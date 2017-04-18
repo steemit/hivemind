@@ -1,0 +1,28 @@
+version: '2'
+services:
+  mysql:
+    image: mysql
+    container_name: hive-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_USERNAME: testuser
+      MYSQL_PASSWORD: testuserpass
+      MYSQL_DATABASE: testdb
+    ports:
+     - 3306:3306
+    volumes:
+     - /home/user/docker/hive:/var/lib/mysql
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: hive-phpmyadmin
+    links:
+      - mysql:db
+    environment:
+      MYSQL_USERNAME: root
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: testdb
+    restart: always
+    ports:
+     - 8080:80
+    volumes:
+     - /sessions
