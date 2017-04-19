@@ -25,6 +25,7 @@ setup(
                    'pytest-console-scripts'],
 
     install_requires=[
+        'steem==0.18.1',
         'maya',
         'toolz',
         'funcy',

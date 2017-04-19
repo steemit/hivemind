@@ -25,8 +25,9 @@ class Community:
 
     """
 
+    _id = 'com.steemit.community'
     _roles = ['admin', 'moderator', 'poster']
-    _valid_settings = ['name', 'about', 'description', 'language', 'nsfw']
+    _valid_settings = ['title', 'about', 'description', 'language', 'is_nsfw']
 
     def __init__(self, community_name: str, account_name: str, steem_instance: Steem = None, **kwargs):
         self.steem = steem_instance or Steem(**kwargs)
@@ -132,7 +133,7 @@ class Community:
             **{'json': community_op,
                'required_auths': [],
                'required_posting_auths': [self.account],
-               'id': 'com.steemit.community'})
+               'id': Community._id})
         return self.steem.commit.finalizeOp(op, self.account, 'posting')
 
     def _op(self, action: str, **params):
