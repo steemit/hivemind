@@ -25,10 +25,12 @@ setup(
                    'pytest-console-scripts'],
 
     install_requires=[
-        'steem==0.18.1',
+        'steem',
         'maya',
         'toolz',
         'funcy',
+        'sqlalchemy',
+        'mysqlclient',
     ],
     entry_points={
         'console_scripts': [

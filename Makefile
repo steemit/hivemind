@@ -15,6 +15,9 @@ build:
 run:
 	docker run $(PROJECT_DOCKER_RUN_ARGS) $(PROJECT_DOCKER_TAG)
 
+ipython:
+    docker run -it $(PROJECT_DOCKER_TAG) ipython
+
 test: test-without-build build
 
 test-without-build: test-without-lint test-pylint

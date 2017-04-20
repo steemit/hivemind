@@ -5,7 +5,8 @@ COPY . /src
 WORKDIR /src
 
 RUN pip install ipython
-RUN pip install -r requirements.txt
+#RUN pip install -r dev-requirements.txt
+RUN pip install -e .
 
 EXPOSE 5000
 
