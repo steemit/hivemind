@@ -6,7 +6,7 @@ from sqlalchemy.dialects.mysql import (
     TINYTEXT, DOUBLE,
 )
 
-connection_url = 'mysql://root:root_password@localhost:3306/testdb'
+connection_url = 'mysql://root:root_password@db:3306/testdb'
 
 logging.basicConfig()
 logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)

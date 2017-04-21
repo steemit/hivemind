@@ -1,3 +1,18 @@
+## Dev Environment
+
+Prepare MySQL Database (once):
+```
+make mysql
+```
+
+Prepare and load REPL (on change):
+```
+make build
+make iypthon
+```
+
+
+## Hivemind
 `hivemind` is an off-chain consensus layer for Steem communities and API server for social features like feeds and follows.
 
 It is primarily concerned with indexing specific `custom_json` namespaces but also watches for posts, votes, and account creations.

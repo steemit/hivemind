@@ -3,7 +3,7 @@ ROOT_DIR := $(shell pwd)
 
 PROJECT_NAME := hive
 PROJECT_DOCKER_TAG := steemit/$(PROJECT_NAME)
-PROJECT_DOCKER_RUN_ARGS := -p8080:8080
+PROJECT_DOCKER_RUN_ARGS := --link steemit_mysql:db
 
 default: build
 
@@ -13,10 +13,16 @@ build:
 	docker build -t $(PROJECT_DOCKER_TAG) .
 
 run:
-	docker run $(PROJECT_DOCKER_RUN_ARGS) $(PROJECT_DOCKER_TAG)
+	docker run -it $(PROJECT_DOCKER_RUN_ARGS) $(PROJECT_DOCKER_TAG) /bin/bash
+
+compose:
+	docker-compose up -d
+
+mysql:
+	docker run -d --name steemit_mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root_password -e MYSQL_DATABASE=testdb mysql
 
 ipython:
-    docker run -it $(PROJECT_DOCKER_TAG) ipython
+	docker run -it $(PROJECT_DOCKER_RUN_ARGS) $(PROJECT_DOCKER_TAG) ipython
 
 test: test-without-build build
 
