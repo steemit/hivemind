@@ -11,6 +11,15 @@ make build
 make iypthon
 ```
 
+Apply MySQL Schema (from REPL):
+```
+%run scripts/schema.py
+```
+
+MySQL Schema (from code):  
+see `schema.setup()` and `schema.teardown()`
+
+*Todo: Implement migrations via Alembic.*
 
 ## Hivemind
 `hivemind` is an off-chain consensus layer for Steem communities and API server for social features like feeds and follows.

@@ -6,13 +6,6 @@ from sqlalchemy.dialects.mysql import (
     TINYTEXT, DOUBLE,
 )
 
-connection_url = 'mysql://root:root_password@db:3306/testdb'
-
-logging.basicConfig()
-logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
-
-engine = sa.create_engine(connection_url)
-conn = engine.connect()
 metadata = sa.MetaData()
 
 hive_blocks = sa.Table('hive_blocks', metadata,
@@ -83,7 +76,7 @@ hive_communities = sa.Table('hive_communities', metadata,
                             sa.Column('about', sa.String(255), nullable=False, server_default=''),
                             sa.Column('description', sa.String(5000), nullable=False, server_default=''),
                             sa.Column('lang', CHAR(2), nullable=False, server_default='en'),
-                            sa.Column('settings', TINYTEXT, nullable=False, server_default=''),
+                            sa.Column('settings', TINYTEXT, nullable=False),
                             sa.Column('type_id', TINYINT(1), nullable=False, server_default='0'),
                             sa.Column('is_nsfw', TINYINT(1), nullable=False, server_default='0'),
                             sa.Column('created_at', sa.DateTime, nullable=False),
@@ -169,18 +162,35 @@ hive_accounts_cache = sa.Table('hive_accounts_cache', metadata,
                                mysql_engine='InnoDB',
                                mysql_default_charset='utf8mb4')
 
-metadata.drop_all(engine)
-metadata.create_all(engine)
+_url = 'mysql://root:root_password@db:3306/testdb'
+logging.basicConfig()
+logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
-# Insert hive_blocks data
-insert = hive_blocks.insert().values(num=0, prev=None, created_at='1970-01-01T00:00:00')
-conn.execute(insert)
 
-# Insert hive_accounts data
-insert = hive_accounts.insert()
-conn.execute(insert, [
-    {'name': 'miners', 'created_at': '1970-01-01T00:00:00'},
-    {'name': 'null', 'created_at': '1970-01-01T00:00:00'},
-    {'name': 'temp', 'created_at': '1970-01-01T00:00:00'},
-    {'name': 'initminer', 'created_at': '1970-01-01T00:00:00'}
-])
+def setup(connection_url=_url):
+    engine = sa.create_engine(connection_url)
+    metadata.create_all(engine)
+
+    conn = engine.connect()
+    # Insert hive_blocks data
+    insert = hive_blocks.insert().values(num=0, prev=None, created_at='1970-01-01T00:00:00')
+    conn.execute(insert)
+
+    # Insert hive_accounts data
+    insert = hive_accounts.insert()
+    conn.execute(insert, [
+        {'name': 'miners', 'created_at': '1970-01-01T00:00:00'},
+        {'name': 'null', 'created_at': '1970-01-01T00:00:00'},
+        {'name': 'temp', 'created_at': '1970-01-01T00:00:00'},
+        {'name': 'initminer', 'created_at': '1970-01-01T00:00:00'}
+    ])
+
+
+def teardown(connection_url=_url):
+    engine = sa.create_engine(connection_url)
+    metadata.drop_all(engine)
+
+
+if __name__ == '__main__':
+    teardown()
+    setup()
