@@ -48,8 +48,7 @@ def get_post_id_and_depth(author, permlink):
     res = None
     if author:
         res = first(query(
-            "SELECT id, depth FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink)).fetchall())
-
+            "SELECT id, depth FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink)))
     return res or (None, -1)
 
 
@@ -91,13 +90,16 @@ def register_posts(ops, date):
         if op['parent_author'] == '':
             parent_id = None
             depth = 0
+            category = op['parent_permlink']
         else:
-            parent_id, parent_depth = get_post_id_and_depth(op['author'], op['permlink'])
+            parent_data = first(query("SELECT id, depth, category FROM hive_posts WHERE author = '%s' "
+                                      "AND permlink = '%s'" % (op['parent_author'], op['parent_permlink'])))
+            parent_id, parent_depth, category = parent_data
             depth = parent_depth + 1
 
-        query("INSERT INTO hive_posts (parent_id, author, permlink, community, depth, created_at) "
-              "VALUES (%s, '%s', '%s', '%s', %d, '%s')" % (
-              parent_id or 'NULL', op['author'], op['permlink'], community, depth, date))
+        query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
+              "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
+              parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
 
 
 def construct_identifier(op):
