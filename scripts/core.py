@@ -152,8 +152,8 @@ def process_block(block):
         # we are assuming `required_posting_auths` is always used and length 1.
         # it may be that some ops will require `required_active_auths` instead
         # (e.g. if we use that route for admin action of acct creation)
-        if op['required_active_auths']:
-            log.warning("unexpected active auths: %s" % op)
+        #if op['required_active_auths']:
+        #    log.warning("unexpected active auths: %s" % op)
         if len(op['required_posting_auths']) != 1:
             log.warning("unexpected auths: %s" % op)
             continue
@@ -195,7 +195,7 @@ def process_json_follow_op(account, op_json, block_date):
     if cmd == 'follow':
         if type(op_json['what']) != list:
             return
-        what = op_json['what'][0] or 'clear'
+        what = first(op_json['what']) or 'clear'
         if what not in ['blog', 'clear', 'ignore']:
             return
 
