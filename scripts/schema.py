@@ -162,7 +162,7 @@ hive_accounts_cache = sa.Table('hive_accounts_cache', metadata,
                                mysql_engine='InnoDB',
                                mysql_default_charset='utf8mb4')
 
-_url = 'mysql://root:root_password@172.17.0.2:3306/testdb'
+_url = 'mysql://root:root_password@mysql:3306/testdb'
 logging.basicConfig()
 logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
