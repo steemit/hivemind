@@ -9,7 +9,7 @@ from sqlalchemy.dialects.mysql import (
 metadata = sa.MetaData()
 
 hive_blocks = sa.Table('hive_blocks', metadata,
-                       sa.Column('num', sa.Integer, primary_key=True),
+                       sa.Column('num', sa.Integer, primary_key=True, autoincrement=False),
                        sa.Column('prev', sa.Integer),
                        sa.Column('txs', SMALLINT(unsigned=True), server_default='0', nullable=False),
                        sa.Column('created_at', sa.DateTime, nullable=False),

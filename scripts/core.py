@@ -1,3 +1,5 @@
+#!/usr/local/bin/python3
+
 import json
 import logging
 import re
@@ -9,7 +11,7 @@ from steem.blockchain import Blockchain
 from steem.utils import parse_time
 from toolz import update_in
 
-from .schema import hive_blocks
+#from .schema import hive_blocks
 
 log = logging.getLogger('')
 engine = create_engine('sqlite:///:memory:', echo=True)
@@ -17,13 +19,15 @@ conn = engine.connect()
 
 
 def query(sql):
-    res = conn.execute(text(sql))
+    res = conn.execute(text(sql).execution_options(autocommit=False))
     return res
 
 
 def query_one(sql):
     res = conn.execute(text(sql))
-    return res.first()[0]
+    row = first(res)
+    if row:
+        return row[0]
 
 
 def db_last_block():
@@ -106,33 +110,34 @@ def process_block(block):
     txs = block['transactions']
 
     # sqlachemy core
-    hive_blocks.insert().values(num=block_num, )
+    #hive_blocks.insert().values(num=block_num, )
     # NOTE: currently `prev` tracks the previous block number and this is enforced with a FK constraint.
     # soon we will have access to prev block hash and current hash in the API return value, we should use this instead.
     # the FK constraint will then fail if we somehow end up on the wrong side in a fork reorg.
     query("INSERT INTO hive_blocks (num, prev, txs, created_at) "
-          "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, txs, date))
+          "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, len(txs), date))
     print("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
 
     accounts = []
     comments = []
     json_ops = []
     deleted = []
-    for operation in pluck('operations', txs):
-        op_type, op = operation
+    for tx in txs:
+        for operation in tx['operations']:
+            op_type, op = operation
 
-        if op_type == 'pow':
-            accounts.append(op['worker_account'])
-        elif op_type == 'pow2':
-            accounts.append(op['work'][1]['input']['worker_account'])
-        elif op_type == 'account_create' or op_type == 'account_create_with_delegation':
-            accounts.append(op['new_account_name'])
-        elif op_type == 'comment':
-            comments.append(op)
-        elif op_type == 'delete_comment':
-            deleted.append(op)
-        elif op_type == 'custom_json':
-            json_ops.append(op)
+            if op_type == 'pow':
+                accounts.append(op['worker_account'])
+            elif op_type == 'pow2':
+                accounts.append(op['work'][1]['input']['worker_account'])
+            elif op_type == 'account_create' or op_type == 'account_create_with_delegation':
+                accounts.append(op['new_account_name'])
+            elif op_type == 'comment':
+                comments.append(op)
+            elif op_type == 'delete_comment':
+                deleted.append(op)
+            elif op_type == 'custom_json':
+                json_ops.append(op)
 
     register_accounts(accounts, date)  # if an account does not exist, mark it as created in this block
     register_posts(comments, date)  # if this is a new post, add the entry and validate community param
@@ -232,15 +237,34 @@ def process_json_follow_op(account, op_json, block_date):
                   "VALUES ('%s', %d, '%s')" % (blogger, post_id, block_date))
 
 
+def process_blocks(blocks):
+    if not blocks:
+        return
+    query("START TRANSACTION")
+    for block in blocks:
+        process_block(block)
+    query("COMMIT")
+
 def run():
-    with open('ruby-hive/blocks_1-10000000.json.lst') as f:
+    last_block = db_last_block()
+    with open('../blocks_1-10000000.json.lst') as f:
+        buffer = []
+        i = 0
         for line in f:
-            process_block(json.loads(line))
+            i = i + 1
+            if i < last_block + 1:
+                continue
+            buffer.append(json.loads(line))
+            if len(buffer) >= 250:
+                process_blocks(buffer)
+                buffer = []
+        process_blocks(buffer)
+        last_block = db_last_block()
 
     # pre-communities?
     b = Blockchain()
     h = b.stream_from(
-        start_block=5000000,
+        start_block=last_block + 1,
         full_blocks=True,
     )
     for block in h:
