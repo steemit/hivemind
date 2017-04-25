@@ -14,7 +14,8 @@ from toolz import update_in
 #from .schema import hive_blocks
 
 log = logging.getLogger('')
-engine = create_engine('sqlite:///:memory:', echo=True)
+_url = 'sqlite:///:memory:'
+engine = create_engine(_url, echo=False)
 conn = engine.connect()
 
 
@@ -118,7 +119,8 @@ def process_block(block):
     # the FK constraint will then fail if we somehow end up on the wrong side in a fork reorg.
     query("INSERT INTO hive_blocks (num, prev, txs, created_at) "
           "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, len(txs), date))
-    print("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
+    if block_num % 1000 == 0:
+        print("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
 
     accounts = []
     comments = []
@@ -232,7 +234,7 @@ def process_json_follow_op(account, op_json, block_date):
         if depth > 0:
             return  # prevent comment reblogs
 
-        if op_json['delete'] == 'delete':
+        if 'delete' in op_json and op_json['delete'] == 'delete':
             query("DELETE FROM hive_reblogs WHERE account = '%s' AND post_id = %d LIMIT 1" % (blogger, post_id))
         else:
             query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
