@@ -1,22 +1,17 @@
-#!/usr/local/bin/python3
-
 import json
 import logging
 import re
 
-from funcy.colls import pluck
-from funcy.seqs import first, second
-from sqlalchemy import text, create_engine
 from steem.blockchain import Blockchain
+from funcy.seqs import first, second, drop
+from schema import connect
+from sqlalchemy import text
 from steem.utils import parse_time
-from toolz import update_in
-
-#from .schema import hive_blocks
+from toolz import update_in, partition_all
 
 log = logging.getLogger('')
-_url = 'sqlite:///:memory:'
-engine = create_engine(_url, echo=False)
-conn = engine.connect()
+
+conn = connect(echo=False)
 
 
 def query(sql):
@@ -28,7 +23,7 @@ def query_one(sql):
     res = conn.execute(text(sql))
     row = first(res)
     if row:
-        return row[0]
+        return first(row)
 
 
 def db_last_block():
@@ -71,7 +66,7 @@ def register_accounts(accounts, date):
 def delete_posts(ops):
     for op in ops:
         query("UPDATE hive_posts SET is_deleted = 1 WHERE author = '%s' AND permlink = '%s'" % (
-        op['author'], op['permlink']))
+            op['author'], op['permlink']))
 
 
 def register_posts(ops, date):
@@ -100,7 +95,7 @@ def register_posts(ops, date):
 
         query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
               "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
-              parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
+                  parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
 
 
 def construct_identifier(op):
@@ -112,15 +107,13 @@ def process_block(block):
     block_num = int(block['previous'][:8], base=16) + 1
     txs = block['transactions']
 
-    # sqlachemy core
-    #hive_blocks.insert().values(num=block_num, )
     # NOTE: currently `prev` tracks the previous block number and this is enforced with a FK constraint.
     # soon we will have access to prev block hash and current hash in the API return value, we should use this instead.
     # the FK constraint will then fail if we somehow end up on the wrong side in a fork reorg.
     query("INSERT INTO hive_blocks (num, prev, txs, created_at) "
           "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, len(txs), date))
     if block_num % 1000 == 0:
-        print("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
+        log.info("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
 
     accounts = []
     comments = []
@@ -154,7 +147,7 @@ def process_block(block):
         # we are assuming `required_posting_auths` is always used and length 1.
         # it may be that some ops will require `required_active_auths` instead
         # (e.g. if we use that route for admin action of acct creation)
-        #if op['required_active_auths']:
+        # if op['required_active_auths']:
         #    log.warning("unexpected active auths: %s" % op)
         if len(op['required_posting_auths']) != 1:
             log.warning("unexpected auths: %s" % op)
@@ -242,40 +235,40 @@ def process_json_follow_op(account, op_json, block_date):
 
 
 def process_blocks(blocks):
-    if not blocks:
-        return
     query("START TRANSACTION")
     for block in blocks:
         process_block(block)
     query("COMMIT")
 
-def run():
-    last_block = db_last_block()
-    with open('../blocks_1-10000000.json.lst') as f:
-        buffer = []
-        i = 0
-        for line in f:
-            i = i + 1
-            if i < last_block + 1:
-                continue
-            buffer.append(json.loads(line))
-            if len(buffer) >= 250:
-                process_blocks(buffer)
-                buffer = []
-        process_blocks(buffer)
-        last_block = db_last_block()
 
-    # pre-communities?
+def sync_from_file(file_path, chunk_size=250):
+    last_block = db_last_block()
+    with open(file_path) as f:
+        # each line in file represents one block
+        # we can skip the blocks we already have
+        remaining = drop(last_block, f)
+        for batch in partition_all(chunk_size, remaining):
+            process_blocks(map(json.loads, batch))
+
+
+def sync_from_steemd():
     b = Blockchain()
     h = b.stream_from(
-        start_block=last_block + 1,
+        start_block=db_last_block() + 1,
         full_blocks=True,
     )
     for block in h:
-        pass
-        # process_block(block)
-        ## if block_num > 100000000 break out of loop
+        process_blocks([block])
+
+
+def run():
+    # fast-load first 10m blocks
+    if db_last_block() < int(1e7):
+        sync_from_file('/home/user/Downloads/blocks.json.lst')
+
+    sync_from_steemd()
 
 
 if __name__ == '__main__':
+    # setup()
     run()
