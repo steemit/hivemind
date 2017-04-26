@@ -8,6 +8,7 @@ ENV LC_ALL en_US.UTF-8
 ENV APP_ROOT /app
 ENV WSGI_APP ${APP_ROOT}/hive/server/serve.py
 ENV HTTP_SERVER_PORT 8080
+ENV HTTP_SERVER_STATS_PORT 9191
 
 RUN \
     apt-get update && \
@@ -25,22 +26,12 @@ RUN \
         libxml2-dev \
         libxslt-dev \
         runit \
-        nginx
-
+        libpcre3 \
+        libpcre3-dev
 
 RUN \
-  mkdir -p /var/lib/nginx/body && \
-  mkdir -p /var/lib/nginx/scgi && \
-  mkdir -p /var/lib/nginx/uwsgi && \
-  mkdir -p /var/lib/nginx/fastcgi && \
-  mkdir -p /var/lib/nginx/proxy && \
-  chown -R www-data:www-data /var/lib/nginx && \
-  mkdir -p /var/log/nginx && \
-  touch /var/log/nginx/access.log && \
-  touch /var/log/nginx/error.log && \
-  chown www-data:www-data /var/log/nginx/*.log && \
-  touch /var/run/nginx.pid && \
-  chown www-data:www-data /var/run/nginx.pid
+    pip3 install --upgrade pip && \
+    pip3 install uwsgi
 
 ADD . /app
 
@@ -51,10 +42,7 @@ RUN \
 WORKDIR /app
 
 RUN \
-    pip3 install --upgrade pip && \
-    pip3 install pipenv && \
-	  pipenv lock && \
-	  pipenv install --three --dev && \
+    pip3 install  . && \
     apt-get remove -y \
         build-essential \
         libffi-dev \
@@ -70,3 +58,4 @@ RUN \
         /usr/local/include
 
 EXPOSE ${HTTP_SERVER_PORT}
+EXPOSE ${HTTP_SERVER_STATS_PORT}
