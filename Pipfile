@@ -1,0 +1,34 @@
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+
+[packages]
+steem = "0.18.2"
+bottle = "*"
+bottle-sqlalchemy = "*"
+bottle_errorsrest = "*"
+SQLAlchemy = "*"
+mysqlclient = "*"
+click = "*"
+click-spinner = "*"
+funcy = "*"
+toolz = "*"
+maya = "*"
+ujson = "*"
+
+[requires]
+python_version = "3.5"
+
+[dev-packages]
+ipython = "*"
+pep8 = "*"
+pytest = "*"
+pytest-console-scripts = "*"
+pytest-docker = "*"
+pytest-pylint = "*"
+recommonmark = "*"
+sphinxcontrib-programoutput = "*"
+sphinxcontrib-restbuilder = "*"
+yapf = "*"
+Sphinx = "*"
+autopep8 = "*"
