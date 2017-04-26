@@ -26,11 +26,17 @@ setup(
 
     install_requires=[
         'steem',
-        'maya',
-        'toolz',
-        'funcy',
+        'bottle',
+        'bottle-sqlalchemy',
+        'bottle_errorsrest',
         'sqlalchemy',
         'mysqlclient',
+        'click',
+        'click-spinner',
+        'funcy',
+        'toolz',
+        'maya',
+        'ujson',
     ],
     entry_points={
         'console_scripts': [

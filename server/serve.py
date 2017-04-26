@@ -1,25 +1,21 @@
 # -*- coding: utf-8 -*-
-import os
 import json
+import logging
+import os
 from datetime import datetime
 
-# pylint: disable=import-error, unused-import
 import bottle
-from bottle.ext import sqlalchemy
-# pylint: enable=import-error
-from bottle import request
 from bottle import abort
 from bottle_errorsrest import ErrorsRestPlugin
+from bottle_sqlalchemy import Plugin
+from hive.core import db_last_block
+from hive.schema import metadata as hive_metadata
+from sqlalchemy import create_engine
+from steem.steemd import Steemd
 
 from sbds.sbds_json import ToStringJSONEncoder
 from sbds.server.jsonrpc import register_endpoint
 
-from steem.steemd import Steemd
-from hive.core import db_last_block
-from hive.schema import metadata as hive_metadata
-from sqlalchemy import create_engine
-
-import logging
 logger = logging.getLogger(__name__)
 
 app = bottle.Bottle()
@@ -32,10 +28,9 @@ app.config['hive.logger'] = logger
 
 def get_db_plugin(database_url):
     sa_engine = create_engine(database_url)
-    Session.configure(bind=sa_engine)
 
     # pylint: disable=undefined-variable
-    return sqlalchemy.Plugin(
+    return Plugin(
         # SQLAlchemy engine created with create_engine function.
         sa_engine,
         # SQLAlchemy metadata, required only if create=True.
@@ -46,9 +41,9 @@ def get_db_plugin(database_url):
         create=False,
         # If it is true, plugin commit changes after route is executed (default True).
         commit=False,
-        # If it is true and keyword is not defined, plugin uses **kwargs argument to inject session database (default False).
+        # If True and keyword is not defined, plugin uses **kwargs argument to inject session database (default False).
         use_kwargs=False,
-        create_session=Session)
+    )
 
 
 app.install(
@@ -83,8 +78,6 @@ def health(db):
 # JSON-RPC route
 # --------------
 jsonrpc = register_endpoint(path='/', app=app, namespace='hive')
-
-
 
 # WSGI application
 # ----------------
