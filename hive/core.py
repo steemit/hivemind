@@ -4,7 +4,7 @@ import re
 
 from steem.blockchain import Blockchain
 from funcy.seqs import first, second, drop
-from schema import connect
+from hive.schema import connect
 from sqlalchemy import text
 from steem.utils import parse_time
 from toolz import update_in, partition_all
