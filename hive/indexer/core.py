@@ -2,10 +2,10 @@ import json
 import logging
 import re
 
-from steem.blockchain import Blockchain
 from funcy.seqs import first, second, drop
 from hive.schema import connect
 from sqlalchemy import text
+from steem.blockchain import Blockchain
 from steem.utils import parse_time
 from toolz import update_in, partition_all
 
@@ -115,7 +115,7 @@ def process_block(block):
     if block_num % 1000 == 0:
         log.info("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
 
-    accounts = []
+    accounts = set()
     comments = []
     json_ops = []
     deleted = []
@@ -124,11 +124,11 @@ def process_block(block):
             op_type, op = operation
 
             if op_type == 'pow':
-                accounts.append(op['worker_account'])
+                accounts.add(op['worker_account'])
             elif op_type == 'pow2':
-                accounts.append(op['work'][1]['input']['worker_account'])
-            elif op_type == 'account_create' or op_type == 'account_create_with_delegation':
-                accounts.append(op['new_account_name'])
+                accounts.add(op['work'][1]['input']['worker_account'])
+            elif op_type in ['account_create', 'account_create_with_delegation']:
+                accounts.add(op['new_account_name'])
             elif op_type == 'comment':
                 comments.append(op)
             elif op_type == 'delete_comment':

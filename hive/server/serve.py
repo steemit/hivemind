@@ -8,7 +8,7 @@ import bottle
 from bottle import abort
 from bottle_errorsrest import ErrorsRestPlugin
 from bottle_sqlalchemy import Plugin
-from hive.core import db_last_block
+from hive.indexer.core import db_last_block
 from hive.schema import metadata as hive_metadata
 from sqlalchemy import create_engine
 from steem.steemd import Steemd
