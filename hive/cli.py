@@ -3,9 +3,13 @@ from hive.db.cli import db
 from hive.indexer.cli import indexer
 from hive.server.cli import server
 
+context_settings = dict(help_option_names=['-h', '--help'])
+
 
 @click.group(
-    short_help='manages storage, retrieval, and querying of the Steem blockchain')
+    short_help='manages storage, retrieval, and querying of the Steem blockchain',
+    context_settings=context_settings,
+)
 def cli():
     """The *hive* CLI manages storage, retrieval, and querying of the Steem
     blockchain.

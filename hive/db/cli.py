@@ -20,6 +20,7 @@ def db():
     required=True,
     help='Database connection URL in RFC-1738 format, read from "DATABASE_URL" ENV var by default'
 )
+@click.confirmation_option(help='Are you sure you want to reset DB schema?')
 def ensure_schema(database_url):
     """re-create db schema (WARN: will wipe data)"""
     teardown(database_url)
