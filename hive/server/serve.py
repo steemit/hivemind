@@ -8,7 +8,7 @@ import bottle
 from bottle import abort
 from bottle_errorsrest import ErrorsRestPlugin
 from bottle_sqlalchemy import Plugin
-from hive.indexer.core import db_last_block
+from hive.indexer.core import db_last_block, head_state
 from hive.schema import metadata as hive_metadata
 from sqlalchemy import create_engine
 from steem.steemd import Steemd
@@ -19,7 +19,7 @@ from sbds.server.jsonrpc import register_endpoint
 logger = logging.getLogger(__name__)
 
 app = bottle.Bottle()
-app.config['hive.DATABASE_URL'] = os.environ.get('DATABASE_URL', '')
+app.config['hive.DATABASE_URL'] = os.environ.get('DATABASE_URL', 'mysql://root:root_password@mysql:3306/testdb')
 app.config['hive.MAX_BLOCK_NUM_DIFF'] = 10
 app.config['hive.MAX_DB_ROW_RESULTS'] = 100000
 app.config['hive.DB_QUERY_LIMIT'] = app.config['hive.MAX_DB_ROW_RESULTS'] + 1
@@ -78,6 +78,21 @@ def health():
 # JSON-RPC route
 # --------------
 jsonrpc = register_endpoint(path='/', app=app, namespace='hive')
+
+json_rpc_methods = {
+    'head_state': head_state,
+}
+for method_name, fn_call in json_rpc_methods.items():
+    jsonrpc.register_method(method=fn_call, method_name=method_name)
+
+# TODO: add to documentation
+#  In [9]: from jsonrpcclient.http_client import HTTPClient
+#
+# In [10]: HTTPClient('http://localhost:1234').request('hive.status')
+# --> {"jsonrpc": "2.0", "method": "hive.status", "id": 8}
+# <-- {"result": {"diff": 6396850, "hive": 5042966, "steemd": 11439816}, "id": 8, "jsonrpc": "2.0"} (200 OK)
+# Out[10]: {'diff': 6396850, 'hive': 5042966, 'steemd': 11439816}
+
 
 # WSGI application
 # ----------------

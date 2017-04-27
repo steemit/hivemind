@@ -6,6 +6,7 @@ from funcy.seqs import first, second, drop
 from hive.schema import connect
 from sqlalchemy import text
 from steem.blockchain import Blockchain
+from steem.steemd import Steemd
 from steem.utils import parse_time
 from toolz import update_in, partition_all
 
@@ -278,6 +279,14 @@ def run():
         sync_from_file('/home/user/Downloads/blocks.json.lst')
 
     sync_from_steemd()
+
+
+def head_state(*args):
+    _ = args  # JSONRPC injects 4 arguments here
+    steemd_head = Steemd().last_irreversible_block_num
+    hive_head = db_last_block()
+    diff = steemd_head - hive_head
+    return dict(steemd=steemd_head, hive=hive_head, diff=diff)
 
 
 if __name__ == '__main__':

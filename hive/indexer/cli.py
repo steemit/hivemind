@@ -2,9 +2,8 @@
 import click
 import click_spinner
 from click import echo
-from hive.indexer.core import sync_from_file, sync_from_steemd, db_last_block
+from hive.indexer.core import sync_from_file, sync_from_steemd, head_state
 from prettytable import PrettyTable
-from steem.steemd import Steemd
 
 
 @click.group()
@@ -33,12 +32,11 @@ def index_from_steemd():
         sync_from_steemd()
 
 
-@indexer.command(name='status')
+@indexer.command(name='show-status')
 def show_status():
     """print head block info"""
-    steemd_head = Steemd().last_irreversible_block_num
-    hive_head = db_last_block()
     t = PrettyTable(['steemd', 'hive', 'Difference'])
     t.align = "l"
-    t.add_row([steemd_head, hive_head, steemd_head - hive_head])
+    s = head_state()
+    t.add_row([s['steemd'], s['hive'], s['diff']])
     echo(t)
