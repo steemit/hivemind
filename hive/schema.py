@@ -188,7 +188,8 @@ hive_accounts_cache = sa.Table(
 _url = 'mysql://root:root_password@mysql:3306/testdb'
 _url = os.environ.get('DATABASE_URL', _url)
 logging.basicConfig()
-logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+if os.environ.get('LOG_LEVEL') == 'INFO':
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 
 def connect(connection_url=_url, **kwargs):

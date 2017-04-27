@@ -15,6 +15,7 @@ funcy = "*"
 toolz = "*"
 maya = "*"
 ujson = "*"
+PrettyTable = "*"
 
 [requires]
 python_version = "3.5"

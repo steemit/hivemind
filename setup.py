@@ -37,6 +37,7 @@ setup(
         'toolz',
         'maya',
         'ujson',
+        'PrettyTable',
     ],
     entry_points={
         'console_scripts': [

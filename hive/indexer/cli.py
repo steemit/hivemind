@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
-import logging
-
 import click
 import click_spinner
 from click import echo
-from hive.indexer.core import sync_from_file, sync_from_steemd
-
-logger = logging.getLogger(__name__)
+from hive.indexer.core import sync_from_file, sync_from_steemd, db_last_block
+from prettytable import PrettyTable
+from steem.steemd import Steemd
 
 
 @click.group()
@@ -33,3 +31,14 @@ def index_from_steemd():
     echo('Loading blocks from steemd...')
     with click_spinner.spinner():
         sync_from_steemd()
+
+
+@indexer.command(name='status')
+def show_status():
+    """print head block info"""
+    steemd_head = Steemd().last_irreversible_block_num
+    hive_head = db_last_block()
+    t = PrettyTable(['steemd', 'hive', 'Difference'])
+    t.align = "l"
+    t.add_row([steemd_head, hive_head, steemd_head - hive_head])
+    echo(t)
