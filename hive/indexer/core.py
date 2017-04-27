@@ -107,8 +107,8 @@ def register_posts(ops, date):
                   parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
 
 
-# This method processes any legacy 'follow' plugin ops (follow/mute/clear, reblog)
 def process_json_follow_op(account, op_json, block_date):
+    """ This method processes any legacy 'follow' plugin ops (follow/mute/clear, reblog) """
     if type(op_json) != list:
         return
     if first(op_json) not in ['follow', 'reblog']:

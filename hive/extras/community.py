@@ -1,6 +1,7 @@
 import json
 from typing import Union
 
+from hive.extras.roles import permissions
 from steem import Steem
 from steem.account import Account
 from steembase.operations import CustomJson
@@ -26,7 +27,7 @@ class Community:
     """
 
     _id = 'com.steemit.community'
-    _roles = ['admin', 'moderator', 'poster']
+    _roles = permissions.keys()
     _valid_settings = ['title', 'about', 'description', 'language', 'is_nsfw']
 
     def __init__(self, community_name: str, account_name: str, steem_instance: Steem = None, **kwargs):
