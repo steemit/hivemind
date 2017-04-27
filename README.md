@@ -2,20 +2,10 @@
 `hivemind` is an off-chain consensus layer for Steem communities and API server for social features like feeds and follows.
 
 # Dev Environment
-
-Prepare MySQL Database (once):
-```
-make mysql
-```
-
-Prepare and load REPL (on change):
-```
-make build
-make iypthon
-```
+Make sure you have Python 3.5+, Docker and MySQL installed on your local machine.
 
 ## Setting up MySQL
-First, we need to setup a MySQL server. An easy way to do that (in Docker) is to run:
+First, we need to start a MySQL server (in Docker).
 ```
 make mysql
 ```
@@ -24,6 +14,7 @@ Then we need to set `DATABASE_URL` environment variable, for example:
 ```
 set DATABASE_URL 'mysql://root:root_password@mysql:3306/testdb'
 ```
+*I defined `mysql` in `/etc/hosts` such that it links to mysql docker container IP.*
 
 Lastly we invoke the `ensure-schema` command to create MySQL tables.
 

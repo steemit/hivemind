@@ -85,14 +85,6 @@ json_rpc_methods = {
 for method_name, fn_call in json_rpc_methods.items():
     jsonrpc.register_method(method=fn_call, method_name=method_name)
 
-# TODO: add to documentation
-#  In [9]: from jsonrpcclient.http_client import HTTPClient
-#
-# In [10]: HTTPClient('http://localhost:1234').request('hive.status')
-# --> {"jsonrpc": "2.0", "method": "hive.status", "id": 8}
-# <-- {"result": {"diff": 6396850, "hive": 5042966, "steemd": 11439816}, "id": 8, "jsonrpc": "2.0"} (200 OK)
-# Out[10]: {'diff': 6396850, 'hive': 5042966, 'steemd': 11439816}
-
 
 # WSGI application
 # ----------------

@@ -11,11 +11,8 @@ context_settings = dict(help_option_names=['-h', '--help'])
     context_settings=context_settings,
 )
 def cli():
-    """The *hive* CLI manages storage, retrieval, and querying of the Steem
-    blockchain.
-
-    hive has several commands, each of which has additional subcommands.
-
+    """The *hive* CLI manages database, indexer and the server.
+    
     \b
     For more detailed information on a command and its flags, run:
         hive COMMAND --help
