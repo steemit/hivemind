@@ -1,4 +1,7 @@
-## Dev Environment
+## Hivemind
+`hivemind` is an off-chain consensus layer for Steem communities and API server for social features like feeds and follows.
+
+# Dev Environment
 
 Prepare MySQL Database (once):
 ```
@@ -11,38 +14,41 @@ make build
 make iypthon
 ```
 
-Apply MySQL Schema (from REPL):
+## Setting up MySQL
+First, we need to setup a MySQL server. An easy way to do that (in Docker) is to run:
 ```
-%run scripts/schema.py
+make mysql
 ```
 
-MySQL Schema (from code):  
-see `schema.setup()` and `schema.teardown()`
+Then we need to set `DATABASE_URL` environment variable, for example:
+```
+set DATABASE_URL 'mysql://root:root_password@mysql:3306/testdb'
+```
 
-*Todo: Implement migrations via Alembic.*
+Lastly we invoke the `ensure-schema` command to create MySQL tables.
 
-## Hivemind
-`hivemind` is an off-chain consensus layer for Steem communities and API server for social features like feeds and follows.
+```
+hive db ensure-schema --yes
+```
 
-It is primarily concerned with indexing specific `custom_json` namespaces but also watches for posts, votes, and account creations.
+## Indexing the blockchain
+We can index the blockchain using cli as well. 
+```
+hive indexer from-steemd
+```
 
+If we have a `.json.lst` file containing first X blocks, we can index from that (its much faster).
+```
+hive indexer from-file /path/to/blocks.json.lst
+```
+
+## Starting API Server
+```
+hive server dev-server --port 1234
+```
+
+## Spec
 [Community Spec Draft](https://github.com/steemit/condenser/wiki/Community-Spec-%5BDRAFT%5D)
 
-
-Upon reindexing/following the blockchain, the following tables are populated:
-
-### Core
-
- - `hive_blocks`: basic linked list of blocks to save current head block and ensure sequential processing
- - `hive_accounts`: basic account index. may be supplanted with cached data
- - `hive_posts`: main post index. contains core immutable metadata as well as community states
- - `hive_follows`: all follows and their creation date
- - `hive_reblogs`: all reblog actions (account, post, date)
- - `hive_posts_cache`: updated with latest state of posts as new blocks come in (removing need to query steemd)
-
-### Community
-
- - `hive_communities`: registered community data
- - `hive_members`: roles of accounts within each community, and metadata
- - `hive_flags`: track all community flag operations for mods to review
- - `hive_modlog`: tracks all `hivemind` related operations for auditability
+## License
+MIT
