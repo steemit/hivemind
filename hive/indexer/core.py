@@ -3,16 +3,13 @@ import logging
 import re
 
 from funcy.seqs import first, second, drop
-from hive.schema import connect
-from sqlalchemy import text
+from hive.db.methods import query_one, query, db_last_block
 from steem.blockchain import Blockchain
 from steem.steemd import Steemd
 from steem.utils import parse_time
 from toolz import update_in, partition_all
 
-log = logging.getLogger('')
-
-conn = connect(echo=False)
+log = logging.getLogger(__name__)
 
 
 # utils
@@ -31,24 +28,6 @@ def json_expand(json_op):
         return update_in(json_op, ['json'], json.loads)
 
     return json_op
-
-
-# methods
-# -------
-def query(sql):
-    res = conn.execute(text(sql).execution_options(autocommit=False))
-    return res
-
-
-def query_one(sql):
-    res = conn.execute(text(sql))
-    row = first(res)
-    if row:
-        return first(row)
-
-
-def db_last_block():
-    return query_one("SELECT MAX(num) FROM hive_blocks") or 0
 
 
 # core

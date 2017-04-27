@@ -197,7 +197,6 @@ def connect(connection_url=_url, **kwargs):
 
 
 def setup(connection_url=_url):
-    global metadata
     engine = sa.create_engine(connection_url)
     metadata.create_all(engine)
 
@@ -217,7 +216,6 @@ def setup(connection_url=_url):
 
 
 def teardown(connection_url=_url):
-    global metadata
     engine = sa.create_engine(connection_url)
     metadata.drop_all(engine)
 
