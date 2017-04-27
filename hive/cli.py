@@ -1,7 +1,7 @@
 import click
-
-from hive.server.cli import server
+from hive.db.cli import db
 from hive.indexer.cli import indexer
+from hive.server.cli import server
 
 
 @click.group(
@@ -18,5 +18,6 @@ def cli():
     """
 
 
-cli.add_command(server)
+cli.add_command(db)
 cli.add_command(indexer)
+cli.add_command(server)
