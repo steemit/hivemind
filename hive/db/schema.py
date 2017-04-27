@@ -185,8 +185,7 @@ hive_accounts_cache = sa.Table(
     mysql_default_charset='utf8mb4'
 )
 
-_url = 'mysql://root:root_password@mysql:3306/testdb'
-_url = os.environ.get('DATABASE_URL', _url)
+_url = os.environ.get('DATABASE_URL', 'missing ENV DATABASE_URL')
 logging.basicConfig()
 if os.environ.get('LOG_LEVEL') == 'INFO':
     logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)

@@ -19,7 +19,7 @@ from sbds.server.jsonrpc import register_endpoint
 logger = logging.getLogger(__name__)
 
 app = bottle.Bottle()
-app.config['hive.DATABASE_URL'] = os.environ.get('DATABASE_URL', 'mysql://root:root_password@mysql:3306/testdb')
+app.config['hive.DATABASE_URL'] = os.environ.get('DATABASE_URL', 'missing ENV DATABASE_URL')
 app.config['hive.MAX_BLOCK_NUM_DIFF'] = 10
 app.config['hive.MAX_DB_ROW_RESULTS'] = 100000
 app.config['hive.DB_QUERY_LIMIT'] = app.config['hive.MAX_DB_ROW_RESULTS'] + 1
