@@ -1,0 +1,6 @@
+#!/bin/bash
+
+POPULATE_CMD="$(which hive)"
+
+exec setuidgid nobody python3.5 "${POPULATE_CMD}" indexer from-steemd \
+#  --database_url "${DATABASE_URL:-sqlite:///}" \
