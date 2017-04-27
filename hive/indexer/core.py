@@ -14,6 +14,26 @@ log = logging.getLogger('')
 conn = connect(echo=False)
 
 
+# utils
+# -----
+def construct_identifier(op):
+    return '%s/%s' % (op['author'], op['permlink'])
+
+
+def is_valid_account_name(name):
+    return re.match('^[a-z][a-z0-9\-.]{2,15}$', name)
+
+
+def json_expand(json_op):
+    """ For custom_json ops. """
+    if type(json_op) == dict and 'json' in json_op:
+        return update_in(json_op, ['json'], json.loads)
+
+    return json_op
+
+
+# methods
+# -------
 def query(sql):
     res = conn.execute(text(sql).execution_options(autocommit=False))
     return res
@@ -30,11 +50,8 @@ def db_last_block():
     return query_one("SELECT MAX(num) FROM hive_blocks") or 0
 
 
-# perform basic name checks. does not hit the database
-def is_valid_account_name(name):
-    return re.match('^[a-z][a-z0-9\-.]{2,15}$', name)
-
-
+# core
+# ----
 def get_account_id(name):
     if is_valid_account_name(name):
         return query_one("SELECT id FROM hive_accounts WHERE name = '%s' LIMIT 1" % name)
@@ -46,15 +63,6 @@ def get_post_id_and_depth(author, permlink):
         res = first(query(
             "SELECT id, depth FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink)))
     return res or (None, -1)
-
-
-def get_validated_community(op):
-    ## community = op['json_metadata']['community']
-    ## is `community` valid?
-    ## is op['author'] allowed to post in `community`?
-    ## if so, return community. otherwise, author's name.
-    # for testing: default to sending all posts to author's blog.
-    return op['author']
 
 
 def register_accounts(accounts, date):
@@ -96,85 +104,6 @@ def register_posts(ops, date):
         query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
               "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
                   parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
-
-
-def construct_identifier(op):
-    return '%s/%s' % (op['author'], op['permlink'])
-
-
-def process_block(block):
-    date = parse_time(block['timestamp'])
-    block_num = int(block['previous'][:8], base=16) + 1
-    txs = block['transactions']
-
-    # NOTE: currently `prev` tracks the previous block number and this is enforced with a FK constraint.
-    # soon we will have access to prev block hash and current hash in the API return value, we should use this instead.
-    # the FK constraint will then fail if we somehow end up on the wrong side in a fork reorg.
-    query("INSERT INTO hive_blocks (num, prev, txs, created_at) "
-          "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, len(txs), date))
-    if block_num % 1000 == 0:
-        log.info("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
-
-    accounts = set()
-    comments = []
-    json_ops = []
-    deleted = []
-    for tx in txs:
-        for operation in tx['operations']:
-            op_type, op = operation
-
-            if op_type == 'pow':
-                accounts.add(op['worker_account'])
-            elif op_type == 'pow2':
-                accounts.add(op['work'][1]['input']['worker_account'])
-            elif op_type in ['account_create', 'account_create_with_delegation']:
-                accounts.add(op['new_account_name'])
-            elif op_type == 'comment':
-                comments.append(op)
-            elif op_type == 'delete_comment':
-                deleted.append(op)
-            elif op_type == 'custom_json':
-                json_ops.append(op)
-
-    register_accounts(accounts, date)  # if an account does not exist, mark it as created in this block
-    register_posts(comments, date)  # if this is a new post, add the entry and validate community param
-    delete_posts(deleted)  # mark hive_posts.is_deleted = 1
-
-    for op in json_ops:
-        if op['id'] not in ['follow', 'com.steemit.community']:
-            continue
-
-        # we are assuming `required_posting_auths` is always used and length 1.
-        # it may be that some ops will require `required_active_auths` instead
-        # (e.g. if we use that route for admin action of acct creation)
-        # if op['required_active_auths']:
-        #    log.warning("unexpected active auths: %s" % op)
-        if len(op['required_posting_auths']) != 1:
-            log.warning("unexpected auths: %s" % op)
-            continue
-
-        account = op['required_posting_auths'][0]
-        op_json = json.loads(op['json'])
-
-        if op['id'] == 'follow':
-            if block_num < 6000000 and type(op_json) != list:
-                op_json = ['follow', op_json]  # legacy compat
-            process_json_follow_op(account, op_json, date)
-        elif op['id'] == 'com.steemit.community':
-            process_json_community_op(account, op_json, date)
-
-
-def json_expand(json_op):
-    """ For custom_json ops. """
-    if type(json_op) == dict and 'json' in json_op:
-        return update_in(json_op, ['json'], json.loads)
-
-    return json_op
-
-
-def process_json_community_op(account, op_json, date):
-    ## TODO
-    return
 
 
 # This method processes any legacy 'follow' plugin ops (follow/mute/clear, reblog)
@@ -234,6 +163,86 @@ def process_json_follow_op(account, op_json, block_date):
                   "VALUES ('%s', %d, '%s')" % (blogger, post_id, block_date))
 
 
+# community methods
+# -----------------
+def process_json_community_op(account, op_json, date):
+    ## TODO
+    return
+
+
+def get_validated_community(op):
+    ## community = op['json_metadata']['community']
+    ## is `community` valid?
+    ## is op['author'] allowed to post in `community`?
+    ## if so, return community. otherwise, author's name.
+    # for testing: default to sending all posts to author's blog.
+    return op['author']
+
+
+# run indexer
+# -----------
+def process_block(block):
+    date = parse_time(block['timestamp'])
+    block_num = int(block['previous'][:8], base=16) + 1
+    txs = block['transactions']
+
+    # NOTE: currently `prev` tracks the previous block number and this is enforced with a FK constraint.
+    # soon we will have access to prev block hash and current hash in the API return value, we should use this instead.
+    # the FK constraint will then fail if we somehow end up on the wrong side in a fork reorg.
+    query("INSERT INTO hive_blocks (num, prev, txs, created_at) "
+          "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, len(txs), date))
+    if block_num % 1000 == 0:
+        log.info("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
+
+    accounts = set()
+    comments = []
+    json_ops = []
+    deleted = []
+    for tx in txs:
+        for operation in tx['operations']:
+            op_type, op = operation
+
+            if op_type == 'pow':
+                accounts.add(op['worker_account'])
+            elif op_type == 'pow2':
+                accounts.add(op['work'][1]['input']['worker_account'])
+            elif op_type in ['account_create', 'account_create_with_delegation']:
+                accounts.add(op['new_account_name'])
+            elif op_type == 'comment':
+                comments.append(op)
+            elif op_type == 'delete_comment':
+                deleted.append(op)
+            elif op_type == 'custom_json':
+                json_ops.append(op)
+
+    register_accounts(accounts, date)  # if an account does not exist, mark it as created in this block
+    register_posts(comments, date)  # if this is a new post, add the entry and validate community param
+    delete_posts(deleted)  # mark hive_posts.is_deleted = 1
+
+    for op in map(json_expand, json_ops):
+        if op['id'] not in ['follow', 'com.steemit.community']:
+            continue
+
+        # we are assuming `required_posting_auths` is always used and length 1.
+        # it may be that some ops will require `required_active_auths` instead
+        # (e.g. if we use that route for admin action of acct creation)
+        # if op['required_active_auths']:
+        #    log.warning("unexpected active auths: %s" % op)
+        if len(op['required_posting_auths']) != 1:
+            log.warning("unexpected auths: %s" % op)
+            continue
+
+        account = op['required_posting_auths'][0]
+        op_json = op['json']
+
+        if op['id'] == 'follow':
+            if block_num < 6000000 and type(op_json) != list:
+                op_json = ['follow', op_json]  # legacy compat
+            process_json_follow_op(account, op_json, date)
+        elif op['id'] == 'com.steemit.community':
+            process_json_community_op(account, op_json, date)
+
+
 def process_blocks(blocks):
     query("START TRANSACTION")
     for block in blocks:
@@ -261,6 +270,8 @@ def sync_from_steemd():
         process_blocks([block])
 
 
+# testing
+# -------
 def run():
     # fast-load first 10m blocks
     if db_last_block() < int(1e7):
