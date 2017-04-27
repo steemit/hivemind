@@ -38,6 +38,33 @@ hive indexer from-file /path/to/blocks.json.lst
 hive server dev-server --port 1234
 ```
 
+# Production Env
+BYO MySQL deployment (ie. Amazon RDS).
+Hive is deployed as Docker container (see `Dockerfile`).
+
+## Environment Variables
+
+| Variable               | Default |
+| ---------------------- | ------- |
+| ENVIRONMENT            | DEV     |
+| LOG_LEVEL              | INFO    |
+| HTTP_SERVER_PORT       | 8080    |
+| HTTP_SERVER_STATS_PORT | 9191    |
+
+## Services
+Please see `/service`.
+
+# Other
+
+## Documentation
+Generate documentation.
+```
+cd docs
+make html
+```
+
+Then open `docs/_build` in browser.
+
 ## Spec
 [Community Spec Draft](https://github.com/steemit/condenser/wiki/Community-Spec-%5BDRAFT%5D)
 
