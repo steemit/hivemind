@@ -23,7 +23,7 @@ app.config['hive.DATABASE_URL'] = os.environ.get('DATABASE_URL', '')
 app.config['hive.MAX_BLOCK_NUM_DIFF'] = 10
 app.config['hive.MAX_DB_ROW_RESULTS'] = 100000
 app.config['hive.DB_QUERY_LIMIT'] = app.config['hive.MAX_DB_ROW_RESULTS'] + 1
-app.config['hive.logger'] = logger
+app.config['sbds.logger'] = logger
 
 
 def get_db_plugin(database_url):
@@ -56,7 +56,7 @@ app.install(db_plugin)
 # Non JSON-RPC routes
 # -------------------
 @app.get('/health')
-def health(db):
+def health():
     steemd = Steemd()
     last_db_block = db_last_block()
     last_irreversible_block = steemd.last_irreversible_block_num
