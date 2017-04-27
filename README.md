@@ -50,11 +50,12 @@ Hive is deployed as Docker container (see `Dockerfile`).
 | LOG_LEVEL              | INFO    |
 | HTTP_SERVER_PORT       | 8080    |
 | HTTP_SERVER_STATS_PORT | 9191    |
+| DATABASE_URL           | ''      |
 
 ## Services
 Please see `/service`.
 
-# Other
+-----
 
 ## Documentation
 Generate documentation.
