@@ -1,7 +1,7 @@
 import json
 from typing import Union
 
-from hive.extras.roles import permissions
+from hive.community.roles import permissions
 from steem import Steem
 from steem.account import Account
 from steembase.operations import CustomJson

@@ -3,10 +3,13 @@ import logging
 import re
 
 from funcy.seqs import first, second, drop
+from hive.community.roles import get_user_role, privacy_map
 from hive.db.methods import query_one, query, db_last_block
 from steem.blockchain import Blockchain
+from steem.post import Post
 from steem.steemd import Steemd
 from steem.utils import parse_time
+from steembase.exceptions import PostDoesNotExist
 from toolz import update_in, partition_all
 
 log = logging.getLogger(__name__)
@@ -65,11 +68,10 @@ def register_posts(ops, date):
             continue  # ignore edits to posts
 
         # this method needs to perform auth checking e.g. is op.author authorized to post in op.community?
-        community = get_validated_community(op)
-
-        # if community is missing or just invalid, send this post to author's blog.
-        if not community:
-            community = op['author']
+        try:
+            community_or_blog = create_post_as(op)
+        except PostDoesNotExist:
+            return
 
         if op['parent_author'] == '':
             parent_id = None
@@ -83,7 +85,7 @@ def register_posts(ops, date):
 
         query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
               "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
-                  parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
+                  parent_id or 'NULL', op['author'], op['permlink'], category, community_or_blog, depth, date))
 
 
 def process_json_follow_op(account, op_json, block_date):
@@ -150,13 +152,60 @@ def process_json_community_op(account, op_json, date):
     return
 
 
-def get_validated_community(op):
-    ## community = op['json_metadata']['community']
-    ## is `community` valid?
-    ## is op['author'] allowed to post in `community`?
-    ## if so, return community. otherwise, author's name.
-    # for testing: default to sending all posts to author's blog.
-    return op['author']
+def create_post_as(comment: dict) -> str:
+    """ Given a new Steem post/comment, add it to appropriate community.
+    
+    For a comment to be valid, these conditions apply:
+        - Post must be new (edits don't count)
+        - Author is allowed to post in this community (membership & privacy)
+        - Author is not muted in this community
+        
+    
+    Args:
+        comment (dict): Operation with the post to add.
+        
+    Returns:
+        name (str): If all conditions apply, community name we're posting into.
+                    Otherwise, authors own name (blog) is returned.
+    """
+    post = Post(comment)
+
+    if not post.community:
+        return post.author
+
+    community = get_community(post.community)
+    if not community:
+        return post.author
+
+    if is_author_muted(post.author, post.community):
+        return post.author
+
+    privacy = community['privacy']
+    if privacy_map[privacy] == 'open':
+        pass
+    elif privacy_map[privacy] == 'restricted':
+        # guests cannot create top-level posts in restricted communities
+        if post.is_main_post() and get_user_role(post.author, post.community) == 'guest':
+            return post.author
+    elif privacy_map[privacy] == 'closed':
+        # we need at least member permissions to post or comment
+        if get_user_role(post.author, post.community) == 'guest':
+            return post.author
+
+    return post.community
+
+
+def get_community(community_name):
+    return query_one("SELECT * FROM hive_communities WHERE account = '%s' LIMIT 1" % community_name)
+
+
+def is_author_muted(author_name: str, community_name: str) -> bool:
+    return False
+
+
+def is_community_valid(name: str) -> bool:
+    """ Given a community name, check if its a valid community."""
+    return bool(get_community(name))
 
 
 # run indexer

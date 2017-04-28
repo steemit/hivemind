@@ -3,7 +3,7 @@
 from hive import *
 from hive.server import *
 from hive.indexer import *
-from hive.extras import *
+from hive.community import *
 
 
 # pylint: disable=unused-import,unused-variable

@@ -3,6 +3,11 @@ from typing import List
 
 # each group inherits permissions from groups below it
 # hence we use OrderedDict to ensure order
+from hive.db.methods import query_one
+
+privacy_types = ('open', 'restricted', 'closed')
+privacy_map = dict(enumerate(privacy_types))
+
 permissions = OrderedDict([
     ('muted', []),
     ('guest', []),
@@ -46,5 +51,22 @@ def is_permitted(account: str, community: str, action: str) -> bool:
 
 
 def get_user_role(account: str, community: str) -> str:
-    # todo query sql
-    return 'admin'
+    if account == community:
+        return 'owner'
+
+    roles = query_one("SELECT is_admin, is_mod, is_approved, is_muted "
+                      "FROM hive_members"
+                      "WHERE community = '%s' AND account = '%s' LIMIT 1" % (community, account))
+
+    # todo muted precedes member role?
+    # return highest role first
+    if roles['is_admin']:
+        return 'admin'
+    elif roles['is_mod']:
+        return 'moderator'
+    elif roles['is_muted']:
+        return 'muted'
+    elif roles['is_approved']:
+        return 'member'
+
+    return 'guest'

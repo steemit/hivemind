@@ -9,16 +9,19 @@ Modules
 
 
 
-hive.indexer
-============
+Indexer
+=======
 
-.. automodule:: hive.indexer
+hive.indexer.core
+-----------------
+
+.. automodule:: hive.indexer.core
    :members:
 
 --------
 
-hive.server
-===========
+Server
+======
 
 .. automodule:: hive.server
    :members:
@@ -46,10 +49,31 @@ Outputs:
 
 --------
 
-hive.extras
-===========
+Community
+=========
 
-.. automodule:: hive.extras
+Community
+---------
+
+.. autoclass:: hive.community.community.Community
+   :members:
+
+Roles
+-----
+
+.. automodule:: hive.community.roles
+   :members:
+
+--------
+
+
+Database
+========
+
+hive.db.methods
+---------------
+
+.. automodule:: hive.db.methods
    :members:
 
 --------
