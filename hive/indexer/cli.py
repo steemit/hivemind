@@ -18,7 +18,7 @@ def indexer():
 @indexer.command(name='from-file')
 @click.argument('filename', type=click.Path(exists=True))
 def index_from_file(filename):
-    """import blocks from .json.lst file"""
+    """import blocks from steemd"""
     echo('Loading blocks from %s...' % filename)
     with click_spinner.spinner():
         sync_from_file(filename)

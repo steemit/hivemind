@@ -54,9 +54,11 @@ def get_user_role(account: str, community: str) -> str:
     if account == community:
         return 'owner'
 
-    roles = query_one("SELECT is_admin, is_mod, is_approved, is_muted "
-                      "FROM hive_members"
-                      "WHERE community = '%s' AND account = '%s' LIMIT 1" % (community, account))
+    roles = query_one(
+        "SELECT is_admin, is_mod, is_approved, is_muted "
+        "FROM hive_members"
+        "WHERE community = '%s' AND account = '%s' LIMIT 1" % (community, account)
+    )
 
     # todo muted precedes member role?
     # return highest role first
@@ -70,3 +72,8 @@ def get_user_role(account: str, community: str) -> str:
         return 'member'
 
     return 'guest'
+
+
+def get_community_privacy(community: str) -> str:
+    type_id = query_one('SELECT type_id from hive_communities WHERE name = "%s"' % community)
+    return privacy_map.get(type_id)

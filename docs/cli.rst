@@ -26,12 +26,41 @@ Usage
 
 Database Commands
 -----------------
-Todo
+Create initial MySQL tables.
+
+::
+
+    hive db ensure-schema
 
 Server Commands
 ---------------
-Todo
+Spin up a JSON-RPC server.
+
+::
+
+    hive server dev-server --port 1234
+
 
 Indexer Commands
 ----------------
-Todo
+
+Syncing with Blockchain:
+
+::
+
+    hive indexer from-file /path/to/blocks.json.lst
+
+    hive indexer from-steem
+
+
+
+Head Block Status:
+
+::
+
+    % hive indexer show-status
+    +----------+---------+------------+
+    | steemd   | hive    | Difference |
+    +----------+---------+------------+
+    | 11482113 | 5723313 | 5758800    |
+    +----------+---------+------------+

@@ -200,7 +200,7 @@ def get_community(community_name):
 
 
 def is_author_muted(author_name: str, community_name: str) -> bool:
-    return False
+    return get_user_role(author_name, community_name) is 'muted'
 
 
 def is_community(name: str) -> bool:
