@@ -64,6 +64,7 @@ class Community:
         return self._commit(op)
 
     def update_settings(self, **settings):
+        """ Update community settings / metadata. """
         # sanitize the settings to valid keys
         settings = {k: v for k, v in settings.items() if k in self._valid_settings}
         assert self._has_permissions('update_settings'), 'Insufficient Community Permissions'
@@ -106,36 +107,43 @@ class Community:
         return self._commit(op)
 
     def mute_user(self, account_name: str):
+        """ Mute user """
         assert self._has_permissions('mute_user'), 'Insufficient Community Permissions'
         op = self._op(action='mute_user', account=account_name)
         return self._commit(op)
 
     def unmute_user(self, account_name: str):
+        """ Un-Mute user """
         assert self._has_permissions('unmute_user'), 'Insufficient Community Permissions'
         op = self._op(action='unmute_user', account=account_name)
         return self._commit(op)
 
     def mute_post(self, author: str, permlink: str, notes: str):
+        """ Mute post """
         assert self._has_permissions('mute_post'), 'Insufficient Community Permissions'
         op = self._op(action='mute_post', author=author, permlink=permlink, notes=notes)
         return self._commit(op)
 
     def unmute_post(self, author: str, permlink: str, notes: str):
+        """ Un-Mute post """
         assert self._has_permissions('unmute_post'), 'Insufficient Community Permissions'
         op = self._op(action='unmute_post', author=author, permlink=permlink, notes=notes)
         return self._commit(op)
 
     def pin_post(self, author: str, permlink: str):
+        """ Pin post """
         assert self._has_permissions('pin_post'), 'Insufficient Community Permissions'
         op = self._op(action='pin_post', author=author, permlink=permlink)
         return self._commit(op)
 
     def unpin_post(self, author: str, permlink: str):
+        """ Un-Pin post """
         assert self._has_permissions('unpin_post'), 'Insufficient Community Permissions'
         op = self._op(action='unpin_post', author=author, permlink=permlink)
         return self._commit(op)
 
     def flag_post(self, author: str, permlink: str, comment: str):
+        """ Flag post """
         assert self._has_permissions('flag_post'), 'Insufficient Community Permissions'
         op = self._op(action='flag_post', author=author, permlink=permlink, comment=comment)
         return self._commit(op)
