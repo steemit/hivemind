@@ -196,14 +196,14 @@ def create_post_as(comment: dict) -> str:
 
 
 def get_community(community_name):
-    return query_one("SELECT * FROM hive_communities WHERE account = '%s' LIMIT 1" % community_name)
+    return first(query("SELECT * FROM hive_communities WHERE account = '%s' LIMIT 1" % community_name))
 
 
 def is_author_muted(author_name: str, community_name: str) -> bool:
     return False
 
 
-def is_community_valid(name: str) -> bool:
+def is_community(name: str) -> bool:
     """ Given a community name, check if its a valid community."""
     return bool(get_community(name))
 

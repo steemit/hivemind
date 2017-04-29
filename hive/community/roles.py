@@ -1,13 +1,13 @@
 from collections import OrderedDict
 from typing import List
 
-# each group inherits permissions from groups below it
-# hence we use OrderedDict to ensure order
 from hive.db.methods import query_one
 
 privacy_types = ('open', 'restricted', 'closed')
 privacy_map = dict(enumerate(privacy_types))
 
+# each group inherits permissions from groups below it
+# hence we use OrderedDict to ensure order
 permissions = OrderedDict([
     ('muted', []),
     ('guest', []),

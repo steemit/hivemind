@@ -1,7 +1,8 @@
 import json
 from typing import Union
 
-from hive.community.roles import permissions
+from hive.community.roles import permissions, is_permitted
+from hive.indexer.core import is_community
 from steem import Steem
 from steem.account import Account
 from steembase.operations import CustomJson
@@ -47,8 +48,10 @@ class Community:
         """
         # validate account and community name
         Account(self.account)
-        assert self.community == self.account
-        # todo: check if community already exists
+        assert self.community == self.account, 'Account name and community name need to be the same'
+
+        if is_community(self.community):
+            raise NameError('Can not create community %s, because it already exists.' % self.community)
 
         if type(admins) == str:
             admins = [admins]
@@ -63,6 +66,7 @@ class Community:
     def update_settings(self, **settings):
         # sanitize the settings to valid keys
         settings = {k: v for k, v in settings.items() if k in self._valid_settings}
+        assert self._has_permissions('update_settings'), 'Insufficient Community Permissions'
         op = self._op(action='update_settings', settings=settings)
         return self._commit(op)
 
@@ -89,39 +93,50 @@ class Community:
             raise ValueError('Invalid role "%s", needs to be either: %s' % (role, ', '.join(self._roles)))
 
         action_name = '{0}_{1}s'.format(action, role)
+        assert self._has_permissions(action_name), 'Insufficient Community Permissions'
         op = self._op(action=action_name, accounts=account_names)
         return self._commit(op)
 
     def set_user_title(self, account_name: str, title: str):
         """ Set a title for given user. """
+        # todo: check permissions.
+        # can you asssign title to self?
+        # can mod/admin assign title to someone else?
         op = self._op(action='set_user_title', account=account_name, title=title)
         return self._commit(op)
 
     def mute_user(self, account_name: str):
+        assert self._has_permissions('mute_user'), 'Insufficient Community Permissions'
         op = self._op(action='mute_user', account=account_name)
         return self._commit(op)
 
     def unmute_user(self, account_name: str):
+        assert self._has_permissions('unmute_user'), 'Insufficient Community Permissions'
         op = self._op(action='unmute_user', account=account_name)
         return self._commit(op)
 
     def mute_post(self, author: str, permlink: str, notes: str):
+        assert self._has_permissions('mute_post'), 'Insufficient Community Permissions'
         op = self._op(action='mute_post', author=author, permlink=permlink, notes=notes)
         return self._commit(op)
 
     def unmute_post(self, author: str, permlink: str, notes: str):
+        assert self._has_permissions('unmute_post'), 'Insufficient Community Permissions'
         op = self._op(action='unmute_post', author=author, permlink=permlink, notes=notes)
         return self._commit(op)
 
     def pin_post(self, author: str, permlink: str):
+        assert self._has_permissions('pin_post'), 'Insufficient Community Permissions'
         op = self._op(action='pin_post', author=author, permlink=permlink)
         return self._commit(op)
 
     def unpin_post(self, author: str, permlink: str):
+        assert self._has_permissions('unpin_post'), 'Insufficient Community Permissions'
         op = self._op(action='unpin_post', author=author, permlink=permlink)
         return self._commit(op)
 
     def flag_post(self, author: str, permlink: str, comment: str):
+        assert self._has_permissions('flag_post'), 'Insufficient Community Permissions'
         op = self._op(action='flag_post', author=author, permlink=permlink, comment=comment)
         return self._commit(op)
 
@@ -144,11 +159,14 @@ class Community:
             **params
         }]
 
-    def _check_permissions(self, action, account_name):
+    def _has_permissions(self, action: str, account_name=None) -> bool:
         """ Check if this account has the right to perform this action within the community.
         Should be called as helper in most methods.
         """
-        pass
+        if not account_name:
+            account_name = self.account
+
+        return is_permitted(account_name, self.community, action)
 
 
 if __name__ == '__main__':
