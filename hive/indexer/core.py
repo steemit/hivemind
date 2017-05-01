@@ -180,14 +180,14 @@ def create_post_as(comment: dict) -> str:
     if is_author_muted(post.author, post.community):
         return post.author
 
-    privacy = community['privacy']
-    if privacy_map[privacy] == 'open':
+    privacy = privacy_map[community['privacy']]
+    if privacy == 'open':
         pass
-    elif privacy_map[privacy] == 'restricted':
+    elif privacy == 'restricted':
         # guests cannot create top-level posts in restricted communities
         if post.is_main_post() and get_user_role(post.author, post.community) == 'guest':
             return post.author
-    elif privacy_map[privacy] == 'closed':
+    elif privacy == 'closed':
         # we need at least member permissions to post or comment
         if get_user_role(post.author, post.community) == 'guest':
             return post.author
