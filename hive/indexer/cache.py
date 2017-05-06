@@ -1,20 +1,18 @@
 import json
 import logging
-import re
+import math
+from time import mktime
 
-from funcy.seqs import first, second, drop
-from hive.db.methods import query_one, query, db_last_block
-from steem.blockchain import Blockchain
-from steem.post import Post
+from dateutil.parser import parse
+from funcy.seqs import first
+from hive.db.methods import query
+from steem.amount import Amount
 from steem.steemd import Steemd
 
 log = logging.getLogger(__name__)
 
-import math
-from time import mktime
-from dateutil.parser import parse
 
-def get_img_url(url, max_size = 1024):
+def get_img_url(url, max_size=1024):
     url = url.strip()
     if not url:
         pass
@@ -25,14 +23,13 @@ def get_img_url(url, max_size = 1024):
     else:
         return url
 
-def amt(str):
-    return float(first(str.split(' ')))
 
-def score(rshares, created_timestamp, timescale = 480000):
+def score(rshares, created_timestamp, timescale=480000):
     mod_score = rshares / 10000000.0
-    order = math.log10( max((abs(mod_score), 1)) )
+    order = math.log10(max((abs(mod_score), 1)))
     sign = 1 if mod_score > 0 else -1
     return sign * order + created_timestamp / timescale
+
 
 # not yet in use. need to get these fields into cache table.
 def get_stats(post):
@@ -48,20 +45,20 @@ def get_stats(post):
         rshares = int(v['rshares'])
         sign = 1 if v['percent'] > 0 else -1
         if sign > 0:
-            up_votes += 1 
+            up_votes += 1
         if sign < 0:
-            neg_rshares += rshares 
+            neg_rshares += rshares
 
-        # For graying: sum up total rshares, but ignore neg rep users and tiny downvotes
-        if string(v['reputation'])[0] != '-' and not (sign < 0 and len(string(rshares)) < 11):
+            # For graying: sum up total rshares, but ignore neg rep users and tiny downvotes
+        if str(v['reputation'])[0] != '-' and not (sign < 0 and len(str(rshares)) < 11):
             net_rshares_adj += rshares
 
     # take negative rshares, divide by 2, truncate 10 digits (plus neg sign), count digits.
     # creates a cheap log10, stake-based flag weight. 1 = approx $400 of downvoting stake; 2 = $4,000; etc
-    flag_weight = max(( len(string(neg_rshares / 2)) - 11, 0 ))
+    flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
 
     allow_delete = post['children'] == 0 and int(post['net_rshares']) <= 0
-    has_pending_payout = amt(post['pending_payout_value']) >= 0.02
+    has_pending_payout = Amount(post['pending_payout_value']).amount >= 0.02
     author_rep = rep_log10(post['author_reputation'])
 
     gray_threshold = -9999999999
@@ -81,37 +78,40 @@ def get_stats(post):
     }
 
 
-
 def batch_queries(queries):
     query("START TRANSACTION")
     for sql in queries:
         query(sql)
     query("COMMIT")
 
+
 # TODO: escape strings for mysql
 def escape(str):
     return str
+
 
 # TODO: calculate rep score
 def rep_log10(raw):
     return 25
 
+
 def vote_csv_row(vote):
-    return ','.join( (vote['voter'], str(vote['rshares']), str(vote['percent']), str(rep_log10(vote['reputation']))) )
-    
+    return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']), str(rep_log10(vote['reputation']))))
+
+
 def generate_cached_post_sql(id, post, updated_at):
     md = json.loads(post['json_metadata']) or {}
 
     thumb_url = ''
     if md and md['image']:
         thumb_url = get_img_url(first(md['image'])) or ''
-    
+
     # clean up tags, check if nsfw
-    tags = (post['category'], )
+    tags = (post['category'],)
     if md and md['tags'] and type(md['tags']) == list:
-        tags.extend(md['tags'])
-    tags = set(map(lambda str:str.lower(), tags))
-    is_nsfw = 1 if 'nsfw' in tags else 0
+        tags += md['tags']
+    tags = set(map(lambda str: str.lower(), tags))
+    is_nsfw = int('nsfw' in tags)
 
     # payout date is last_payout if paid, and cashout_time if pending.
     payout_at = post['last_payout'] if post['cashout_time'][0:4] == '1969' else post['cashout_time']
@@ -122,7 +122,7 @@ def generate_cached_post_sql(id, post, updated_at):
 
     # these are rshares which are PENDING
     payout_declined = False
-    if amt(post['max_accepted_payout']) == 0:
+    if Amount(post['max_accepted_payout']).amount == 0:
         payout_declined = True
     elif len(post['beneficiaries']) == 1:
         benny = first(post['beneficiaries'])
@@ -130,41 +130,42 @@ def generate_cached_post_sql(id, post, updated_at):
             payout_declined = True
 
     # total payout (completed and/or pending)
-    payout = amt(post['total_payout_value']) 
-    + amt(post['curator_payout_value']) 
-    + amt(post['pending_payout_value'])
+    payout = sum([
+        Amount(post['total_payout_value']).amount,
+        Amount(post['curator_payout_value']).amount,
+        Amount(post['pending_payout_value']).amount,
+    ])
 
     # total promotion cost
-    promoted = amt(post['promoted'])
+    promoted = Amount(post['promoted']).amount
 
     # trending scores
-    timestamp   = mktime(parse(post['created']).timetuple())
-    hot_score   = score(rshares, timestamp,  10000)
+    timestamp = mktime(parse(post['created']).timetuple())
+    hot_score = score(rshares, timestamp, 10000)
     trend_score = score(rshares, timestamp, 480000)
 
     fields = {
-      'title':      ["'%2$s'",  escape(post['title'])],
-      'preview':    ["'%3$s'",  escape(post['body'][0:1024])],
-      'img_url':    ["'%4$s'",  escape(thumb_url)],
-      'payout':     ["%5$f",    payout],
-      'promoted':   ["%6$f",    promoted],
-      'payout_at':  ["'%7$s'",  payout_at],
-      'updated_at': ["'%8$s'",  updated_at],
-      'children':   ["%9$d",    post['children']],
-      'rshares':    ["%10$d",   rshares],
-      'votes':      ["'%11$s'", escape(csvotes)],
-      'json':       ["'%12$s'", escape(json.dumps(md))],
-      'is_nsfw':    ["%13$d",   is_nsfw],
-      'sc_trend':   ["%14$f",   trend_score],
-      'sc_hot':     ["%15$f",   hot_score],
+        'title': ["'%2$s'", escape(post['title'])],
+        'preview': ["'%3$s'", escape(post['body'][0:1024])],
+        'img_url': ["'%4$s'", escape(thumb_url)],
+        'payout': ["%5$f", payout],
+        'promoted': ["%6$f", promoted],
+        'payout_at': ["'%7$s'", payout_at],
+        'updated_at': ["'%8$s'", updated_at],
+        'children': ["%9$d", post['children']],
+        'rshares': ["%10$d", rshares],
+        'votes': ["'%11$s'", escape(csvotes)],
+        'json': ["'%12$s'", escape(json.dumps(md))],
+        'is_nsfw': ["%13$d", is_nsfw],
+        'sc_trend': ["%14$f", trend_score],
+        'sc_hot': ["%15$f", hot_score],
     }
     fields = ', '.join(['post_id'].extend(fields.keys()))
-    values = [id].extend(map(lambda k,v: v[1], fields))
-    params = ', '.join(['%1$d'].extend(map(lambda a,b: a, fields.values())))
-    update = ', '.join(map(lambda k,v: k + " = " + v[0], fields))
+    values = [id].extend(map(lambda k, v: v[1], fields))
+    params = ', '.join(['%1$d'].extend(map(lambda a, b: a, fields.values())))
+    update = ', '.join(map(lambda k, v: k + " = " + v[0], fields))
     sql = "INSERT INTO hive_posts_cache (" + fields + ") VALUES (" + params + ") " + "ON DUPLICATE KEY UPDATE " + update
     return sql % values
-
 
 
 # testing
