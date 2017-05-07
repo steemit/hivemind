@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 
 from funcy.seqs import first, second, drop
 from hive.community.roles import get_user_role, privacy_map
@@ -8,29 +7,11 @@ from hive.db.methods import query_one, query, db_last_block
 from steem.blockchain import Blockchain
 from steem.post import Post
 from steem.steemd import Steemd
-from steem.utils import parse_time
+from steem.utils import parse_time, is_valid_account_name, json_expand
 from steembase.exceptions import PostDoesNotExist
-from toolz import update_in, partition_all
+from toolz import partition_all
 
 log = logging.getLogger(__name__)
-
-
-# utils
-# -----
-def construct_identifier(op):
-    return '%s/%s' % (op['author'], op['permlink'])
-
-
-def is_valid_account_name(name):
-    return re.match('^[a-z][a-z0-9\-.]{2,15}$', name)
-
-
-def json_expand(json_op):
-    """ For custom_json ops. """
-    if type(json_op) == dict and 'json' in json_op:
-        return update_in(json_op, ['json'], json.loads)
-
-    return json_op
 
 
 # core
