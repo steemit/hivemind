@@ -1,26 +1,19 @@
 import json
 import logging
 import math
-from time import mktime
 
-from dateutil.parser import parse
 from funcy.seqs import first
 from hive.db.methods import query
 from steem.amount import Amount
 from steem.steemd import Steemd
+from steem.utils import parse_time
 
 log = logging.getLogger(__name__)
 
 
 def get_img_url(url, max_size=1024):
     url = url.strip()
-    if not url:
-        pass
-    elif url[max_size]:
-        pass
-    elif url[0:4] is not 'http':
-        pass
-    else:
+    if url and len(url) < max_size and url[0:4] is not 'http':
         return url
 
 
@@ -140,7 +133,7 @@ def generate_cached_post_sql(id, post, updated_at):
     promoted = Amount(post['promoted']).amount
 
     # trending scores
-    timestamp = mktime(parse(post['created']).timetuple())
+    timestamp = parse_time(post['created']).timestamp()
     hot_score = score(rshares, timestamp, 10000)
     trend_score = score(rshares, timestamp, 480000)
 
