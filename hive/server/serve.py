@@ -13,8 +13,8 @@ from hive.indexer.core import db_last_block, head_state
 from sqlalchemy import create_engine
 from steem.steemd import Steemd
 
-from sbds.sbds_json import ToStringJSONEncoder
-from sbds.server.jsonrpc import register_endpoint
+from hive.sbds.sbds_json import ToStringJSONEncoder
+from hive.sbds.jsonrpc import register_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ app.config['hive.DATABASE_URL'] = os.environ.get('DATABASE_URL', 'missing ENV DA
 app.config['hive.MAX_BLOCK_NUM_DIFF'] = 10
 app.config['hive.MAX_DB_ROW_RESULTS'] = 100000
 app.config['hive.DB_QUERY_LIMIT'] = app.config['hive.MAX_DB_ROW_RESULTS'] + 1
-app.config['sbds.logger'] = logger
+app.config['hive.logger'] = logger
 
 
 def get_db_plugin(database_url):
