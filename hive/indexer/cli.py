@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import click
-import click_spinner
 from click import echo
 from hive.indexer.core import sync_from_file, sync_from_steemd, head_state
 from prettytable import PrettyTable
@@ -20,16 +19,14 @@ def indexer():
 def index_from_file(filename):
     """import blocks from steemd"""
     echo('Loading blocks from %s...' % filename)
-    with click_spinner.spinner():
-        sync_from_file(filename)
+    sync_from_file(filename)
 
 
 @indexer.command(name='from-steemd')
 def index_from_steemd():
     """import blocks from .json.lst file"""
     echo('Loading blocks from steemd...')
-    with click_spinner.spinner():
-        sync_from_steemd()
+    sync_from_steemd()
 
 
 @indexer.command(name='show-status')

@@ -32,7 +32,6 @@ setup(
         'sqlalchemy',
         'mysqlclient',
         'click',
-        'click-spinner',
         'funcy',
         'toolz',
         'maya',

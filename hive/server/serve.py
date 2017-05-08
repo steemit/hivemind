@@ -5,16 +5,16 @@ import os
 from datetime import datetime
 
 import bottle
+import hive.server.methods as rpcmethods
 from bottle import abort
 from bottle_errorsrest import ErrorsRestPlugin
 from bottle_sqlalchemy import Plugin
 from hive.db.schema import metadata as hive_metadata
 from hive.indexer.core import db_last_block, head_state
+from hive.sbds.jsonrpc import register_endpoint
+from hive.sbds.sbds_json import ToStringJSONEncoder
 from sqlalchemy import create_engine
 from steem.steemd import Steemd
-
-from hive.sbds.sbds_json import ToStringJSONEncoder
-from hive.sbds.jsonrpc import register_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -81,10 +81,11 @@ jsonrpc = register_endpoint(path='/', app=app, namespace='hive')
 
 json_rpc_methods = {
     'head_state': head_state,
+    'get_followers': rpcmethods.get_followers,
+    'get_following': rpcmethods.get_following,
 }
 for method_name, fn_call in json_rpc_methods.items():
     jsonrpc.register_method(method=fn_call, method_name=method_name)
-
 
 # WSGI application
 # ----------------
