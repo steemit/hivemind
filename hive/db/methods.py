@@ -3,7 +3,7 @@ from hive.db import conn
 from hive.db.schema import (
     hive_follows,
 )
-from sqlalchemy import text, select
+from sqlalchemy import text, select, func
 
 
 # generic
@@ -26,15 +26,29 @@ def db_last_block():
 
 # api specific
 # ------------
-def get_followers(account: str, skip: int, limit: int, db=conn):
+def get_followers(account: str, skip: int, limit: int):
     q = select([hive_follows]). \
         where(hive_follows.c.following == account). \
         skip(skip).limit(limit)
-    return db.execute(q)
+    return conn.execute(q)
 
 
-def get_following(account: str, skip: int, limit: int, db=conn):
+def get_following(account: str, skip: int, limit: int):
     q = select([hive_follows]). \
         where(hive_follows.c.follower == account). \
         skip(skip).limit(limit)
-    return db.execute(q)
+    return conn.execute(q)
+
+
+def following_count(account: str):
+    q = select([func.count(hive_follows.c.hive_follows_fk1)]). \
+        where(hive_follows.c.follower == account). \
+        as_scalar()
+    return conn.execute(q)
+
+
+def follower_count(account: str):
+    q = select([func.count(hive_follows.c.hive_follows_fk1)]). \
+        where(hive_follows.c.following == account). \
+        as_scalar()
+    return conn.execute(q)
