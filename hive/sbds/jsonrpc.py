@@ -59,7 +59,7 @@ class JSONRPC(object):
     def make_endpoint(self):
         @funcy.log_calls(self.logger.debug, errors=True)
         @self.app.post(self.path)
-        def rpc(db):
+        def rpc():
             if not request.json:
                 self.logger.error('Parse Error, Not JSON', extra=request.body.read())
                 return error('parse_error', 0)
@@ -108,7 +108,7 @@ class JSONRPC(object):
 
             # execute json-rpc method
             try:
-                result = func(db, bottle, self.app, params)
+                result = func(bottle, self.app, params)
                 return {'jsonrpc': '2.0', 'id': json_rpc_id, 'result': result}
             except Exception as e:
                 self.logger.exception(e)

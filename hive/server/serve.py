@@ -19,38 +19,14 @@ from steem.steemd import Steemd
 logger = logging.getLogger(__name__)
 
 app = bottle.Bottle()
-app.config['hive.DATABASE_URL'] = os.environ.get('DATABASE_URL', 'missing ENV DATABASE_URL')
 app.config['hive.MAX_BLOCK_NUM_DIFF'] = 10
 app.config['hive.MAX_DB_ROW_RESULTS'] = 100000
 app.config['hive.DB_QUERY_LIMIT'] = app.config['hive.MAX_DB_ROW_RESULTS'] + 1
 app.config['hive.logger'] = logger
 
-
-def get_db_plugin(database_url):
-    sa_engine = create_engine(database_url)
-
-    # pylint: disable=undefined-variable
-    return Plugin(
-        # SQLAlchemy engine created with create_engine function.
-        sa_engine,
-        # SQLAlchemy metadata, required only if create=True.
-        hive_metadata,
-        # Keyword used to inject session database in a route (default 'db').
-        keyword='db',
-        # If it is true, execute `metadata.create_all(engine)` when plugin is applied (default False).
-        create=False,
-        # If it is true, plugin commit changes after route is executed (default True).
-        commit=False,
-        # If True and keyword is not defined, plugin uses **kwargs argument to inject session database (default False).
-        use_kwargs=False,
-    )
-
-
 app.install(
     bottle.JSONPlugin(json_dumps=lambda s: json.dumps(s, cls=ToStringJSONEncoder)))
 app.install(ErrorsRestPlugin())
-db_plugin = get_db_plugin(app.config['hive.DATABASE_URL'])
-app.install(db_plugin)
 
 
 # Non JSON-RPC routes
