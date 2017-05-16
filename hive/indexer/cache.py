@@ -137,28 +137,29 @@ def generate_cached_post_sql(id, post, updated_at):
     hot_score = score(rshares, timestamp, 10000)
     trend_score = score(rshares, timestamp, 480000)
 
-    fields = {
-        'title': ["'%2$s'", escape(post['title'])],
-        'preview': ["'%3$s'", escape(post['body'][0:1024])],
-        'img_url': ["'%4$s'", escape(thumb_url)],
-        'payout': ["%5$f", payout],
-        'promoted': ["%6$f", promoted],
-        'payout_at': ["'%7$s'", payout_at],
-        'updated_at': ["'%8$s'", updated_at],
-        'children': ["%9$d", post['children']],
-        'rshares': ["%10$d", rshares],
-        'votes': ["'%11$s'", escape(csvotes)],
-        'json': ["'%12$s'", escape(json.dumps(md))],
-        'is_nsfw': ["%13$d", is_nsfw],
-        'sc_trend': ["%14$f", trend_score],
-        'sc_hot': ["%15$f", hot_score],
-    }
-    fields = ', '.join(['post_id'].extend(fields.keys()))
-    values = [id].extend(map(lambda k, v: v[1], fields))
-    params = ', '.join(['%1$d'].extend(map(lambda a, b: a, fields.values())))
-    update = ', '.join(map(lambda k, v: k + " = " + v[0], fields))
-    sql = "INSERT INTO hive_posts_cache (" + fields + ") VALUES (" + params + ") " + "ON DUPLICATE KEY UPDATE " + update
-    return sql % values
+    fields = [
+        ['post_id', '%d' % id],
+        ['title', "'%s'" % escape(post['title'])],
+        ['preview', "'%s'" % escape(post['body'][0:1024])],
+        ['img_url', "'%s'" % escape(thumb_url)],
+        ['payout', "%f" % payout],
+        ['promoted', "%f" % promoted],
+        ['payout_at', "'%s'" % payout_at],
+        ['updated_at', "'%s'" % updated_at],
+        ['children', "%d" % post['children']],
+        ['rshares', "%d" % rshares],
+        ['votes', "'%s'" % escape(csvotes)],
+        ['json', "'%s'" % escape(json.dumps(md))],
+        ['is_nsfw', "%d" % is_nsfw],
+        ['sc_trend', "%f" % trend_score],
+        ['sc_hot', "%f" % hot_score]
+    ]
+
+    cols   = ', '.join( [v[0] for v in fields] )
+    params = ', '.join( [v[1] for v in fields] )
+    update = ', '.join( [v[0]+" = "+v[1] for v in fields] )
+    sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
+    return sql % (cols, params, update)
 
 
 # testing
