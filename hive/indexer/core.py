@@ -6,10 +6,8 @@ from funcy.seqs import first, second, drop, flatten
 from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
 from hive.db.methods import query_one, query, db_last_block
 from steem.blockchain import Blockchain
-from steem.post import Post
 from steem.steemd import Steemd
 from steem.utils import parse_time, is_valid_account_name, json_expand
-from steembase.exceptions import PostDoesNotExist
 from toolz import partition_all
 
 log = logging.getLogger(__name__)
@@ -50,10 +48,7 @@ def register_posts(ops, date):
             continue  # ignore edits to posts
 
         # this method needs to perform auth checking e.g. is op.author authorized to post in op.community?
-        try:
-            community_or_blog = create_post_as(op)
-        except PostDoesNotExist:
-            return
+        community_or_blog = create_post_as(op) or op['author']
 
         if op['parent_author'] == '':
             parent_id = None
@@ -257,31 +252,37 @@ def create_post_as(comment: dict) -> str:
         name (str): If all conditions apply, community name we're posting into.
                     Otherwise, authors own name (blog) is returned.
     """
-    post = Post(comment)
 
-    if not post.community:
-        return post.author
+    if comment['json_metadata'] == "":
+        return None
 
-    community = get_community(post.community)
-    if not community:
-        return post.author
+    md = json.loads(comment['json_metadata'])
+    if md is not dict or 'community' not in md:
+        return None
 
-    if is_author_muted(post.author, post.community):
-        return post.author
+    author = comment['author']
+    community = md['community']
+    community_props = get_community(community)
 
-    privacy = privacy_map[community['privacy']]
+    if not community_props:
+        return None
+
+    if is_author_muted(author, community):
+        return None
+
+    privacy = privacy_map[community_props['privacy']]
     if privacy == 'open':
         pass
     elif privacy == 'restricted':
         # guests cannot create top-level posts in restricted communities
-        if post.is_main_post() and get_user_role(post.author, post.community) == 'guest':
-            return post.author
+        if comment['parent_author'] == "" and get_user_role(author, community) == 'guest':
+            return None
     elif privacy == 'closed':
         # we need at least member permissions to post or comment
-        if get_user_role(post.author, post.community) == 'guest':
-            return post.author
+        if get_user_role(author, community) == 'guest':
+            return None
 
-    return post.community
+    return community
 
 
 def get_community(community_name):
