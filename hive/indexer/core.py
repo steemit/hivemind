@@ -256,7 +256,12 @@ def create_post_as(comment: dict) -> str:
     if comment['json_metadata'] == "":
         return None
 
-    md = json.loads(comment['json_metadata'])
+    md = None
+    try:
+        md = json.loads(comment['json_metadata'])
+    except:
+        return None
+
     if md is not dict or 'community' not in md:
         return None
 
@@ -289,7 +294,7 @@ def get_community(community_name):
     # sqlalchemy:
     # q = select([hive_communities]).where(hive_communities.c.account == community_name).limit(1)
     # conn.execute(q).fetchall()
-    return first(query("SELECT * FROM hive_communities WHERE account = '%s' LIMIT 1" % community_name))
+    return first(query("SELECT * FROM hive_communities WHERE name = '%s' LIMIT 1" % community_name))
 
 
 def is_author_muted(author_name: str, community_name: str) -> bool:
