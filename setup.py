@@ -36,6 +36,7 @@ setup(
         'maya',
         'ujson',
         'PrettyTable',
+        'progressbar2',
     ],
     entry_points={
         'console_scripts': [

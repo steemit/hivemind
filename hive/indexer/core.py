@@ -1,5 +1,6 @@
 import json
 import logging
+import progressbar
 
 from funcy.seqs import first, second, drop, flatten
 from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
@@ -311,8 +312,8 @@ def process_block(block):
     # the FK constraint will then fail if we somehow end up on the wrong side in a fork reorg.
     query("INSERT INTO hive_blocks (num, prev, txs, created_at) "
           "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, len(txs), date))
-    if block_num % 1000 == 0:
-        log.info("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
+    if block_num % 100000 == 0:
+        log.warning("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
 
     accounts = set()
     comments = []
@@ -372,12 +373,16 @@ def process_blocks(blocks):
 
 def sync_from_file(file_path, chunk_size=250):
     last_block = db_last_block()
+    bar = progressbar.ProgressBar(max_value = (10000000 - last_block))
+    progress = 0
     with open(file_path) as f:
         # each line in file represents one block
         # we can skip the blocks we already have
         remaining = drop(last_block, f)
         for batch in partition_all(chunk_size, remaining):
             process_blocks(map(json.loads, batch))
+            progress += chunk_size
+            bar.update(progress)
 
 
 def sync_from_steemd():
@@ -386,8 +391,13 @@ def sync_from_steemd():
         start_block=db_last_block() + 1,
         full_blocks=True,
     )
+    buffer = [] # TODO: only needed during resync
     for block in h:
-        process_blocks([block])
+        buffer.append(block)
+        if len(buffer) == 250:
+            process_blocks(buffer)
+            buffer = []
+    process_blocks(buffer)
 
 
 # testing
