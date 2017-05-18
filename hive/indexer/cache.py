@@ -109,7 +109,11 @@ def vote_csv_row(vote):
 
 
 def generate_cached_post_sql(id, post, updated_at):
-    md = json.loads(post['json_metadata']) or {}
+    md = None
+    try:
+        md = json.loads(post['json_metadata'])
+    except json.decoder.JSONDecodeError:
+        pass
 
     thumb_url = ''
     if md and md['image']:
@@ -172,6 +176,7 @@ def generate_cached_post_sql(id, post, updated_at):
         ['promoted', "%f" % promoted],
         ['payout_at', "'%s'" % payout_at],
         ['updated_at', "'%s'" % updated_at],
+        ['created_at', "'%s'" % post['created']],
         ['children', "%d" % post['children']], # TODO: remove this field
         ['rshares', "%d" % rshares],
         ['votes', "'%s'" % escape(csvotes)],
@@ -187,13 +192,35 @@ def generate_cached_post_sql(id, post, updated_at):
     sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
     return sql % (cols, params, update)
 
+def cache_missing_posts():
+    sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id > (SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache) ORDER BY id LIMIT 10"
+    rows = query(sql)
+    update_posts_batch(rows)
+
+def update_posts_batch(buffer):
+    sqls = []
+    updated_at = Steemd().get_dynamic_global_properties()['time']
+
+    for (id, author, permlink) in buffer:
+        print("process post id {} -- @{}/{}".format(id, author,permlink))
+
+        post = Steemd().get_content(author, permlink)
+        sql = generate_cached_post_sql(id, post, updated_at)
+        sqls.append(sql)
+
+        if len(sqls) == 250:
+            batch_queries(sqls)
+            sqls = []
+
+    batch_queries(sqls)
 
 # testing
 # -------
 def run():
-    post = Steemd().get_content('roadscape', 'script-check')
-    print(post)
-    print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
+    cache_missing_posts()
+    #post = Steemd().get_content('roadscape', 'script-check')
+    #print(post)
+    #print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
 
 
 if __name__ == '__main__':
