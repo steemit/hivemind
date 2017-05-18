@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 
 def get_img_url(url, max_size=1024):
     url = url.strip()
-    if url and len(url) < max_size and url[0:4] is not 'http':
+    if url and len(url) < max_size and url[0:4] is 'http':
         return url
 
 
@@ -153,7 +153,7 @@ def generate_cached_post_sql(id, post, updated_at):
     hot_score = score(rshares, timestamp, 10000)
     trend_score = score(rshares, timestamp, 480000)
 
-    # Need to evaluate adding these columns. Some CAN be computed upon access.
+    # TODO: evaluate adding these columns. Some CAN be computed upon access.
     #   Some need to be in the db if queries will depend on them. (is_hidden)
     # is_no_payout
     # is_full_power
@@ -172,7 +172,7 @@ def generate_cached_post_sql(id, post, updated_at):
         ['promoted', "%f" % promoted],
         ['payout_at', "'%s'" % payout_at],
         ['updated_at', "'%s'" % updated_at],
-        ['children', "%d" % post['children']],
+        ['children', "%d" % post['children']], # TODO: remove this field
         ['rshares', "%d" % rshares],
         ['votes', "'%s'" % escape(csvotes)],
         ['json', "'%s'" % escape(json.dumps(md))],

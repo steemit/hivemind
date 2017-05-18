@@ -392,7 +392,6 @@ def sync_from_checkpoints():
             sync_from_file(path, skip_lines)
             last_block = num
         last_read = num
-    exit()
 
 
 def sync_from_file(file_path, skip_lines, chunk_size=250):
