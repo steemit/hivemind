@@ -1,3 +1,9 @@
+# Ignore hive checkpoint files
+checkpoints/*.json.lst
+
+# OSX
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
