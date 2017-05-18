@@ -57,8 +57,8 @@ def get_stats(post):
     gray_threshold = -9999999999
     low_value_post = net_rshares_adj < gray_threshold and author_rep < 65
 
-    gray = not has_pending_payout and (authorRepLog10 < 1 or low_value_post)
-    hide = not has_pending_payout and (authorRepLog10 < 0)
+    gray = not has_pending_payout and (author_rep < 1 or low_value_post)
+    hide = not has_pending_payout and (author_rep < 0)
 
     return {
         'hide': hide,
@@ -82,10 +82,26 @@ def batch_queries(queries):
 def escape(str):
     return str
 
+# calculate Steemit rep score
+def rep_log10(rep):
+    def log10(str):
+        leading_digits = int(str[0:4])
+        log = math.log10(leading_digits) + 0.00000001
+        n = len(str) - 1
+        return n + (log - int(log))
 
-# TODO: calculate rep score
-def rep_log10(raw):
-    return 25
+    rep = str(rep)
+    if rep == "0":
+        return 25
+
+    sign = -1 if rep[0] == '-' else 1
+    if sign < 0:
+        rep = rep[1:]
+
+    out = log10(rep)
+    out = max(out - 9, 0) * sign  # @ -9, $1 earned is approx magnitude 1
+    out = (out * 9) + 25          # 9 points per magnitude. center at 25
+    return round(out, 2)
 
 
 def vote_csv_row(vote):
@@ -136,6 +152,16 @@ def generate_cached_post_sql(id, post, updated_at):
     timestamp = parse_time(post['created']).timestamp()
     hot_score = score(rshares, timestamp, 10000)
     trend_score = score(rshares, timestamp, 480000)
+
+    # Need to evaluate adding these columns. Some CAN be computed upon access.
+    #   Some need to be in the db if queries will depend on them. (is_hidden)
+    # is_no_payout
+    # is_full_power
+    # is_hidden
+    # is_grayed
+    # flag_weight
+    # total_votes
+    # up_votes
 
     fields = [
         ['post_id', '%d' % id],
