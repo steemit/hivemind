@@ -1,6 +1,6 @@
 import json
 import logging
-import progressbar
+import glob
 
 from funcy.seqs import first, second, drop, flatten
 from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
@@ -377,18 +377,31 @@ def process_blocks(blocks):
     query("COMMIT")
 
 
-def sync_from_file(file_path, chunk_size=250):
+def sync_from_checkpoints():
     last_block = db_last_block()
-    bar = progressbar.ProgressBar(max_value = (10000000 - last_block))
-    progress = 0
+
+    fn = lambda f: [int(f.split('/')[1].split('.')[0]), f]
+    files = map(fn, glob.glob("checkpoints/*.json.lst"))
+    files = sorted(files, key = lambda f: f[0])
+
+    last_read = 0
+    for (num, path) in files:
+        if last_block < num:
+            print("Last block: {} -- load {}".format(last_block, path))
+            skip_lines = last_block - last_read
+            sync_from_file(path, skip_lines)
+            last_block = num
+        last_read = num
+    exit()
+
+
+def sync_from_file(file_path, skip_lines, chunk_size=250):
     with open(file_path) as f:
         # each line in file represents one block
         # we can skip the blocks we already have
-        remaining = drop(last_block, f)
+        remaining = drop(skip_lines, f)
         for batch in partition_all(chunk_size, remaining):
             process_blocks(map(json.loads, batch))
-            progress += chunk_size
-            bar.update(progress)
 
 
 def sync_from_steemd():
@@ -409,9 +422,8 @@ def sync_from_steemd():
 # testing
 # -------
 def run():
-    # fast-load first 10m blocks
-    if db_last_block() < int(1e7):
-        sync_from_file('/home/user/Downloads/blocks.json.lst')
+    # fast-load checkpoint files
+    sync_from_checkpoints()
 
     sync_from_steemd()
 
