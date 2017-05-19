@@ -97,7 +97,7 @@ def process_json_follow_op(account, op_json, block_date):
         else:
             fields = {'follower': follower, 'following': following,
                     'created_at': block_date, 'is_muted': int(what == 'ignore')}
-            query("INSERT INTO hive_follows (follower, following, created_at, is_muted) "
+            query("INSERT IGNORE INTO hive_follows (follower, following, created_at, is_muted) "
                     "VALUES (:follower, :following, :created_at, :is_muted) "
                     "ON DUPLICATE KEY UPDATE is_muted = :is_muted", **fields)
 
@@ -319,8 +319,6 @@ def process_block(block):
     # the FK constraint will then fail if we somehow end up on the wrong side in a fork reorg.
     query("INSERT INTO hive_blocks (num, prev, txs, created_at) "
           "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, len(txs), date))
-    if block_num % 100000 == 0:
-        log.warning("processing block {} at {} with {} txs".format(block_num, date, len(txs)))
 
     accounts = set()
     comments = []
@@ -388,7 +386,7 @@ def sync_from_checkpoints():
     last_read = 0
     for (num, path) in files:
         if last_block < num:
-            print("Last block: {} -- load {}".format(last_block, path))
+            print("[SYNC] Load {} -- last block: {}".format(path, last_block))
             skip_lines = last_block - last_read
             sync_from_file(path, skip_lines)
             last_block = num
@@ -406,12 +404,12 @@ def sync_from_file(file_path, skip_lines, chunk_size=250):
 
 def sync_from_steemd():
     s = Steemd()
-    st = time.time()
 
-    start = db_last_block() + 1
-    lbound = start
-    ubound = s.get_dynamic_global_properties()['head_block_number']
+    lbound = db_last_block() + 1
+    ubound = s.last_irreversible_block_num
 
+    start_num = lbound
+    start_time = time.time()
     while lbound < ubound:
         to = min(lbound + 250, ubound)
         #blocks = s.get_blocks_range(lbound, to) # not ordered
@@ -419,9 +417,9 @@ def sync_from_steemd():
         lbound = to + 1
         process_blocks(blocks)
 
-        rate = (lbound - start) / (time.time() - st)
-        print("Loaded blocks {} to {} ({}/s) {}m remaining".format(
-            start, to, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
+        rate = (lbound - start_num) / (time.time() - start_time)
+        print("[SYNC] Got block {} ({}/s) {}m remaining".format(
+            to, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
 
 
 def listen_steemd():
@@ -431,7 +429,9 @@ def listen_steemd():
         full_blocks=True,
     )
     for block in h:
-        print("Process block {}".format(block))
+        num = int(block['previous'][:8], base=16) + 1
+        print("[LIVE] Got block {} at {} with {} txs".format(num,
+            block['timestamp'], len(block['transactions'])))
         process_blocks([buffer])
 
 
