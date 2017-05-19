@@ -60,10 +60,13 @@ hive_follows = sa.Table(
     'hive_follows', metadata,
     sa.Column('follower', CHAR(16), nullable=False),
     sa.Column('following', CHAR(16), nullable=False),
+    sa.Column('is_muted', TINYINT(1), nullable=False, server_default='0'),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.ForeignKeyConstraint(['follower'], ['hive_accounts.name'], name='hive_follows_fk1'),
     sa.ForeignKeyConstraint(['following'], ['hive_accounts.name'], name='hive_follows_fk2'),
     sa.UniqueConstraint('follower', 'following', name='hive_follows_ux1'),
+    sa.Index('hive_follows_ix1', 'follower', 'is_muted', 'created_at'),
+    sa.Index('hive_follows_ix2', 'following', 'is_muted', 'created_at'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )

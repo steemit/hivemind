@@ -91,15 +91,15 @@ def process_json_follow_op(account, op_json, block_date):
         if not all(filter(is_valid_account_name, [follower, following])):
             return
 
-        if what == 'blog':
-            query("INSERT IGNORE INTO hive_follows (follower, following, created_at) "
-                  "VALUES ('%s', '%s', '%s')" % (follower, following, block_date))
-        elif what == 'ignore':
-            # TODO: `hive_follows` needs a flag to distinguish between a follow and a mute.
-            # otherwise we need to create a `hive_ignores` table to track mutes.
-            pass
-        elif what == 'clear':
-            query("DELETE FROM hive_follows WHERE follower = '%s' AND following = '%s' LIMIT 1" % (follower, following))
+        if what == 'clear':
+            query("DELETE FROM hive_follows WHERE follower = '%s' "
+                  "AND following = '%s' LIMIT 1" % (follower, following))
+        else:
+            fields = {'follower': follower, 'following': following,
+                    'created_at': created_at, 'is_muted': int(what == 'ignore')}
+            query("INSERT INTO hive_follows (follower, following, created_at, is_muted) "
+                    "VALUES (:follower, :following, :created_at, :is_muted) "
+                    "ON DUPLICATE KEY UPDATE is_muted = :is_muted", fields)
 
     elif cmd == 'reblog':
         blogger = op_json['account']
