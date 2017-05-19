@@ -96,10 +96,10 @@ def process_json_follow_op(account, op_json, block_date):
                   "AND following = '%s' LIMIT 1" % (follower, following))
         else:
             fields = {'follower': follower, 'following': following,
-                    'created_at': created_at, 'is_muted': int(what == 'ignore')}
+                    'created_at': block_date, 'is_muted': int(what == 'ignore')}
             query("INSERT INTO hive_follows (follower, following, created_at, is_muted) "
                     "VALUES (:follower, :following, :created_at, :is_muted) "
-                    "ON DUPLICATE KEY UPDATE is_muted = :is_muted", fields)
+                    "ON DUPLICATE KEY UPDATE is_muted = :is_muted", **fields)
 
     elif cmd == 'reblog':
         blogger = op_json['account']
