@@ -1,6 +1,7 @@
 import json
 import logging
 import math
+import collections
 
 from funcy.seqs import first
 from hive.db.methods import query
@@ -73,8 +74,8 @@ def get_stats(post):
 
 def batch_queries(queries):
     query("START TRANSACTION")
-    for sql in queries:
-        query(sql)
+    for (sql, params) in queries:
+        query(sql, **params)
     query("COMMIT")
 
 
@@ -167,30 +168,32 @@ def generate_cached_post_sql(id, post, updated_at):
     # total_votes
     # up_votes
 
-    fields = [
-        ['post_id', '%d' % id],
-        ['title', "'%s'" % escape(post['title'])],
-        ['preview', "'%s'" % escape(post['body'][0:1024])],
-        ['img_url', "'%s'" % escape(thumb_url)],
-        ['payout', "%f" % payout],
-        ['promoted', "%f" % promoted],
-        ['payout_at', "'%s'" % payout_at],
-        ['updated_at', "'%s'" % updated_at],
-        ['created_at', "'%s'" % post['created']],
-        ['children', "%d" % post['children']], # TODO: remove this field
-        ['rshares', "%d" % rshares],
-        ['votes', "'%s'" % escape(csvotes)],
-        ['json', "'%s'" % escape(json.dumps(md))],
-        ['is_nsfw', "%d" % is_nsfw],
-        ['sc_trend', "%f" % trend_score],
-        ['sc_hot', "%f" % hot_score]
-    ]
+    values = collections.OrderedDict([
+        ('post_id', '%d' % id),
+        ('title', "%s" % escape(post['title'])),
+        ('preview', "%s" % escape(post['body'][0:1024])),
+        ('img_url', "%s" % escape(thumb_url)),
+        ('payout', "%f" % payout),
+        ('promoted', "%f" % promoted),
+        ('payout_at', "%s" % payout_at),
+        ('updated_at', "%s" % updated_at),
+        ('created_at', "%s" % post['created']),
+        ('children', "%d" % post['children']), # TODO: remove this field
+        ('rshares', "%d" % rshares),
+        ('votes', "%s" % escape(csvotes)),
+        ('json', "%s" % escape(json.dumps(md))),
+        ('is_nsfw', "%d" % is_nsfw),
+        ('sc_trend', "%f" % trend_score),
+        ('sc_hot', "%f" % hot_score)
+    ])
+    fields = values.keys()
 
-    cols   = ', '.join( [v[0] for v in fields] )
-    params = ', '.join( [v[1] for v in fields] )
-    update = ', '.join( [v[0]+" = "+v[1] for v in fields] )
+
+    cols   = ', '.join( fields )
+    params = ', '.join( [':'+k for k in fields] )
+    update = ', '.join( [k+" = :"+k for k in fields][1:] )
     sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
-    return sql % (cols, params, update)
+    return (sql % (cols, params, update), values)
 
 def cache_missing_posts():
     sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id > (SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache) ORDER BY id LIMIT 10"
@@ -219,7 +222,6 @@ def update_posts_batch(buffer):
 def run():
     cache_missing_posts()
     #post = Steemd().get_content('roadscape', 'script-check')
-    #print(post)
     #print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
 
 

@@ -8,8 +8,8 @@ from sqlalchemy import text, select, func
 
 # generic
 # -------
-def query(sql):
-    res = conn.execute(text(sql).execution_options(autocommit=False))
+def query(sql, **kwargs):
+    res = conn.execute(text(sql).execution_options(autocommit=False), **kwargs)
     return res
 
 
