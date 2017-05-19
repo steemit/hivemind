@@ -108,7 +108,7 @@ def process_json_follow_op(account, op_json, block_date):
 
         if blogger != account:
             return  # impersonation
-        if not all(filter(is_valid_account_name, [account, blogger])):
+        if not all(filter(is_valid_account_name, [author, blogger])):
             return
 
         post_id, depth = get_post_id_and_depth(author, permlink)
@@ -412,14 +412,13 @@ def sync_from_steemd():
     start_time = time.time()
     while lbound < ubound:
         to = min(lbound + 250, ubound)
-        #blocks = s.get_blocks_range(lbound, to) # not ordered
-        blocks = [s.get_block(n) for n in range(lbound, to + 1)]
-        lbound = to + 1
+        blocks = s.get_blocks_range(lbound, to)
+        lbound = to
         process_blocks(blocks)
 
         rate = (lbound - start_num) / (time.time() - start_time)
         print("[SYNC] Got block {} ({}/s) {}m remaining".format(
-            to, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
+            to - 1, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
 
 
 def listen_steemd():
