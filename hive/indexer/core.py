@@ -1,6 +1,7 @@
 import json
 import logging
 import glob
+import time
 
 from funcy.seqs import first, second, drop, flatten
 from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
@@ -404,18 +405,34 @@ def sync_from_file(file_path, skip_lines, chunk_size=250):
 
 
 def sync_from_steemd():
+    s = Steemd()
+    st = time.time()
+
+    start = db_last_block() + 1
+    lbound = start
+    ubound = s.get_dynamic_global_properties()['head_block_number']
+
+    while lbound < ubound:
+        to = min(lbound + 250, ubound)
+        print("get blocks {} to {}".format(lbound, to))
+        blocks = s.get_blocks_range(lbound, to)
+        lbound = to + 1
+        process_blocks(blocks)
+
+        rate = (lbound - start) / (time.time() - st)
+        print("Loaded blocks {} to {} ({}/s) {}m remaining".format(
+            start, to, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
+
+
+def listen_steemd():
     b = Blockchain()
     h = b.stream_from(
         start_block=db_last_block() + 1,
         full_blocks=True,
     )
-    buffer = [] # TODO: only needed during resync
     for block in h:
-        buffer.append(block)
-        if len(buffer) == 250:
-            process_blocks(buffer)
-            buffer = []
-    process_blocks(buffer)
+        print("Process block {}".format(block))
+        process_blocks([buffer])
 
 
 # testing
@@ -423,8 +440,10 @@ def sync_from_steemd():
 def run():
     # fast-load checkpoint files
     sync_from_checkpoints()
-
+    # fast-load from steemd
     sync_from_steemd()
+    # follow head blocks
+    listen_steemd()
 
 
 def head_state(*args):
