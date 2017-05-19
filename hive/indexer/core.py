@@ -414,8 +414,8 @@ def sync_from_steemd():
 
     while lbound < ubound:
         to = min(lbound + 250, ubound)
-        print("get blocks {} to {}".format(lbound, to))
-        blocks = s.get_blocks_range(lbound, to)
+        #blocks = s.get_blocks_range(lbound, to) # not ordered
+        blocks = [s.get_block(n) for n in range(lbound, to + 1)]
         lbound = to + 1
         process_blocks(blocks)
 
