@@ -2,11 +2,12 @@ import json
 import logging
 import math
 import collections
+import progressbar
 
 from funcy.seqs import first
 from hive.db.methods import query
 from steem.amount import Amount
-from steem.steemd import Steemd
+from steem import Steem
 from steem.utils import parse_time
 
 log = logging.getLogger(__name__)
@@ -117,13 +118,13 @@ def generate_cached_post_sql(id, post, updated_at):
         pass
 
     thumb_url = ''
-    if md and md['image']:
+    if md and 'image' in md:
         thumb_url = get_img_url(first(md['image'])) or ''
 
     # clean up tags, check if nsfw
-    tags = (post['category'],)
-    if md and md['tags'] and type(md['tags']) == list:
-        tags += md['tags']
+    tags = [post['category']]
+    if md and 'tags' in md and type(md['tags']) == list:
+        tags = tags + md['tags']
     tags = set(map(lambda str: str.lower(), tags))
     is_nsfw = int('nsfw' in tags)
 
@@ -188,7 +189,6 @@ def generate_cached_post_sql(id, post, updated_at):
     ])
     fields = values.keys()
 
-
     cols   = ', '.join( fields )
     params = ', '.join( [':'+k for k in fields] )
     update = ', '.join( [k+" = :"+k for k in fields][1:] )
@@ -196,26 +196,32 @@ def generate_cached_post_sql(id, post, updated_at):
     return (sql % (cols, params, update), values)
 
 def cache_missing_posts():
-    sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id > (SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache) ORDER BY id LIMIT 10"
-    rows = query(sql)
+    sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id > (SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache) ORDER BY id"
+    rows = list(query(sql))
     update_posts_batch(rows)
 
-def update_posts_batch(buffer):
-    sqls = []
-    updated_at = Steemd().get_dynamic_global_properties()['time']
+def update_posts_batch(tuples):
+    steemd = Steem().steemd
+    buffer = []
+    updated_at = steemd.get_dynamic_global_properties()['time']
 
-    for (id, author, permlink) in buffer:
-        print("process post id {} -- @{}/{}".format(id, author,permlink))
+    progress = 0
+    bar = progressbar.ProgressBar(max_value=len(tuples))
 
-        post = Steemd().get_content(author, permlink)
+    for (id, author, permlink) in tuples:
+        #print("process post id {} -- @{}/{}".format(id, author,permlink))
+
+        post = steemd.get_content(author, permlink)
         sql = generate_cached_post_sql(id, post, updated_at)
-        sqls.append(sql)
+        buffer.append(sql)
 
-        if len(sqls) == 250:
-            batch_queries(sqls)
-            sqls = []
+        if len(buffer) == 250:
+            batch_queries(buffer)
+            progress += 250
+            bar.update(progress)
+            buffer = []
 
-    batch_queries(sqls)
+    batch_queries(buffer)
 
 # testing
 # -------
