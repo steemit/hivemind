@@ -411,7 +411,7 @@ def sync_from_steemd():
     start_num = lbound
     start_time = time.time()
     while lbound < ubound:
-        to = min(lbound + 250, ubound)
+        to = min(lbound + 1000, ubound)
         blocks = s.get_blocks_range(lbound, to)
         lbound = to
         process_blocks(blocks)
@@ -431,7 +431,7 @@ def listen_steemd():
         num = int(block['previous'][:8], base=16) + 1
         print("[LIVE] Got block {} at {} with {} txs".format(num,
             block['timestamp'], len(block['transactions'])))
-        process_blocks([buffer])
+        process_blocks([block])
 
 
 # testing
