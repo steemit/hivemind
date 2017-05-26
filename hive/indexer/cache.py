@@ -2,7 +2,7 @@ import json
 import logging
 import math
 import collections
-import progressbar
+import time
 
 from funcy.seqs import first
 from hive.db.methods import query
@@ -14,7 +14,8 @@ log = logging.getLogger(__name__)
 
 
 def get_img_url(url, max_size=1024):
-    url = url.strip()
+    if url:
+        url = url.strip()
     if url and len(url) < max_size and url[0:4] is 'http':
         return url
 
@@ -114,12 +115,15 @@ def generate_cached_post_sql(id, post, updated_at):
     md = None
     try:
         md = json.loads(post['json_metadata'])
+        if type(md) is not dict:
+            md = {}
     except json.decoder.JSONDecodeError:
         pass
 
     thumb_url = ''
     if md and 'image' in md:
         thumb_url = get_img_url(first(md['image'])) or ''
+        md['image'] = [thumb_url]
 
     # clean up tags, check if nsfw
     tags = [post['category']]
@@ -205,20 +209,21 @@ def update_posts_batch(tuples):
     buffer = []
     updated_at = steemd.get_dynamic_global_properties()['time']
 
-    progress = 0
-    bar = progressbar.ProgressBar(max_value=len(tuples))
-
+    processed = 0
+    start_time = time.time()
     for (id, author, permlink) in tuples:
-        #print("process post id {} -- @{}/{}".format(id, author,permlink))
-
         post = steemd.get_content(author, permlink)
         sql = generate_cached_post_sql(id, post, updated_at)
         buffer.append(sql)
 
         if len(buffer) == 250:
             batch_queries(buffer)
-            progress += 250
-            bar.update(progress)
+            processed += len(buffer)
+            rem = len(tuples) - processed
+            rate = processed / (time.time() - start_time)
+            print("{} of {} ({}/s) {}m remaining".format(
+                processed, len(tuples), round(rate, 1),
+                round((len(tuples) - processed) / rate / 60, 2) ))
             buffer = []
 
     batch_queries(buffer)
