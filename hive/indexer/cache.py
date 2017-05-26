@@ -129,7 +129,7 @@ def generate_cached_post_sql(id, post, updated_at):
     tags = [post['category']]
     if md and 'tags' in md and type(md['tags']) == list:
         tags = tags + md['tags']
-    tags = set(map(lambda str: str.lower(), tags))
+    tags = set(map(lambda str: (str or '').lower(), tags))
     is_nsfw = int('nsfw' in tags)
 
     # payout date is last_payout if paid, and cashout_time if pending.
