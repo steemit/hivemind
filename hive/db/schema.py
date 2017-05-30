@@ -4,7 +4,7 @@ import os
 import sqlalchemy as sa
 from sqlalchemy.dialects.mysql import (
     CHAR, SMALLINT, TINYINT,
-    TINYTEXT, DOUBLE,
+    TINYTEXT, MEDIUMTEXT, DOUBLE,
 )
 
 metadata = sa.MetaData()
@@ -156,12 +156,11 @@ hive_posts_cache = sa.Table(
     sa.Column('payout_at', sa.DateTime, nullable=False),
     sa.Column('updated_at', sa.DateTime, nullable=False),
     sa.Column('is_nsfw', TINYINT(1), nullable=False, server_default='0'),
-    sa.Column('children', sa.Integer, nullable=False, server_default='0'),
     sa.Column('rshares', sa.BigInteger, nullable=False),
     sa.Column('sc_trend', DOUBLE, nullable=False),
     sa.Column('sc_hot', DOUBLE, nullable=False),
     sa.Column('body', sa.Text),
-    sa.Column('votes', sa.Text),
+    sa.Column('votes', MEDIUMTEXT)
     sa.Column('json', sa.Text),
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_posts_cache_fk1'),
     sa.Index('hive_posts_cache_ix1', 'payout'),
