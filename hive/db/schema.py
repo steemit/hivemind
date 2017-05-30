@@ -160,7 +160,7 @@ hive_posts_cache = sa.Table(
     sa.Column('sc_trend', DOUBLE, nullable=False),
     sa.Column('sc_hot', DOUBLE, nullable=False),
     sa.Column('body', sa.Text),
-    sa.Column('votes', MEDIUMTEXT)
+    sa.Column('votes', MEDIUMTEXT),
     sa.Column('json', sa.Text),
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_posts_cache_fk1'),
     sa.Index('hive_posts_cache_ix1', 'payout'),
