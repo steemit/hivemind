@@ -311,14 +311,13 @@ def is_community(name: str) -> bool:
 # -----------
 def process_block(block):
     date = parse_time(block['timestamp'])
-    block_num = int(block['previous'][:8], base=16) + 1
+    block_id = block['block_id']
+    prev = block['previous']
+    block_num = int(block_id[:8], base=16)
     txs = block['transactions']
 
-    # NOTE: currently `prev` tracks the previous block number and this is enforced with a FK constraint.
-    # soon we will have access to prev block hash and current hash in the API return value, we should use this instead.
-    # the FK constraint will then fail if we somehow end up on the wrong side in a fork reorg.
-    query("INSERT INTO hive_blocks (num, prev, txs, created_at) "
-          "VALUES ('%d', '%d', '%d', '%s')" % (block_num, block_num - 1, len(txs), date))
+    query("INSERT INTO hive_blocks (num, hash, prev, txs, created_at) "
+          "VALUES (%d, '%s', '%s', %d, '%s')" % (block_num, block_id, prev, len(txs), date))
 
     accounts = set()
     comments = []

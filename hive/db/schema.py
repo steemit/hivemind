@@ -12,11 +12,13 @@ metadata = sa.MetaData()
 hive_blocks = sa.Table(
     'hive_blocks', metadata,
     sa.Column('num', sa.Integer, primary_key=True, autoincrement=False),
-    sa.Column('prev', sa.Integer),
+    sa.Column('hash', CHAR(40, ascii=True), nullable=False),
+    sa.Column('prev', CHAR(40, ascii=True)),
     sa.Column('txs', SMALLINT(unsigned=True), server_default='0', nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.UniqueConstraint('prev', name='hive_blocks_ux1'),
-    sa.ForeignKeyConstraint(['prev'], ['hive_blocks.num'], name='hive_blocks_fk1'),
+    sa.UniqueConstraint('hash', name='hive_blocks_ux1'),
+    sa.UniqueConstraint('prev', name='hive_blocks_ux2'),
+    sa.ForeignKeyConstraint(['prev'], ['hive_blocks.hash'], name='hive_blocks_fk1'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -203,7 +205,7 @@ def setup(connection_url=_url):
 
     conn = engine.connect()
     # Insert hive_blocks data
-    insert = hive_blocks.insert().values(num=0, prev=None, created_at='1970-01-01T00:00:00')
+    insert = hive_blocks.insert().values(num=0, hash='0000000000000000000000000000000000000000', prev=None, created_at='1970-01-01T00:00:00')
     conn.execute(insert)
 
     # Insert hive_accounts data
