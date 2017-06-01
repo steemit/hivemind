@@ -16,6 +16,16 @@ from hive.sbds.sbds_json import ToStringJSONEncoder
 from sqlalchemy import create_engine
 from steem.steemd import Steemd
 
+
+
+from hive.db.methods import (
+    get_followers,
+    get_following,
+    following_count,
+    follower_count,
+)
+
+
 logger = logging.getLogger(__name__)
 
 app = bottle.Bottle()
@@ -49,6 +59,19 @@ def health():
             last_irreversible_block=last_irreversible_block,
             diff=diff,
             timestamp=datetime.utcnow().isoformat())
+
+@app.get('/followers/<user>')
+def callback(user):
+    return dict(user = user, followers = get_followers(user))
+
+@app.get('/followers/<user>/<since>')
+def callback(user, since):
+    return dict(user = user, followers = get_followers(user, since))
+
+@app.get('/head_state')
+def callback():
+    return head_state()
+
 
 
 # JSON-RPC route
