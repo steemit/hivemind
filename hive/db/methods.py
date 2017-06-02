@@ -98,6 +98,19 @@ def get_user_feed(account: str, skip: int, limit: int):
     return query(sql, account = account, skip = skip, limit = limit)
 
 
+def get_blog_feed(account: str, skip: int, limit: int):
+    sql = """
+        SELECT p.author, p.permlink, p.created_at
+          FROM hive_posts p 
+         WHERE depth = 0 AND p.author = :account
+     UNION ALL
+        SELECT p.author, p.permlink, r.created_at
+          FROM hive_posts p JOIN hive_reblogs r ON p.id = r.post_id
+         WHERE depth = 0 AND r.account = :account
+      ORDER BY created_at DESC
+         LIMIT :limit OFFSET :offset
+    """
+    return query(sql, account = account, skip = skip, limit = limit)
 
 def get_reblogs_since(account: str, since: str):
     sql = ("SELECT * FROM hive_reblogs r JOIN hive_posts p ON r.post_id = p.id "
