@@ -64,9 +64,9 @@ def health():
 def callback(user):
     return dict(user = user, followers = get_followers(user))
 
-@app.get('/followers/<user>/<since>')
-def callback(user, since):
-    return dict(user = user, followers = get_followers(user, since))
+@app.get('/followers/<user>/<skip>/<limit>')
+def callback(user, skip, limit):
+    return dict(user = user, followers = get_followers(user, skip, limit))
 
 @app.get('/head_state')
 def callback():
