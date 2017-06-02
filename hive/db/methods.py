@@ -67,6 +67,38 @@ def follow_stats(account: str):
     return first(query(sql))
 
 
+def get_discussions_by_trending(skip: int, limit: int):
+    sql = ("SELECT CONCAT('@', p.author, '/', p.permlink) url, p.created_at, p.depth, c.* FROM hive.hive_posts_cache c "
+          "JOIN hive_posts p ON c.post_id = p.id ORDER BY sc_trend DESC")
+    return query(sql)
+
+
+def get_discussions_by_created(skip: int, limit: int):
+    sql = ("SELECT CONCAT('@', p.author, '/', p.permlink) url, p.created_at, p.depth, c.* FROM hive.hive_posts_cache c "
+            "JOIN hive_posts p ON c.post_id = p.id ORDER BY post_id DESC")
+    return query(sql)
+
+
+def get_user_feed(account: str, skip: int, limit: int):
+    sql = """
+        SELECT p.author, p.permlink, p.created_at, r.accts reblogby, r.at reblogged_at, f.following
+          FROM hive_posts p 
+     LEFT JOIN hive_follows f ON f.following = p.author AND f.follower = :account
+     LEFT JOIN (
+                                SELECT GROUP_CONCAT(r.account) accts, r.post_id pid, MIN(r.created_at) at
+                                  FROM hive_reblogs r
+                         USE INDEX (hive_reblogs_ux3)
+                                  JOIN hive_follows f ON r.account = f.following
+                                 WHERE follower = :account
+                              GROUP BY r.post_id
+               ) r ON p.id = r.pid
+         WHERE depth = 0 AND (f.following IS NOT NULL OR r.pid IS NOT NULL)
+      ORDER BY IF(f.following IS NULL, r.at, p.created_at) DESC
+      LIMIT :limit OFFSET :skip"""
+    return query(sql, account = account, skip = skip, limit = limit)
+
+
+
 def get_reblogs_since(account: str, since: str):
     sql = ("SELECT * FROM hive_reblogs r JOIN hive_posts p ON r.post_id = p.id "
           "WHERE p.author = :account AND r.created_at > :since ORDER BY r.created_at DESC")
