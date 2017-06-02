@@ -183,7 +183,6 @@ def generate_cached_post_sql(id, post, updated_at):
         ('payout_at', "%s" % payout_at),
         ('updated_at', "%s" % updated_at),
         ('created_at', "%s" % post['created']),
-        ('children', "%d" % post['children']), # TODO: remove this field
         ('rshares', "%d" % rshares),
         ('votes', "%s" % escape(csvotes)),
         ('json', "%s" % escape(json.dumps(md))),
