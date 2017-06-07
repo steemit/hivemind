@@ -147,6 +147,17 @@ hive_modlog = sa.Table(
     mysql_default_charset='utf8mb4'
 )
 
+hive_feed_cache = sa.Table(
+    'hive_feed_cache', metadata,
+    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('post_id', sa.Integer, primary_key=True),
+    sa.Column('created_at', sa.DateTime, nullable=False),
+    sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_feed_cache_fk1'),
+    sa.Index('hive_feed_cache_ix1', 'account', 'post_id', 'created_at'),
+    mysql_engine='InnoDB',
+    mysql_default_charset='utf8mb4'
+)
+
 hive_posts_cache = sa.Table(
     'hive_posts_cache', metadata,
     sa.Column('post_id', sa.Integer, primary_key=True),

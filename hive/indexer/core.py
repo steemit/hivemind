@@ -13,7 +13,7 @@ from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
-from cache import generate_cached_post_sql
+from cache import generate_cached_post_sql, update_feed_cache
 
 # core
 # ----
@@ -74,6 +74,11 @@ def register_posts(ops, date):
         query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
               "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
                   parent_id or 'NULL', op['author'], op['permlink'], category, community_or_blog, depth, date))
+        if depth is 0:
+            id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
+            sql = "INSERT INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
+            query(sql, account=op['author'], id=id, created_at=date)
+
 
 
 def process_json_follow_op(account, op_json, block_date):
@@ -131,7 +136,8 @@ def process_json_follow_op(account, op_json, block_date):
         else:
             query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
                   "VALUES ('%s', %d, '%s')" % (blogger, post_id, block_date))
-
+            sql = "INSERT INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
+            query(sql, account=blogger, id=post_id, created_at=block_date)
 
 # community methods
 # -----------------
@@ -458,6 +464,9 @@ def run():
     sync_from_checkpoints()
     # fast-load from steemd
     sync_from_steemd()
+
+    update_feed_cache()
+
     # follow head blocks
     listen_steemd()
 
