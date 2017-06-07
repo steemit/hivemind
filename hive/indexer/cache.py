@@ -198,11 +198,6 @@ def generate_cached_post_sql(id, post, updated_at):
     sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
     return (sql % (cols, params, update), values)
 
-def cache_missing_posts():
-    sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id > (SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache) ORDER BY id"
-    rows = list(query(sql))
-    update_posts_batch(rows)
-
 def update_posts_batch(tuples):
     steemd = Steem().steemd
     buffer = []
@@ -226,6 +221,12 @@ def update_posts_batch(tuples):
             buffer = []
 
     batch_queries(buffer)
+
+def cache_missing_posts():
+    sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id > (SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache) ORDER BY id"
+    rows = list(query(sql))
+    update_posts_batch(rows)
+
 
 # testing
 # -------

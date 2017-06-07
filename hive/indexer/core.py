@@ -13,6 +13,7 @@ from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
+from cache import generate_cached_post_sql
 
 # core
 # ----
@@ -40,6 +41,15 @@ def delete_posts(ops):
         query("UPDATE hive_posts SET is_deleted = 1 WHERE author = '%s' AND permlink = '%s'" % (
             op['author'], op['permlink']))
 
+
+def update_posts(posts, date):
+    for url in posts:
+        author, permlink = url.split('/')
+        id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
+        post = Steemd().get_content(author, permlink)
+        sql, params = generate_cached_post_sql(id, post, date)
+        query(sql, **params)
+    #print("updated {} posts.".format(len(posts)))
 
 def register_posts(ops, date):
     for op in ops:
@@ -309,7 +319,7 @@ def is_community(name: str) -> bool:
 
 # run indexer
 # -----------
-def process_block(block):
+def process_block(block, syncing = True):
     date = parse_time(block['timestamp'])
     block_id = block['block_id']
     prev = block['previous']
@@ -323,6 +333,7 @@ def process_block(block):
     comments = []
     json_ops = []
     deleted = []
+    dirty = set()
     for tx in txs:
         for operation in tx['operations']:
             op_type, op = operation
@@ -335,14 +346,21 @@ def process_block(block):
                 accounts.add(op['new_account_name'])
             elif op_type == 'comment':
                 comments.append(op)
+                dirty.add(op['author']+'/'+op['permlink'])
             elif op_type == 'delete_comment':
                 deleted.append(op)
             elif op_type == 'custom_json':
                 json_ops.append(op)
+            elif op_type == 'vote':
+                dirty.add(op['author']+'/'+op['permlink'])
 
     register_accounts(accounts, date)  # if an account does not exist, mark it as created in this block
     register_posts(comments, date)  # if this is a new post, add the entry and validate community param
     delete_posts(deleted)  # mark hive_posts.is_deleted = 1
+
+    # if we're streaming, update cache each block
+    if not syncing:
+        update_posts(dirty, date)
 
     for op in map(json_expand, json_ops):
         if op['id'] not in ['follow', 'com.steemit.community']:
@@ -368,10 +386,10 @@ def process_block(block):
             process_json_community_op(account, op_json, date)
 
 
-def process_blocks(blocks):
+def process_blocks(blocks, syncing = True):
     query("START TRANSACTION")
     for block in blocks:
-        process_block(block)
+        process_block(block, syncing)
     query("COMMIT")
 
 
@@ -430,7 +448,7 @@ def listen_steemd():
         num = int(block['previous'][:8], base=16) + 1
         print("[LIVE] Got block {} at {} with {} txs".format(num,
             block['timestamp'], len(block['transactions'])))
-        process_blocks([block])
+        process_blocks([block], False)
 
 
 # testing
