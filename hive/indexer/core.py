@@ -13,7 +13,7 @@ from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
-from cache import generate_cached_post_sql, cache_missing_posts, rebuild_feed_cache
+from hive.indexer.cache import generate_cached_post_sql, cache_missing_posts, rebuild_feed_cache
 
 # core
 # ----

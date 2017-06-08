@@ -23,6 +23,8 @@ from hive.db.methods import (
     get_following,
     following_count,
     follower_count,
+    get_user_feed,
+    get_discussions_by_trending
 )
 
 
@@ -59,6 +61,10 @@ def health():
             last_irreversible_block=last_irreversible_block,
             diff=diff,
             timestamp=datetime.utcnow().isoformat())
+
+@app.get('/feed/<user>/<skip>')
+def callback(user, skip):
+    return dict(user = user, posts = get_user_feed(user, int(skip), 10))
 
 @app.get('/followers/<user>')
 def callback(user):
