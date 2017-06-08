@@ -13,7 +13,7 @@ from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
-from cache import generate_cached_post_sql, update_feed_cache
+from cache import generate_cached_post_sql, cache_missing_posts, rebuild_feed_cache
 
 # core
 # ----
@@ -36,12 +36,17 @@ def register_accounts(accounts, date):
             query("INSERT INTO hive_accounts (name, created_at) VALUES ('%s', '%s')" % (account, date))
 
 
+# marks posts as deleted and removes them from feed cache
 def delete_posts(ops):
     for op in ops:
         query("UPDATE hive_posts SET is_deleted = 1 WHERE author = '%s' AND permlink = '%s'" % (
             op['author'], op['permlink']))
+        post_id, depth = get_post_id_and_depth(op['author'], op['permlink'])
+        sql = "DELETE FROM hive_feed_cache WHERE account = :account and id = :id"
+        query(sql, account=op['author'], id=post_id)
 
 
+# updates cache entry for posts (saves latest title, body, trending/hot score, payout, etc)
 def update_posts(posts, date):
     for url in posts:
         author, permlink = url.split('/')
@@ -49,8 +54,9 @@ def update_posts(posts, date):
         post = Steemd().get_content(author, permlink)
         sql, params = generate_cached_post_sql(id, post, date)
         query(sql, **params)
-    #print("updated {} posts.".format(len(posts)))
 
+
+# registers new posts (not edits), inserts into feed cache
 def register_posts(ops, date):
     for op in ops:
         is_edit = query_one(
@@ -133,6 +139,8 @@ def process_json_follow_op(account, op_json, block_date):
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
             query("DELETE FROM hive_reblogs WHERE account = '%s' AND post_id = %d LIMIT 1" % (blogger, post_id))
+            sql = "DELETE FROM hive_feed_cache WHERE account = :account and id = :id"
+            query(sql, account=blogger, id=post_id)
         else:
             query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
                   "VALUES ('%s', %d, '%s')" % (blogger, post_id, block_date))
@@ -325,7 +333,7 @@ def is_community(name: str) -> bool:
 
 # run indexer
 # -----------
-def process_block(block, syncing = True):
+def process_block(block, is_initial_sync = False):
     date = parse_time(block['timestamp'])
     block_id = block['block_id']
     prev = block['previous']
@@ -365,7 +373,7 @@ def process_block(block, syncing = True):
     delete_posts(deleted)  # mark hive_posts.is_deleted = 1
 
     # if we're streaming, update cache each block
-    if not syncing:
+    if not is_initial_sync:
         update_posts(dirty, date)
 
     for op in map(json_expand, json_ops):
@@ -392,14 +400,14 @@ def process_block(block, syncing = True):
             process_json_community_op(account, op_json, date)
 
 
-def process_blocks(blocks, syncing = True):
+def process_blocks(blocks, is_initial_sync = False):
     query("START TRANSACTION")
     for block in blocks:
-        process_block(block, syncing)
+        process_block(block, is_initial_sync)
     query("COMMIT")
 
 
-def sync_from_checkpoints():
+def sync_from_checkpoints(is_initial_sync):
     last_block = db_last_block()
 
     fn = lambda f: [int(f.split('/')[1].split('.')[0]), f]
@@ -411,21 +419,21 @@ def sync_from_checkpoints():
         if last_block < num:
             print("[SYNC] Load {} -- last block: {}".format(path, last_block))
             skip_lines = last_block - last_read
-            sync_from_file(path, skip_lines)
+            sync_from_file(path, skip_lines, 250, is_initial_sync)
             last_block = num
         last_read = num
 
 
-def sync_from_file(file_path, skip_lines, chunk_size=250):
+def sync_from_file(file_path, skip_lines, chunk_size=250, is_initial_sync=False):
     with open(file_path) as f:
         # each line in file represents one block
         # we can skip the blocks we already have
         remaining = drop(skip_lines, f)
         for batch in partition_all(chunk_size, remaining):
-            process_blocks(map(json.loads, batch))
+            process_blocks(map(json.loads, batch), is_initial_sync)
 
 
-def sync_from_steemd():
+def sync_from_steemd(is_initial_sync):
     s = Steemd()
 
     lbound = db_last_block() + 1
@@ -437,7 +445,7 @@ def sync_from_steemd():
         to = min(lbound + 1000, ubound)
         blocks = s.get_blocks_range(lbound, to)
         lbound = to
-        process_blocks(blocks)
+        process_blocks(blocks, is_initial_sync)
 
         rate = (lbound - start_num) / (time.time() - start_time)
         print("[SYNC] Got block {} ({}/s) {}m remaining".format(
@@ -460,12 +468,20 @@ def listen_steemd():
 # testing
 # -------
 def run():
-    # fast-load checkpoint files
-    sync_from_checkpoints()
-    # fast-load from steemd
-    sync_from_steemd()
 
-    update_feed_cache()
+    # if this is the initial sync, do not waste cycles updating caches.. we'll do it in bulk
+    is_initial_sync = query_one("SELECT COUNT(*) FROM hive_posts_cache") is 0
+
+    # fast-load checkpoint files
+    sync_from_checkpoints(is_initial_sync)
+
+    # fast-load from steemd
+    sync_from_steemd(is_initial_sync)
+
+    # upon completing initial sync, perform some batch processing
+    if is_initial_sync:
+        cache_missing_posts()
+        rebuild_feed_cache()
 
     # follow head blocks
     listen_steemd()

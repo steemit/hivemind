@@ -222,13 +222,17 @@ def update_posts_batch(tuples):
 
     batch_queries(buffer)
 
-def update_feed_cache():
-    print("Updating hive_feed_cache")
+
+def rebuild_feed_cache():
+    print("Rebuilding hive_feed_cache")
+
+    query("TRUNCATE TABLE hive_feed_cache")
+
     sql = """INSERT IGNORE INTO hive_feed_cache
     SELECT p.author account, p.id, p.created_at
     FROM hive_posts p
     USE INDEX (hive_posts_ix4)
-    WHERE depth = 0"""
+    WHERE depth = 0 AND is_deleted = 0"""
     query(sql)
 
     sql = """INSERT IGNORE INTO hive_feed_cache  
@@ -241,6 +245,7 @@ def update_feed_cache():
 def cache_missing_posts():
     sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id > (SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache) ORDER BY id"
     rows = list(query(sql))
+    print("{} posts missing".format(len(rows)))
     update_posts_batch(rows)
 
 
