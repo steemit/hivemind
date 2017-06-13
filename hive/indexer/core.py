@@ -457,7 +457,7 @@ def sync_from_steemd(is_initial_sync):
 
 
 def listen_steemd():
-    b = Blockchain()
+    b = Blockchain(mode='head')
     h = b.stream_from(
         start_block=db_last_block() + 1,
         full_blocks=True,
