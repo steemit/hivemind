@@ -75,24 +75,30 @@ def get_discussions_by_trending(skip: int, limit: int):
     return query(sql, limit = limit, skip = skip)
 
 
+# given an array of post ids, returns full metadata in the same order
 def get_posts(ids):
+    sql = "SELECT * FROM hive_posts_cache WHERE post_id IN (%s)"
+    sql = sql % ','.join([str(id) for id in ids])
+    posts = [dict(r) for r in query(sql).fetchall()]
 
-    sql = """
-    SELECT CONCAT('@', p.author, '/', p.permlink) url, p.created_at, p.depth, c.*
-    FROM hive.hive_posts_cache c
-    JOIN hive_posts p ON c.post_id = p.id
-    WHERE p.id IN (%s)
-    ORDER BY sc_trend DESC
-    """ % ','.join(ids)
-    return query(sql)
+    posts_by_id = {}
+    for row in query(sql).fetchall():
+        obj = dict(row)
+        obj.pop('votes')
+        obj.pop('json')
+        posts_by_id[row['post_id']] = obj
+
+    return [posts_by_id[id] for id in ids]
 
 
+# global "created" feed
 def get_discussions_by_created(skip: int, limit: int):
-    sql = ("SELECT CONCAT('@', p.author, '/', p.permlink) url, p.created_at, p.depth, c.* FROM hive.hive_posts_cache c "
-            "JOIN hive_posts p ON c.post_id = p.id ORDER BY post_id DESC")
-    return query(sql)
+    sql = "SELECT post_id FROM hive_posts_cache ORDER BY post_id DESC LIMIT :limit OFFSET :skip"
+    ids = [r[0] for r in query(sql, limit=limit, skip=skip).fetchall()]
+    return get_posts(ids)
 
 
+# returns "homepage" feed for specified account
 def get_user_feed(account: str, skip: int, limit: int):
     sql = """
         SELECT id, GROUP_CONCAT(account) accounts -- , MIN(created_at) date
@@ -102,9 +108,14 @@ def get_user_feed(account: str, skip: int, limit: int):
         ORDER BY MIN(created_at) DESC
         LIMIT :limit OFFSET :skip
     """
-    return query(sql, account = account, skip = skip, limit = limit).fetchall()
+    res = query(sql, account = account, skip = skip, limit = limit).fetchall()
+
+    posts = get_posts([r[0] for r in res])
+    # TODO: populate "reblogged_by" field
+    return posts
 
 
+# returns a blog feed (posts and reblogs from the specified account)
 def get_blog_feed(account: str, skip: int, limit: int):
     sql = """
         SELECT p.author, p.permlink, p.created_at
