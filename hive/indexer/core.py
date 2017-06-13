@@ -137,6 +137,10 @@ def process_json_follow_op(account, op_json, block_date):
         if depth > 0:
             return  # prevent comment reblogs
 
+        if not post_id:
+            print("reblog: post not found: {}/{}".format(author, permlink))
+            return
+
         if 'delete' in op_json and op_json['delete'] == 'delete':
             query("DELETE FROM hive_reblogs WHERE account = '%s' AND post_id = %d LIMIT 1" % (blogger, post_id))
             sql = "DELETE FROM hive_feed_cache WHERE account = :account and id = :id"
@@ -144,7 +148,7 @@ def process_json_follow_op(account, op_json, block_date):
         else:
             query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
                   "VALUES ('%s', %d, '%s')" % (blogger, post_id, block_date))
-            sql = "INSERT INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
+            sql = "INSERT IGNORE INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
             query(sql, account=blogger, id=post_id, created_at=block_date)
 
 # community methods
