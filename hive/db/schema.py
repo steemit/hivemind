@@ -39,7 +39,7 @@ hive_posts = sa.Table(
     'hive_posts', metadata,
     sa.Column('id', sa.Integer, primary_key=True),
     sa.Column('parent_id', sa.Integer),
-    sa.Column('author', CHAR(16), nullable=False),
+    sa.Column('author', CHAR(16, ascii=True), nullable=False),
     sa.Column('permlink', CHAR(255, ascii=True), nullable=False),
     sa.Column('community', CHAR(16)),
     sa.Column('category', CHAR(255, ascii=True), nullable=False),
@@ -161,6 +161,8 @@ hive_feed_cache = sa.Table(
 hive_posts_cache = sa.Table(
     'hive_posts_cache', metadata,
     sa.Column('post_id', sa.Integer, primary_key=True),
+    sa.Column('author', CHAR(16, ascii=True), nullable=False),
+    sa.Column('permlink', CHAR(255, ascii=True), nullable=False),
     sa.Column('title', sa.String(255), nullable=False),
     sa.Column('preview', sa.String(1024), nullable=False),
     sa.Column('img_url', sa.String(1024), nullable=False),

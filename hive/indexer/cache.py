@@ -175,6 +175,8 @@ def generate_cached_post_sql(id, post, updated_at):
 
     values = collections.OrderedDict([
         ('post_id', '%d' % id),
+        ('author', "%s" % escape(post['author'])),
+        ('permlink', "%s" % escape(post['permlink'])),
         ('title', "%s" % escape(post['title'])),
         ('preview', "%s" % escape(post['body'][0:1024])),
         ('img_url', "%s" % escape(thumb_url)),
