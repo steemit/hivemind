@@ -254,9 +254,9 @@ def cache_missing_posts():
 # testing
 # -------
 def run():
-    cache_missing_posts()
-    #post = Steemd().get_content('roadscape', 'script-check')
-    #print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
+    #cache_missing_posts()
+    post = Steem().get_content('roadscape', 'script-check')
+    print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
 
 
 if __name__ == '__main__':

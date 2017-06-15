@@ -33,8 +33,6 @@ hive_accounts = sa.Table(
     mysql_default_charset='utf8mb4'
 )
 
-# The column 'permlink' is CHAR(190) instead of CHAR(255) since the latter
-# will give error: (1071, 'Specified key was too long; max key length is 767 bytes')
 hive_posts = sa.Table(
     'hive_posts', metadata,
     sa.Column('id', sa.Integer, primary_key=True),

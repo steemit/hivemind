@@ -474,7 +474,7 @@ def listen_steemd():
 def run():
 
     # if this is the initial sync, do not waste cycles updating caches.. we'll do it in bulk
-    is_initial_sync = query_one("SELECT COUNT(*) FROM hive_posts_cache") is 0
+    is_initial_sync = query_one("SELECT 1 FROM hive_posts_cache LIMIT 1") is None
 
     # fast-load checkpoint files
     sync_from_checkpoints(is_initial_sync)
@@ -484,6 +484,7 @@ def run():
 
     # upon completing initial sync, perform some batch processing
     if is_initial_sync:
+        print("Initial sync finished. Rebuilding cache...")
         cache_missing_posts()
         rebuild_feed_cache()
 
