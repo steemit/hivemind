@@ -74,10 +74,11 @@ def get_stats(post):
     }
 
 
-def batch_queries(queries):
+def batch_queries(batches):
     query("START TRANSACTION")
-    for (sql, params) in queries:
-        query(sql, **params)
+    for queries in batches:
+        for (sql, params) in queries:
+            query(sql, **params)
     query("COMMIT")
 
 
@@ -194,11 +195,27 @@ def generate_cached_post_sql(id, post, updated_at):
     ])
     fields = values.keys()
 
+    # Multiple SQL statements are generated for each post
+    sqls = []
+
+    # Update main metadata in the hive_posts_cache table
     cols   = ', '.join( fields )
     params = ', '.join( [':'+k for k in fields] )
     update = ', '.join( [k+" = :"+k for k in fields][1:] )
     sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
-    return (sql % (cols, params, update), values)
+    sqls.append((sql % (cols, params, update), values))
+
+    sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
+    sqls.append((sql, {'id': id}))
+
+    for tag in tags:
+        sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES (:id, :tag)"
+        sqls.append((sql, {'id': id, 'tag': tag}))
+
+    return sqls
+
+
+
 
 def update_posts_batch(tuples):
     steemd = Steem().steemd

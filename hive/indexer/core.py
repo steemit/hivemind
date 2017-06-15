@@ -52,8 +52,9 @@ def update_posts(posts, date):
         author, permlink = url.split('/')
         id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
         post = Steemd().get_content(author, permlink)
-        sql, params = generate_cached_post_sql(id, post, date)
-        query(sql, **params)
+        sqls = generate_cached_post_sql(id, post, date)
+        for sql, params in sqls:
+            query(sql, **params)
 
 
 # registers new posts (not edits), inserts into feed cache

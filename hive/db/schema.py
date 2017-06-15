@@ -57,6 +57,24 @@ hive_posts = sa.Table(
     mysql_default_charset='utf8mb4'
 )
 
+#hive_tags = sa.Table(
+#    'hive_tags', metadata,
+#    sa.Column('id', sa.Integer, primary_key=True),
+#    sa.Column('name', CHAR(64), nullable=False),
+#    sa.UniqueConstraint('name', name='hive_tags_ux1'),
+#    mysql_engine='InnoDB',
+#    mysql_default_charset='utf8mb4'
+#)
+
+hive_post_tags = sa.Table(
+    'hive_post_tags', metadata,
+    sa.Column('post_id', sa.Integer),
+    sa.Column('tag', sa.String(32), nullable=False),
+    sa.UniqueConstraint('tag', 'post_id', name='hive_post_tags_ux1'),
+    mysql_engine='InnoDB',
+    mysql_default_charset='utf8mb4'
+)
+
 hive_follows = sa.Table(
     'hive_follows', metadata,
     sa.Column('follower', CHAR(16), nullable=False),
