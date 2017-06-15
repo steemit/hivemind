@@ -200,6 +200,8 @@ hive_posts_cache = sa.Table(
     sa.Index('hive_posts_cache_ix3', 'payout_at'),
     sa.Index('hive_posts_cache_ix4', 'updated_at'),
     sa.Index('hive_posts_cache_ix5', 'rshares'),
+    sa.Index('hive_posts_cache_ix6', 'sc_trend', 'post_id'),
+    sa.Index('hive_posts_cache_ix7', 'sc_hot', 'post_id'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
