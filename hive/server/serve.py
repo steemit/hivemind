@@ -24,6 +24,7 @@ from hive.db.methods import (
     following_count,
     follower_count,
     get_user_feed,
+    get_blog_feed,
     get_discussions_by_trending
 )
 
@@ -62,9 +63,17 @@ def health():
             diff=diff,
             timestamp=datetime.utcnow().isoformat())
 
+@app.get('/blog/<user>/<skip>')
+def callback(user, skip):
+    return dict(user = user, posts = get_blog_feed(user, int(skip), 20))
+
 @app.get('/feed/<user>/<skip>')
 def callback(user, skip):
-    return dict(user = user, posts = get_user_feed(user, int(skip), 10))
+    return dict(user = user, posts = get_user_feed(user, int(skip), 20))
+
+@app.get('/discussions/trending/<skip>')
+def callback(skip):
+    return get_discussions_by_trending(int(skip), 20)
 
 @app.get('/followers/<user>')
 def callback(user):
