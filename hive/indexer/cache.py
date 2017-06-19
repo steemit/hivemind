@@ -130,7 +130,7 @@ def generate_cached_post_sql(id, post, updated_at):
     tags = [post['category']]
     if md and 'tags' in md and type(md['tags']) == list:
         tags = tags + md['tags']
-    tags = set(map(lambda str: (str or '').strip('# ').lower(), tags))
+    tags = set(map(lambda str: (str or '').strip('# ').lower()[:32], tags))
     tags.discard('')
     is_nsfw = int('nsfw' in tags)
 
