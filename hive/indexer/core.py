@@ -47,11 +47,12 @@ def delete_posts(ops):
 
 
 # updates cache entry for posts (saves latest title, body, trending/hot score, payout, etc)
-def update_posts(posts, date):
+def update_posts(steemd, posts, date):
+    print("Updating cache for {} posts @ {}".format(len(posts), date))
     for url in posts:
         author, permlink = url.split('/')
         id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
-        post = Steemd().get_content(author, permlink)
+        post = steemd.get_content(author, permlink)
         sqls = generate_cached_post_sql(id, post, date)
         for sql, params in sqls:
             query(sql, **params)
@@ -377,10 +378,6 @@ def process_block(block, is_initial_sync = False):
     register_posts(comments, date)  # if this is a new post, add the entry and validate community param
     delete_posts(deleted)  # mark hive_posts.is_deleted = 1
 
-    # if we're streaming, update cache each block
-    if not is_initial_sync:
-        update_posts(dirty, date)
-
     for op in map(json_expand, json_ops):
         if op['id'] not in ['follow', 'com.steemit.community']:
             continue
@@ -404,12 +401,17 @@ def process_block(block, is_initial_sync = False):
         elif op['id'] == 'com.steemit.community':
             process_json_community_op(account, op_json, date)
 
+    # return all posts modified this block
+    return dirty
+
 
 def process_blocks(blocks, is_initial_sync = False):
+    dirty = set()
     query("START TRANSACTION")
     for block in blocks:
-        process_block(block, is_initial_sync)
+        dirty |= process_block(block, is_initial_sync)
     query("COMMIT")
+    return dirty
 
 
 def sync_from_checkpoints(is_initial_sync):
@@ -440,6 +442,7 @@ def sync_from_file(file_path, skip_lines, chunk_size=250, is_initial_sync=False)
 
 def sync_from_steemd(is_initial_sync):
     s = Steemd()
+    dirty = set()
 
     lbound = db_last_block() + 1
     ubound = s.last_irreversible_block_num
@@ -450,15 +453,21 @@ def sync_from_steemd(is_initial_sync):
         to = min(lbound + 1000, ubound)
         blocks = s.get_blocks_range(lbound, to)
         lbound = to
-        process_blocks(blocks, is_initial_sync)
+        dirty |= process_blocks(blocks, is_initial_sync)
 
         rate = (lbound - start_num) / (time.time() - start_time)
         print("[SYNC] Got block {} ({}/s) {}m remaining".format(
             to - 1, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
 
+    if not is_initial_sync:
+        # batch update post cache
+        date = s.get_dynamic_global_properties()['time']
+        update_posts(s, dirty, date)
+
 
 def listen_steemd():
     b = Blockchain(mode='head')
+    s = Steemd()
     h = b.stream_from(
         start_block=db_last_block() + 1,
         full_blocks=True,
@@ -467,7 +476,8 @@ def listen_steemd():
         num = int(block['previous'][:8], base=16) + 1
         print("[LIVE] Got block {} at {} with {} txs".format(num,
             block['timestamp'], len(block['transactions'])))
-        process_blocks([block], False)
+        dirty = process_blocks([block], False)
+        update_posts(s, dirty, block['timestamp'])
 
 
 # testing
