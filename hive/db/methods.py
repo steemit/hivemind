@@ -5,16 +5,25 @@ from hive.db.schema import (
 )
 from sqlalchemy import text, select, func
 
+import time
 
 # generic
 # -------
 def query(sql, **kwargs):
+    t1 = time.time()
     res = conn.execute(text(sql).execution_options(autocommit=False), **kwargs)
+    t2 = time.time()
+    if t2 - t1 > 0.05:
+        print("[SQL][{}ms] -- {}".format(int((t2-t1)*1000), sql[:250]))
     return res
 
 
 def query_one(sql, **kwargs):
+    t1 = time.time()
     res = conn.execute(text(sql), **kwargs)
+    t2 = time.time()
+    if t2 - t1 > 0.05:
+        print("[SQL][{}ms] -- {}".format(int((t2-t1)*1000), sql[:250]))
     row = first(res)
     if row:
         return first(row)
