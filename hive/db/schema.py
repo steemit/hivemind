@@ -71,6 +71,7 @@ hive_post_tags = sa.Table(
     sa.Column('post_id', sa.Integer),
     sa.Column('tag', sa.String(32), nullable=False),
     sa.UniqueConstraint('tag', 'post_id', name='hive_post_tags_ux1'),
+    sa.Index('hive_post_tags_ix1', 'post_id'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
