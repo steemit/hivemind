@@ -268,13 +268,25 @@ def cache_missing_posts():
     print("{} posts missing".format(len(rows)))
     update_posts_batch(rows)
 
+def sweep_missing_posts():
+    sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id NOT IN (SELECT post_id FROM hive_posts_cache) ORDER BY id"
+    rows = list(query(sql))
+    update_posts_batch(rows)
+
+def sweep_paidout_posts():
+    sql = "SELECT post_id, author, permlink FROM hive_posts_cache WHERE payout_at < UTC_TIMESTAMP() AND payout_at > updated_at"
+    rows = list(query(sql))
+    update_posts_batch(rows)
+
 
 # testing
 # -------
 def run():
     #cache_missing_posts()
-    post = Steem().get_content('roadscape', 'script-check')
-    print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
+    #sweep_missing_posts()
+    sweep_paidout_posts()
+    #post = Steem().get_content('roadscape', 'script-check')
+    #print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
 
 
 if __name__ == '__main__':
