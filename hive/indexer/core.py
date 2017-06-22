@@ -13,7 +13,7 @@ from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
-from hive.indexer.cache import generate_cached_post_sql, cache_missing_posts, rebuild_feed_cache
+from hive.indexer.cache import generate_cached_post_sql, cache_missing_posts, rebuild_feed_cache, sweep_paidout_posts
 
 # core
 # ----
@@ -478,6 +478,7 @@ def listen_steemd():
             block['timestamp'], len(block['transactions'])))
         dirty = process_blocks([block], False)
         update_posts(s, dirty, block['timestamp'])
+        sweep_paidout_posts()
 
 
 # testing
