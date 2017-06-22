@@ -48,7 +48,7 @@ def delete_posts(ops):
 
 # updates cache entry for posts (saves latest title, body, trending/hot score, payout, etc)
 def update_posts(steemd, posts, date):
-    print("Updating cache for {} posts @ {}".format(len(posts), date))
+    print("       Updating cache for {} posts @ {}".format(len(posts), date))
     for url in posts:
         author, permlink = url.split('/')
         id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink))

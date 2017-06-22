@@ -135,7 +135,8 @@ def generate_cached_post_sql(id, post, updated_at):
     is_nsfw = int('nsfw' in tags)
 
     # payout date is last_payout if paid, and cashout_time if pending.
-    payout_at = post['last_payout'] if post['cashout_time'][0:4] == '1969' else post['cashout_time']
+    is_paidout = (post['cashout_time'][0:4] == '1969')
+    payout_at = post['last_payout'] if is_paidout else post['cashout_time']
 
     # get total rshares, and create comma-separated vote data blob
     rshares = sum(int(v['rshares']) for v in post['active_votes'])
@@ -191,6 +192,7 @@ def generate_cached_post_sql(id, post, updated_at):
         ('votes', "%s" % escape(csvotes)),
         ('json', "%s" % escape(json.dumps(md))),
         ('is_nsfw', "%d" % is_nsfw),
+        ('is_paidout', "%d" % is_paidout),
         ('sc_trend', "%f" % trend_score),
         ('sc_hot', "%f" % hot_score)
     ])
@@ -275,11 +277,15 @@ def sweep_missing_posts():
 
 def sweep_paidout_posts():
     # TODO: use head_block_time here instead of external time
-    sql = "SELECT post_id FROM hive_posts_cache WHERE payout_at < UTC_TIMESTAMP() AND payout_at > updated_at"
+    sql = "SELECT post_id FROM hive_posts_cache WHERE is_paidout = 0 AND payout_at < UTC_TIMESTAMP()"
     sql = "SELECT post_id, author, permlink FROM hive_posts_cache WHERE post_id IN (" + sql + ")"
     rows = list(query(sql))
+    print("       Update {} paid out posts".format(len(rows)))
     update_posts_batch(rows)
 
+def clean_dead_posts():
+    sl = "DELETE FROM hive_posts_cache WHERE post_id IN (SELECT id FROM hive_posts WHERE is_deleted = 1)"
+    query(sql)
 
 # testing
 # -------
