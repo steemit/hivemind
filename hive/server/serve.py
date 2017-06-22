@@ -25,7 +25,8 @@ from hive.db.methods import (
     follower_count,
     get_user_feed,
     get_blog_feed,
-    get_discussions_by_trending
+    get_discussions_by_trending,
+    get_discussions_by_promoted,
 )
 
 
@@ -73,7 +74,13 @@ def callback(user, skip):
 
 @app.get('/discussions/trending/<skip>')
 def callback(skip):
-    return get_discussions_by_trending(int(skip), 20)
+    return dict(posts = get_discussions_by_trending(int(skip), 20))
+
+@app.get('/discussions/promoted/<skip>')
+def callback(skip):
+    return dict(posts = get_discussions_by_promoted(int(skip), 20))
+
+
 
 @app.get('/followers/<user>')
 def callback(user):

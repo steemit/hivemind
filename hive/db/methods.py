@@ -113,6 +113,16 @@ def get_discussions_by_created(skip: int, limit: int):
     return get_posts(ids)
 
 
+def get_discussions_by_promoted(skip: int, limit: int):
+    sql = ("SELECT post_id FROM hive_posts_cache "
+            "WHERE payout_at > UTC_TIMESTAMP() AND promoted > 0 "
+            "ORDER BY promoted DESC LIMIT :limit OFFSET :skip")
+    ids = [r[0] for r in query(sql, limit=limit, skip=skip).fetchall()]
+    return get_posts(ids)
+
+
+
+
 # returns "homepage" feed for specified account
 def get_user_feed(account: str, skip: int, limit: int):
     sql = """
