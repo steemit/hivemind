@@ -274,7 +274,9 @@ def sweep_missing_posts():
     update_posts_batch(rows)
 
 def sweep_paidout_posts():
-    sql = "SELECT post_id, author, permlink FROM hive_posts_cache WHERE payout_at < UTC_TIMESTAMP() AND payout_at > updated_at"
+    # TODO: use head_block_time here instead of external time
+    sql = "SELECT post_id FROM hive_posts_cache WHERE payout_at < UTC_TIMESTAMP() AND payout_at > updated_at"
+    sql = "SELECT post_id, author, permlink FROM hive_posts_cache WHERE post_id IN (" + sql + ")"
     rows = list(query(sql))
     update_posts_batch(rows)
 
