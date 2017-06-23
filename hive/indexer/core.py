@@ -60,6 +60,8 @@ def update_posts(steemd, posts, date):
             continue
 
         post = steemd.get_content(author, permlink)
+        if not post['author']:
+            raise Exception("Post does not exist! {id=} @{}/{}".format(id, author, permlink))
         sqls = generate_cached_post_sql(id, post, date)
         for sql, params in sqls:
             query(sql, **params)
@@ -70,12 +72,12 @@ def register_posts(ops, date):
     for op in ops:
         sql = "SELECT id, is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'"
         ret = first(query(sql % (op['author'], op['permlink'])))
+        restore_id = None
         if ret:
             if ret[1] == 0:
                 continue  # ignore edits to posts
             else:
-                print("WARNING: attempting to re-use permlink @{}/{} for a new post. Deleting old record (id {}).".format(op['author'], op['permlink'], ret[0]))
-                query("DELETE FROM hive_posts WHERE id = :id", id=ret[0])
+                restore_id = ret[0]
 
         # this method needs to perform auth checking e.g. is op.author authorized to post in op.community?
         community_or_blog = create_post_as(op) or op['author']
@@ -90,9 +92,16 @@ def register_posts(ops, date):
             parent_id, parent_depth, category = parent_data
             depth = parent_depth + 1
 
-        query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
-              "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
-                  parent_id or 'NULL', op['author'], op['permlink'], category, community_or_blog, depth, date))
+        # if we're reusing a previously-deleted post (rare!),
+        if restore_id:
+            print("WARNING: about to re-purpose permlink @{}/{} (id {}).".format(op['author'], op['permlink'], restore_id))
+            query("UPDATE hive_posts SET is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (parent_id or 'NULL', category, community_or_blog, depth, restore_id))
+        else:
+            query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
+                  "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
+                      parent_id or 'NULL', op['author'], op['permlink'], category, community_or_blog, depth, date))
+
+        # add top-level posts to feed cache
         if depth is 0:
             id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
             sql = "INSERT INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
