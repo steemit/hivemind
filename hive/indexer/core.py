@@ -52,7 +52,13 @@ def update_posts(steemd, posts, date):
     print("       Update {} edited posts @ {}".format(len(posts), date))
     for url in posts:
         author, permlink = url.split('/')
-        id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
+        id, is_deleted = first(query("SELECT id,is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink)))
+        if not id:
+            raise Exception("Post not found! {}/{}".format(author, permlink))
+        if is_deleted:
+            print("ignoring attemp to cache deleted post @{}/{}".format(author, permlink))
+            continue
+
         post = steemd.get_content(author, permlink)
         sqls = generate_cached_post_sql(id, post, date)
         for sql, params in sqls:

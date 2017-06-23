@@ -113,6 +113,9 @@ def vote_csv_row(vote):
 
 
 def generate_cached_post_sql(id, post, updated_at):
+    if not post['author']:
+        raise Exception("post id {} was not found.".format(id))
+
     md = None
     try:
         md = json.loads(post['json_metadata'])
