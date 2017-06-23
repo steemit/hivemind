@@ -42,13 +42,14 @@ def delete_posts(ops):
         query("UPDATE hive_posts SET is_deleted = 1 WHERE author = '%s' AND permlink = '%s'" % (
             op['author'], op['permlink']))
         post_id, depth = get_post_id_and_depth(op['author'], op['permlink'])
+        query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
         sql = "DELETE FROM hive_feed_cache WHERE account = :account and id = :id"
         query(sql, account=op['author'], id=post_id)
 
 
 # updates cache entry for posts (saves latest title, body, trending/hot score, payout, etc)
 def update_posts(steemd, posts, date):
-    print("       Updating cache for {} posts @ {}".format(len(posts), date))
+    print("       Update {} edited posts @ {}".format(len(posts), date))
     for url in posts:
         author, permlink = url.split('/')
         id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink))

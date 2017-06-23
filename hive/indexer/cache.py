@@ -222,9 +222,11 @@ def generate_cached_post_sql(id, post, updated_at):
 
 def update_posts_batch(tuples):
     steemd = Steem().steemd
-    buffer = []
     updated_at = steemd.get_dynamic_global_properties()['time']
+    _update_posts_batch(tuples, steemd, updated_at)
 
+def _update_posts_batch(tuples, steemd, updated_at):
+    buffer = []
     processed = 0
     start_time = time.time()
     for (id, author, permlink) in tuples:
