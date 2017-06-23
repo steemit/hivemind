@@ -68,10 +68,14 @@ def update_posts(steemd, posts, date):
 # registers new posts (not edits), inserts into feed cache
 def register_posts(ops, date):
     for op in ops:
-        is_edit = query_one(
-            "SELECT 1 FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
-        if is_edit:
-            continue  # ignore edits to posts
+        sql = "SELECT id, is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'"
+        ret = first(query(sql % (op['author'], op['permlink'])))
+        if ret:
+            if ret[1] == 0:
+                continue  # ignore edits to posts
+            else:
+                print("WARNING: attempting to re-use permlink @{}/{} for a new post. Deleting old record (id {}).".format(op['author'], op['permlink'], ret[0]))
+                query("DELETE FROM hive_posts WHERE id = :id", id=ret[0])
 
         # this method needs to perform auth checking e.g. is op.author authorized to post in op.community?
         community_or_blog = create_post_as(op) or op['author']
@@ -469,7 +473,9 @@ def sync_from_steemd(is_initial_sync):
     if not is_initial_sync:
         # batch update post cache
         date = s.get_dynamic_global_properties()['time']
+        query("START TRANSACTION")
         update_posts(s, dirty, date)
+        query("COMMIT")
 
 
 def listen_steemd():
