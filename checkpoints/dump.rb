@@ -59,12 +59,12 @@ end
 def stream_blocks_to_file n1, n2, file
   raise "File already exists" if File.exists?(file)
   File.open(file, 'w') do |f|
-    stream_blocks_from_ws(n1, n2){|r| f.write(r[1]+"\n")}
+    stream_blocks_from_ws(n1, n2){|r| f.write(r+"\n")}
   end
 end
 
 # Save all blocks up to 12M in batches of 1M
-(1..12).each do |mil|
+(1..13).each do |mil|
   n1 = (mil - 1) * 1000000 + 1
   n2 = mil * 1000000
   stream_blocks_to_file n1, n2, "#{n2}.json.lst"
