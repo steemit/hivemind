@@ -61,7 +61,7 @@ def update_posts(steemd, posts, date):
 
         post = steemd.get_content(author, permlink)
         if not post['author']:
-            raise Exception("Post does not exist! {id=} @{}/{}".format(id, author, permlink))
+            raise Exception("Post does not exist! (id={}) @{}/{}".format(id, author, permlink))
         sqls = generate_cached_post_sql(id, post, date)
         for sql, params in sqls:
             query(sql, **params)
@@ -104,6 +104,9 @@ def register_posts(ops, date):
         # add top-level posts to feed cache
         if depth is 0:
             id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
+            if restore_id:
+                print("WARNING: about to reset feed cache for @{}/{} (id {}).".format(op['author'], op['permlink'], restore_id))
+                query("DELETE FROM hive_feed_cache WHERE account = :account AND id = :id", account=op['author'], id=restore_id)
             sql = "INSERT INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
             query(sql, account=op['author'], id=id, created_at=date)
 
