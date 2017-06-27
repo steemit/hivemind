@@ -114,7 +114,7 @@ def vote_csv_row(vote):
 
 def generate_cached_post_sql(id, post, updated_at):
     if not post['author']:
-        raise Exception("post id {} was not found.".format(id))
+        raise Exception("ERROR: post id {} has no chain state.".format(id))
 
     md = None
     try:
@@ -234,6 +234,9 @@ def _update_posts_batch(tuples, steemd, updated_at):
     start_time = time.time()
     for (id, author, permlink) in tuples:
         post = steemd.get_content(author, permlink)
+        if not post['author']:
+            print("WARNING: content not found: @{}/{} (id {})".format(author, permlink, id))
+            continue
         sql = generate_cached_post_sql(id, post, updated_at)
         buffer.append(sql)
 
@@ -285,7 +288,7 @@ def sweep_paidout_posts():
     sql = "SELECT post_id FROM hive_posts_cache WHERE is_paidout = 0 AND payout_at < UTC_TIMESTAMP()"
     sql = "SELECT post_id, author, permlink FROM hive_posts_cache WHERE post_id IN (" + sql + ")"
     rows = list(query(sql))
-    print("       Update {} paid out posts".format(len(rows)))
+    print("processing {} payouts".format(len(rows)))
     update_posts_batch(rows)
 
 def clean_dead_posts():
@@ -296,7 +299,7 @@ def clean_dead_posts():
 # -------
 def run():
     #cache_missing_posts()
-    #sweep_missing_posts()
+    sweep_missing_posts()
     sweep_paidout_posts()
     #post = Steem().get_content('roadscape', 'script-check')
     #print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))

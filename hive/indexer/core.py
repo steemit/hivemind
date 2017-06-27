@@ -49,19 +49,19 @@ def delete_posts(ops):
 
 # updates cache entry for posts (saves latest title, body, trending/hot score, payout, etc)
 def update_posts(steemd, posts, date):
-    print("       Update {} edited posts @ {}".format(len(posts), date))
     for url in posts:
         author, permlink = url.split('/')
         id, is_deleted = first(query("SELECT id,is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink)))
         if not id:
             raise Exception("Post not found! {}/{}".format(author, permlink))
         if is_deleted:
-            print("ignoring attemp to cache deleted post @{}/{}".format(author, permlink))
             continue
 
         post = steemd.get_content(author, permlink)
         if not post['author']:
-            raise Exception("Post does not exist! (id={}) @{}/{}".format(id, author, permlink))
+            print("WARNING: attemted to cache deleted post (id={}) @{}/{}".format(id, author, permlink))
+            continue
+
         sqls = generate_cached_post_sql(id, post, date)
         for sql, params in sqls:
             query(sql, **params)
@@ -464,17 +464,20 @@ def sync_from_file(file_path, skip_lines, chunk_size=250, is_initial_sync=False)
 
 
 def sync_from_steemd(is_initial_sync):
-    s = Steemd()
+    steemd = Steemd()
     dirty = set()
 
     lbound = db_last_block() + 1
-    ubound = s.last_irreversible_block_num
+    ubound = steemd.last_irreversible_block_num
+
+    if not is_initial_sync:
+        query("START TRANSACTION")
 
     start_num = lbound
     start_time = time.time()
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
-        blocks = s.get_blocks_range(lbound, to)
+        blocks = steemd.get_blocks_range(lbound, to)
         lbound = to
         dirty |= process_blocks(blocks, is_initial_sync)
 
@@ -483,10 +486,11 @@ def sync_from_steemd(is_initial_sync):
             to - 1, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
 
     if not is_initial_sync:
-        # batch update post cache
-        date = s.get_dynamic_global_properties()['time']
-        query("START TRANSACTION")
-        update_posts(s, dirty, date)
+        # batch update post cache after catching up to head block
+        date = steemd.get_dynamic_global_properties()['time']
+        print("Updating {} edited posts.".format(len(dirty), date))
+        update_posts(steemd, dirty, date)
+        sweep_paidout_posts()
         query("COMMIT")
 
 
@@ -500,10 +504,14 @@ def listen_steemd():
     for block in h:
         num = int(block['previous'][:8], base=16) + 1
         print("[LIVE] Got block {} at {} with {} txs".format(num,
-            block['timestamp'], len(block['transactions'])))
-        dirty = process_blocks([block], False)
+            block['timestamp'], len(block['transactions'])), end='')
+
+        query("START TRANSACTION")
+        dirty = process_block(block)
+        print(" -- {} post edits -- ".format(len(dirty)), end = '')
         update_posts(s, dirty, block['timestamp'])
         sweep_paidout_posts()
+        query("COMMIT")
 
 
 # testing
