@@ -521,6 +521,10 @@ def run():
     # if this is the initial sync, do not waste cycles updating caches.. we'll do it in bulk
     is_initial_sync = query_one("SELECT 1 FROM hive_posts_cache LIMIT 1") is None
 
+    if not is_initial_sync:
+        # perform cleanup in case process did not exit cleanly
+        cache_missing_posts()
+
     # fast-load checkpoint files
     sync_from_checkpoints(is_initial_sync)
 

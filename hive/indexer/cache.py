@@ -235,7 +235,8 @@ def _update_posts_batch(tuples, steemd, updated_at):
     for (id, author, permlink) in tuples:
         post = steemd.get_content(author, permlink)
         if not post['author']:
-            print("WARNING: content not found: @{}/{} (id {})".format(author, permlink, id))
+            print("WARNING: content not found: @{}/{} (id {})".format(
+                author, permlink, id))
             continue
         sql = generate_cached_post_sql(id, post, updated_at)
         buffer.append(sql)
@@ -253,46 +254,48 @@ def _update_posts_batch(tuples, steemd, updated_at):
     batch_queries(buffer)
 
 
+# the feed cache allows for efficient querying of blogs+reblogs. this method
+# efficiently builds the feed cache after the initial sync.
 def rebuild_feed_cache():
     print("Rebuilding hive_feed_cache")
-
     query("TRUNCATE TABLE hive_feed_cache")
+    query("INSERT INTO hive_feed_cache SELECT author account, id, created_at "
+        "FROM hive_posts WHERE depth = 0 AND is_deleted = 0")
+    query("INSERT IGNORE INTO hive_feed_cache "
+        "SELECT account, post_id, created_at FROM hive_reblogs")
 
-    sql = """INSERT IGNORE INTO hive_feed_cache
-    SELECT p.author account, p.id, p.created_at
-    FROM hive_posts p
-    USE INDEX (hive_posts_ix4)
-    WHERE depth = 0 AND is_deleted = 0"""
-    query(sql)
-
-    sql = """INSERT IGNORE INTO hive_feed_cache  
-    SELECT r.account, r.post_id, r.created_at
-    FROM hive_reblogs r
-    ORDER BY created_at DESC"""
-    query(sql)
-
-
+# efficient check of missing cache rows
 def cache_missing_posts():
-    sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id > (SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache) ORDER BY id"
+    lastid = "(SELECT IFNULL(MAX(post_id),0) FROM hive_posts_cache)"
+    sql = ("SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 "
+            "AND id > " + lastid + " ORDER BY id")
     rows = list(query(sql))
-    print("{} posts missing".format(len(rows)))
+    print("Updating {} missing cache entries".format(len(rows)))
     update_posts_batch(rows)
 
+# inefficient but thorough check of missing cache rows
 def sweep_missing_posts():
-    sql = "SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 AND id NOT IN (SELECT post_id FROM hive_posts_cache) ORDER BY id"
+    sql = ("SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 "
+        "AND id NOT IN (SELECT post_id FROM hive_posts_cache) ORDER BY id")
     rows = list(query(sql))
     update_posts_batch(rows)
 
+# when a post gets paidout ensure we update its official state
 def sweep_paidout_posts():
     # TODO: use head_block_time here instead of external time
-    sql = "SELECT post_id FROM hive_posts_cache WHERE is_paidout = 0 AND payout_at < UTC_TIMESTAMP()"
-    sql = "SELECT post_id, author, permlink FROM hive_posts_cache WHERE post_id IN (" + sql + ")"
+    sql = """
+    SELECT post_id, author, permlink FROM hive_posts_cache
+    WHERE post_id IN (SELECT post_id FROM hive_posts_cache
+    WHERE is_paidout = 0 AND payout_at < UTC_TIMESTAMP())
+    """
     rows = list(query(sql))
     print("processing {} payouts".format(len(rows)))
     update_posts_batch(rows)
 
+# remove any rows from cache which belong to a deleted post
 def clean_dead_posts():
-    sl = "DELETE FROM hive_posts_cache WHERE post_id IN (SELECT id FROM hive_posts WHERE is_deleted = 1)"
+    sl = ("DELETE FROM hive_posts_cache WHERE post_id IN "
+        "(SELECT id FROM hive_posts WHERE is_deleted = 1)")
     query(sql)
 
 # testing
