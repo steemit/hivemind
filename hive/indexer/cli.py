@@ -14,12 +14,12 @@ def indexer():
     pass
 
 
-@indexer.command(name='from-file')
-@click.argument('filename', type=click.Path(exists=True))
-def index_from_file(filename):
-    """import blocks from steemd"""
-    echo('Loading blocks from %s...' % filename)
-    sync_from_file(filename)
+#@indexer.command(name='from-file')
+#@click.argument('filename', type=click.Path(exists=True))
+#def index_from_file(filename):
+#    """import blocks from steemd"""
+#    echo('Loading blocks from %s...' % filename)
+#    sync_from_file(filename)
 
 
 @indexer.command(name='from-steemd')
