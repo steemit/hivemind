@@ -79,13 +79,13 @@ def callback(user, skip):
 def callback(user, skip):
     return dict(user = user, posts = get_user_feed(user, int(skip), 20))
 
-@app.get('/discussions/trending/<skip>')
-def callback(skip):
-    return dict(posts = get_discussions_by_sort_and_tag('trending', None, int(skip), 20))
+@app.get('/discussions/sort/<sort>/<skip>')
+def callback(sort, skip):
+    return dict(posts = get_discussions_by_sort_and_tag(sort, None, int(skip), 20))
 
-@app.get('/discussions/promoted/<skip>')
-def callback(skip):
-    return dict(posts = get_discussions_by_sort_and_tag('promoted', None, int(skip), 20))
+@app.get('/discussions/tag/<tag>/sort/<sort>/<skip>')
+def callback(tag, sort, skip):
+    return dict(posts = get_discussions_by_sort_and_tag(sort, tag, int(skip), 20))
 
 
 # follows
