@@ -161,10 +161,20 @@ def get_user_feed(account: str, skip: int, limit: int):
     GROUP BY id
     ORDER BY MIN(created_at) DESC LIMIT :limit OFFSET :skip
     """
-    res = query(sql, account = account, skip = skip, limit = limit).fetchall()
+    res = query_all(sql, account = account, skip = skip, limit = limit)
 
     posts = get_posts([r[0] for r in res])
-    # TODO: populate "reblogged_by" field
+
+    post_to_accts = {}
+    for r in res:
+        post_to_accts[r[0]] = r[1]
+
+    for post in posts:
+        rby = set(post_to_accts[post['post_id']].split(','))
+        rby.discard(post['author'])
+        if rby:
+            post['reblogged_by'] = list(rby)
+
     return posts
 
 
