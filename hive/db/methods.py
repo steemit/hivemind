@@ -25,6 +25,10 @@ def query_row(sql, **kwargs):
     res = query(sql, **kwargs)
     return first(res)
 
+def query_col(sql, **kwargs):
+    res = query(sql, **kwargs).fetchall()
+    return [r[0] for r in res]
+
 def query_one(sql, **kwargs):
     t1 = time.time()
     res = conn.execute(text(sql), **kwargs)
@@ -98,12 +102,20 @@ def get_posts(ids):
     sql = sql % ','.join([str(id) for id in ids])
     posts = [dict(r) for r in query(sql).fetchall()]
 
+    # key by id so we can return sorted by input order
     posts_by_id = {}
     for row in query(sql).fetchall():
         obj = dict(row)
         obj.pop('votes')
         obj.pop('json')
         posts_by_id[row['post_id']] = obj
+
+    # in rare cases of cache inconsistency, recover and warn
+    missed = set(ids) - posts_by_id.keys()
+    if missed:
+        print("WARNING: get_posts do not exist in cache: {}".format(missed))
+        for id in missed:
+            ids.remove(id)
 
     return [posts_by_id[id] for id in ids]
 
@@ -162,15 +174,12 @@ def get_user_feed(account: str, skip: int, limit: int):
     ORDER BY MIN(created_at) DESC LIMIT :limit OFFSET :skip
     """
     res = query_all(sql, account = account, skip = skip, limit = limit)
-
     posts = get_posts([r[0] for r in res])
 
-    post_to_accts = {}
-    for r in res:
-        post_to_accts[r[0]] = r[1]
-
+    # Merge reblogged_by data into result set
+    accts = dict(res)
     for post in posts:
-        rby = set(post_to_accts[post['post_id']].split(','))
+        rby = set(accts[post['post_id']].split(','))
         rby.discard(post['author'])
         if rby:
             post['reblogged_by'] = list(rby)
@@ -180,18 +189,19 @@ def get_user_feed(account: str, skip: int, limit: int):
 
 # returns a blog feed (posts and reblogs from the specified account)
 def get_blog_feed(account: str, skip: int, limit: int):
-    sql = """
-        SELECT id, created_at
-          FROM hive_posts
-         WHERE depth = 0 AND is_deleted = 0 AND author = :account
-     UNION ALL
-        SELECT post_id, created_at
-          FROM hive_reblogs
-         WHERE account = :account AND (SELECT is_deleted FROM hive_posts WHERE id = post_id) = 0
-      ORDER BY created_at DESC
-         LIMIT :limit OFFSET :skip
-    """
-    res = query(sql, account = account, skip = skip, limit = limit).fetchall()
-    return get_posts([r[0] for r in res])
+    #sql = """
+    #    SELECT id, created_at
+    #      FROM hive_posts
+    #     WHERE depth = 0 AND is_deleted = 0 AND author = :account
+    # UNION ALL
+    #    SELECT post_id, created_at
+    #      FROM hive_reblogs
+    #     WHERE account = :account AND (SELECT is_deleted FROM hive_posts WHERE id = post_id) = 0
+    #  ORDER BY created_at DESC
+    #     LIMIT :limit OFFSET :skip
+    #"""
+    sql = "SELECT id FROM hive_feed_cache WHERE account = :account ORDER BY created_at DESC LIMIT :limit OFFSET :skip"
+    post_ids = query_col(sql, account = account, skip = skip, limit = limit)
+    return get_posts(post_ids)
 
 
