@@ -25,8 +25,7 @@ from hive.db.methods import (
     follower_count,
     get_user_feed,
     get_blog_feed,
-    get_discussions_by_trending,
-    get_discussions_by_promoted,
+    get_discussions_by_sort_and_tag
 )
 
 
@@ -64,6 +63,14 @@ def health():
             diff=diff,
             timestamp=datetime.utcnow().isoformat())
 
+@app.get('/head_state')
+def callback():
+    return head_state()
+
+
+# discussions
+# -----------
+
 @app.get('/blog/<user>/<skip>')
 def callback(user, skip):
     return dict(user = user, posts = get_blog_feed(user, int(skip), 20))
@@ -74,13 +81,15 @@ def callback(user, skip):
 
 @app.get('/discussions/trending/<skip>')
 def callback(skip):
-    return dict(posts = get_discussions_by_trending(int(skip), 20))
+    return dict(posts = get_discussions_by_sort_and_tag('trending', None, int(skip), 20))
 
 @app.get('/discussions/promoted/<skip>')
 def callback(skip):
-    return dict(posts = get_discussions_by_promoted(int(skip), 20))
+    return dict(posts = get_discussions_by_sort_and_tag('promoted', None, int(skip), 20))
 
 
+# follows
+# -------
 
 @app.get('/followers/<user>')
 def callback(user):
@@ -89,10 +98,6 @@ def callback(user):
 @app.get('/followers/<user>/<skip>/<limit>')
 def callback(user, skip, limit):
     return dict(user = user, followers = get_followers(user, skip, limit))
-
-@app.get('/head_state')
-def callback():
-    return head_state()
 
 
 

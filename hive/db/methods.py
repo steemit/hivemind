@@ -17,6 +17,13 @@ def query(sql, **kwargs):
         print("[SQL][{}ms] -- {}".format(int((t2-t1)*1000), sql[:250]))
     return res
 
+def query_all(sql, **kwargs):
+    res = query(sql, **kwargs)
+    return res.fetchall()
+
+def query_row(sql, **kwargs):
+    res = query(sql, **kwargs)
+    return first(res)
 
 def query_one(sql, **kwargs):
     t1 = time.time()
@@ -101,26 +108,48 @@ def get_posts(ids):
     return [posts_by_id[id] for id in ids]
 
 
-def get_discussions_by_trending(skip: int, limit: int):
-    sql = "SELECT post_id FROM hive_posts_cache ORDER BY sc_trend DESC LIMIT :limit OFFSET :skip"
-    ids = [r[0] for r in query(sql, limit=limit, skip=skip).fetchall()]
+# builds SQL query to pull a list of posts for any sort order or tag
+def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
+    order = ''
+    where = []
+
+    if sort is 'trending':
+        order = 'sc_trend DESC'
+    elif sort is 'hot':
+        order = 'sc_hot DESC'
+    elif sort is 'created':
+        order = 'post_id DESC'
+    elif sort is 'promoted':
+        order = 'promoted DESC'
+        where.append('is_paidout = 0')
+        where.append('promoted > 0')
+    else:
+        raise Exception("unknown sort order {}".format(sort))
+
+    if tag:
+        where.append('post_id IN (SELECT post_id FROM hive_post_tags WHERE tag = :tag)')
+
+    if where:
+        where = 'WHERE ' + ' AND '.join(where)
+    else:
+        where = ''
+
+    sql = "SELECT post_id FROM hive_posts_cache %s ORDER BY %s LIMIT :limit OFFSET :skip" % (where, order)
+    ids = [r[0] for r in query(sql, tag=tag, limit=limit, skip=skip).fetchall()]
     return get_posts(ids)
 
+
+def get_discussions_by_trending_and_tag(tag, skip: int, limit: int):
+    return get_discussions_by_sort_and_tag('trending', tag, skip, limit)
+
+def get_discussions_by_trending(skip: int, limit: int):
+    return get_discussions_by_sort_and_tag('trending', None, skip, limit)
 
 def get_discussions_by_created(skip: int, limit: int):
-    sql = "SELECT post_id FROM hive_posts_cache ORDER BY post_id DESC LIMIT :limit OFFSET :skip"
-    ids = [r[0] for r in query(sql, limit=limit, skip=skip).fetchall()]
-    return get_posts(ids)
-
+    return get_discussions_by_sort_and_tag('created', None, skip, limit)
 
 def get_discussions_by_promoted(skip: int, limit: int):
-    sql = ("SELECT post_id FROM hive_posts_cache "
-            "WHERE payout_at > UTC_TIMESTAMP() AND promoted > 0 "
-            "ORDER BY promoted DESC LIMIT :limit OFFSET :skip")
-    ids = [r[0] for r in query(sql, limit=limit, skip=skip).fetchall()]
-    return get_posts(ids)
-
-
+    return get_discussions_by_sort_and_tag('promoted', None, skip, limit)
 
 
 # returns "homepage" feed for specified account
