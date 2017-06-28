@@ -133,16 +133,16 @@ def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
     table = 'hive_posts_cache'
     col   = 'post_id'
 
-    if sort is 'trending':
+    if sort == 'trending':
         order = 'sc_trend DESC'
-    elif sort is 'hot':
+    elif sort == 'hot':
         order = 'sc_hot DESC'
-    elif sort is 'new':
+    elif sort == 'new':
         order = 'id DESC'
         where.append('depth = 0')
         table = 'hive_posts'
         col = 'id'
-    elif sort is 'promoted':
+    elif sort == 'promoted':
         order = 'promoted DESC'
         where.append('is_paidout = 0')
         where.append('promoted > 0')
