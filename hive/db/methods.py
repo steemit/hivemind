@@ -121,16 +121,27 @@ def get_posts(ids):
 
 
 # builds SQL query to pull a list of posts for any sort order or tag
+# sort can be: trending hot new promoted
 def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
+    if skip > 5000:
+        raise Exception("cannot skip {} results".format(skip))
+    if limit > 100:
+        raise Exception("cannot limit {} results".format(limit))
+
     order = ''
     where = []
+    table = 'hive_posts_cache'
+    col   = 'post_id'
 
     if sort is 'trending':
         order = 'sc_trend DESC'
     elif sort is 'hot':
         order = 'sc_hot DESC'
-    elif sort is 'created':
-        order = 'post_id DESC'
+    elif sort is 'new':
+        order = 'id DESC'
+        where.append('depth = 0')
+        table = 'hive_posts'
+        col = 'id'
     elif sort is 'promoted':
         order = 'promoted DESC'
         where.append('is_paidout = 0')
@@ -146,22 +157,9 @@ def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
     else:
         where = ''
 
-    sql = "SELECT post_id FROM hive_posts_cache %s ORDER BY %s LIMIT :limit OFFSET :skip" % (where, order)
+    sql = "SELECT %s FROM %s %s ORDER BY %s LIMIT :limit OFFSET :skip" % (col, table, where, order)
     ids = [r[0] for r in query(sql, tag=tag, limit=limit, skip=skip).fetchall()]
     return get_posts(ids)
-
-
-def get_discussions_by_trending_and_tag(tag, skip: int, limit: int):
-    return get_discussions_by_sort_and_tag('trending', tag, skip, limit)
-
-def get_discussions_by_trending(skip: int, limit: int):
-    return get_discussions_by_sort_and_tag('trending', None, skip, limit)
-
-def get_discussions_by_created(skip: int, limit: int):
-    return get_discussions_by_sort_and_tag('created', None, skip, limit)
-
-def get_discussions_by_promoted(skip: int, limit: int):
-    return get_discussions_by_sort_and_tag('promoted', None, skip, limit)
 
 
 # returns "homepage" feed for specified account
