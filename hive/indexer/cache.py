@@ -211,12 +211,13 @@ def generate_cached_post_sql(id, post, updated_at):
     sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
     sqls.append((sql % (cols, params, update), values))
 
-    sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
-    sqls.append((sql, {'id': id}))
-
-    for tag in tags:
-        sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES (:id, :tag)"
-        sqls.append((sql, {'id': id, 'tag': tag}))
+    # update tag metadata only for top-level posts
+    if post['depth'] == 0:
+        sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
+        sqls.append((sql, {'id': id}))
+        for tag in tags:
+            sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES (:id, :tag)"
+            sqls.append((sql, {'id': id, 'tag': tag}))
 
     return sqls
 
