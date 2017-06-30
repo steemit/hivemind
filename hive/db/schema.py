@@ -228,7 +228,7 @@ if os.environ.get('LOG_LEVEL') == 'INFO':
 
 
 def connect(connection_url=_url, **kwargs):
-    return sa.create_engine(connection_url, isolation_level="READ UNCOMMITTED", **kwargs).connect()
+    return sa.create_engine(connection_url, isolation_level="READ UNCOMMITTED", pool_recycle=3600, **kwargs).connect()
 
 
 def setup(connection_url=_url):
