@@ -129,6 +129,9 @@ def process_json_follow_op(account, op_json, block_date):
         what = first(op_json['what']) or 'clear'
         if what not in ['blog', 'clear', 'ignore']:
             return
+        if not all([key in op_json for key in ['follower', 'following']]):
+            print("bad follow op: {} {}".format(block_date, op_json))
+            return
 
         follower = op_json['follower']
         following = op_json['following']
