@@ -4,7 +4,6 @@ import glob
 import time
 
 from funcy.seqs import first, second, drop, flatten
-from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
 from hive.db.methods import query_one, query, db_last_block
 from steem.blockchain import Blockchain
 from steem.steemd import Steemd
@@ -67,47 +66,58 @@ def update_posts(steemd, posts, date):
         for sql, params in sqls:
             query(sql, **params)
 
+# given a comment op, safely read 'community' field from json
+def get_op_community(comment):
+    if not comment['json_metadata']:
+        return None
+    md = None
+    try:
+        md = json.loads(comment['json_metadata'])
+    except:
+        return None
+    if md is not dict or 'community' not in md:
+        return None
+    return md['community']
+
 
 # registers new posts (not edits), inserts into feed cache
 def register_posts(ops, date):
     for op in ops:
         sql = "SELECT id, is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'"
         ret = first(query(sql % (op['author'], op['permlink'])))
-        restore_id = None
+        id = None
         if ret:
             if ret[1] == 0:
                 continue  # ignore edits to posts
             else:
-                restore_id = ret[0]
-
-        # this method needs to perform auth checking e.g. is op.author authorized to post in op.community?
-        community_or_blog = create_post_as(op) or op['author']
+                id = ret[0]
 
         if op['parent_author'] == '':
             parent_id = None
             depth = 0
             category = op['parent_permlink']
+            community = get_op_community(op) or op['author']
         else:
-            parent_data = first(query("SELECT id, depth, category FROM hive_posts WHERE author = '%s' "
+            parent_data = first(query("SELECT id, depth, category, community FROM hive_posts WHERE author = '%s' "
                                       "AND permlink = '%s'" % (op['parent_author'], op['parent_permlink'])))
-            parent_id, parent_depth, category = parent_data
+            parent_id, parent_depth, category, community = parent_data
             depth = parent_depth + 1
 
-        # if we're reusing a previously-deleted post (rare!),
-        if restore_id:
-            print("WARNING: about to re-purpose permlink @{}/{} (id {}).".format(op['author'], op['permlink'], restore_id))
-            query("UPDATE hive_posts SET is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (parent_id or 'NULL', category, community_or_blog, depth, restore_id))
+        # will return None if invalid, defaults to author.
+        community = create_post_as(community, op) or op['author']
+
+        # if we're reusing a previously-deleted post (rare!), update it
+        if id:
+            query("UPDATE hive_posts SET is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (parent_id or 'NULL', category, community, depth, id))
+            query("DELETE FROM hive_feed_cache WHERE account = :account AND id = :id", account=op['author'], id=id)
         else:
             query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
                   "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
-                      parent_id or 'NULL', op['author'], op['permlink'], category, community_or_blog, depth, date))
+                      parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
+            id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
 
         # add top-level posts to feed cache
         if depth is 0:
-            id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
-            if restore_id:
-                print("WARNING: about to reset feed cache for @{}/{} (id {}).".format(op['author'], op['permlink'], restore_id))
-                query("DELETE FROM hive_feed_cache WHERE account = :account AND id = :id", account=op['author'], id=restore_id)
             sql = "INSERT INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
             query(sql, account=op['author'], id=id, created_at=date)
 

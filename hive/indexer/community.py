@@ -1,3 +1,6 @@
+from hive.db.methods import query_row
+from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
+
 # community methods
 # -----------------
 def process_json_community_op(account, op_json, date):
@@ -112,7 +115,7 @@ def process_json_community_op(account, op_json, date):
     return True
 
 
-def create_post_as(comment: dict) -> str:
+def create_post_as(community, comment: dict) -> str:
     """ Given a new Steem post/comment, add it to appropriate community.
     
     For a comment to be valid, these conditions apply:
@@ -122,6 +125,7 @@ def create_post_as(comment: dict) -> str:
         
     
     Args:
+        community (str): Community intended for this post op
         comment (dict): Operation with the post to add.
         
     Returns:
@@ -129,23 +133,17 @@ def create_post_as(comment: dict) -> str:
                     Otherwise, authors own name (blog) is returned.
     """
 
-    if comment['json_metadata'] == "":
-        return None
-
-    md = None
-    try:
-        md = json.loads(comment['json_metadata'])
-    except:
-        return None
-
-    if md is not dict or 'community' not in md:
-        return None
+    if not community:
+        raise Exception("no community specified")
 
     author = comment['author']
-    community = md['community']
-    community_props = get_community(community)
+    if author == community:
+        return author
 
+    community_props = get_community(community)
     if not community_props:
+        # TODO: if a community is not found, assume it's completely open.
+        # all we need to do at that point is validate that its a valid acct name.
         return None
 
     if is_author_muted(author, community):
@@ -167,11 +165,7 @@ def create_post_as(comment: dict) -> str:
 
 
 def get_community(community_name):
-    # sqlalchemy:
-    # q = select([hive_communities]).where(hive_communities.c.account == community_name).limit(1)
-    # conn.execute(q).fetchall()
-    return first(query("SELECT * FROM hive_communities WHERE name = '%s' LIMIT 1" % community_name))
-
+    return query_row("SELECT * FROM hive_communities WHERE name = '%s' LIMIT 1" % community_name)
 
 def is_author_muted(author_name: str, community_name: str) -> bool:
     return get_user_role(author_name, community_name) is 'muted'
