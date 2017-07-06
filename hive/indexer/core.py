@@ -327,6 +327,9 @@ def listen_steemd():
         full_blocks=True,
     )
     for block in h:
+        if not block or not block['previous']:
+            raise Exception("stream_from returned bad/empty block: {}".format(block))
+
         num = int(block['previous'][:8], base=16) + 1
         print("[LIVE] Got block {} at {} with {} txs".format(num,
             block['timestamp'], len(block['transactions'])), end='')
