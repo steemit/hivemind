@@ -266,7 +266,7 @@ def rebuild_cache():
 def rebuild_feed_cache():
     print("Rebuilding hive_feed_cache")
     query("TRUNCATE TABLE hive_feed_cache")
-    query("INSERT INTO hive_feed_cache SELECT author account, id, created_at "
+    query("INSERT INTO hive_feed_cache SELECT author account, id post_id, created_at "
         "FROM hive_posts WHERE depth = 0 AND is_deleted = 0")
     query("INSERT IGNORE INTO hive_feed_cache "
         "SELECT account, post_id, created_at FROM hive_reblogs")

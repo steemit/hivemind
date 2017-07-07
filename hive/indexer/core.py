@@ -3,6 +3,7 @@ import logging
 import glob
 import time
 
+from hive.db.schema import setup, teardown
 from funcy.seqs import first, second, drop, flatten
 from hive.db.methods import query_one, query, query_row, db_last_block
 from steem.blockchain import Blockchain
@@ -74,7 +75,7 @@ def delete_posts(ops):
         post_id, depth = get_post_id_and_depth(op['author'], op['permlink'])
         query("UPDATE hive_posts SET is_deleted = 1 WHERE id = :id", id=post_id)
         query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
-        query("DELETE FROM hive_feed_cache WHERE id = :id", id=post_id)
+        query("DELETE FROM hive_feed_cache WHERE post_id = :id", id=post_id)
 
 
 # registers new posts (not edits), inserts into feed cache
@@ -108,7 +109,7 @@ def register_posts(ops, date):
         # if we're reusing a previously-deleted post (rare!), update it
         if id:
             query("UPDATE hive_posts SET is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (parent_id or 'NULL', category, community, depth, id))
-            query("DELETE FROM hive_feed_cache WHERE account = :account AND id = :id", account=op['author'], id=id)
+            query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=id)
         else:
             query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
                   "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
@@ -117,7 +118,7 @@ def register_posts(ops, date):
 
         # add top-level posts to feed cache
         if depth == 0:
-            sql = "INSERT INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
+            sql = "INSERT INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
             query(sql, account=op['author'], id=id, created_at=date)
 
 
@@ -181,12 +182,12 @@ def process_json_follow_op(account, op_json, block_date):
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
             query("DELETE FROM hive_reblogs WHERE account = '%s' AND post_id = %d LIMIT 1" % (blogger, post_id))
-            sql = "DELETE FROM hive_feed_cache WHERE account = :account and id = :id"
+            sql = "DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id"
             query(sql, account=blogger, id=post_id)
         else:
             query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
                   "VALUES ('%s', %d, '%s')" % (blogger, post_id, block_date))
-            sql = "INSERT IGNORE INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
+            sql = "INSERT IGNORE INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
             query(sql, account=blogger, id=post_id, created_at=block_date)
 
 
@@ -361,6 +362,11 @@ def listen_steemd():
 
 
 def run():
+    # if tables not created, do so now
+    if not query_row('SHOW TABLES'):
+        print("No tables found. Initializing db...")
+        setup()
+
     # if this is the initial sync, batch updates until very end
     is_initial_sync = not query_one("SELECT 1 FROM hive_posts_cache LIMIT 1")
 

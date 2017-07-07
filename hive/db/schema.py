@@ -26,8 +26,15 @@ hive_blocks = sa.Table(
 hive_accounts = sa.Table(
     'hive_accounts', metadata,
     sa.Column('id', sa.Integer, primary_key=True),
-    sa.Column('name', sa.String(16), nullable=False),
+    sa.Column('name', CHAR(16, ascii=True), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
+    #sa.Column('block_num', sa.Integer, nullable=False),
+    sa.Column('reputation', sa.Float, nullable=False, server_default='25'),
+    sa.Column('display_name', sa.String(20)),
+    sa.Column('about', sa.String(160)),
+    sa.Column('location', sa.String(30)),
+    sa.Column('url', sa.String(100)),
+    sa.Column('img_url', sa.String(1024)),
     sa.UniqueConstraint('name', name='hive_accounts_ux1'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
@@ -39,7 +46,7 @@ hive_posts = sa.Table(
     sa.Column('parent_id', sa.Integer),
     sa.Column('author', CHAR(16, ascii=True), nullable=False),
     sa.Column('permlink', CHAR(255, ascii=True), nullable=False),
-    sa.Column('community', CHAR(16)),
+    sa.Column('community', CHAR(16, ascii=True), nullable=False),
     sa.Column('category', CHAR(255, ascii=True), nullable=False),
     sa.Column('depth', SMALLINT(unsigned=True), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
@@ -78,8 +85,8 @@ hive_post_tags = sa.Table(
 
 hive_follows = sa.Table(
     'hive_follows', metadata,
-    sa.Column('follower', CHAR(16), nullable=False),
-    sa.Column('following', CHAR(16), nullable=False),
+    sa.Column('follower', CHAR(16, ascii=True), nullable=False),
+    sa.Column('following', CHAR(16, ascii=True), nullable=False),
     sa.Column('is_muted', TINYINT(1), nullable=False, server_default='0'),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.ForeignKeyConstraint(['follower'], ['hive_accounts.name'], name='hive_follows_fk1'),
@@ -93,7 +100,7 @@ hive_follows = sa.Table(
 
 hive_reblogs = sa.Table(
     'hive_reblogs', metadata,
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('account', CHAR(16, ascii=True), nullable=False),
     sa.Column('post_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_reblogs_fk1'),
@@ -106,7 +113,7 @@ hive_reblogs = sa.Table(
 
 hive_communities = sa.Table(
     'hive_communities', metadata,
-    sa.Column('name', CHAR(16), primary_key=True),
+    sa.Column('name', CHAR(16, ascii=True), primary_key=True),
     sa.Column('title', sa.String(32), nullable=False),
     sa.Column('about', sa.String(255), nullable=False, server_default=''),
     sa.Column('description', sa.String(5000), nullable=False, server_default=''),
@@ -122,8 +129,8 @@ hive_communities = sa.Table(
 
 hive_members = sa.Table(
     'hive_members', metadata,
-    sa.Column('community', CHAR(16), nullable=False),
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('community', CHAR(16, ascii=True), nullable=False),
+    sa.Column('account', CHAR(16, ascii=True), nullable=False),
     sa.Column('is_admin', TINYINT(1), nullable=False),
     sa.Column('is_mod', TINYINT(1), nullable=False),
     sa.Column('is_approved', TINYINT(1), nullable=False),
@@ -138,7 +145,7 @@ hive_members = sa.Table(
 
 hive_flags = sa.Table(
     'hive_flags', metadata,
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('account', CHAR(16, ascii=True), nullable=False),
     sa.Column('post_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.Column('notes', sa.String(255), nullable=False),
@@ -152,8 +159,8 @@ hive_flags = sa.Table(
 hive_modlog = sa.Table(
     'hive_modlog', metadata,
     sa.Column('id', sa.Integer, primary_key=True),
-    sa.Column('community', CHAR(16), nullable=False),
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('community', CHAR(16, ascii=True), nullable=False),
+    sa.Column('account', CHAR(16, ascii=True), nullable=False),
     sa.Column('action', sa.String(32), nullable=False),
     sa.Column('params', sa.String(1000), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
@@ -166,8 +173,8 @@ hive_modlog = sa.Table(
 
 hive_feed_cache = sa.Table(
     'hive_feed_cache', metadata,
-    sa.Column('account', CHAR(16), nullable=False),
     sa.Column('post_id', sa.Integer, primary_key=True),
+    sa.Column('account', CHAR(16), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_feed_cache_fk1'),
     sa.Index('hive_feed_cache_ix1', 'account', 'post_id', 'created_at'),
@@ -206,20 +213,6 @@ hive_posts_cache = sa.Table(
     mysql_default_charset='utf8mb4'
 )
 
-hive_accounts_cache = sa.Table(
-    'hive_accounts_cache', metadata,
-    sa.Column('account', CHAR(16), primary_key=True),
-    sa.Column('reputation', sa.Float, nullable=False, server_default='25'),
-    sa.Column('name', sa.String(20)),
-    sa.Column('about', sa.String(160)),
-    sa.Column('location', sa.String(30)),
-    sa.Column('url', sa.String(100)),
-    sa.Column('img_url', sa.String(1024)),
-    sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'],
-                            name='hive_accounts_cache_fk1'),
-    mysql_engine='InnoDB',
-    mysql_default_charset='utf8mb4'
-)
 
 _url = os.environ.get('DATABASE_URL', 'missing ENV DATABASE_URL')
 logging.basicConfig()
