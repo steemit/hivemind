@@ -4,7 +4,7 @@ import glob
 import time
 
 from funcy.seqs import first, second, drop, flatten
-from hive.db.methods import query_one, query, db_last_block
+from hive.db.methods import query_one, query, query_row, db_last_block
 from steem.blockchain import Blockchain
 from steem.steemd import Steemd
 from steem.utils import parse_time, is_valid_account_name, json_expand
@@ -12,7 +12,7 @@ from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
-from hive.indexer.cache import generate_cached_post_sql, cache_missing_posts, rebuild_feed_cache, sweep_paidout_posts, _update_posts_batch
+from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, _update_posts_batch
 from hive.indexer.community import process_json_community_op, create_post_as
 
 # core
@@ -25,8 +25,8 @@ def get_account_id(name):
 def get_post_id_and_depth(author, permlink):
     res = None
     if author:
-        res = first(query(
-            "SELECT id, depth FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink)))
+        res = query_row(
+            "SELECT id, depth FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
     return res or (None, -1)
 
 
@@ -51,7 +51,8 @@ def urls_to_tuples(urls):
     tuples = []
     for url in urls:
         author, permlink = url.split('/')
-        id, is_deleted = first(query("SELECT id,is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink)))
+        id, is_deleted = query_row("SELECT id,is_deleted FROM hive_posts "
+                "WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
         if not id:
             raise Exception("Post not found! {}/{}".format(author, permlink))
         if is_deleted:
@@ -59,18 +60,6 @@ def urls_to_tuples(urls):
         tuples.append([id, author, permlink])
     return tuples
 
-
-# updates cache entry for posts (saves latest title, body, trending/hot score, payout, etc)
-def update_post_urls(posts, steemd, date):
-    for (id, author, permlink) in urls_to_tuples(posts):
-        post = steemd.get_content(author, permlink)
-        if not post['author']:
-            print("WARNING: attemted to cache deleted post (id={}) @{}/{}".format(id, author, permlink))
-            continue
-
-        sqls = generate_cached_post_sql(id, post, date)
-        for sql, params in sqls:
-            query(sql, **params)
 
 # given a comment op, safely read 'community' field from json
 def get_op_community(comment):
@@ -90,7 +79,7 @@ def get_op_community(comment):
 def register_posts(ops, date):
     for op in ops:
         sql = "SELECT id, is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'"
-        ret = first(query(sql % (op['author'], op['permlink'])))
+        ret = query_row(sql % (op['author'], op['permlink']))
         id = None
         if ret:
             if ret[1] == 0:
@@ -104,8 +93,8 @@ def register_posts(ops, date):
             category = op['parent_permlink']
             community = get_op_community(op) or op['author']
         else:
-            parent_data = first(query("SELECT id, depth, category, community FROM hive_posts WHERE author = '%s' "
-                                      "AND permlink = '%s'" % (op['parent_author'], op['parent_permlink'])))
+            parent_data = query_row("SELECT id, depth, category, community FROM hive_posts WHERE author = '%s' "
+                                      "AND permlink = '%s'" % (op['parent_author'], op['parent_permlink']))
             parent_id, parent_depth, category, community = parent_data
             depth = parent_depth + 1
 
@@ -333,7 +322,7 @@ def sync_from_steemd(is_initial_sync):
         print("[PREP] Update {} edited posts".format(len(dirty), date))
         _update_posts_batch(urls_to_tuples(dirty), steemd, date)
 
-        paidout = sweep_paidout_posts()
+        paidout = select_paidout_posts()
         print("[PREP] Process {} payouts".format(len(paidout)))
         _update_posts_batch(paidout, steemd, date)
 
@@ -358,9 +347,9 @@ def listen_steemd():
         query("START TRANSACTION")
 
         dirty = process_block(block)
-        update_post_urls(dirty, steemd, block['timestamp'])
+        _update_posts_batch(urls_to_tuples(dirty), steemd, block['timestamp'])
 
-        paidout = sweep_paidout_posts()
+        paidout = select_paidout_posts()
         _update_posts_batch(paidout, steemd, block['timestamp'])
 
         print("{} edits, {} payouts".format(len(dirty), len(paidout)))
@@ -368,10 +357,12 @@ def listen_steemd():
 
 
 def run():
-    # if this is the initial sync, do not waste cycles updating caches.. we'll do it in bulk
-    is_initial_sync = query_one("SELECT 1 FROM hive_posts_cache LIMIT 1") is None
+    # if this is the initial sync, batch updates until very end
+    is_initial_sync = not query_one("SELECT 1 FROM hive_posts_cache LIMIT 1")
 
-    if not is_initial_sync:
+    if is_initial_sync:
+        print("Initial sync")
+    else:
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()
 
@@ -383,9 +374,7 @@ def run():
 
     # upon completing initial sync, perform some batch processing
     if is_initial_sync:
-        print("Initial sync finished. Rebuilding cache...")
-        cache_missing_posts()
-        rebuild_feed_cache()
+        rebuild_cache()
 
     # initialization complete. follow head blocks
     listen_steemd()

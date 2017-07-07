@@ -242,7 +242,7 @@ def _update_posts_batch(tuples, steemd, updated_at):
         sql = generate_cached_post_sql(id, post, updated_at)
         buffer.append(sql)
 
-        if len(buffer) == 250:
+        if len(buffer) == 1000:
             batch_queries(buffer)
             processed += len(buffer)
             rem = len(tuples) - processed
@@ -254,6 +254,10 @@ def _update_posts_batch(tuples, steemd, updated_at):
 
     batch_queries(buffer)
 
+def rebuild_cache():
+    print("Initial sync finished. Rebuilding cache...")
+    cache_missing_posts()
+    rebuild_feed_cache()
 
 # the feed cache allows for efficient querying of blogs+reblogs. this method
 # efficiently builds the feed cache after the initial sync.
@@ -282,7 +286,7 @@ def sweep_missing_posts():
     update_posts_batch(rows)
 
 # when a post gets paidout ensure we update its final state
-def sweep_paidout_posts():
+def select_paidout_posts():
     # TODO: use head_block_time here instead of external time
     sql = """
     SELECT post_id, author, permlink FROM hive_posts_cache

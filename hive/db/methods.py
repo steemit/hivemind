@@ -10,32 +10,32 @@ import time
 # generic
 # -------
 def query(sql, **kwargs):
-    t1 = time.time()
-    res = conn.execute(text(sql).execution_options(autocommit=False), **kwargs)
-    t2 = time.time()
-    if t2 - t1 > 0.1:
-        print("[SQL][{}ms] -- {}".format(int((t2-t1)*1000), sql[:250]))
+    ti = time.time()
+    query = text(sql).execution_options(autocommit=False)
+    res = conn.execute(query, **kwargs)
+    t = time.time() - ti
+    if t > 0.1:
+        print("\033[93m[SQL][{}ms] {}\033[0m".format(int(t*1000), sql[:250]))
     return res
 
+# n*m
 def query_all(sql, **kwargs):
     res = query(sql, **kwargs)
     return res.fetchall()
 
+# 1*m
 def query_row(sql, **kwargs):
     res = query(sql, **kwargs)
     return first(res)
 
+# n*1
 def query_col(sql, **kwargs):
     res = query(sql, **kwargs).fetchall()
     return [r[0] for r in res]
 
+# 1*1
 def query_one(sql, **kwargs):
-    t1 = time.time()
-    res = conn.execute(text(sql), **kwargs)
-    t2 = time.time()
-    if t2 - t1 > 0.1:
-        print("[SQL][{}ms] -- {}".format(int((t2-t1)*1000), sql[:250]))
-    row = first(res)
+    row = query_row(sql, **kwargs)
     if row:
         return first(row)
 
@@ -51,7 +51,7 @@ def get_followers(account: str, skip: int, limit: int):
     SELECT follower, created_at FROM hive_follows WHERE following = :account
     ORDER BY created_at DESC LIMIT :limit OFFSET :skip
     """
-    res = query(sql, account = account, skip = int(skip), limit = int(limit))
+    res = query(sql, account=account, skip=int(skip), limit=int(limit))
     return [[r[0],r[1]] for r in res.fetchall()]
 
 
@@ -60,7 +60,7 @@ def get_following(account: str, skip: int, limit: int):
     SELECT following, created_at FROM hive_follows WHERE follower = :account
     ORDER BY created_at DESC LIMIT :limit OFFSET :skip
     """
-    res = query(sql, account = account, skip = int(skip), limit = int(limit))
+    res = query(sql, account=account, skip=int(skip), limit=int(limit))
     return [[r[0],r[1]] for r in res.fetchall()]
 
 
@@ -87,9 +87,12 @@ def follow_stats(account: str):
 
 # unused
 def get_reblogs_since(account: str, since: str):
-    sql = ("SELECT * FROM hive_reblogs r JOIN hive_posts p ON r.post_id = p.id "
-          "WHERE p.author = :account AND r.created_at > :since ORDER BY r.created_at DESC")
-    return [dict(r) for r in query(sql, account = account, since = since).fetchall()]
+    sql = """
+      SELECT r.* FROM hive_reblogs r JOIN hive_posts p ON r.post_id = p.id
+       WHERE p.author = :account AND r.created_at > :since
+    ORDER BY r.created_at DESC
+    """
+    return [dict(r) for r in query_all(sql, account=account, since=since)]
 
 
 # given an array of post ids, returns full metadata in the same order
@@ -100,7 +103,7 @@ def get_posts(ids):
       FROM hive_posts_cache WHERE post_id IN (%s)
     """
     sql = sql % ','.join([str(id) for id in ids])
-    posts = [dict(r) for r in query(sql).fetchall()]
+    posts = [dict(r) for r in query_all(sql)]
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
