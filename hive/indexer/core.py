@@ -12,7 +12,7 @@ from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
-from hive.indexer.cache import generate_cached_post_sql, cache_missing_posts, rebuild_feed_cache, sweep_paidout_posts
+from hive.indexer.cache import generate_cached_post_sql, cache_missing_posts, rebuild_feed_cache, sweep_paidout_posts, _update_posts_batch
 from hive.indexer.community import process_json_community_op, create_post_as
 
 # core
@@ -47,16 +47,22 @@ def delete_posts(ops):
         query(sql, account=op['author'], id=post_id)
 
 
-# updates cache entry for posts (saves latest title, body, trending/hot score, payout, etc)
-def update_posts(steemd, posts, date):
-    for url in posts:
+def urls_to_tuples(urls):
+    tuples = []
+    for url in urls:
         author, permlink = url.split('/')
         id, is_deleted = first(query("SELECT id,is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink)))
         if not id:
             raise Exception("Post not found! {}/{}".format(author, permlink))
         if is_deleted:
             continue
+        tuples.append([id, author, permlink])
+    return tuples
 
+
+# updates cache entry for posts (saves latest title, body, trending/hot score, payout, etc)
+def update_post_urls(posts, steemd, date):
+    for (id, author, permlink) in urls_to_tuples(posts):
         post = steemd.get_content(author, permlink)
         if not post['author']:
             print("WARNING: attemted to cache deleted post (id={}) @{}/{}".format(id, author, permlink))
@@ -320,35 +326,44 @@ def sync_from_steemd(is_initial_sync):
         print("[SYNC] Got block {} ({}/s) {}m remaining".format(
             to - 1, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
 
+    # batch update post cache after catching up to head block
     if not is_initial_sync:
-        # batch update post cache after catching up to head block
         date = steemd.get_dynamic_global_properties()['time']
-        print("Updating {} edited posts.".format(len(dirty), date))
-        update_posts(steemd, dirty, date)
-        sweep_paidout_posts()
+
+        print("[PREP] Update {} edited posts".format(len(dirty), date))
+        _update_posts_batch(urls_to_tuples(dirty), steemd, date)
+
+        paidout = sweep_paidout_posts()
+        print("[PREP] Process {} payouts".format(len(paidout)))
+        _update_posts_batch(paidout, steemd, date)
+
         query("COMMIT")
 
 
 def listen_steemd():
+    steemd = Steemd()
     b = Blockchain(mode='head')
-    s = Steemd()
     h = b.stream_from(
         start_block=db_last_block() + 1,
         full_blocks=True,
     )
     for block in h:
         if not block or not block['previous']:
-            raise Exception("stream_from returned bad/empty block: {}".format(block))
+            raise Exception("stream returned invalid block: {}".format(block))
 
         num = int(block['previous'][:8], base=16) + 1
-        print("[LIVE] Got block {} at {} with {} txs".format(num,
+        print("[LIVE] Got block {} at {} with {} txs -- ".format(num,
             block['timestamp'], len(block['transactions'])), end='')
 
         query("START TRANSACTION")
+
         dirty = process_block(block)
-        print(" -- {} post edits -- ".format(len(dirty)), end = '')
-        update_posts(s, dirty, block['timestamp'])
-        sweep_paidout_posts()
+        update_post_urls(dirty, steemd, block['timestamp'])
+
+        paidout = sweep_paidout_posts()
+        _update_posts_batch(paidout, steemd, block['timestamp'])
+
+        print("{} edits, {} payouts".format(len(dirty), len(paidout)))
         query("COMMIT")
 
 

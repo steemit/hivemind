@@ -247,7 +247,7 @@ def _update_posts_batch(tuples, steemd, updated_at):
             processed += len(buffer)
             rem = len(tuples) - processed
             rate = processed / (time.time() - start_time)
-            print("{} of {} ({}/s) {}m remaining".format(
+            print(" -- {} of {} ({}/s) -- {}m remaining".format(
                 processed, len(tuples), round(rate, 1),
                 round((len(tuples) - processed) / rate / 60, 2) ))
             buffer = []
@@ -271,7 +271,7 @@ def cache_missing_posts():
     sql = ("SELECT id, author, permlink FROM hive_posts WHERE is_deleted = 0 "
             "AND id > " + lastid + " ORDER BY id")
     rows = list(query(sql))
-    print("Updating {} missing cache entries".format(len(rows)))
+    print("[INIT] Found {} missing cache entries".format(len(rows)))
     update_posts_batch(rows)
 
 # inefficient but thorough check of missing cache rows
@@ -297,15 +297,14 @@ def clean_dead_posts():
         "(SELECT id FROM hive_posts WHERE is_deleted = 1)")
     query(sql)
 
+
 # testing
 # -------
 def run():
-    #cache_missing_posts()
     sweep_missing_posts()
     #post = Steem().get_content('roadscape', 'script-check')
     #print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
 
 
 if __name__ == '__main__':
-    # setup()
     run()
