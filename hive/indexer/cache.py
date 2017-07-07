@@ -281,7 +281,7 @@ def sweep_missing_posts():
     rows = list(query(sql))
     update_posts_batch(rows)
 
-# when a post gets paidout ensure we update its official state
+# when a post gets paidout ensure we update its final state
 def sweep_paidout_posts():
     # TODO: use head_block_time here instead of external time
     sql = """
@@ -289,9 +289,7 @@ def sweep_paidout_posts():
     WHERE post_id IN (SELECT post_id FROM hive_posts_cache
     WHERE is_paidout = 0 AND payout_at < UTC_TIMESTAMP())
     """
-    rows = list(query(sql))
-    print("processing {} payouts".format(len(rows)))
-    update_posts_batch(rows)
+    return list(query(sql))
 
 # remove any rows from cache which belong to a deleted post
 def clean_dead_posts():
@@ -304,7 +302,6 @@ def clean_dead_posts():
 def run():
     #cache_missing_posts()
     sweep_missing_posts()
-    sweep_paidout_posts()
     #post = Steem().get_content('roadscape', 'script-check')
     #print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
 

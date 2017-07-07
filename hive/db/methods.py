@@ -133,6 +133,7 @@ def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
     table = 'hive_posts_cache'
     col   = 'post_id'
 
+    # TODO: all discussions need a depth == 0 condition?
     if sort == 'trending':
         order = 'sc_trend DESC'
     elif sort == 'hot':
