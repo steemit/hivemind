@@ -30,23 +30,6 @@ def get_post_id_and_depth(author, permlink):
     return res or (None, -1)
 
 
-def register_accounts(accounts, date):
-    for account in set(accounts):
-        if not get_account_id(account):
-            query("INSERT INTO hive_accounts (name, created_at) VALUES ('%s', '%s')" % (account, date))
-
-
-# marks posts as deleted and removes them from feed cache
-def delete_posts(ops):
-    for op in ops:
-        query("UPDATE hive_posts SET is_deleted = 1 WHERE author = '%s' AND permlink = '%s'" % (
-            op['author'], op['permlink']))
-        post_id, depth = get_post_id_and_depth(op['author'], op['permlink'])
-        query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
-        sql = "DELETE FROM hive_feed_cache WHERE account = :account and id = :id"
-        query(sql, account=op['author'], id=post_id)
-
-
 def urls_to_tuples(urls):
     tuples = []
     for url in urls:
@@ -70,9 +53,28 @@ def get_op_community(comment):
         md = json.loads(comment['json_metadata'])
     except:
         return None
-    if md is not dict or 'community' not in md:
+    if type(md) is not dict or 'community' not in md:
         return None
     return md['community']
+
+
+# block-level routines
+# --------------------
+
+# register any new accounts in a block
+def register_accounts(accounts, date):
+    for account in set(accounts):
+        if not get_account_id(account):
+            query("INSERT INTO hive_accounts (name, created_at) VALUES ('%s', '%s')" % (account, date))
+
+
+# marks posts as deleted and removes them from feed cache
+def delete_posts(ops):
+    for op in ops:
+        post_id, depth = get_post_id_and_depth(op['author'], op['permlink'])
+        query("UPDATE hive_posts SET is_deleted = 1 WHERE id = :id", id=post_id)
+        query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
+        query("DELETE FROM hive_feed_cache WHERE id = :id", id=post_id)
 
 
 # registers new posts (not edits), inserts into feed cache
@@ -83,10 +85,12 @@ def register_posts(ops, date):
         id = None
         if ret:
             if ret[1] == 0:
-                continue  # ignore edits to posts
+                # if post has id and is_deleted=0, then it's an edit -- ignore.
+                continue
             else:
                 id = ret[0]
 
+        # set parent & inherited attributes
         if op['parent_author'] == '':
             parent_id = None
             depth = 0
@@ -98,7 +102,7 @@ def register_posts(ops, date):
             parent_id, parent_depth, category, community = parent_data
             depth = parent_depth + 1
 
-        # will return None if invalid, defaults to author.
+        # validated community; will return None if invalid & defaults to author.
         community = create_post_as(community, op) or op['author']
 
         # if we're reusing a previously-deleted post (rare!), update it
@@ -112,14 +116,14 @@ def register_posts(ops, date):
             id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
 
         # add top-level posts to feed cache
-        if depth is 0:
+        if depth == 0:
             sql = "INSERT INTO hive_feed_cache (account, id, created_at) VALUES (:account, :id, :created_at)"
             query(sql, account=op['author'], id=id, created_at=date)
 
 
 
 def process_json_follow_op(account, op_json, block_date):
-    """ This method processes any legacy 'follow' plugin ops (follow/mute/clear, reblog) """
+    """ Process legacy 'follow' plugin ops (follow/mute/clear, reblog) """
     if type(op_json) != list:
         return
     if first(op_json) not in ['follow', 'reblog']:
@@ -142,9 +146,9 @@ def process_json_follow_op(account, op_json, block_date):
         following = op_json['following']
 
         if follower != account:
-            return  # impersonation attempt
+            return  # impersonation
         if not all(filter(is_valid_account_name, [follower, following])):
-            return
+            return  # invalid input
 
         if what == 'clear':
             query("DELETE FROM hive_follows WHERE follower = '%s' "
@@ -322,7 +326,7 @@ def sync_from_steemd(is_initial_sync):
         print("[PREP] Update {} edited posts".format(len(dirty), date))
         _update_posts_batch(urls_to_tuples(dirty), steemd, date)
 
-        paidout = select_paidout_posts()
+        paidout = select_paidout_posts(date)
         print("[PREP] Process {} payouts".format(len(paidout)))
         _update_posts_batch(paidout, steemd, date)
 
@@ -337,10 +341,10 @@ def listen_steemd():
         full_blocks=True,
     )
     for block in h:
-        if not block or not block['previous']:
+        if not block or 'block_id' not in block:
             raise Exception("stream returned invalid block: {}".format(block))
 
-        num = int(block['previous'][:8], base=16) + 1
+        num = int(block['block_id'][:8], base=16)
         print("[LIVE] Got block {} at {} with {} txs -- ".format(num,
             block['timestamp'], len(block['transactions'])), end='')
 
@@ -349,7 +353,7 @@ def listen_steemd():
         dirty = process_block(block)
         _update_posts_batch(urls_to_tuples(dirty), steemd, block['timestamp'])
 
-        paidout = select_paidout_posts()
+        paidout = select_paidout_posts(block['timestamp'])
         _update_posts_batch(paidout, steemd, block['timestamp'])
 
         print("{} edits, {} payouts".format(len(dirty), len(paidout)))

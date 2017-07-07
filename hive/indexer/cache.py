@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 def get_img_url(url, max_size=1024):
     if url:
         url = url.strip()
-    if url and len(url) < max_size and url[0:4] is 'http':
+    if url and len(url) < max_size and url[0:4] == 'http':
         return url
 
 
@@ -254,6 +254,8 @@ def _update_posts_batch(tuples, steemd, updated_at):
 
     batch_queries(buffer)
 
+
+# called once -- after initial block sync
 def rebuild_cache():
     print("Initial sync finished. Rebuilding cache...")
     cache_missing_posts()
@@ -286,14 +288,14 @@ def sweep_missing_posts():
     update_posts_batch(rows)
 
 # when a post gets paidout ensure we update its final state
-def select_paidout_posts():
+def select_paidout_posts(block_date):
     # TODO: use head_block_time here instead of external time
     sql = """
     SELECT post_id, author, permlink FROM hive_posts_cache
     WHERE post_id IN (SELECT post_id FROM hive_posts_cache
-    WHERE is_paidout = 0 AND payout_at < UTC_TIMESTAMP())
+    WHERE is_paidout = 0 AND payout_at <= :date)
     """
-    return list(query(sql))
+    return list(query(sql, date=block_date))
 
 # remove any rows from cache which belong to a deleted post
 def clean_dead_posts():
@@ -306,8 +308,6 @@ def clean_dead_posts():
 # -------
 def run():
     sweep_missing_posts()
-    #post = Steem().get_content('roadscape', 'script-check')
-    #print(generate_cached_post_sql(1, post, '1970-01-01T00:00:00'))
 
 
 if __name__ == '__main__':
