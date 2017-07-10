@@ -1,3 +1,4 @@
+from funcy.seqs import first, flatten
 from hive.db.methods import query_row
 from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
 

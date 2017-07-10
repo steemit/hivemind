@@ -173,10 +173,11 @@ hive_modlog = sa.Table(
 
 hive_feed_cache = sa.Table(
     'hive_feed_cache', metadata,
-    sa.Column('post_id', sa.Integer, primary_key=True),
+    sa.Column('post_id', sa.Integer),
     sa.Column('account', CHAR(16), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_feed_cache_fk1'),
+    sa.UniqueConstraint('post_id', 'account', name='hive_flags_ux1'), #TODO: verify PK
     sa.Index('hive_feed_cache_ix1', 'account', 'post_id', 'created_at'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'

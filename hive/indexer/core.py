@@ -2,13 +2,14 @@ import json
 import logging
 import glob
 import time
+import re
 
 from hive.db.schema import setup, teardown
 from funcy.seqs import first, second, drop, flatten
 from hive.db.methods import query_one, query, query_row, db_last_block
 from steem.blockchain import Blockchain
 from steem.steemd import Steemd
-from steem.utils import parse_time, is_valid_account_name, json_expand
+from steem.utils import json_expand
 from toolz import partition_all
 
 log = logging.getLogger(__name__)
@@ -18,6 +19,10 @@ from hive.indexer.community import process_json_community_op, create_post_as
 
 # core
 # ----
+def is_valid_account_name(name):
+    return re.match('^[a-z][a-z0-9\-.]{2,15}$', name)
+
+
 def get_account_id(name):
     if is_valid_account_name(name):
         return query_one("SELECT id FROM hive_accounts WHERE name = '%s' LIMIT 1" % name)
@@ -193,7 +198,7 @@ def process_json_follow_op(account, op_json, block_date):
 
 # process a single block. always wrap in a transaction!
 def process_block(block, is_initial_sync = False):
-    date = parse_time(block['timestamp'])
+    date = block['timestamp']
     block_id = block['block_id']
     prev = block['previous']
     block_num = int(block_id[:8], base=16)
@@ -252,7 +257,8 @@ def process_block(block, is_initial_sync = False):
                 op_json = ['follow', op_json]  # legacy compat
             process_json_follow_op(account, op_json, date)
         elif op['id'] == 'com.steemit.community':
-            process_json_community_op(account, op_json, date)
+            if block_num > 13e6:
+                process_json_community_op(account, op_json, date)
 
     # return all posts modified this block
     return dirty
