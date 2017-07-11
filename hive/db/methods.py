@@ -6,6 +6,7 @@ from hive.db.schema import (
 from sqlalchemy import text, select, func
 
 import time
+import re
 
 # generic
 # -------
@@ -13,9 +14,10 @@ def query(sql, **kwargs):
     ti = time.time()
     query = text(sql).execution_options(autocommit=False)
     res = conn.execute(query, **kwargs)
-    t = time.time() - ti
-    if t > 0.1:
-        print("\033[93m[SQL][{}ms] {}\033[0m".format(int(t*1000), sql[:250]))
+    ms = int((time.time() - ti) * 1000)
+    if ms > 100:
+        disp = re.sub('\s+', ' ', sql).strip()[:250]
+        print("\033[93m[SQL][{}ms] {}\033[0m".format(ms, disp))
     return res
 
 # n*m

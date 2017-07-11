@@ -45,12 +45,14 @@ def get_stats(post):
         if sign < 0:
             neg_rshares += rshares
 
-            # For graying: sum up total rshares, but ignore neg rep users and tiny downvotes
-        if str(v['reputation'])[0] != '-' and not (sign < 0 and len(str(rshares)) < 11):
+        # For graying: sum rshares, but ignore neg rep users and dust downvotes
+        neg_rep = str(v['reputation'])[0] == '-'
+        if not (neg_rep and sign < 0 and len(str(rshares)) < 11):
             net_rshares_adj += rshares
 
-    # take negative rshares, divide by 2, truncate 10 digits (plus neg sign), count digits.
-    # creates a cheap log10, stake-based flag weight. 1 = approx $400 of downvoting stake; 2 = $4,000; etc
+    # take negative rshares, divide by 2, truncate 10 digits (plus neg sign),
+    #   and count digits. creates a cheap log10, stake-based flag weight.
+    #   result: 1 = approx $400 of downvoting stake; 2 = $4,000; etc
     flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
 
     allow_delete = post['children'] == 0 and int(post['net_rshares']) <= 0
@@ -81,10 +83,6 @@ def batch_queries(batches):
             query(sql, **params)
     query("COMMIT")
 
-
-# TODO: escape strings for mysql
-def escape(str):
-    return str
 
 # calculate Steemit rep score
 def rep_log10(rep):
@@ -181,19 +179,19 @@ def generate_cached_post_sql(id, post, updated_at):
 
     values = collections.OrderedDict([
         ('post_id', '%d' % id),
-        ('author', "%s" % escape(post['author'])),
-        ('permlink', "%s" % escape(post['permlink'])),
-        ('title', "%s" % escape(post['title'])),
-        ('preview', "%s" % escape(post['body'][0:1024])),
-        ('img_url', "%s" % escape(thumb_url)),
+        ('author', "%s" % post['author']),
+        ('permlink', "%s" % post['permlink']),
+        ('title', "%s" % post['title']),
+        ('preview', "%s" % post['body'][0:10000024]),
+        ('img_url', "%s" % thumb_url),
         ('payout', "%f" % payout),
         ('promoted', "%f" % promoted),
         ('payout_at', "%s" % payout_at),
         ('updated_at', "%s" % updated_at),
         ('created_at', "%s" % post['created']),
         ('rshares', "%d" % rshares),
-        ('votes', "%s" % escape(csvotes)),
-        ('json', "%s" % escape(json.dumps(md))),
+        ('votes', "%s" % csvotes),
+        ('json', "%s" % json.dumps(md)),
         ('is_nsfw', "%d" % is_nsfw),
         ('is_paidout', "%d" % is_paidout),
         ('sc_trend', "%f" % trend_score),
@@ -257,7 +255,7 @@ def _update_posts_batch(tuples, steemd, updated_at):
 
 # called once -- after initial block sync
 def rebuild_cache():
-    print("Initial sync finished. Rebuilding cache...")
+    print("*** Initial sync finished. Rebuilding cache. ***")
     cache_missing_posts()
     rebuild_feed_cache()
 
@@ -289,7 +287,6 @@ def sweep_missing_posts():
 
 # when a post gets paidout ensure we update its final state
 def select_paidout_posts(block_date):
-    # TODO: use head_block_time here instead of external time
     sql = """
     SELECT post_id, author, permlink FROM hive_posts_cache
     WHERE post_id IN (SELECT post_id FROM hive_posts_cache
