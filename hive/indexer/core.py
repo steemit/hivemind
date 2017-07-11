@@ -156,15 +156,12 @@ def process_json_follow_op(account, op_json, block_date):
         if not all(filter(is_valid_account_name, [follower, following])):
             return  # invalid input
 
-        if what == 'clear':
-            query("DELETE FROM hive_follows WHERE follower = '%s' "
-                  "AND following = '%s' LIMIT 1" % (follower, following))
-        else:
-            fields = {'follower': follower, 'following': following,
-                    'created_at': block_date, 'is_muted': int(what == 'ignore')}
-            query("INSERT IGNORE INTO hive_follows (follower, following, created_at, is_muted) "
-                    "VALUES (:follower, :following, :created_at, :is_muted) "
-                    "ON DUPLICATE KEY UPDATE is_muted = :is_muted", **fields)
+        sql = """
+        INSERT IGNORE INTO hive_follows (follower, following, created_at, state)
+        VALUES (:fr, :fg, :at, :state) ON DUPLICATE KEY UPDATE state = :state
+        """
+        state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
+        query(sql, fr=follower, fg=following, at=block_date, state=state)
 
     elif cmd == 'reblog':
         blogger = op_json['account']
@@ -311,6 +308,8 @@ def sync_from_steemd(is_initial_sync):
     lbound = db_last_block() + 1
     ubound = steemd.last_irreversible_block_num
 
+    print("[SYNC] {} blocks to sync".format(ubound - lbound + 1))
+
     if not is_initial_sync:
         query("START TRANSACTION")
 
@@ -377,7 +376,7 @@ def run():
     is_initial_sync = not query_one("SELECT 1 FROM hive_posts_cache LIMIT 1")
 
     if is_initial_sync:
-        print("Initial sync")
+        print("*** Initial sync ***")
     else:
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()

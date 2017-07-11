@@ -49,7 +49,7 @@ def db_last_block():
 def get_followers(account: str, skip: int, limit: int):
     sql = """
     SELECT follower, created_at FROM hive_follows WHERE following = :account
-    ORDER BY created_at DESC LIMIT :limit OFFSET :skip
+    AND state = 1 ORDER BY created_at DESC LIMIT :limit OFFSET :skip
     """
     res = query(sql, account=account, skip=int(skip), limit=int(limit))
     return [[r[0],r[1]] for r in res.fetchall()]
@@ -58,19 +58,19 @@ def get_followers(account: str, skip: int, limit: int):
 def get_following(account: str, skip: int, limit: int):
     sql = """
     SELECT following, created_at FROM hive_follows WHERE follower = :account
-    ORDER BY created_at DESC LIMIT :limit OFFSET :skip
+    AND state = 1 ORDER BY created_at DESC LIMIT :limit OFFSET :skip
     """
     res = query(sql, account=account, skip=int(skip), limit=int(limit))
     return [[r[0],r[1]] for r in res.fetchall()]
 
 
 def following_count(account: str):
-    sql = "SELECT COUNT(*) FROM hive_follows WHEERE follower = :account"
+    sql = "SELECT COUNT(*) FROM hive_follows WHEERE follower = :account AND state = 1"
     return query_one(sql, account=account)
 
 
 def follower_count(account: str):
-    sql = "SELECT COUNT(*) FROM hive_follows WHEERE following = :account"
+    sql = "SELECT COUNT(*) FROM hive_follows WHEERE following = :account AND state = 1"
     return query_one(sql, account=account)
 
 
@@ -80,7 +80,7 @@ def follow_stats(account: str):
     SELECT SUM(IF(follower  = :account, 1, 0)) following,
            SUM(IF(following = :account, 1, 0)) followers
       FROM hive_follows
-     WHERE is_muted = 0
+     WHERE state = 1
     """
     return first(query(sql))
 
@@ -171,7 +171,7 @@ def get_user_feed(account: str, skip: int, limit: int):
     sql = """
       SELECT id, GROUP_CONCAT(account) accounts
         FROM hive_feed_cache
-       WHERE account IN (SELECT following FROM hive_follows WHERE follower = :account)
+       WHERE account IN (SELECT following FROM hive_follows WHERE follower = :account AND state = 1)
     GROUP BY id
     ORDER BY MIN(created_at) DESC LIMIT :limit OFFSET :skip
     """
