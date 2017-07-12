@@ -25,14 +25,15 @@ def is_valid_account_name(name):
 
 def get_account_id(name):
     if is_valid_account_name(name):
-        return query_one("SELECT id FROM hive_accounts WHERE name = '%s' LIMIT 1" % name)
+        return query_one("SELECT id FROM hive_accounts "
+                "WHERE name = '%s' LIMIT 1" % name)
 
 
 def get_post_id_and_depth(author, permlink):
     res = None
     if author:
-        res = query_row(
-            "SELECT id, depth FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
+        res = query_row("SELECT id, depth FROM hive_posts WHERE "
+                "author = '%s' AND permlink = '%s'" % (author, permlink))
     return res or (None, -1)
 
 
@@ -71,7 +72,8 @@ def get_op_community(comment):
 def register_accounts(accounts, date):
     for account in set(accounts):
         if not get_account_id(account):
-            query("INSERT INTO hive_accounts (name, created_at) VALUES ('%s', '%s')" % (account, date))
+            query("INSERT INTO hive_accounts (name, created_at) "
+                    "VALUES ('%s', '%s')" % (account, date))
 
 
 # marks posts as deleted and removes them from feed cache
@@ -86,7 +88,8 @@ def delete_posts(ops):
 # registers new posts (not edits), inserts into feed cache
 def register_posts(ops, date):
     for op in ops:
-        sql = "SELECT id, is_deleted FROM hive_posts WHERE author = '%s' AND permlink = '%s'"
+        sql = ("SELECT id, is_deleted FROM hive_posts "
+            "WHERE author = '%s' AND permlink = '%s'")
         ret = query_row(sql % (op['author'], op['permlink']))
         id = None
         if ret:
@@ -372,6 +375,8 @@ def run():
         print("No tables found. Initializing db...")
         setup()
 
+    #TODO: if initial sync is interrupted, cache never rebuilt
+    #TODO: do not build partial feed_cache during init_sync
     # if this is the initial sync, batch updates until very end
     is_initial_sync = not query_one("SELECT 1 FROM hive_posts_cache LIMIT 1")
 
