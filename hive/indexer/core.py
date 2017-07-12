@@ -14,7 +14,7 @@ from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
-from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, _update_posts_batch
+from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, create_post_as
 
 # core
@@ -330,11 +330,11 @@ def sync_from_steemd(is_initial_sync):
         date = steemd.get_dynamic_global_properties()['time']
 
         print("[PREP] Update {} edited posts".format(len(dirty), date))
-        _update_posts_batch(urls_to_tuples(dirty), steemd, date)
+        update_posts_batch(urls_to_tuples(dirty), steemd, date)
 
         paidout = select_paidout_posts(date)
         print("[PREP] Process {} payouts".format(len(paidout)))
-        _update_posts_batch(paidout, steemd, date)
+        update_posts_batch(paidout, steemd, date)
 
         query("COMMIT")
 
@@ -357,10 +357,10 @@ def listen_steemd():
         query("START TRANSACTION")
 
         dirty = process_block(block)
-        _update_posts_batch(urls_to_tuples(dirty), steemd, block['timestamp'])
+        update_posts_batch(urls_to_tuples(dirty), steemd, block['timestamp'])
 
         paidout = select_paidout_posts(block['timestamp'])
-        _update_posts_batch(paidout, steemd, block['timestamp'])
+        update_posts_batch(paidout, steemd, block['timestamp'])
 
         print("{} edits, {} payouts".format(len(dirty), len(paidout)))
         query("COMMIT")
