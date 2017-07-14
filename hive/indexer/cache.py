@@ -3,13 +3,16 @@ import logging
 import math
 import collections
 import time
+import os
+import websocket
 
 from funcy.seqs import first
 from hive.db.methods import query
 from steem.amount import Amount
 from steem import Steem
 from steem.utils import parse_time
-
+from hive.indexer.call_batch_ws import call_batch_ws
+from toolz import partition_all
 log = logging.getLogger(__name__)
 
 
@@ -220,31 +223,114 @@ def generate_cached_post_sql(id, post, updated_at):
 
     return sqls
 
+def vals_sorted_by_key(adict):
+    ret = []
+    for key in sorted(adict.keys()):
+        ret.append(adict[key])
+    return ret
+
 
 def update_posts_batch(tuples, steemd, updated_at):
-    buffer = []
-    processed = 0
-    start_time = time.time()
-    for (id, author, permlink) in tuples:
-        post = steemd.get_content(author, permlink)
+    class local:
+        pending = 0
+        queue = []
+        date = None
+
+    def on_message(ws, message):
+        msg = json.loads(message)
+        id = msg['id']
+        post = msg['result']
+
         if not post['author']:
             print("WARNING: content not found: @{}/{} (id {})".format(
                 author, permlink, id))
-            continue
-        sql = generate_cached_post_sql(id, post, updated_at)
-        buffer.append(sql)
 
-        if len(buffer) == 1000:
-            batch_queries(buffer)
-            processed += len(buffer)
-            rem = len(tuples) - processed
-            rate = processed / (time.time() - start_time)
-            print(" -- {} of {} ({}/s) -- {}m remaining".format(
-                processed, len(tuples), round(rate, 1),
-                round((len(tuples) - processed) / rate / 60, 2) ))
-            buffer = []
+        queries = generate_cached_post_sql(id, post, local.date)
+        #buffer.append(sql)
+        for (sql, params) in queries:
+            query(sql, **params)
 
-    batch_queries(buffer)
+        local.pending -= 1
+        if not local.pending and not local.queue:
+            ws.close()
+
+    def on_error(ws, error):
+        print("[WS] ERROR: {}".format(error))
+
+    def on_close(ws):
+        pass
+
+    def on_open(ws):
+        while local.queue:
+            while local.pending >= 1000:
+                print("wait.. %d left, %d pending" % (len(local.queue), local.pending))
+                time.sleep(0.1)
+
+            while local.queue and local.pending < 100000000:
+                local.pending += 1
+                id, author, permlink = local.queue.pop()
+                message = dict(jsonrpc='2.0', method='get_content',
+                        id=id, params=[author, permlink])
+                ws.send(json.dumps(message))
+
+
+    # init
+    tuples.reverse()
+    local.queue = tuples
+    local.date = updated_at
+    url = os.environ.get('STEEMD_WS', 'missing ENV STEEMD_WS')
+    ws = websocket.WebSocketApp(url,
+        on_message = on_message,
+        on_error = on_error,
+        on_close = on_close)
+
+    # send
+    ws.on_open = on_open
+    ws.run_forever()
+
+    #done.
+
+
+
+def update_posts_batch2(tuples, steemd, updated_at):
+    processed = 0
+    start_time = time.time()
+    ws_url = os.environ.get('STEEMD_WS', 'missing ENV STEEMD_WS')
+
+    for batch in partition_all(1000, tuples):
+
+        calls = [['get_content', [author, permlink]]
+            for (id, author, permlink) in batch]
+
+        ti1 = time.time()
+        ret = call_batch_ws(ws_url, calls)
+        t1 = time.time() - ti1
+
+        buffer = []
+        i = 0
+        for (id, author, permlink) in batch:
+            post = ret[i]
+            if not post['author']:
+                print("WARNING: content not found: @{}/{} (id {})".format(
+                    author, permlink, id))
+                continue
+            sql = generate_cached_post_sql(id, post, updated_at)
+            buffer.append(sql)
+            i += 1
+
+        ti2 = time.time()
+        batch_queries(buffer)
+        t2 = time.time() - ti2
+
+        processed += len(buffer)
+        rem = len(tuples) - processed
+        rate = processed / (time.time() - start_time)
+        print(" -- {} of {} ({}/s) -- {}m remaining".format(
+            processed, len(tuples), round(rate, 1),
+            round((len(tuples) - processed) / rate / 60, 2) ))
+
+        print("%d%% steemd, %d%% mysql -- %0.4f -- %d/s, %d/s" % (100 * t1 / (t1 + t2), 100 * t2 / (t1 + t2), len(buffer) / (t1 + t2), len(buffer)/t1, len(buffer)/t2))
+
 
 
 # called once -- after initial block sync
@@ -275,7 +361,7 @@ def cache_missing_posts(fast_mode = True):
         where = "id NOT IN (SELECT post_id FROM hive_posts_cache)"
 
     sql = ("SELECT id, author, permlink FROM hive_posts "
-           "WHERE is_deleted = 0 AND %s ORDER BY id" % where)
+           "WHERE is_deleted = 0 AND %s ORDER BY id limit 5000" % where)
     rows = list(query(sql))
     print("[INIT] Found {} missing cache entries".format(len(rows)))
     steemd = Steem().steemd
