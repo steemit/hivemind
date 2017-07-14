@@ -67,13 +67,13 @@ def get_following(account: str, skip: int, limit: int):
 
 
 def following_count(account: str):
-    sql = "SELECT COUNT(*) FROM hive_follows WHEERE follower = :account AND state = 1"
-    return query_one(sql, account=account)
+    sql = "SELECT COUNT(*) FROM hive_follows WHERE follower = :a AND state = 1"
+    return query_one(sql, a=account)
 
 
 def follower_count(account: str):
-    sql = "SELECT COUNT(*) FROM hive_follows WHEERE following = :account AND state = 1"
-    return query_one(sql, account=account)
+    sql = "SELECT COUNT(*) FROM hive_follows WHERE following = :a AND state = 1"
+    return query_one(sql, a=account)
 
 
 # evaluate replacing two above methods with this
@@ -171,10 +171,11 @@ def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
 # returns "homepage" feed for specified account
 def get_user_feed(account: str, skip: int, limit: int):
     sql = """
-      SELECT id, GROUP_CONCAT(account) accounts
+      SELECT post_id, GROUP_CONCAT(account) accounts
         FROM hive_feed_cache
-       WHERE account IN (SELECT following FROM hive_follows WHERE follower = :account AND state = 1)
-    GROUP BY id
+       WHERE account IN (SELECT following FROM hive_follows
+                          WHERE follower = :account AND state = 1)
+    GROUP BY post_id
     ORDER BY MIN(created_at) DESC LIMIT :limit OFFSET :skip
     """
     res = query_all(sql, account = account, skip = skip, limit = limit)
@@ -200,11 +201,13 @@ def get_blog_feed(account: str, skip: int, limit: int):
     # UNION ALL
     #    SELECT post_id, created_at
     #      FROM hive_reblogs
-    #     WHERE account = :account AND (SELECT is_deleted FROM hive_posts WHERE id = post_id) = 0
+    #     WHERE account = :account AND (SELECT is_deleted FROM hive_posts
+    #                                   WHERE id = post_id) = 0
     #  ORDER BY created_at DESC
     #     LIMIT :limit OFFSET :skip
     #"""
-    sql = "SELECT id FROM hive_feed_cache WHERE account = :account ORDER BY created_at DESC LIMIT :limit OFFSET :skip"
+    sql = ("SELECT post_id FROM hive_feed_cache WHERE account = :account "
+            "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
     post_ids = query_col(sql, account = account, skip = skip, limit = limit)
     return get_posts(post_ids)
 
