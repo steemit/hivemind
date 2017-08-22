@@ -3,7 +3,7 @@ ROOT_DIR := $(shell pwd)
 
 PROJECT_NAME := hive
 PROJECT_DOCKER_TAG := steemit/$(PROJECT_NAME)
-PROJECT_DOCKER_RUN_ARGS := --link steemit_mysql:mysql
+PROJECT_DOCKER_RUN_ARGS := --link mysql:mysql
 
 default: build
 

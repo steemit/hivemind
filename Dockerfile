@@ -1,6 +1,6 @@
 FROM phusion/baseimage:0.9.19
 
-#ENV MYSQL_URL mysql://
+
 ENV ENVIRONMENT DEV
 ENV LOG_LEVEL INFO
 ENV LANG en_US.UTF-8
@@ -42,7 +42,7 @@ RUN \
 WORKDIR /app
 
 RUN \
-    pip3 install  . && \
+    pip3 install -e . && \
     apt-get remove -y \
         build-essential \
         libffi-dev \

@@ -2,6 +2,7 @@
 import click
 from click import echo
 from hive.indexer.core import sync_from_file, sync_from_steemd, head_state
+from hive.db.schema import setup
 from prettytable import PrettyTable
 
 
@@ -26,7 +27,8 @@ def indexer():
 def index_from_steemd():
     """import blocks from .json.lst file"""
     echo('Loading blocks from steemd...')
-    sync_from_steemd()
+    setup()
+    sync_from_steemd(True)
 
 
 @indexer.command(name='show-status')

@@ -2,7 +2,6 @@ version: '3'
 services:
   mysql:
     image: mysql
-    container_name: hive-mysql
     environment:
       MYSQL_ROOT_PASSWORD: root_password
       MYSQL_USERNAME: testuser
@@ -10,28 +9,20 @@ services:
       MYSQL_DATABASE: testdb
     ports:
      - 3306:3306
-    volumes:
-     - /home/user/docker/hive:/var/lib/mysql
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin
-    container_name: hive-phpmyadmin
+  hive:
+    depends_on:
+      - mysql
+    image: steemit/hive
+    build: .
+    environment:
+      DATABASE_URL: mysql://root:root_password@mysql:3306/testdb
+      LOG_LEVEL: DEBUG
+      STEEMD_URL: https://steemd.steemit.com
     links:
       - mysql:db
-    environment:
-      MYSQL_USERNAME: root
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: testdb
-    restart: always
     ports:
-     - 8080:80
+      - 8080:8080
     volumes:
-     - /sessions
-#  hive:
-#    build:
-#      context: .
-#      dockerfile: Dockerfile
-#    command: python run.py
-#    container_name: hive-python
-#    links:
-#      - mysql:db
-#    restart: always
+      - .:/app
+    restart: always
+

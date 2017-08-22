@@ -6,6 +6,7 @@ from sqlalchemy.dialects.mysql import (
     CHAR, SMALLINT, TINYINT,
     TINYTEXT, MEDIUMTEXT, DOUBLE,
 )
+from sqlalchemy.exc import IntegrityError
 
 metadata = sa.MetaData()
 
@@ -230,19 +231,26 @@ def setup(connection_url=_url):
     metadata.create_all(engine)
 
     conn = engine.connect()
+
     # Insert hive_blocks data
-    insert = hive_blocks.insert().values(num=0, hash='0000000000000000000000000000000000000000', prev=None, created_at='1970-01-01T00:00:00')
-    conn.execute(insert)
+    try:
+        insert = hive_blocks.insert().values(num=0, hash='0000000000000000000000000000000000000000', prev=None, created_at='1970-01-01T00:00:00')
+        conn.execute(insert)
+
+    except IntegrityError:
+        pass
 
     # Insert hive_accounts data
-    insert = hive_accounts.insert()
-    conn.execute(insert, [
-        {'name': 'miners', 'created_at': '1970-01-01T00:00:00'},
-        {'name': 'null', 'created_at': '1970-01-01T00:00:00'},
-        {'name': 'temp', 'created_at': '1970-01-01T00:00:00'},
-        {'name': 'initminer', 'created_at': '1970-01-01T00:00:00'}
-    ])
-
+    try:
+        insert = hive_accounts.insert()
+        conn.execute(insert, [
+            {'name': 'miners', 'created_at': '1970-01-01T00:00:00'},
+            {'name': 'null', 'created_at': '1970-01-01T00:00:00'},
+            {'name': 'temp', 'created_at': '1970-01-01T00:00:00'},
+            {'name': 'initminer', 'created_at': '1970-01-01T00:00:00'}
+        ])
+    except IntegrityError:
+        pass
 
 def teardown(connection_url=_url):
     engine = sa.create_engine(connection_url)
