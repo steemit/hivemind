@@ -86,6 +86,15 @@ def follow_stats(account: str):
     """
     return first(query(sql))
 
+# all completed payouts (warning: 70s query)
+def payouts_total():
+    sql = "SELECT SUM(payout) FROM hive_posts_cache WHERE is_paidout = 1"
+    return query_one(sql)
+
+# sum of completed payouts last 24 hrs
+def payouts_last_24h():
+    sql = "SELECT SUM(payout) FROM hive_posts_cache WHERE is_paidout = 1 AND payout_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+    return query_one(sql)
 
 # unused
 def get_reblogs_since(account: str, since: str):
