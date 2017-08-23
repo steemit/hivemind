@@ -165,7 +165,10 @@ def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
         raise Exception("unknown sort order {}".format(sort))
 
     if tag:
-        where.append('post_id IN (SELECT post_id FROM hive_post_tags WHERE tag = :tag)')
+        id_col = 'post_id'
+        if table == 'hive_posts':
+            id_col = 'id'
+        where.append('%s IN (SELECT post_id FROM hive_post_tags WHERE tag = :tag)' % (id_col))
 
     if where:
         where = 'WHERE ' + ' AND '.join(where)
