@@ -3,6 +3,7 @@ import logging
 import glob
 import time
 import re
+import os
 
 from hive.db.schema import setup, teardown
 from funcy.seqs import first, second, drop, flatten
@@ -16,6 +17,9 @@ log = logging.getLogger(__name__)
 
 from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, create_post_as
+
+
+STEEMD_URL = os.environ.get('STEEMD_URL')
 
 # core
 # ----
@@ -305,7 +309,10 @@ def sync_from_file(file_path, skip_lines, chunk_size=250, is_initial_sync=False)
 
 
 def sync_from_steemd(is_initial_sync):
-    steemd = Steemd()
+    if STEEMD_URL:
+        steemd = Steemd(nodes=[STEEMD_URL])
+    else:
+        steemd = Steemd()
     dirty = set()
 
     lbound = db_last_block() + 1

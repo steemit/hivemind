@@ -230,6 +230,7 @@ def setup(connection_url=_url):
     metadata.create_all(engine)
 
     conn = engine.connect()
+
     # Insert hive_blocks data
     insert = hive_blocks.insert().values(num=0, hash='0000000000000000000000000000000000000000', prev=None, created_at='1970-01-01T00:00:00')
     conn.execute(insert)

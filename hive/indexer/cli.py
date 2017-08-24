@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 import click
 from click import echo
-from hive.indexer.core import sync_from_file, sync_from_steemd, head_state
+from hive.indexer.core import run, head_state
+from hive.db.schema import setup
 from prettytable import PrettyTable
 
 
@@ -14,19 +15,11 @@ def indexer():
     pass
 
 
-#@indexer.command(name='from-file')
-#@click.argument('filename', type=click.Path(exists=True))
-#def index_from_file(filename):
-#    """import blocks from steemd"""
-#    echo('Loading blocks from %s...' % filename)
-#    sync_from_file(filename)
-
-
-@indexer.command(name='from-steemd')
+@indexer.command(name='run')
 def index_from_steemd():
-    """import blocks from .json.lst file"""
-    echo('Loading blocks from steemd...')
-    sync_from_steemd()
+    """sync up to head block, then listen"""
+    echo('Starting hivemind...')
+    run()
 
 
 @indexer.command(name='show-status')
