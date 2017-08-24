@@ -2,5 +2,5 @@
 
 POPULATE_CMD="$(which hive)"
 
-exec python3.5 "${POPULATE_CMD}" indexer from-steemd \
+exec python3.5 "${POPULATE_CMD}" indexer run \
 #  --database_url "${DATABASE_URL:-sqlite:///}" \
