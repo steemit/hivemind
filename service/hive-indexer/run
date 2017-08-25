@@ -2,4 +2,4 @@
 
 POPULATE_CMD="$(which hive)"
 
-exec python3.5 "${POPULATE_CMD}" indexer run
+exec python3.5 -u "${POPULATE_CMD}" indexer run
