@@ -11,6 +11,8 @@ def process_json_community_op(account, op_json, date):
     if cmd_name not in commands:
         return
 
+    print("community op from {} @ {} -- {}".format(account, date, op_json))
+
     community = cmd_op['community']
     community_exists = is_community(community)
 

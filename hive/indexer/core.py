@@ -285,8 +285,9 @@ def process_blocks(blocks, is_initial_sync = False):
 def sync_from_checkpoints(is_initial_sync):
     last_block = db_last_block()
 
-    fn = lambda f: [int(f.split('/')[1].split('.')[0]), f]
-    files = map(fn, glob.glob("checkpoints/*.json.lst"))
+    fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
+    mydir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
+    files = map(fn, glob.glob(mydir + "/checkpoints/*.json.lst"))
     files = sorted(files, key = lambda f: f[0])
 
     last_read = 0
