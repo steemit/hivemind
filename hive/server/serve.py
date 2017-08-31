@@ -25,7 +25,9 @@ from hive.db.methods import (
     follower_count,
     get_user_feed,
     get_blog_feed,
-    get_discussions_by_sort_and_tag
+    get_discussions_by_sort_and_tag,
+    payouts_total,
+    payouts_last_24h,
 )
 
 
@@ -66,6 +68,10 @@ def health():
 @app.get('/head_state')
 def callback():
     return head_state()
+
+@app.get('/stats/payouts')
+def callback():
+    return dict(total = payouts_total(), last_24h = payouts_last_24h())
 
 
 # discussions

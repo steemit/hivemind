@@ -4,6 +4,7 @@ from hive.db.schema import (
     hive_follows,
 )
 from sqlalchemy import text, select, func
+from decimal import Decimal
 
 import time
 import re
@@ -86,14 +87,28 @@ def follow_stats(account: str):
     """
     return first(query(sql))
 
-# all completed payouts (warning: 70s query)
+# all completed payouts
 def payouts_total():
-    sql = "SELECT SUM(payout) FROM hive_posts_cache WHERE is_paidout = 1"
-    return query_one(sql)
+    # memoized historical sum. To update:
+    #  SELECT SUM(payout) FROM hive_posts_cache
+    #  WHERE is_paidout = 1 AND payout_at <= precalc_date
+    precalc_date = '2017-08-30 00:00:00'
+    precalc_sum = Decimal('19358777.541')
+
+    # sum all payouts since `precalc_date`
+    sql = """
+      SELECT SUM(payout) FROM hive_posts_cache
+      WHERE is_paidout = 1 AND payout_at > '%s'
+    """ % (precalc_date)
+
+    return precalc_sum + query_one(sql)
 
 # sum of completed payouts last 24 hrs
 def payouts_last_24h():
-    sql = "SELECT SUM(payout) FROM hive_posts_cache WHERE is_paidout = 1 AND payout_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+    sql = """
+      SELECT SUM(payout) FROM hive_posts_cache
+      WHERE is_paidout = 1 AND payout_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+    """
     return query_one(sql)
 
 # unused
