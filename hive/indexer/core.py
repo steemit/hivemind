@@ -139,6 +139,8 @@ def process_json_follow_op(account, op_json, block_date):
     """ Process legacy 'follow' plugin ops (follow/mute/clear, reblog) """
     if type(op_json) != list:
         return
+    if len(op_json) != 2:
+        return
     if first(op_json) not in ['follow', 'reblog']:
         return
     if not isinstance(second(op_json), dict):
