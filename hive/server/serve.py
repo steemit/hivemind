@@ -26,6 +26,7 @@ from hive.db.methods import (
     get_user_feed,
     get_blog_feed,
     get_discussions_by_sort_and_tag,
+    get_related_posts,
     payouts_total,
     payouts_last_24h,
 )
@@ -92,6 +93,10 @@ def callback(sort, skip):
 @app.get('/discussions/tag/<tag>/sort/<sort>/<skip>')
 def callback(tag, sort, skip):
     return dict(posts = get_discussions_by_sort_and_tag(sort, tag, int(skip), 20))
+
+@app.get('/related/<account>/<permlink>')
+def callback(account, permlink):
+    return dict(posts = get_related_posts(account, permlink))
 
 
 # follows

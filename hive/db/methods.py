@@ -239,3 +239,18 @@ def get_blog_feed(account: str, skip: int, limit: int):
     return get_posts(post_ids)
 
 
+def get_related_posts(account: str, permlink: str):
+    sql = """
+      SELECT p2.id
+        FROM hive_posts p1
+        JOIN hive_posts p2 ON p1.category = p2.category
+        JOIN hive_posts_cache pc ON p2.id = pc.post_id
+       WHERE p1.author = :a AND p1.permlink = :p
+         AND sc_trend > :t
+    ORDER BY sc_trend DESC LIMIT 5
+    """
+    thresh = time.time() / 480000
+    post_ids = query_col(sql, a=account, p=permlink, t=thresh)
+    return get_posts(post_ids)
+
+
