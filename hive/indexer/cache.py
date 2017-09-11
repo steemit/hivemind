@@ -231,8 +231,7 @@ def update_posts_batch(tuples, steemd, updated_at):
     for (id, author, permlink) in tuples:
         post = steemd.get_content(author, permlink)
         if not post['author']:
-            print("WARNING: content not found: @{}/{} (id {})".format(
-                author, permlink, id))
+            # post was deleted; skip.
             continue
         sql = generate_cached_post_sql(id, post, updated_at)
         buffer.append(sql)
