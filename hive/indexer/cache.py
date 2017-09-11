@@ -14,11 +14,11 @@ log = logging.getLogger(__name__)
 
 
 def get_img_url(url, max_size=1024):
-    if url:
-        url = url.strip()
     if url and type(url) is not str:
         print("bad url param type: {}".format(url))
         url = None
+    if url:
+        url = url.strip()
     if url and len(url) < max_size and url[0:4] == 'http':
         return url
 
