@@ -354,12 +354,15 @@ def sync_from_steemd(is_initial_sync):
 
 def listen_steemd():
     steemd = Steemd()
-    b = Blockchain(mode='head')
-    h = b.stream_from(
-        start_block=db_last_block() + 1,
-        full_blocks=True,
-    )
-    for block in h:
+    curr_block = db_last_block()
+    while True:
+        curr_block = curr_block + 1
+        block = False
+        while not block:
+            block = steemd.get_block(curr_block)
+            if not block:
+                time.sleep(3)
+
         if not block or 'block_id' not in block:
             raise Exception("stream returned invalid block: {}".format(block))
 
