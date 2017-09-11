@@ -356,6 +356,7 @@ def listen_steemd(trail_blocks = 2):
     steemd = Steemd()
     curr_block = db_last_block()
     head_block = steemd.get_dynamic_global_properties()['head_block_number']
+    last_hash = False
 
     while True:
         curr_block = curr_block + 1
@@ -375,6 +376,14 @@ def listen_steemd(trail_blocks = 2):
         num = int(block['block_id'][:8], base=16)
         print("[LIVE] Got block {} at {} with {} txs -- ".format(num,
             block['timestamp'], len(block['transactions'])), end='')
+
+        # ensure the block we received links to our last
+        if last_hash and last_hash != block['previous']:
+            # this condition is very rare unless trail_blocks is 0 and fork is
+            # encountered; to handle gracefully, implement a pop_block method
+            raise Exception("Unlinkable block: have {}, got {} -> {})".format(
+                last_hash, block['previous'], block['block_id']))
+        last_hash = block['block_id']
 
         query("START TRANSACTION")
 
