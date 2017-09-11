@@ -321,7 +321,7 @@ def sync_from_steemd(is_initial_sync):
     lbound = db_last_block() + 1
     ubound = steemd.last_irreversible_block_num
 
-    print("[SYNC] {} blocks to sync".format(ubound - lbound + 1))
+    print("[SYNC] {} blocks to batch sync".format(ubound - lbound + 1))
 
     if not is_initial_sync:
         query("START TRANSACTION")
@@ -352,19 +352,25 @@ def sync_from_steemd(is_initial_sync):
         query("COMMIT")
 
 
-def listen_steemd():
+def listen_steemd(trail_blocks = 2):
     steemd = Steemd()
     curr_block = db_last_block()
+    head_block = steemd.get_dynamic_global_properties()['head_block_number']
+
     while True:
         curr_block = curr_block + 1
-        block = False
-        while not block:
-            block = steemd.get_block(curr_block)
-            if not block:
-                time.sleep(3)
 
-        if not block or 'block_id' not in block:
-            raise Exception("stream returned invalid block: {}".format(block))
+        # pause for a block interval if trailing too close
+        while curr_block > head_block - trail_blocks:
+            time.sleep(3)
+            head_block += 1
+
+        # get the target block; if DNE, pause and retry
+        block = steemd.get_block(curr_block)
+        while not block:
+            time.sleep(3)
+            head_block += 1
+            block = steemd.get_block(curr_block)
 
         num = int(block['block_id'][:8], base=16)
         print("[LIVE] Got block {} at {} with {} txs -- ".format(num,
