@@ -118,8 +118,8 @@ def process_json_community_op(account, op_json, date):
     return True
 
 
-def create_post_as(community, comment: dict) -> str:
-    """ Given a new Steem post/comment, add it to appropriate community.
+def is_community_post_valid(community, comment: dict) -> str:
+    """ Given a new Steem post/comment, check if valid as per community rules
     
     For a comment to be valid, these conditions apply:
         - Post must be new (edits don't count)
@@ -129,11 +129,10 @@ def create_post_as(community, comment: dict) -> str:
     
     Args:
         community (str): Community intended for this post op
-        comment (dict): Operation with the post to add.
+        comment (dict): Raw post operation
         
     Returns:
-        name (str): If all conditions apply, community name we're posting into.
-                    Otherwise, authors own name (blog) is returned.
+        is_valid (bool): If all checks pass, true
     """
 
     if not community:
@@ -141,16 +140,16 @@ def create_post_as(community, comment: dict) -> str:
 
     author = comment['author']
     if author == community:
-        return author
+        return True
 
     community_props = get_community(community)
     if not community_props:
-        # TODO: if a community is not found, assume it's completely open.
+        # TODO: if a community is not found, assume it's completely open?
         # all we need to do at that point is validate that its a valid acct name.
-        return None
+        return False
 
     if is_author_muted(author, community):
-        return None
+        return False
 
     privacy = privacy_map[community_props['privacy']]
     if privacy == 'open':
@@ -158,13 +157,13 @@ def create_post_as(community, comment: dict) -> str:
     elif privacy == 'restricted':
         # guests cannot create top-level posts in restricted communities
         if comment['parent_author'] == "" and get_user_role(author, community) == 'guest':
-            return None
+            return False
     elif privacy == 'closed':
         # we need at least member permissions to post or comment
         if get_user_role(author, community) == 'guest':
-            return None
+            return False
 
-    return community
+    return True
 
 
 def get_community(community_name):

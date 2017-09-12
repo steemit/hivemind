@@ -16,7 +16,7 @@ from toolz import partition_all
 log = logging.getLogger(__name__)
 
 from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, update_posts_batch
-from hive.indexer.community import process_json_community_op, create_post_as
+from hive.indexer.community import process_json_community_op, is_community_post_valid
 
 
 STEEMD_URL = os.environ.get('STEEMD_URL')
@@ -116,16 +116,16 @@ def register_posts(ops, date):
             depth = parent_depth + 1
 
         # validated community; will return None if invalid & defaults to author.
-        community = create_post_as(community, op) or op['author']
+        is_valid = int(is_community_post_valid(community, op))
 
         # if we're reusing a previously-deleted post (rare!), update it
         if id:
-            query("UPDATE hive_posts SET is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (parent_id or 'NULL', category, community, depth, id))
+            query("UPDATE hive_posts SET is_valid = %d, is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (is_valid, parent_id or 'NULL', category, community, depth, id))
             query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=id)
         else:
-            query("INSERT INTO hive_posts (parent_id, author, permlink, category, community, depth, created_at) "
-                  "VALUES (%s, '%s', '%s', '%s', '%s', %d, '%s')" % (
-                      parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
+            query("INSERT INTO hive_posts (is_valid, parent_id, author, permlink, category, community, depth, created_at) "
+                  "VALUES (%d, %s, '%s', '%s', '%s', '%s', %d, '%s')" % (
+                      is_valid, parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
             id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
 
         # add top-level posts to feed cache

@@ -53,6 +53,7 @@ hive_posts = sa.Table(
     sa.Column('is_deleted', TINYINT(1), nullable=False, server_default='0'),
     sa.Column('is_pinned', TINYINT(1), nullable=False, server_default='0'),
     sa.Column('is_muted', TINYINT(1), nullable=False, server_default='0'),
+    sa.Column('is_valid', TINYINT(1), nullable=False, server_default='1'),
     sa.ForeignKeyConstraint(['author'], ['hive_accounts.name'], name='hive_posts_fk1'),
     sa.ForeignKeyConstraint(['community'], ['hive_accounts.name'], name='hive_posts_fk2'),
     sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
