@@ -144,9 +144,8 @@ def is_community_post_valid(community, comment: dict) -> str:
 
     community_props = get_community(community)
     if not community_props:
-        # TODO: if a community is not found, assume it's completely open?
-        # all we need to do at that point is validate that its a valid acct name.
-        return False
+        # if this is not a defined community, it's free to post in.
+        return True
 
     if is_author_muted(author, community):
         return False

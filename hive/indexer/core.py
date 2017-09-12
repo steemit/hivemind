@@ -115,8 +115,16 @@ def register_posts(ops, date):
             parent_id, parent_depth, category, community = parent_data
             depth = parent_depth + 1
 
+        # community must be an existing account
+        if not get_account_id(community):
+            print("Invalid community @{}/{} -- {}".format(op['author'], op['permlink'], community))
+            community = op['author']
+
+
         # validated community; will return None if invalid & defaults to author.
         is_valid = int(is_community_post_valid(community, op))
+        if not is_valid:
+            print("Invalid post @{}/{} in @{}".format(op['author'], op['permlink'], community))
 
         # if we're reusing a previously-deleted post (rare!), update it
         if id:
