@@ -355,22 +355,21 @@ def sync_from_steemd(is_initial_sync):
 def listen_steemd(trail_blocks = 2):
     steemd = Steemd()
     curr_block = db_last_block()
-    head_block = steemd.get_dynamic_global_properties()['head_block_number']
     last_hash = False
 
     while True:
         curr_block = curr_block + 1
 
-        # pause for a block interval if trailing too close
-        while curr_block > head_block - trail_blocks:
-            time.sleep(3)
-            head_block += 1
+        # if trailing too close, take a pause
+        while trail_blocks > 0:
+            if curr_block <= steemd.head_block_number - trail_blocks:
+                break
+            time.sleep(0.5)
 
         # get the target block; if DNE, pause and retry
         block = steemd.get_block(curr_block)
         while not block:
-            time.sleep(3)
-            head_block += 1
+            time.sleep(0.5)
             block = steemd.get_block(curr_block)
 
         num = int(block['block_id'][:8], base=16)
