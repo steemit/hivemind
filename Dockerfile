@@ -42,6 +42,7 @@ RUN \
 WORKDIR /app
 
 RUN \
+    pip3 install -e git+https://github.com/steemit/steem-python.git#egg=steem && \
     pip3 install -e . && \
     apt-get remove -y \
         build-essential \

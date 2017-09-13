@@ -138,6 +138,7 @@ application = app
 def _dev_server(port=8081, debug=True):
     # pylint: disable=bare-except
     try:
+        print("Launch hive server.")
         app.run(port=port, debug=debug)
     except:
         logger.exception('HTTP Server Exception')
