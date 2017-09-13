@@ -126,7 +126,7 @@ def get_posts(ids, context = None):
     sql = """
     SELECT post_id, author, permlink, title, preview, img_url, payout,
            promoted, created_at, payout_at, is_nsfw, rshares, votes, json
-      FROM hive_posts_cache WHERE post_id IN (%s)
+      FROM hive_posts_cache WHERE post_id IN :ids
     """
 
     reblogged_ids = []

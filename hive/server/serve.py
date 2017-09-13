@@ -6,7 +6,7 @@ from datetime import datetime
 
 import bottle
 import hive.server.methods as rpcmethods
-from bottle import abort
+from bottle import abort, request
 from bottle_errorsrest import ErrorsRestPlugin
 from bottle_sqlalchemy import Plugin
 from hive.db.schema import metadata as hive_metadata
@@ -78,21 +78,25 @@ def callback():
 # discussions
 # -----------
 
+def get_context():
+    if 'context' in request.query:
+        return request.query['context']
+
 @app.get('/blog/<user>/<skip>')
 def callback(user, skip):
-    return dict(user = user, posts = get_blog_feed(user, int(skip), 20))
+    return dict(user = user, posts = get_blog_feed(user, int(skip), 20, get_context()))
 
 @app.get('/feed/<user>/<skip>')
 def callback(user, skip):
-    return dict(user = user, posts = get_user_feed(user, int(skip), 20))
+    return dict(user = user, posts = get_user_feed(user, int(skip), 20, get_context()))
 
 @app.get('/discussions/sort/<sort>/<skip>')
 def callback(sort, skip):
-    return dict(posts = get_discussions_by_sort_and_tag(sort, None, int(skip), 20))
+    return dict(posts = get_discussions_by_sort_and_tag(sort, None, int(skip), 20, get_context()))
 
 @app.get('/discussions/tag/<tag>/sort/<sort>/<skip>')
 def callback(tag, sort, skip):
-    return dict(posts = get_discussions_by_sort_and_tag(sort, tag, int(skip), 20))
+    return dict(posts = get_discussions_by_sort_and_tag(sort, tag, int(skip), 20, get_context()))
 
 @app.get('/related/<account>/<permlink>')
 def callback(account, permlink):
