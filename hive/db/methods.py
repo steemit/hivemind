@@ -122,21 +122,31 @@ def get_reblogs_since(account: str, since: str):
 
 
 # given an array of post ids, returns full metadata in the same order
-def get_posts(ids):
+def get_posts(ids, context = None):
     sql = """
     SELECT post_id, author, permlink, title, preview, img_url, payout,
            promoted, created_at, payout_at, is_nsfw, rshares, votes, json
       FROM hive_posts_cache WHERE post_id IN (%s)
     """
-    sql = sql % ','.join([str(id) for id in ids])
-    posts = [dict(r) for r in query_all(sql)]
+
+    reblogged_ids = []
+    if context:
+        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE account = :a AND post_id IN :ids", a=context, ids=ids)
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
-    for row in query(sql).fetchall():
+    for row in query(sql, ids=ids).fetchall():
         obj = dict(row)
-        obj.pop('votes')
-        obj.pop('json')
+
+        if context:
+            voters = [csa.split(",")[0] for csa in obj['votes'].split("\n")]
+            obj['user_state'] = {
+                'reblogged': row['post_id'] in reblogged_ids,
+                'voted': context in voters
+            }
+
+        obj.pop('votes') # temp
+        obj.pop('json')  # temp
         posts_by_id[row['post_id']] = obj
 
     # in rare cases of cache inconsistency, recover and warn
@@ -151,7 +161,7 @@ def get_posts(ids):
 
 # builds SQL query to pull a list of posts for any sort order or tag
 # sort can be: trending hot new promoted
-def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
+def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None):
     if skip > 5000:
         raise Exception("cannot skip {} results".format(skip))
     if limit > 100:
@@ -192,11 +202,11 @@ def get_discussions_by_sort_and_tag(sort, tag, skip, limit):
 
     sql = "SELECT %s FROM %s %s ORDER BY %s LIMIT :limit OFFSET :skip" % (col, table, where, order)
     ids = [r[0] for r in query(sql, tag=tag, limit=limit, skip=skip).fetchall()]
-    return get_posts(ids)
+    return get_posts(ids, context)
 
 
 # returns "homepage" feed for specified account
-def get_user_feed(account: str, skip: int, limit: int):
+def get_user_feed(account: str, skip: int, limit: int, context: str = None):
     sql = """
       SELECT post_id, GROUP_CONCAT(account) accounts
         FROM hive_feed_cache
@@ -206,7 +216,7 @@ def get_user_feed(account: str, skip: int, limit: int):
     ORDER BY MIN(created_at) DESC LIMIT :limit OFFSET :skip
     """
     res = query_all(sql, account = account, skip = skip, limit = limit)
-    posts = get_posts([r[0] for r in res])
+    posts = get_posts([r[0] for r in res], context)
 
     # Merge reblogged_by data into result set
     accts = dict(res)
@@ -220,7 +230,7 @@ def get_user_feed(account: str, skip: int, limit: int):
 
 
 # returns a blog feed (posts and reblogs from the specified account)
-def get_blog_feed(account: str, skip: int, limit: int):
+def get_blog_feed(account: str, skip: int, limit: int, context: str = None):
     #sql = """
     #    SELECT id, created_at
     #      FROM hive_posts
@@ -236,7 +246,7 @@ def get_blog_feed(account: str, skip: int, limit: int):
     sql = ("SELECT post_id FROM hive_feed_cache WHERE account = :account "
             "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
     post_ids = query_col(sql, account = account, skip = skip, limit = limit)
-    return get_posts(post_ids)
+    return get_posts(post_ids, context)
 
 
 def get_related_posts(account: str, permlink: str):
