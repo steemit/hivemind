@@ -27,6 +27,7 @@ setup(
     install_requires=[
         'steem',
         'bottle',
+        'bottle_sqlalchemy',
         'bottle_errorsrest',
         'sqlalchemy',
         'mysqlclient',

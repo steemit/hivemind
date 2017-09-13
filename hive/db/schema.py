@@ -218,8 +218,9 @@ hive_posts_cache = sa.Table(
 
 _url = os.environ.get('DATABASE_URL', 'missing ENV DATABASE_URL')
 logging.basicConfig()
-if os.environ.get('LOG_LEVEL') == 'INFO':
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+#if os.environ.get('LOG_LEVEL') == 'INFO': # ultra-verbose
+#    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
 
 def connect(connection_url=_url, **kwargs):
