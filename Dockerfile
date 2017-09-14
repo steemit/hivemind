@@ -23,6 +23,7 @@ RUN \
         python3 \
         python3-dev \
         python3-pip \
+        python3-setuptools \
         libxml2-dev \
         libxslt-dev \
         runit \
@@ -42,6 +43,8 @@ RUN \
 WORKDIR /app
 
 RUN \
+    pip3 install pipenv && \
+    pip3 install -e git+https://github.com/steemit/steem-python.git#egg=steem && \
     pip3 install -e . && \
     apt-get remove -y \
         build-essential \
