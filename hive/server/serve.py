@@ -10,15 +10,15 @@ from bottle import abort, request
 from bottle_errorsrest import ErrorsRestPlugin
 from bottle_sqlalchemy import Plugin
 from hive.db.schema import metadata as hive_metadata
-from hive.indexer.core import db_last_block, head_state
+#from hive.indexer.core import db_last_block, head_state
 from hive.sbds.jsonrpc import register_endpoint
 from hive.sbds.sbds_json import ToStringJSONEncoder
 from sqlalchemy import create_engine
-from steem.steemd import Steemd
 
 
 
 from hive.db.methods import (
+    db_head_state,
     get_followers,
     get_following,
     following_count,
@@ -49,26 +49,21 @@ app.install(ErrorsRestPlugin())
 # -------------------
 @app.get('/health')
 def health():
-    steemd = Steemd()
-    last_db_block = db_last_block()
-    last_irreversible_block = steemd.last_irreversible_block_num
-    diff = last_irreversible_block - last_db_block
-    if diff > app.config['hive.MAX_BLOCK_NUM_DIFF']:
+    state = db_head_state()
+    if state['db_head_age'] > app.config['hive.MAX_BLOCK_NUM_DIFF'] * 3:
         abort(
             500,
-            'last irreversible block (%s) - highest db block (%s) = %s, > max allowable difference (%s)'
-            % (last_irreversible_block, last_db_block, diff,
-               app.config['hive.MAX_BLOCK_NUM_DIFF']))
+            'head block age (%s) > max allowable (%s); head block num: %s'
+            % (state['db_head_age'], app.config['hive.MAX_BLOCK_NUM_DIFF'] * 3,
+                state['db_head_block']))
     else:
         return dict(
-            last_db_block=last_db_block,
-            last_irreversible_block=last_irreversible_block,
-            diff=diff,
+            state=state,
             timestamp=datetime.utcnow().isoformat())
 
-@app.get('/head_state')
-def callback():
-    return head_state()
+#@app.get('/head_state')
+#def callback():
+#    return head_state()
 
 @app.get('/stats/payouts')
 def callback():
@@ -121,7 +116,7 @@ def callback(user, skip, limit):
 jsonrpc = register_endpoint(path='/', app=app, namespace='hive')
 
 json_rpc_methods = {
-    'head_state': head_state,
+#    'head_state': head_state,
     'get_followers': rpcmethods.get_followers,
     'get_following': rpcmethods.get_following,
 }
