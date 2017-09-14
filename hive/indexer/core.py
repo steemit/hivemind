@@ -5,10 +5,9 @@ import time
 import re
 import os
 
-from hive.db.schema import setup, teardown
 from funcy.seqs import first, second, drop, flatten
+from hive.db.schema import setup, teardown
 from hive.db.methods import query_one, query, query_row, db_last_block
-from steem.blockchain import Blockchain
 from steem.steemd import Steemd
 from steem.utils import json_expand
 from toolz import partition_all

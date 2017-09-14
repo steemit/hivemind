@@ -6,9 +6,8 @@ import time
 
 from funcy.seqs import first
 from hive.db.methods import query
-from steem.amount import Amount
 from steem import Steem
-from steem.utils import parse_time
+from hive.indexer.utils import amount, parse_time
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +58,7 @@ def get_stats(post):
     flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
 
     allow_delete = post['children'] == 0 and int(post['net_rshares']) <= 0
-    has_pending_payout = Amount(post['pending_payout_value']).amount >= 0.02
+    has_pending_payout = amount(post['pending_payout_value']) >= 0.02
     author_rep = rep_log10(post['author_reputation'])
 
     gray_threshold = -9999999999
@@ -148,7 +147,7 @@ def generate_cached_post_sql(id, post, updated_at):
 
     # these are rshares which are PENDING
     payout_declined = False
-    if Amount(post['max_accepted_payout']).amount == 0:
+    if amount(post['max_accepted_payout']) == 0:
         payout_declined = True
     elif len(post['beneficiaries']) == 1:
         benny = first(post['beneficiaries'])
@@ -157,13 +156,13 @@ def generate_cached_post_sql(id, post, updated_at):
 
     # total payout (completed and/or pending)
     payout = sum([
-        Amount(post['total_payout_value']).amount,
-        Amount(post['curator_payout_value']).amount,
-        Amount(post['pending_payout_value']).amount,
+        amount(post['total_payout_value']),
+        amount(post['curator_payout_value']),
+        amount(post['pending_payout_value']),
     ])
 
     # total promotion cost
-    promoted = Amount(post['promoted']).amount
+    promoted = amount(post['promoted'])
 
     # trending scores
     timestamp = parse_time(post['created']).timestamp()
