@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from steem import utils as steem_utils
-from steem.steemd import Steemd
+from steembase.http_client import HttpClient
 
 def amount(str):
     return float(str.split(' ')[0])
@@ -27,26 +27,51 @@ def get_adapter():
 class SteemAdapter:
 
     def __init__(self, api_endpoint):
-        self.steemd = Steemd(nodes=[api_endpoint])
+        self._client = HttpClient(nodes=[api_endpoint])
+
+    def get_accounts(self, accounts):
+        return self.__exec('get_accounts', accounts)
 
     def get_content(self, account, permlink):
-        return self.steemd.get_content(account, permlink)
+        return self.__exec('get_content', account, permlink)
 
     def get_block(self, num):
-        return self.steemd.get_block(num)
+        return self.__exec('get_block', num)
 
-    def get_blocks(lbound, ubound): # [lbound, ubound)
-        return self.steemd.get_blocks_range(lbound, ubound)
-
-    def head_block(self):
-        return self.gdgp()['head_block_number']
+    def _gdgp(self):
+        return self.__exec('get_dynamic_global_properties')
 
     def head_time(self):
-        return self.gdgp()['time']
+        return self._gdgp()['time']
+
+    def head_block(self):
+        return self._gdgp()['head_block_number']
 
     def last_irreversible_block_num(self):
-        return self.gdgp()['last_irreversible_block_num']
+        return self._gdgp()['last_irreversible_block_num']
 
-    def gdgp(self):
-        return self.steemd.get_dynamic_global_properties()
+    # https://github.com/steemit/steem-python/blob/master/steem/steemd.py
+    def get_blocks_range(self, lbound, ubound): # [lbound, ubound)
+        block_nums = range(lbound, ubound)
+        required = set(block_nums)
+        available = set()
+        missing = required - available
+        blocks = {}
+
+        while missing:
+            for block in self._get_blocks(missing):
+                blocks[int(block['block_id'][:8], base=16)] = block
+
+            available = set(blocks.keys())
+            missing = required - available
+            if missing:
+                print("WARNING: missed blocks {}".format(missing))
+
+        return [blocks[x] for x in block_nums]
+
+    def _get_blocks(self, blocks):
+        return self._client.exec_multi_with_futures('get_block', blocks, max_workers=10)
+
+    def __exec(self, method, *params):
+        return self._client.exec(method, *params)
 

@@ -333,7 +333,7 @@ def sync_from_steemd(is_initial_sync):
     start_time = time.time()
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
-        blocks = steemd.get_blocks(lbound, to)
+        blocks = steemd.get_blocks_range(lbound, to)
         lbound = to
         dirty |= process_blocks(blocks, is_initial_sync)
 
@@ -432,7 +432,7 @@ def run():
 
 def head_state(*args):
     _ = args  # JSONRPC injects 4 arguments here
-    steemd_head = get_adapter().last_irreversible_block_num()
+    steemd_head = get_adapter().head_block()
     hive_head = db_last_block()
     diff = steemd_head - hive_head
     return dict(steemd=steemd_head, hive=hive_head, diff=diff)
