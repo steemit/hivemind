@@ -9,11 +9,11 @@ from funcy.seqs import first, second, drop, flatten
 from hive.db.schema import setup, teardown
 from hive.db.methods import query_one, query, query_row, db_last_block
 from steem.steemd import Steemd
-from steem.utils import json_expand
 from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
+from hive.indexer.utils import json_expand
 from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, is_community_post_valid
 

@@ -6,8 +6,7 @@ import time
 
 from funcy.seqs import first
 from hive.db.methods import query
-from steem import Steem
-from hive.indexer.utils import amount, parse_time
+from hive.indexer.utils import amount, parse_time, get_adapter
 
 log = logging.getLogger(__name__)
 
@@ -86,7 +85,7 @@ def batch_queries(batches):
     query("COMMIT")
 
 
-# calculate Steemit rep score
+# calculate UI rep score
 def rep_log10(rep):
     def log10(str):
         leading_digits = int(str[0:4])
@@ -223,7 +222,11 @@ def generate_cached_post_sql(id, post, updated_at):
     return sqls
 
 
-def update_posts_batch(tuples, steemd, updated_at):
+def update_posts_batch(tuples, steemd, updated_at = None):
+    # if calling function already has head_time, saves us a call
+    if not updated_at:
+        updated_at = steemd.head_time()
+
     buffer = []
     processed = 0
     start_time = time.time()
@@ -279,9 +282,7 @@ def cache_missing_posts(fast_mode = True):
            "WHERE is_deleted = 0 AND %s ORDER BY id" % where)
     rows = list(query(sql))
     print("[INIT] Found {} missing cache entries".format(len(rows)))
-    steemd = Steem().steemd
-    updated_at = steemd.get_dynamic_global_properties()['time']
-    update_posts_batch(rows, steemd, updated_at)
+    update_posts_batch(rows, get_adapter())
 
 
 # when a post gets paidout ensure we update its final state
