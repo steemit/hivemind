@@ -1,4 +1,6 @@
 import os
+import time
+
 from datetime import datetime
 from steem import utils as steem_utils
 from steembase.http_client import HttpClient
@@ -18,8 +20,7 @@ def get_adapter():
     global _shared_adapter
     if not _shared_adapter:
         url = os.environ.get('STEEMD_URL')
-        if not url:
-            raise "STEEMD_URL undefined"
+        assert url, 'STEEMD_URL undefined'
         _shared_adapter = SteemAdapter(url)
     return _shared_adapter
 
@@ -58,6 +59,7 @@ class SteemAdapter:
         missing = required - available
         blocks = {}
 
+        tries = 0
         while missing:
             for block in self._get_blocks(missing):
                 blocks[int(block['block_id'][:8], base=16)] = block
@@ -65,7 +67,14 @@ class SteemAdapter:
             available = set(blocks.keys())
             missing = required - available
             if missing:
-                print("WARNING: missed blocks {}".format(missing))
+                print("WARNING: API missed blocks {}".format(missing))
+                tries += 1
+                if tries > 50:
+                    print("tried {} times.. pause 5m".format(tries))
+                    time.sleep(300)
+                elif tries > 10:
+                    print("tried {} times.. pause 1m".format(tries))
+                    time.sleep(60)
 
         return [blocks[x] for x in block_nums]
 
