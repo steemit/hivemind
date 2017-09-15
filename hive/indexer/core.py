@@ -8,12 +8,11 @@ import os
 from funcy.seqs import first, second, drop, flatten
 from hive.db.schema import setup, teardown
 from hive.db.methods import query_one, query, query_row, db_last_block
-from steem.steemd import Steemd
 from toolz import partition_all
 
 log = logging.getLogger(__name__)
 
-from hive.indexer.utils import json_expand
+from hive.indexer.utils import json_expand, get_adapter
 from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, is_community_post_valid
 
@@ -319,14 +318,11 @@ def sync_from_file(file_path, skip_lines, chunk_size=250, is_initial_sync=False)
 
 
 def sync_from_steemd(is_initial_sync):
-    if STEEMD_URL:
-        steemd = Steemd(nodes=[STEEMD_URL])
-    else:
-        steemd = Steemd()
+    steemd = get_adapter()
     dirty = set()
 
     lbound = db_last_block() + 1
-    ubound = steemd.last_irreversible_block_num
+    ubound = steemd.last_irreversible_block_num()
 
     print("[SYNC] {} blocks to batch sync".format(ubound - lbound + 1))
 
@@ -337,7 +333,7 @@ def sync_from_steemd(is_initial_sync):
     start_time = time.time()
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
-        blocks = steemd.get_blocks_range(lbound, to)
+        blocks = steemd.get_blocks(lbound, to)
         lbound = to
         dirty |= process_blocks(blocks, is_initial_sync)
 
@@ -347,9 +343,9 @@ def sync_from_steemd(is_initial_sync):
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
-        date = steemd.get_dynamic_global_properties()['time']
+        date = steemd.head_time()
 
-        print("[PREP] Update {} edited posts".format(len(dirty), date))
+        print("[PREP] Update {} edited posts".format(len(dirty)))
         update_posts_batch(urls_to_tuples(dirty), steemd, date)
 
         paidout = select_paidout_posts(date)
@@ -360,7 +356,7 @@ def sync_from_steemd(is_initial_sync):
 
 
 def listen_steemd(trail_blocks = 2):
-    steemd = Steemd()
+    steemd = get_adapter()
     curr_block = db_last_block()
     last_hash = False
 
@@ -369,7 +365,7 @@ def listen_steemd(trail_blocks = 2):
 
         # if trailing too close, take a pause
         while trail_blocks > 0:
-            if curr_block <= steemd.head_block_number - trail_blocks:
+            if curr_block <= steemd.head_block() - trail_blocks:
                 break
             time.sleep(0.5)
 
@@ -436,7 +432,7 @@ def run():
 
 def head_state(*args):
     _ = args  # JSONRPC injects 4 arguments here
-    steemd_head = Steemd().last_irreversible_block_num
+    steemd_head = get_adapter().last_irreversible_block_num()
     hive_head = db_last_block()
     diff = steemd_head - hive_head
     return dict(steemd=steemd_head, hive=hive_head, diff=diff)

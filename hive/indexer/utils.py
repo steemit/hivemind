@@ -35,8 +35,8 @@ class SteemAdapter:
     def get_block(self, num):
         return self.steemd.get_block(num)
 
-    def get_blocks_in_range(start, end):
-        return self.steemd.get_blocks_in_range(start, end)
+    def get_blocks(lbound, ubound): # [lbound, ubound)
+        return self.steemd.get_blocks_range(lbound, ubound)
 
     def head_block(self):
         return self.gdgp()['head_block_number']
