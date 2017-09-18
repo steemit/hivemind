@@ -3,12 +3,104 @@ import logging
 import math
 import collections
 import time
+import re
 
 from funcy.seqs import first
 from hive.db.methods import query
 from hive.indexer.utils import amount, parse_time, get_adapter
 
 log = logging.getLogger(__name__)
+
+def get_accounts_follow_stats(accounts):
+    sql = "SELECT follower,COUNT(*) FROM hive_follows WHERE follower IN :a GROUP BY follower"
+    following = dict(query(sql, a=accounts).fetchall())
+    for a in accounts:
+        if a not in following:
+            following[a] = 0
+
+    sql = "SELECT following,COUNT(*) FROM hive_follows WHERE following IN :a GROUP BY following"
+    followers = dict(query(sql, a=accounts).fetchall())
+    for a in accounts:
+        if a not in followers:
+            followers[a] = 0
+
+    return {'followers': followers, 'following': following}
+
+def truncate(string, maxlen):
+    if string:
+        string = string.strip()
+        if len(string) > maxlen:
+            string = string[0:(maxlen-1)] + '...'
+    return string
+
+def normalize_account_metadata(account):
+    prof = {}
+    try:
+        prof = json.loads(account['json_metadata'])['profile']
+        if type(prof) != dict:
+            prof = {}
+    except:
+        pass
+
+    name = prof['name'] if 'name' in prof else None
+    about = prof['about'] if 'about' in prof else None
+    location = prof['location'] if 'location' in prof else None
+    website = prof['website'] if 'website' in prof else None
+    profile_image = prof['profile_image'] if 'profile_image' in prof else None
+    cover_image = prof['cover_image'] if 'cover_image' in prof else None
+
+    name = truncate(name, 20)
+    about = truncate(about, 160)
+    location = truncate(location, 30)
+
+    if name and name[0:1] == '@':
+        name = None
+    if website and len(website) > 100:
+        website = None
+    if website and website[0:4] != 'http':
+        website = 'http://' + website
+    # TODO: regex validate `website`
+
+    if profile_image and not re.match('^https?://', profile_image):
+        profile_image = None
+    if cover_image and not re.match('^https?://', cover_image):
+        cover_image = None
+
+    return dict(
+        display_name=name,
+        about=about,
+        location=location,
+        #website=website,
+        url=website,
+        img_url=profile_image,
+        #profile_image=profile_image,
+        #cover_image=cover_image,
+        )
+
+
+def generate_cached_accounts_sql(accounts):
+    fstats = get_accounts_follow_stats(accounts)
+    sqls = []
+    for account in get_adapter().get_accounts(accounts):
+        name = account['name']
+
+        values = {
+            'name': name,
+            #'proxy': account['proxy'],
+            #'post_count': account['post_count'],
+            'reputation': rep_log10(account['reputation']),
+            #'followers': fstats['followers'][name],
+            #'following': fstats['following'][name],
+            #'proxy_weight': account['vesting_shares'],
+            #'vote_weight': account['vesting_shares'],
+            #'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
+            **normalize_account_metadata(account)
+        }
+
+        update = ', '.join( [k+" = :"+k for k in values.keys()][1:] )
+        sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
+        sqls.append([(sql, values)])
+    return sqls
 
 
 def get_img_url(url, max_size=1024):
@@ -65,6 +157,10 @@ def get_stats(post):
 
     gray = not has_pending_payout and (author_rep < 1 or low_value_post)
     hide = not has_pending_payout and (author_rep < 0)
+
+    # TODO: evaluate adding these columns
+    # is_no_payout
+    # is_full_power
 
     return {
         'hide': hide,
@@ -168,15 +264,7 @@ def generate_cached_post_sql(id, post, updated_at):
     hot_score = score(rshares, timestamp, 10000)
     trend_score = score(rshares, timestamp, 480000)
 
-    # TODO: evaluate adding these columns. Some CAN be computed upon access.
-    #   Some need to be in the db if queries will depend on them. (is_hidden)
-    # is_no_payout
-    # is_full_power
-    # is_hidden
-    # is_grayed
-    # flag_weight
-    # total_votes
-    # up_votes
+    # TODO: add get_stats fields
 
     values = collections.OrderedDict([
         ('post_id', '%d' % id),
@@ -305,7 +393,9 @@ def clean_dead_posts():
 # testing
 # -------
 def run():
-    cache_missing_posts(fast_mode=False)
+    #cache_missing_posts(fast_mode=False)
+    sqls = generate_cached_accounts_sql(['roadscape', 'ned', 'sneak', 'test-safari'])
+    batch_queries(sqls)
 
 
 if __name__ == '__main__':
