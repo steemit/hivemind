@@ -42,12 +42,12 @@ def normalize_account_metadata(account):
     except:
         pass
 
-    name = prof['name'] if 'name' in prof else None
-    about = prof['about'] if 'about' in prof else None
-    location = prof['location'] if 'location' in prof else None
-    website = prof['website'] if 'website' in prof else None
-    profile_image = prof['profile_image'] if 'profile_image' in prof else None
-    cover_image = prof['cover_image'] if 'cover_image' in prof else None
+    name = str(prof['name']) if 'name' in prof else None
+    about = str(prof['about']) if 'about' in prof else None
+    location = str(prof['location']) if 'location' in prof else None
+    website = str(prof['website']) if 'website' in prof else None
+    profile_image = str(prof['profile_image']) if 'profile_image' in prof else None
+    cover_image = str(prof['cover_image']) if 'cover_image' in prof else None
 
     name = truncate(name, 20)
     about = truncate(about, 160)
@@ -67,15 +67,13 @@ def normalize_account_metadata(account):
         cover_image = None
 
     return dict(
-        display_name=name,
-        about=about,
-        location=location,
-        #website=website,
-        url=website,
-        img_url=profile_image,
-        #profile_image=profile_image,
-        #cover_image=cover_image,
-        )
+        display_name=name or '',
+        about=about or '',
+        location=location or '',
+        website=website or '',
+        profile_image=profile_image or '',
+        cover_image=cover_image or '',
+    )
 
 
 def generate_cached_accounts_sql(accounts):
@@ -86,14 +84,14 @@ def generate_cached_accounts_sql(accounts):
 
         values = {
             'name': name,
-            #'proxy': account['proxy'],
-            #'post_count': account['post_count'],
+            'proxy': account['proxy'],
+            'post_count': account['post_count'],
             'reputation': rep_log10(account['reputation']),
-            #'followers': fstats['followers'][name],
-            #'following': fstats['following'][name],
-            #'proxy_weight': account['vesting_shares'],
-            #'vote_weight': account['vesting_shares'],
-            #'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
+            'followers': fstats['followers'][name],
+            'following': fstats['following'][name],
+            'proxy_weight': amount(account['vesting_shares']),
+            'vote_weight': amount(account['vesting_shares']),
+            'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
             **normalize_account_metadata(account)
         }
 
