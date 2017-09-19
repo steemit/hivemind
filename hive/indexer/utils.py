@@ -28,16 +28,19 @@ _shared_adapter = None
 def get_adapter():
     global _shared_adapter
     if not _shared_adapter:
-        url = os.environ.get('STEEMD_URL')
-        assert url, 'STEEMD_URL undefined'
-        _shared_adapter = SteemAdapter(url)
+        steem = os.environ.get('STEEMD_URL')
+        jussi = os.environ.get('JUSSI_URL')
+        _shared_adapter = SteemAdapter(steem, jussi)
     return _shared_adapter
 
 
 class SteemAdapter:
 
-    def __init__(self, api_endpoint):
-        self._client = HttpClient(nodes=[api_endpoint])
+    def __init__(self, api_endpoint, jussi=None):
+        self._jussi = bool(jussi)
+        url = jussi or api_endpoint
+        assert url, 'steem-API endpoint undefined'
+        self._client = HttpClient(nodes=[url])
 
     def get_accounts(self, accounts):
         return self.__exec('get_accounts', accounts)
@@ -79,11 +82,12 @@ class SteemAdapter:
 
         return [blocks[x] for x in block_nums]
 
-    def __exec_multi(self, method, params, max_workers=10):
-        return self._client.exec_multi_with_futures(method, params, max_workers=10)
-
     def __exec(self, method, *params):
         return self._client.exec(method, *params)
 
     def __exec_batch(self, method, params):
-        return self._client.exec_batch(method, params)
+        """If jussi is enabled, use batch requests; otherwise, multi"""
+        if self._jussi:
+            return self._client.exec_batch(method, params)
+        else:
+            return self._client.exec_multi_with_futures(method, params, max_workers=10)
