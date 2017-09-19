@@ -13,11 +13,9 @@ from toolz import partition_all
 log = logging.getLogger(__name__)
 
 from hive.indexer.utils import json_expand, get_adapter
-from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, update_posts_batch
+from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, is_community_post_valid
 
-
-STEEMD_URL = os.environ.get('STEEMD_URL')
 
 # core
 # ----
@@ -402,7 +400,7 @@ def listen_steemd(trail_blocks = 2):
 def run():
     # if tables not created, do so now
     if not query_row('SHOW TABLES'):
-        print("No tables found. Initializing db...")
+        print("[INIT] No tables found. Initializing db...")
         setup()
 
     #TODO: if initial sync is interrupted, cache never rebuilt
@@ -411,10 +409,12 @@ def run():
     is_initial_sync = not query_one("SELECT 1 FROM hive_posts_cache LIMIT 1")
 
     if is_initial_sync:
-        print("*** Initial sync ***")
+        print("[INIT] *** Initial sync ***")
     else:
         # perform cleanup in case process did not exit cleanly
-        cache_missing_posts()
+        missing = select_missing_posts()
+        print("[INIT] Found {} missing cache entries".format(len(missing)))
+        update_posts_batch(missing, get_adapter())
 
     # fast-load checkpoint files
     sync_from_checkpoints(is_initial_sync)
@@ -424,7 +424,9 @@ def run():
 
     # upon completing initial sync, perform some batch processing
     if is_initial_sync:
-        rebuild_cache()
+        print("[INIT] *** Initial sync complete. Rebuilding cache. ***")
+        update_posts_batch(select_missing_posts(), get_adapter())
+        rebuild_feed_cache()
 
     # initialization complete. follow head blocks
     listen_steemd()

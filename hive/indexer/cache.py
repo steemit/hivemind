@@ -12,32 +12,36 @@ from hive.indexer.utils import amount, parse_time, get_adapter
 log = logging.getLogger(__name__)
 
 def get_accounts_follow_stats(accounts):
-    sql = "SELECT follower,COUNT(*) FROM hive_follows WHERE follower IN :a GROUP BY follower"
-    following = dict(query(sql, a=accounts).fetchall())
-    for a in accounts:
-        if a not in following:
-            following[a] = 0
+    sql = """SELECT follower, COUNT(*) FROM hive_follows
+            WHERE follower IN :lst GROUP BY follower"""
+    following = dict(query(sql, lst=accounts).fetchall())
+    for name in accounts:
+        if name not in following:
+            following[name] = 0
 
-    sql = "SELECT following,COUNT(*) FROM hive_follows WHERE following IN :a GROUP BY following"
-    followers = dict(query(sql, a=accounts).fetchall())
-    for a in accounts:
-        if a not in followers:
-            followers[a] = 0
+    sql = """SELECT following, COUNT(*) FROM hive_follows
+            WHERE following IN :lst GROUP BY following"""
+    followers = dict(query(sql, lst=accounts).fetchall())
+    for name in accounts:
+        if name not in followers:
+            followers[name] = 0
 
     return {'followers': followers, 'following': following}
 
-def truncate(string, maxlen):
+
+def trunc(string, maxlen):
     if string:
         string = string.strip()
         if len(string) > maxlen:
             string = string[0:(maxlen-1)] + '...'
     return string
 
+
 def normalize_account_metadata(account):
     prof = {}
     try:
         prof = json.loads(account['json_metadata'])['profile']
-        if type(prof) != dict:
+        if not isinstance(prof, dict):
             prof = {}
     except:
         pass
@@ -49,9 +53,9 @@ def normalize_account_metadata(account):
     profile_image = str(prof['profile_image']) if 'profile_image' in prof else None
     cover_image = str(prof['cover_image']) if 'cover_image' in prof else None
 
-    name = truncate(name, 20)
-    about = truncate(about, 160)
-    location = truncate(location, 30)
+    name = trunc(name, 20)
+    about = trunc(about, 160)
+    location = trunc(location, 30)
 
     if name and name[0:1] == '@':
         name = None
@@ -95,14 +99,14 @@ def generate_cached_accounts_sql(accounts):
             **normalize_account_metadata(account)
         }
 
-        update = ', '.join( [k+" = :"+k for k in values.keys()][1:] )
+        update = ', '.join([k+" = :"+k for k in values.keys()][1:])
         sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
         sqls.append([(sql, values)])
     return sqls
 
 
 def get_img_url(url, max_size=1024):
-    if url and type(url) is not str:
+    if url and not isinstance(url, str):
         print("bad url param type: {}".format(url))
         url = None
     if url:
@@ -124,20 +128,20 @@ def get_stats(post):
     neg_rshares = 0
     total_votes = 0
     up_votes = 0
-    for v in post['active_votes']:
-        if v['percent'] == 0:
+    for vote in post['active_votes']:
+        if vote['percent'] == 0:
             continue
 
         total_votes += 1
-        rshares = int(v['rshares'])
-        sign = 1 if v['percent'] > 0 else -1
+        rshares = int(vote['rshares'])
+        sign = 1 if vote['percent'] > 0 else -1
         if sign > 0:
             up_votes += 1
         if sign < 0:
             neg_rshares += rshares
 
         # For graying: sum rshares, but ignore neg rep users and dust downvotes
-        neg_rep = str(v['reputation'])[0] == '-'
+        neg_rep = str(vote['reputation'])[0] == '-'
         if not (neg_rep and sign < 0 and len(str(rshares)) < 11):
             net_rshares_adj += rshares
 
@@ -155,10 +159,6 @@ def get_stats(post):
 
     gray = not has_pending_payout and (author_rep < 1 or low_value_post)
     hide = not has_pending_payout and (author_rep < 0)
-
-    # TODO: evaluate adding these columns
-    # is_no_payout
-    # is_full_power
 
     return {
         'hide': hide,
@@ -181,11 +181,11 @@ def batch_queries(batches):
 
 # calculate UI rep score
 def rep_log10(rep):
-    def log10(str):
-        leading_digits = int(str[0:4])
+    def log10(string):
+        leading_digits = int(string[0:4])
         log = math.log10(leading_digits) + 0.00000001
-        n = len(str) - 1
-        return n + (log - int(log))
+        num = len(string) - 1
+        return num + (log - int(log))
 
     rep = str(rep)
     if rep == "0":
@@ -202,17 +202,18 @@ def rep_log10(rep):
 
 
 def vote_csv_row(vote):
-    return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']), str(rep_log10(vote['reputation']))))
+    return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']),
+                     str(rep_log10(vote['reputation']))))
 
 
-def generate_cached_post_sql(id, post, updated_at):
+def generate_cached_post_sql(pid, post, updated_at):
     if not post['author']:
-        raise Exception("ERROR: post id {} has no chain state.".format(id))
+        raise Exception("ERROR: post id {} has no chain state.".format(pid))
 
     md = None
     try:
         md = json.loads(post['json_metadata'])
-        if type(md) is not dict:
+        if not isinstance(md, dict):
             md = {}
     except json.decoder.JSONDecodeError:
         pass
@@ -224,7 +225,7 @@ def generate_cached_post_sql(id, post, updated_at):
 
     # clean up tags, check if nsfw
     tags = [post['category']]
-    if md and 'tags' in md and type(md['tags']) == list:
+    if md and 'tags' in md and isinstance(md['tags'], list):
         tags = tags + md['tags']
     tags = set(map(lambda str: (str or '').strip('# ').lower()[:32], tags))
     tags.discard('')
@@ -238,7 +239,6 @@ def generate_cached_post_sql(id, post, updated_at):
     rshares = sum(int(v['rshares']) for v in post['active_votes'])
     csvotes = "\n".join(map(vote_csv_row, post['active_votes']))
 
-    # these are rshares which are PENDING
     payout_declined = False
     if amount(post['max_accepted_payout']) == 0:
         payout_declined = True
@@ -246,6 +246,8 @@ def generate_cached_post_sql(id, post, updated_at):
         benny = first(post['beneficiaries'])
         if benny['account'] == 'null' and int(benny['weight']) == 10000:
             payout_declined = True
+
+    full_power = int(post['percent_steem_dollars']) == 0
 
     # total payout (completed and/or pending)
     payout = sum([
@@ -263,9 +265,8 @@ def generate_cached_post_sql(id, post, updated_at):
     trend_score = score(rshares, timestamp, 480000)
 
     # TODO: add get_stats fields
-
     values = collections.OrderedDict([
-        ('post_id', '%d' % id),
+        ('post_id', '%d' % pid),
         ('author', "%s" % post['author']),
         ('permlink', "%s" % post['permlink']),
         ('title', "%s" % post['title']),
@@ -283,7 +284,9 @@ def generate_cached_post_sql(id, post, updated_at):
         ('is_nsfw', "%d" % is_nsfw),
         ('is_paidout', "%d" % is_paidout),
         ('sc_trend', "%f" % trend_score),
-        ('sc_hot', "%f" % hot_score)
+        ('sc_hot', "%f" % hot_score),
+        #('payout_declined', "%d" % int(payout_declined)),
+        #('full_power', "%d" % int(full_power)),
     ])
     fields = values.keys()
 
@@ -291,31 +294,31 @@ def generate_cached_post_sql(id, post, updated_at):
     sqls = []
 
     # Update main metadata in the hive_posts_cache table
-    cols   = ', '.join( fields )
-    params = ', '.join( [':'+k for k in fields] )
-    update = ', '.join( [k+" = :"+k for k in fields][1:] )
+    cols = ', '.join(fields)
+    params = ', '.join([':'+k for k in fields])
+    update = ', '.join([k+" = :"+k for k in fields][1:])
     sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
     sqls.append((sql % (cols, params, update), values))
 
     # update tag metadata only for top-level posts
     if post['depth'] == 0:
         sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
-        sqls.append((sql, {'id': id}))
+        sqls.append((sql, {'id': pid}))
         for tag in tags:
-            sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES (:id, :tag)"
-            sqls.append((sql, {'id': id, 'tag': tag}))
+            sql = "INSERT IGNORE INTO hive_post_tags (post_id, tag) VALUES (:id, :tag)"
+            sqls.append((sql, {'id': pid, 'tag': tag}))
 
     return sqls
 
 
-def update_posts_batch(tuples, steemd, updated_at = None):
+def update_posts_batch(tuples, steemd, updated_at=None):
     # if calling function already has head_time, saves us a call
     if not updated_at:
         updated_at = steemd.head_time()
 
     # build url->id map
-    ids = dict([[author+"/"+permlink, id] for (id,author,permlink) in tuples])
-    posts = [[author, permlink] for (id,author,permlink) in tuples]
+    ids = dict([[author+"/"+permlink, id] for (id, author, permlink) in tuples])
+    posts = [[author, permlink] for (id, author, permlink) in tuples]
 
     total = len(posts)
     processed = 0
@@ -342,16 +345,9 @@ def update_posts_batch(tuples, steemd, updated_at = None):
                 rem, round(rate, 1), round(rem / rate / 60, 2) ))
 
 
-
-# called once -- after initial block sync
-def rebuild_cache():
-    print("*** Initial sync finished. Rebuilding cache. ***")
-    cache_missing_posts()
-    rebuild_feed_cache()
-
 # the feed cache allows for efficient querying of blogs+reblogs. this method
 # efficiently builds the feed cache after the initial sync.
-def rebuild_feed_cache(truncate = True):
+def rebuild_feed_cache(truncate=True):
     print("*** Rebuilding hive_feed_cache ***")
     if truncate:
         query("TRUNCATE TABLE hive_feed_cache")
@@ -364,7 +360,7 @@ def rebuild_feed_cache(truncate = True):
 
 
 # identify and insert missing cache rows
-def cache_missing_posts(fast_mode = True):
+def select_missing_posts(fast_mode=True):
     if fast_mode:
         where = "id > (SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache)"
     else:
@@ -372,9 +368,7 @@ def cache_missing_posts(fast_mode = True):
 
     sql = ("SELECT id, author, permlink FROM hive_posts "
            "WHERE is_deleted = 0 AND %s ORDER BY id" % where)
-    rows = list(query(sql))
-    print("[INIT] Found {} missing cache entries".format(len(rows)))
-    update_posts_batch(rows, get_adapter())
+    return list(query(sql))
 
 
 # when a post gets paidout ensure we update its final state
@@ -389,7 +383,7 @@ def select_paidout_posts(block_date):
 
 # remove any rows from cache which belong to a deleted post
 def clean_dead_posts():
-    sl = ("DELETE FROM hive_posts_cache WHERE post_id IN "
+    sql = ("DELETE FROM hive_posts_cache WHERE post_id IN "
         "(SELECT id FROM hive_posts WHERE is_deleted = 1)")
     query(sql)
 
@@ -397,7 +391,6 @@ def clean_dead_posts():
 # testing
 # -------
 def run():
-    #cache_missing_posts(fast_mode=False)
     sqls = generate_cached_accounts_sql(['roadscape', 'ned', 'sneak', 'test-safari'])
     batch_queries(sqls)
 
