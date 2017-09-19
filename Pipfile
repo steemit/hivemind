@@ -3,7 +3,6 @@ url = "https://pypi.python.org/simple"
 verify_ssl = true
 
 [packages]
-steem = "0.18.2"
 bottle = "*"
 bottle-sqlalchemy = "*"
 bottle_errorsrest = "*"

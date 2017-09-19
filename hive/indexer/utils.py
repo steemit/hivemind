@@ -5,7 +5,7 @@ import json
 from json import JSONDecodeError
 from toolz import update_in, assoc
 from datetime import datetime
-from steembase.http_client import HttpClient
+from .http_client import HttpClient
 
 def amount(string):
     return float(string.split(' ')[0])
@@ -69,11 +69,10 @@ class SteemAdapter:
         blocks = {}
 
         while missing:
-            for block in self.__exec_multi('get_block', missing):
+            for block in self.__exec_batch('get_block', missing):
                 blocks[int(block['block_id'][:8], base=16)] = block
-
-            available = set(blocks.keys())
-            missing = required - available
+                available = set(blocks.keys())
+                missing = required - available
             if missing:
                 print("WARNING: API missed blocks {}".format(missing))
                 time.sleep(3)
@@ -85,3 +84,6 @@ class SteemAdapter:
 
     def __exec(self, method, *params):
         return self._client.exec(method, *params)
+
+    def __exec_batch(self, method, params):
+        return self._client.exec_batch(method, params)

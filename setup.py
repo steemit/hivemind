@@ -25,10 +25,10 @@ setup(
                    'pytest-console-scripts'],
 
     install_requires=[
-        'steem',
         'bottle',
         'bottle_sqlalchemy',
         'bottle_errorsrest',
+        'certifi',
         'sqlalchemy',
         'mysqlclient',
         'click',
@@ -36,6 +36,7 @@ setup(
         'toolz',
         'maya',
         'ujson',
+        'urllib3',
         'PrettyTable',
         'progressbar2',
     ],
