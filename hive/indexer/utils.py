@@ -33,12 +33,8 @@ class SteemAdapter:
     def get_accounts(self, accounts):
         return self.__exec('get_accounts', accounts)
 
-    # TODO: fetch in parallel
     def get_content_batch(self, tuples):
-        posts = {}
-        for (id, author, permlink) in tuples:
-            posts[id] = self.__exec('get_content', author, permlink)
-        return posts
+        return self.__exec_multi('get_content', tuples)
 
     def get_block(self, num):
         return self.__exec('get_block', num)
@@ -64,7 +60,7 @@ class SteemAdapter:
         blocks = {}
 
         while missing:
-            for block in self._get_blocks(missing):
+            for block in self.__exec_multi('get_block', missing):
                 blocks[int(block['block_id'][:8], base=16)] = block
 
             available = set(blocks.keys())
@@ -75,8 +71,8 @@ class SteemAdapter:
 
         return [blocks[x] for x in block_nums]
 
-    def _get_blocks(self, blocks):
-        return self._client.exec_multi_with_futures('get_block', blocks, max_workers=10)
+    def __exec_multi(self, method, params, max_workers=10):
+        return self._client.exec_multi_with_futures(method, params, max_workers=10)
 
     def __exec(self, method, *params):
         return self._client.exec(method, *params)

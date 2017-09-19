@@ -313,22 +313,29 @@ def update_posts_batch(tuples, steemd, updated_at = None):
     if not updated_at:
         updated_at = steemd.head_time()
 
-    total = len(tuples)
+    # build url->id map
+    ids = dict([[author+"/"+permlink, id] for (id,author,permlink) in tuples])
+    posts = [[author, permlink] for (id,author,permlink) in tuples]
+
+    total = len(posts)
     processed = 0
     start_time = time.time()
     for i in range(0, total, 1000):
 
         buffer = []
-        for id, post in steemd.get_content_batch(tuples[i:i+1000]).items():
+        for post in steemd.get_content_batch(posts[i:i+1000]):
             if not post['author']:
                 # post was deleted; skip.
                 continue
-            sql = generate_cached_post_sql(id, post, updated_at)
+            url = post['author'] + '/' + post['permlink']
+            sql = generate_cached_post_sql(ids[url], post, updated_at)
             buffer.append(sql)
 
         batch_queries(buffer)
-        processed += len(buffer)
-        if processed >= 1000:
+
+        # only print progress if more than 1 batch
+        if total >= 1000:
+            processed += len(buffer)
             rem = total - processed
             rate = processed / (time.time() - start_time)
             print(" -- {} of {} ({}/s) -- {}m remaining".format(processed,
