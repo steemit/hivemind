@@ -59,7 +59,6 @@ class SteemAdapter:
         missing = required - available
         blocks = {}
 
-        tries = 0
         while missing:
             for block in self._get_blocks(missing):
                 blocks[int(block['block_id'][:8], base=16)] = block
@@ -68,13 +67,7 @@ class SteemAdapter:
             missing = required - available
             if missing:
                 print("WARNING: API missed blocks {}".format(missing))
-                tries += 1
-                if tries > 50:
-                    print("tried {} times.. pause 5m".format(tries))
-                    time.sleep(300)
-                elif tries > 10:
-                    print("tried {} times.. pause 1m".format(tries))
-                    time.sleep(60)
+                time.sleep(3)
 
         return [blocks[x] for x in block_nums]
 
