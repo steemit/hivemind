@@ -1,8 +1,10 @@
 import os
 import time
+import json
 
+from json import JSONDecodeError
+from toolz import update_in, assoc
 from datetime import datetime
-from steem import utils as steem_utils
 from steembase.http_client import HttpClient
 
 def amount(str):
@@ -11,8 +13,15 @@ def amount(str):
 def parse_time(block_time):
     return datetime.strptime(block_time, '%Y-%m-%dT%H:%M:%S')
 
+# https://github.com/steemit/steem-python/blob/master/steem/utils.py
 def json_expand(json_op, key_name='json'):
-    return steem_utils.json_expand(json_op, key_name)
+    """ Convert a string json object to Python dict in an op. """
+    if type(json_op) == dict and key_name in json_op and json_op[key_name]:
+        try:
+            return update_in(json_op, [key_name], json.loads)
+        except JSONDecodeError:
+            return assoc(json_op, key_name, {})
+    return json_op
 
 
 _shared_adapter = None
