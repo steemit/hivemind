@@ -65,7 +65,61 @@ confidence=
 # --enable=similarities". If you want to run only the classes checker, but have
 # no Warning level messages displayed, use"--disable=all --enable=classes
 # --disable=W"
-disable=range-builtin-not-iterating,filter-builtin-not-iterating,raising-string,no-absolute-import,round-builtin,old-raise-syntax,nonzero-method,hex-method,import-star-module-level,zip-builtin-not-iterating,delslice-method,basestring-builtin,coerce-builtin,file-builtin,unicode-builtin,unpacking-in-except,apply-builtin,print-statement,parameter-unpacking,next-method-called,indexing-exception,reduce-builtin,reload-builtin,map-builtin-not-iterating,old-octal-literal,backtick,old-ne-operator,intern-builtin,suppressed-message,raw_input-builtin,execfile-builtin,old-division,buffer-builtin,dict-view-method,dict-iter-method,metaclass-assignment,useless-suppression,cmp-method,input-builtin,standarderror-builtin,unichr-builtin,cmp-builtin,long-suffix,getslice-method,long-builtin,xrange-builtin,using-cmp-argument,setslice-method,oct-method,coerce-method
+disable=
+    # custom
+    missing-docstring,
+
+    # default
+    range-builtin-not-iterating,
+    filter-builtin-not-iterating,
+    raising-string,
+    no-absolute-import,
+    round-builtin,
+    old-raise-syntax,
+    nonzero-method,
+    hex-method,
+    import-star-module-level,
+    zip-builtin-not-iterating,
+    delslice-method,
+    basestring-builtin,
+    coerce-builtin,
+    file-builtin,
+    unicode-builtin,
+    unpacking-in-except,
+    apply-builtin,
+    print-statement,
+    parameter-unpacking,
+    next-method-called,
+    indexing-exception,
+    reduce-builtin,
+    reload-builtin,
+    map-builtin-not-iterating,
+    old-octal-literal,
+    backtick,
+    old-ne-operator,
+    intern-builtin,
+    suppressed-message,
+    raw_input-builtin,
+    execfile-builtin,
+    old-division,
+    buffer-builtin,
+    dict-view-method,
+    dict-iter-method,
+    metaclass-assignment,
+    useless-suppression,
+    cmp-method,
+    input-builtin,
+    standarderror-builtin,
+    unichr-builtin,
+    cmp-builtin,
+    long-suffix,
+    getslice-method,
+    long-builtin,
+    xrange-builtin,
+    using-cmp-argument,
+    setslice-method,
+    oct-method,
+    coerce-method
 
 
 [REPORTS]

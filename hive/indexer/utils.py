@@ -7,8 +7,8 @@ from toolz import update_in, assoc
 from datetime import datetime
 from steembase.http_client import HttpClient
 
-def amount(str):
-    return float(str.split(' ')[0])
+def amount(string):
+    return float(string.split(' ')[0])
 
 def parse_time(block_time):
     return datetime.strptime(block_time, '%Y-%m-%dT%H:%M:%S')
@@ -16,7 +16,7 @@ def parse_time(block_time):
 # https://github.com/steemit/steem-python/blob/master/steem/utils.py
 def json_expand(json_op, key_name='json'):
     """ Convert a string json object to Python dict in an op. """
-    if type(json_op) == dict and key_name in json_op and json_op[key_name]:
+    if isinstance(json_op, dict) and key_name in json_op and json_op[key_name]:
         try:
             return update_in(json_op, [key_name], json.loads)
         except JSONDecodeError:
@@ -85,4 +85,3 @@ class SteemAdapter:
 
     def __exec(self, method, *params):
         return self._client.exec(method, *params)
-
