@@ -43,7 +43,7 @@ class SteemAdapter:
         return self.__exec('get_accounts', accounts)
 
     def get_content_batch(self, tuples):
-        return self.__exec_multi('get_content', tuples)
+        return self.__exec_batch('get_content', tuples)
 
     def get_block(self, num):
         return self.__exec('get_block', num)
@@ -69,10 +69,10 @@ class SteemAdapter:
         blocks = {}
 
         while missing:
-            for block in self.__exec_batch('get_block', missing):
+            for block in self.__exec_batch('get_block', [[i] for i in missing]):
                 blocks[int(block['block_id'][:8], base=16)] = block
-                available = set(blocks.keys())
-                missing = required - available
+            available = set(blocks.keys())
+            missing = required - available
             if missing:
                 print("WARNING: API missed blocks {}".format(missing))
                 time.sleep(3)

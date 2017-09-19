@@ -17,7 +17,7 @@ from urllib3.connection import HTTPConnection
 from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.WARNING)
 
 class RPCError(Exception):
     pass
@@ -109,7 +109,7 @@ class HttpClient(object):
         self.request = None
         self.next_node()
 
-        log_level = kwargs.get('log_level', logging.DEBUG)
+        log_level = kwargs.get('log_level', logging.WARNING)
         logger.setLevel(log_level)
 
     def next_node(self):
@@ -256,9 +256,9 @@ class HttpClient(object):
 
         batch_requests = ({
                 "method": name,
-                "params": [i],
+                "params": i,
                 "jsonrpc": "2.0",
-                "id": i
+                "id": 0
             } for i in params)
 
 
