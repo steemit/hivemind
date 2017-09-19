@@ -33,8 +33,12 @@ class SteemAdapter:
     def get_accounts(self, accounts):
         return self.__exec('get_accounts', accounts)
 
-    def get_content(self, account, permlink):
-        return self.__exec('get_content', account, permlink)
+    # TODO: fetch in parallel
+    def get_content_batch(self, tuples):
+        posts = {}
+        for (id, author, permlink) in tuples:
+            posts[id] = self.__exec('get_content', author, permlink)
+        return posts
 
     def get_block(self, num):
         return self.__exec('get_block', num)

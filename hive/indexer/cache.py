@@ -313,28 +313,27 @@ def update_posts_batch(tuples, steemd, updated_at = None):
     if not updated_at:
         updated_at = steemd.head_time()
 
-    buffer = []
+    total = len(tuples)
     processed = 0
     start_time = time.time()
-    for (id, author, permlink) in tuples:
-        post = steemd.get_content(author, permlink)
-        if not post['author']:
-            # post was deleted; skip.
-            continue
-        sql = generate_cached_post_sql(id, post, updated_at)
-        buffer.append(sql)
+    for i in range(0, total, 1000):
 
-        if len(buffer) == 1000:
-            batch_queries(buffer)
-            processed += len(buffer)
-            rem = len(tuples) - processed
+        buffer = []
+        for id, post in steemd.get_content_batch(tuples[i:i+1000]).items():
+            if not post['author']:
+                # post was deleted; skip.
+                continue
+            sql = generate_cached_post_sql(id, post, updated_at)
+            buffer.append(sql)
+
+        batch_queries(buffer)
+        processed += len(buffer)
+        if processed >= 1000:
+            rem = total - processed
             rate = processed / (time.time() - start_time)
-            print(" -- {} of {} ({}/s) -- {}m remaining".format(
-                processed, len(tuples), round(rate, 1),
-                round((len(tuples) - processed) / rate / 60, 2) ))
-            buffer = []
+            print(" -- {} of {} ({}/s) -- {}m remaining".format(processed,
+                rem, round(rate, 1), round(rem / rate / 60, 2) ))
 
-    batch_queries(buffer)
 
 
 # called once -- after initial block sync
