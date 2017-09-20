@@ -326,17 +326,21 @@ def sync_from_steemd(is_initial_sync):
     if not is_initial_sync:
         query("START TRANSACTION")
 
-    start_num = lbound
-    start_time = time.time()
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
-        blocks = steemd.get_blocks_range(lbound, to)
-        lbound = to
-        dirty |= process_blocks(blocks, is_initial_sync)
 
-        rate = (lbound - start_num) / (time.time() - start_time)
-        print("[SYNC] Got block {} ({}/s) {}m remaining".format(
-            to - 1, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
+        lap_0 = time.time()
+        blocks = steemd.get_blocks_range(lbound, to)
+        lap_1 = time.time()
+        dirty |= process_blocks(blocks, is_initial_sync)
+        lap_2 = time.time()
+
+        rate = (to - lbound) / (lap_2 - lap_0)
+        pct_db = int(100 * (lap_2 - lap_1) / (lap_2 - lap_0))
+        print("[SYNC] Got block {} ({}/s) ({}% db) -- {}m remaining".format(
+            to-1, round(rate, 1), pct_db, round((ubound-to) / rate / 60, 2)))
+
+        lbound = to
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:

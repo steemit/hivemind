@@ -9,7 +9,7 @@ from funcy.seqs import first
 from hive.db.methods import query
 from hive.indexer.utils import amount, parse_time, get_adapter
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 def get_accounts_follow_stats(accounts):
     sql = """SELECT follower, COUNT(*) FROM hive_follows
@@ -341,8 +341,8 @@ def update_posts_batch(tuples, steemd, updated_at=None):
             processed += len(buffer)
             rem = total - processed
             rate = processed / (time.time() - start_time)
-            print(" -- {} of {} ({}/s) -- {}m remaining".format(processed,
-                total, round(rate, 1), round(rem / rate / 60, 2) ))
+            print(" -- {} of {} ({}/s) -- {}m remaining".format(
+                processed, total, round(rate, 1), round(rem / rate / 60, 2)))
 
 
 # the feed cache allows for efficient querying of blogs+reblogs. this method
@@ -353,10 +353,10 @@ def rebuild_feed_cache(truncate=True):
         query("TRUNCATE TABLE hive_feed_cache")
 
     query("INSERT IGNORE INTO hive_feed_cache "
-            "SELECT author account, id post_id, created_at "
-            "FROM hive_posts WHERE depth = 0 AND is_deleted = 0")
+          "SELECT author account, id post_id, created_at "
+          "FROM hive_posts WHERE depth = 0 AND is_deleted = 0")
     query("INSERT IGNORE INTO hive_feed_cache "
-            "SELECT account, post_id, created_at FROM hive_reblogs")
+          "SELECT account, post_id, created_at FROM hive_reblogs")
 
 
 # identify and insert missing cache rows
@@ -384,7 +384,7 @@ def select_paidout_posts(block_date):
 # remove any rows from cache which belong to a deleted post
 def clean_dead_posts():
     sql = ("DELETE FROM hive_posts_cache WHERE post_id IN "
-        "(SELECT id FROM hive_posts WHERE is_deleted = 1)")
+           "(SELECT id FROM hive_posts WHERE is_deleted = 1)")
     query(sql)
 
 
