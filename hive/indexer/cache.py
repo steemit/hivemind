@@ -322,9 +322,9 @@ def update_posts_batch(tuples, steemd, updated_at=None):
 
     total = len(posts)
     processed = 0
-    start_time = time.time()
     for i in range(0, total, 1000):
 
+        lap_0 = time.time()
         buffer = []
         for post in steemd.get_content_batch(posts[i:i+1000]):
             if not post['author']:
@@ -334,15 +334,18 @@ def update_posts_batch(tuples, steemd, updated_at=None):
             sql = generate_cached_post_sql(ids[url], post, updated_at)
             buffer.append(sql)
 
+        lap_1 = time.time()
         batch_queries(buffer)
+        lap_2 = time.time()
 
         # only print progress if more than 1 batch
         if total >= 1000:
             processed += len(buffer)
             rem = total - processed
-            rate = processed / (time.time() - start_time)
-            print(" -- {} of {} ({}/s) -- {}m remaining".format(
-                processed, total, round(rate, 1), round(rem / rate / 60, 2)))
+            rate = len(buffer) / (lap_2 - lap_0)
+            pct_db = int(100 * (lap_2 - lap_1) / (lap_2 - lap_0))
+            print(" -- {} of {} ({}/s, {}% db) -- {}m remaining".format(
+                processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
 
 
 # the feed cache allows for efficient querying of blogs+reblogs. this method

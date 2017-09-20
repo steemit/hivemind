@@ -337,7 +337,7 @@ def sync_from_steemd(is_initial_sync):
 
         rate = (to - lbound) / (lap_2 - lap_0)
         pct_db = int(100 * (lap_2 - lap_1) / (lap_2 - lap_0))
-        print("[SYNC] Got block {} ({}/s) ({}% db) -- {}m remaining".format(
+        print("[SYNC] Got block {} ({}/s, {}% db) -- {}m remaining".format(
             to-1, round(rate, 1), pct_db, round((ubound-to) / rate / 60, 2)))
 
         lbound = to
