@@ -266,7 +266,7 @@ class HttpClient(object):
             body = json.dumps(batch).encode()
             batch_response = self.exec('ignore',[], body=body)
             assert batch_response, "batch_response was empty"
-            assert len(batch_response) == len(params), "batch_response len did not match params"
+            assert len(batch_response) == len(batch), "batch_response len did not match params ({} vs {})".format(len(batch_response), len(batch))
             for response in batch_response:
                 yield response['result']
 

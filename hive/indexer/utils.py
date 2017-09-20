@@ -52,7 +52,10 @@ class SteemAdapter:
         return self.__exec('get_block', num)
 
     def _gdgp(self):
-        return self.__exec('get_dynamic_global_properties')
+        ret = self.__exec('get_dynamic_global_properties')
+        assert ret, "empty response for gdgp: {}".format(ret)
+        assert isinstance(ret, dict), "gdgp was not a dict"
+        return ret
 
     def head_time(self):
         return self._gdgp()['time']
