@@ -10,7 +10,6 @@ from bottle import abort, request
 from bottle_errorsrest import ErrorsRestPlugin
 from bottle_sqlalchemy import Plugin
 from hive.db.schema import metadata as hive_metadata
-#from hive.indexer.core import db_last_block, head_state
 from hive.sbds.jsonrpc import register_endpoint
 from hive.sbds.sbds_json import ToStringJSONEncoder
 from sqlalchemy import create_engine
@@ -53,7 +52,7 @@ def health():
     if state['db_head_age'] > app.config['hive.MAX_BLOCK_NUM_DIFF'] * 3:
         abort(
             500,
-            'head block age (%s) > max allowable (%s); head block num: %s'
+            'head block age (%ss) > max allowable (%ss); head block num: %s'
             % (state['db_head_age'], app.config['hive.MAX_BLOCK_NUM_DIFF'] * 3,
                 state['db_head_block']))
     else:
@@ -61,9 +60,9 @@ def health():
             state=state,
             timestamp=datetime.utcnow().isoformat())
 
-#@app.get('/head_state')
-#def callback():
-#    return head_state()
+@app.get('/head_state')
+def callback():
+    return db_head_state()
 
 @app.get('/stats/payouts')
 def callback():
@@ -116,7 +115,7 @@ def callback(user, skip, limit):
 jsonrpc = register_endpoint(path='/', app=app, namespace='hive')
 
 json_rpc_methods = {
-#    'head_state': head_state,
+    'head_state': db_head_state,
     'get_followers': rpcmethods.get_followers,
     'get_following': rpcmethods.get_following,
 }
