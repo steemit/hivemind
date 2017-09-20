@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-exec uwsgi \
+exec setuidgid nobody uwsgi \
  --master \
  --http :"${HTTP_SERVER_PORT}" \
  --wsgi-file "${WSGI_APP}" \
