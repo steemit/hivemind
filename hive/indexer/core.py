@@ -10,12 +10,11 @@ from hive.db.schema import setup, teardown
 from hive.db.methods import query_one, query, query_row, db_last_block
 from toolz import partition_all
 
-log = logging.getLogger(__name__)
-
 from hive.indexer.utils import json_expand, get_adapter
 from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, is_community_post_valid
 
+log = logging.getLogger(__name__)
 
 # core
 # ----
@@ -41,13 +40,13 @@ def urls_to_tuples(urls):
     tuples = []
     for url in urls:
         author, permlink = url.split('/')
-        id, is_deleted = query_row("SELECT id,is_deleted FROM hive_posts "
+        pid, is_deleted = query_row("SELECT id,is_deleted FROM hive_posts "
                 "WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
-        if not id:
+        if not pid:
             raise Exception("Post not found! {}/{}".format(author, permlink))
         if is_deleted:
             continue
-        tuples.append([id, author, permlink])
+        tuples.append([pid, author, permlink])
     return tuples
 
 
@@ -91,13 +90,13 @@ def register_posts(ops, date):
         sql = ("SELECT id, is_deleted FROM hive_posts "
             "WHERE author = '%s' AND permlink = '%s'")
         ret = query_row(sql % (op['author'], op['permlink']))
-        id = None
+        pid = None
         if ret:
             if ret[1] == 0:
                 # if post has id and is_deleted=0, then it's an edit -- ignore.
                 continue
             else:
-                id = ret[0]
+                pid = ret[0]
 
         # set parent & inherited attributes
         if op['parent_author'] == '':
@@ -123,19 +122,19 @@ def register_posts(ops, date):
             print("Invalid post @{}/{} in @{}".format(op['author'], op['permlink'], community))
 
         # if we're reusing a previously-deleted post (rare!), update it
-        if id:
-            query("UPDATE hive_posts SET is_valid = %d, is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (is_valid, parent_id or 'NULL', category, community, depth, id))
-            query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=id)
+        if pid:
+            query("UPDATE hive_posts SET is_valid = %d, is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (is_valid, parent_id or 'NULL', category, community, depth, pid))
+            query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=pid)
         else:
             query("INSERT INTO hive_posts (is_valid, parent_id, author, permlink, category, community, depth, created_at) "
                   "VALUES (%d, %s, '%s', '%s', '%s', '%s', %d, '%s')" % (
                       is_valid, parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
-            id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
+            pid = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
 
         # add top-level posts to feed cache
         if depth == 0:
             sql = "INSERT INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
-            query(sql, account=op['author'], id=id, created_at=date)
+            query(sql, account=op['author'], id=pid, created_at=date)
 
 
 
@@ -207,7 +206,7 @@ def process_json_follow_op(account, op_json, block_date):
 
 
 # process a single block. always wrap in a transaction!
-def process_block(block, is_initial_sync = False):
+def process_block(block, is_initial_sync=False):
     date = block['timestamp']
     block_id = block['block_id']
     prev = block['previous']
@@ -275,7 +274,7 @@ def process_block(block, is_initial_sync = False):
 
 
 # batch-process blocks, wrap in a transaction
-def process_blocks(blocks, is_initial_sync = False):
+def process_blocks(blocks, is_initial_sync=False):
     dirty = set()
     query("START TRANSACTION")
     for block in blocks:
@@ -294,7 +293,7 @@ def sync_from_checkpoints(is_initial_sync):
     fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
     mydir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
     files = map(fn, glob.glob(mydir + "/checkpoints/*.json.lst"))
-    files = sorted(files, key = lambda f: f[0])
+    files = sorted(files, key=lambda f: f[0])
 
     last_read = 0
     for (num, path) in files:
@@ -353,7 +352,7 @@ def sync_from_steemd(is_initial_sync):
         query("COMMIT")
 
 
-def listen_steemd(trail_blocks = 2):
+def listen_steemd(trail_blocks=2):
     steemd = get_adapter()
     curr_block = db_last_block()
     last_hash = False
