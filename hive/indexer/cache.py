@@ -6,7 +6,7 @@ import time
 import re
 
 from funcy.seqs import first
-from hive.db.methods import query
+from hive.db.methods import query, query_all, query_col
 from hive.indexer.utils import amount, parse_time, get_adapter
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def trunc(string, maxlen):
     if string:
         string = string.strip()
         if len(string) > maxlen:
-            string = string[0:(maxlen-1)] + '...'
+            string = string[0:(maxlen-3)] + '...'
     return string
 
 
@@ -68,6 +68,10 @@ def normalize_account_metadata(account):
     if profile_image and not re.match('^https?://', profile_image):
         profile_image = None
     if cover_image and not re.match('^https?://', cover_image):
+        cover_image = None
+    if profile_image and len(profile_image) > 1024:
+        profile_image = None
+    if cover_image and len(cover_image) > 1024:
         cover_image = None
 
     return dict(
@@ -391,12 +395,32 @@ def clean_dead_posts():
     query(sql)
 
 
+def cache_all_accounts():
+    accounts = query_col("SELECT name FROM hive_accounts")
+    processed = 0
+    total = len(accounts)
+
+    for i in range(0, total, 1000):
+        batch = accounts[i:i+1000]
+
+        lap_0 = time.time()
+        sqls = generate_cached_accounts_sql(batch)
+        lap_1 = time.time()
+        batch_queries(sqls)
+        lap_2 = time.time()
+
+        processed += len(batch)
+        rem = total - processed
+        rate = len(batch) / (lap_2 - lap_0)
+        pct_db = int(100 * (lap_2 - lap_1) / (lap_2 - lap_0))
+        print(" -- {} of {} ({}/s, {}% db) -- {}m remaining".format(
+            processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
+
 # testing
 # -------
 def run():
-    sqls = generate_cached_accounts_sql(['roadscape', 'ned', 'sneak', 'test-safari'])
-    batch_queries(sqls)
-
+    #sqls = generate_cached_accounts_sql(['roadscape', 'ned', 'sneak', 'test-safari'])
+    cache_all_accounts()
 
 if __name__ == '__main__':
     run()
