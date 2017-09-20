@@ -227,7 +227,7 @@ class HttpClient(object):
                     if self.re_raise:
                         error_message = error.get(
                             'detail', response_json['error']['message'])
-                        raise RPCError(error_message)
+                        raise RPCError("{}: {}".format(error_message, response_json))
 
                     result = response_json['error']
                 elif isinstance(response_json, dict):
@@ -265,6 +265,8 @@ class HttpClient(object):
         for batch in chunkify(batch_requests, batch_size):
             body = json.dumps(batch).encode()
             batch_response = self.exec('ignore',[], body=body)
+            assert batch_response, "batch_response was empty"
+            assert len(batch_response) == len(params), "batch_response len did not match params"
             for response in batch_response:
                 yield response['result']
 

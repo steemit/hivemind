@@ -342,7 +342,7 @@ def update_posts_batch(tuples, steemd, updated_at=None):
             rem = total - processed
             rate = processed / (time.time() - start_time)
             print(" -- {} of {} ({}/s) -- {}m remaining".format(processed,
-                rem, round(rate, 1), round(rem / rate / 60, 2) ))
+                total, round(rate, 1), round(rem / rate / 60, 2) ))
 
 
 # the feed cache allows for efficient querying of blogs+reblogs. this method
