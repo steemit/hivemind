@@ -5,12 +5,13 @@ import time
 import re
 import os
 
+from json import JSONDecodeError
 from funcy.seqs import first, second, drop, flatten
 from hive.db.schema import setup, teardown
 from hive.db.methods import query_one, query, query_row, db_last_block
 from toolz import partition_all
 
-from hive.indexer.utils import json_expand, get_adapter
+from hive.indexer.utils import get_adapter
 from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, is_community_post_valid
 
@@ -245,7 +246,7 @@ def process_block(block, is_initial_sync=False):
     register_posts(comments, date)  # if this is a new post, add the entry and validate community param
     delete_posts(deleted)  # mark hive_posts.is_deleted = 1
 
-    for op in map(json_expand, json_ops):
+    for op in json_ops:
         if op['id'] not in ['follow', 'com.steemit.community']:
             continue
 
@@ -259,7 +260,11 @@ def process_block(block, is_initial_sync=False):
             continue
 
         account = op['required_posting_auths'][0]
-        op_json = op['json']
+        op_json = {}
+        try:
+            op_json = json.loads(op['json'])
+        except JSONDecodeError:
+            pass
 
         if op['id'] == 'follow':
             if block_num < 6000000 and type(op_json) != list:
@@ -388,6 +393,7 @@ def listen_steemd(trail_blocks=2):
                 last_hash, block['previous'], block['block_id']))
         last_hash = block['block_id']
 
+        start_time = time.time()
         query("START TRANSACTION")
 
         dirty = process_block(block)
@@ -398,6 +404,10 @@ def listen_steemd(trail_blocks=2):
 
         print("{} edits, {} payouts".format(len(dirty), len(paidout)))
         query("COMMIT")
+        secs = time.time() - start_time
+
+        if secs > 1:
+            print("WARNING: block {} process took {}s".format(num, secs))
 
 
 def run():

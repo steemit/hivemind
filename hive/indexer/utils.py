@@ -3,7 +3,6 @@ import time
 import json
 
 from json import JSONDecodeError
-from toolz import update_in, assoc
 from datetime import datetime
 from .http_client import HttpClient
 
@@ -12,16 +11,6 @@ def amount(string):
 
 def parse_time(block_time):
     return datetime.strptime(block_time, '%Y-%m-%dT%H:%M:%S')
-
-# https://github.com/steemit/steem-python/blob/master/steem/utils.py
-def json_expand(json_op, key_name='json'):
-    """ Convert a string json object to Python dict in an op. """
-    if isinstance(json_op, dict) and key_name in json_op and json_op[key_name]:
-        try:
-            return update_in(json_op, [key_name], json.loads)
-        except JSONDecodeError:
-            return assoc(json_op, key_name, {})
-    return json_op
 
 
 _shared_adapter = None
@@ -92,5 +81,4 @@ class SteemAdapter:
         """If jussi is enabled, use batch requests; otherwise, multi"""
         if self._jussi:
             return self._client.exec_batch(method, params)
-        else:
-            return self._client.exec_multi_with_futures(method, params, max_workers=10)
+        return self._client.exec_multi_with_futures(method, params, max_workers=10)
