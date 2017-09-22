@@ -425,9 +425,11 @@ def run():
         print("[INIT] *** Initial sync ***")
     else:
         # perform cleanup in case process did not exit cleanly
-        missing = select_missing_posts()
-        print("[INIT] Found {} missing cache entries".format(len(missing)))
-        update_posts_batch(missing, get_adapter())
+        missing = select_missing_posts(1e6)
+        while missing:
+            print("[INIT] Found {} missing cache entries".format(len(missing)))
+            update_posts_batch(missing, get_adapter())
+            missing = select_missing_posts(1e6)
 
     # fast-load checkpoint files
     sync_from_checkpoints(is_initial_sync)
@@ -438,7 +440,13 @@ def run():
     # upon completing initial sync, perform some batch processing
     if is_initial_sync:
         print("[INIT] *** Initial sync complete. Rebuilding cache. ***")
-        update_posts_batch(select_missing_posts(), get_adapter())
+        sql = "SELECT (SELECT IFNULL(MAX(id), 0) FROM hive_posts) - (SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache) missing"
+        total_missing = query_one(sql)
+        print("[INIT] {} total posts to cache".format(total_missing))
+        missing = select_missing_posts(1e6)
+        while missing:
+            update_posts_batch(missing, get_adapter())
+            missing = select_missing_posts(1e6)
         rebuild_feed_cache()
 
     # initialization complete. follow head blocks

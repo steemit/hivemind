@@ -367,14 +367,19 @@ def rebuild_feed_cache(truncate=True):
 
 
 # identify and insert missing cache rows
-def select_missing_posts(fast_mode=True):
+def select_missing_posts(limit=None, fast_mode=True):
     if fast_mode:
         where = "id > (SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache)"
     else:
         where = "id NOT IN (SELECT post_id FROM hive_posts_cache)"
 
+    if limit:
+        limit = "LIMIT %d" % limit
+    else:
+        limit = ""
+
     sql = ("SELECT id, author, permlink FROM hive_posts "
-           "WHERE is_deleted = 0 AND %s ORDER BY id" % where)
+           "WHERE is_deleted = 0 AND %s ORDER BY id %s" % (where, limit))
     return list(query(sql))
 
 
