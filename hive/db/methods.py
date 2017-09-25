@@ -263,7 +263,7 @@ def get_related_posts(account: str, permlink: str):
         JOIN hive_posts p2 ON p1.category = p2.category
         JOIN hive_posts_cache pc ON p2.id = pc.post_id
        WHERE p1.author = :a AND p1.permlink = :p
-         AND sc_trend > :t
+         AND sc_trend > :t AND p1.id != p2.id
     ORDER BY sc_trend DESC LIMIT 5
     """
     thresh = time.time() / 480000
