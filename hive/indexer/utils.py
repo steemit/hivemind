@@ -35,7 +35,14 @@ class SteemAdapter:
         return self.__exec('get_accounts', accounts)
 
     def get_content_batch(self, tuples):
-        return self.__exec_batch('get_content', tuples)
+        posts = self.__exec_batch('get_content', tuples)
+
+        # sanity-checking jussi responses
+        for post in posts:
+            assert post, "unexpected empty response: {}".format(post)
+            assert 'author' in post, "invalid post: {}".format(post)
+
+        return posts
 
     def get_block(self, num):
         return self.__exec('get_block', num)
@@ -55,7 +62,6 @@ class SteemAdapter:
     def last_irreversible_block_num(self):
         return self._gdgp()['last_irreversible_block_num']
 
-    # https://github.com/steemit/steem-python/blob/master/steem/steemd.py
     def get_blocks_range(self, lbound, ubound): # [lbound, ubound)
         block_nums = range(lbound, ubound)
         required = set(block_nums)

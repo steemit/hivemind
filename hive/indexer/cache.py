@@ -111,7 +111,6 @@ def generate_cached_accounts_sql(accounts):
 
 def get_img_url(url, max_size=1024):
     if url and not isinstance(url, str):
-        print("bad url param type: {}".format(url))
         url = None
     if url:
         url = url.strip()
@@ -331,11 +330,8 @@ def update_posts_batch(tuples, steemd, updated_at=None):
         lap_0 = time.time()
         buffer = []
         for post in steemd.get_content_batch(posts[i:i+1000]):
-            assert post, "unexpected empty post: {}".format(post)
-            assert 'author' in post, "post invalid: {}".format(post)
             if not post['author']:
-                # post was deleted; skip.
-                continue
+                continue # post has been deleted
             url = post['author'] + '/' + post['permlink']
             sql = generate_cached_post_sql(ids[url], post, updated_at)
             buffer.append(sql)
@@ -344,29 +340,34 @@ def update_posts_batch(tuples, steemd, updated_at=None):
         batch_queries(buffer)
         lap_2 = time.time()
 
-        # only print progress if more than 1 batch
         if total >= 1000:
             processed += len(buffer)
             rem = total - processed
             rate = len(buffer) / (lap_2 - lap_0)
             rps = int(len(buffer) / (lap_1 - lap_0))
             wps = int(len(buffer) / (lap_2 - lap_1))
-            print(" -- {} of {} ({}/s, {}rps {}wps) -- {}m remaining".format(
+            print(" -- post {} of {} ({}/s, {}rps {}wps) -- {}m remaining".format(
                 processed, total, round(rate, 1), rps, wps, round(rem / rate / 60, 2)))
 
 
 # the feed cache allows for efficient querying of blogs+reblogs. this method
 # efficiently builds the feed cache after the initial sync.
 def rebuild_feed_cache(truncate=True):
-    print("*** Rebuilding hive_feed_cache ***")
+    print("[INIT] Rebuilding hive_feed_cache")
     if truncate:
         query("TRUNCATE TABLE hive_feed_cache")
 
+    lap_0 = time.time()
     query("INSERT IGNORE INTO hive_feed_cache "
           "SELECT author account, id post_id, created_at "
           "FROM hive_posts WHERE depth = 0 AND is_deleted = 0")
+    lap_1 = time.time()
     query("INSERT IGNORE INTO hive_feed_cache "
           "SELECT account, post_id, created_at FROM hive_reblogs")
+    lap_2 = time.time()
+
+    print("[INIT] Rebuilt hive_feed_cache in {}s ({}+{})".format(
+          int(lap_2-lap_0), int(lap_1-lap_0), int(lap_2-lap_1)))
 
 
 # identify and insert missing cache rows

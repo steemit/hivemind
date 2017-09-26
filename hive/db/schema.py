@@ -67,7 +67,7 @@ hive_posts = sa.Table(
     sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
     sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
     sa.Index('hive_posts_ix1', 'parent_id'),
-    sa.Index('hive_posts_ix2', 'is_deleted'),
+    sa.Index('hive_posts_ix2', 'is_deleted', 'depth'),
     sa.Index('hive_posts_ix3', 'created_at', 'author'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
