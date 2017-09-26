@@ -356,7 +356,7 @@ def sync_from_steemd(is_initial_sync):
         update_posts_batch(urls_to_tuples(dirty), steemd, date)
 
         paidout = select_paidout_posts(date)
-        print("[PREP] Process {} payouts".format(len(paidout)))
+        print("[PREP] Process {} payouts since {}".format(len(paidout), date))
         update_posts_batch(paidout, steemd, date)
 
         query("COMMIT")
@@ -411,6 +411,23 @@ def listen_steemd(trail_blocks=2):
             print("WARNING: block {} process took {}s".format(num, secs))
 
 
+def cache_missing_posts():
+    # cached posts inserted sequentially, so just compare MAX(id)'s
+    sql = ("SELECT (SELECT IFNULL(MAX(id), 0) FROM hive_posts) - "
+           "(SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache)")
+    missing_count = query_one(sql)
+    print("[INIT] Found {} missing cache entries".format(missing_count))
+
+    if not missing_count:
+        return
+
+    # process in batches of 1m posts
+    missing = select_missing_posts(1e6)
+    while missing:
+        update_posts_batch(missing, get_adapter())
+        missing = select_missing_posts(1e6)
+
+
 def run():
     # if tables not created, do so now
     if not query_row('SHOW TABLES'):
@@ -426,28 +443,15 @@ def run():
         print("[INIT] *** Initial sync ***")
     else:
         # perform cleanup in case process did not exit cleanly
-        missing = select_missing_posts(1e6)
-        while missing:
-            print("[INIT] Found {} missing cache entries".format(len(missing)))
-            update_posts_batch(missing, get_adapter())
-            missing = select_missing_posts(1e6)
+        cache_missing_posts()
 
-    # fast-load checkpoint files
+    # fast block sync strategies
     sync_from_checkpoints(is_initial_sync)
-
-    # fast-load from steemd
     sync_from_steemd(is_initial_sync)
 
-    # upon completing initial sync, perform some batch processing
     if is_initial_sync:
         print("[INIT] *** Initial sync complete. Rebuilding cache. ***")
-        sql = "SELECT (SELECT IFNULL(MAX(id), 0) FROM hive_posts) - (SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache) missing"
-        total_missing = query_one(sql)
-        print("[INIT] {} total posts to cache".format(total_missing))
-        missing = select_missing_posts(1e6)
-        while missing:
-            update_posts_batch(missing, get_adapter())
-            missing = select_missing_posts(1e6)
+        cache_missing_posts()
         rebuild_feed_cache()
 
     # initialization complete. follow head blocks
