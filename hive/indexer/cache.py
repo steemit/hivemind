@@ -331,6 +331,8 @@ def update_posts_batch(tuples, steemd, updated_at=None):
         lap_0 = time.time()
         buffer = []
         for post in steemd.get_content_batch(posts[i:i+1000]):
+            assert post, "unexpected empty post: {}".format(post)
+            assert 'author' in post, "post invalid: {}".format(post)
             if not post['author']:
                 # post was deleted; skip.
                 continue
@@ -347,9 +349,10 @@ def update_posts_batch(tuples, steemd, updated_at=None):
             processed += len(buffer)
             rem = total - processed
             rate = len(buffer) / (lap_2 - lap_0)
-            pct_db = int(100 * (lap_2 - lap_1) / (lap_2 - lap_0))
-            print(" -- {} of {} ({}/s, {}% db) -- {}m remaining".format(
-                processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
+            rps = int(len(buffer) / (lap_1 - lap_0))
+            wps = int(len(buffer) / (lap_2 - lap_1))
+            print(" -- {} of {} ({}/s, {}rps {}wps) -- {}m remaining".format(
+                processed, total, round(rate, 1), rps, wps, round(rem / rate / 60, 2)))
 
 
 # the feed cache allows for efficient querying of blogs+reblogs. this method
