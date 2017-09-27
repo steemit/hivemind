@@ -51,6 +51,7 @@ class SteemAdapter:
         ret = self.__exec('get_dynamic_global_properties')
         assert ret, "empty response for gdgp: {}".format(ret)
         assert isinstance(ret, dict), "gdgp was not a dict"
+        assert 'time' in ret, "gdgp invalid resp: {}".format(ret)
         return ret
 
     def head_time(self):
