@@ -85,6 +85,6 @@ class SteemAdapter:
     def __exec_batch(self, method, params):
         """If jussi is enabled, use batch requests; otherwise, multi"""
         if self._jussi:
-            return self._client.exec_batch(method, params, batch_size=500)
+            return list(self._client.exec_batch(method, params, batch_size=500))
         return list(self._client.exec_multi_with_futures(
             method, params, max_workers=10))

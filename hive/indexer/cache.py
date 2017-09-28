@@ -230,7 +230,7 @@ def generate_cached_post_sql(pid, post, updated_at):
     tags = [post['category']]
     if md and 'tags' in md and isinstance(md['tags'], list):
         tags = tags + md['tags']
-    tags = set(map(lambda str: (str or '').strip('# ').lower()[:32], tags))
+    tags = set(list(map(lambda str: (str or '').strip('# ').lower()[:32], tags))[0:5])
     tags.discard('')
     is_nsfw = int('nsfw' in tags)
 
@@ -307,9 +307,14 @@ def generate_cached_post_sql(pid, post, updated_at):
     if post['depth'] == 0:
         sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
         sqls.append((sql, {'id': pid}))
-        for tag in tags:
-            sql = "INSERT IGNORE INTO hive_post_tags (post_id, tag) VALUES (:id, :tag)"
-            sqls.append((sql, {'id': pid, 'tag': tag}))
+
+        sql = "INSERT IGNORE INTO hive_post_tags (post_id, tag) VALUES "
+        params = {}
+        vals = []
+        for i, tag in enumerate(tags):
+            vals.append("(:id, :t%d)" % i)
+            params["t%d"%i] = tag
+        sqls.append((sql + ','.join(vals), {'id': pid, **params}))
 
     return sqls
 
@@ -340,7 +345,7 @@ def update_posts_batch(tuples, steemd, updated_at=None):
         batch_queries(buffer)
         lap_2 = time.time()
 
-        if total >= 1000:
+        if total >= 500:
             processed += len(buffer)
             rem = total - processed
             rate = len(buffer) / (lap_2 - lap_0)
