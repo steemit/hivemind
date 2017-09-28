@@ -26,14 +26,14 @@ def is_valid_account_name(name):
 def get_account_id(name):
     if is_valid_account_name(name):
         return query_one("SELECT id FROM hive_accounts "
-                "WHERE name = '%s' LIMIT 1" % name)
+                "WHERE name = :n LIMIT 1", n=name)
 
 
 def get_post_id_and_depth(author, permlink):
     res = None
     if author:
         res = query_row("SELECT id, depth FROM hive_posts WHERE "
-                "author = '%s' AND permlink = '%s'" % (author, permlink))
+                "author = :a AND permlink = :p", a=author, p=permlink)
     return res or (None, -1)
 
 
@@ -42,7 +42,7 @@ def urls_to_tuples(urls):
     for url in urls:
         author, permlink = url.split('/')
         pid, is_deleted = query_row("SELECT id,is_deleted FROM hive_posts "
-                "WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
+                "WHERE author = :a AND permlink = :p", a=author, p=permlink)
         if not pid:
             raise Exception("Post not found! {}/{}".format(author, permlink))
         if is_deleted:
@@ -89,8 +89,8 @@ def delete_posts(ops):
 def register_posts(ops, date):
     for op in ops:
         sql = ("SELECT id, is_deleted FROM hive_posts "
-            "WHERE author = '%s' AND permlink = '%s'")
-        ret = query_row(sql % (op['author'], op['permlink']))
+            "WHERE author = :a AND permlink = :p")
+        ret = query_row(sql, a=op['author'], p=op['permlink'])
         pid = None
         if ret:
             if ret[1] == 0:
@@ -106,8 +106,8 @@ def register_posts(ops, date):
             category = op['parent_permlink']
             community = get_op_community(op) or op['author']
         else:
-            parent_data = query_row("SELECT id, depth, category, community FROM hive_posts WHERE author = '%s' "
-                                      "AND permlink = '%s'" % (op['parent_author'], op['parent_permlink']))
+            parent_data = query_row("SELECT id, depth, category, community FROM hive_posts WHERE author = :a "
+                                      "AND permlink = :p", a=op['parent_author'], p=op['parent_permlink'])
             parent_id, parent_depth, category, community = parent_data
             depth = parent_depth + 1
 
@@ -196,12 +196,12 @@ def process_json_follow_op(account, op_json, block_date):
             return
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
-            query("DELETE FROM hive_reblogs WHERE account = '%s' AND post_id = %d LIMIT 1" % (blogger, post_id))
+            query("DELETE FROM hive_reblogs WHERE account = :a AND post_id = :pid LIMIT 1", a=blogger, pid=post_id)
             sql = "DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id"
             query(sql, account=blogger, id=post_id)
         else:
             query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
-                  "VALUES ('%s', %d, '%s')" % (blogger, post_id, block_date))
+                  "VALUES (:a, :pid, :date)", a=blogger, pid=post_id, date=block_date)
             sql = "INSERT IGNORE INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
             query(sql, account=blogger, id=post_id, created_at=block_date)
 
@@ -416,7 +416,7 @@ def cache_missing_posts():
     sql = ("SELECT (SELECT IFNULL(MAX(id), 0) FROM hive_posts) - "
            "(SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache)")
     missing_count = query_one(sql)
-    print("[INIT] Found {} missing cache entries".format(missing_count))
+    print("[INIT] Found {} missing post cache entries".format(missing_count))
 
     if not missing_count:
         return

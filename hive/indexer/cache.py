@@ -353,7 +353,7 @@ def update_posts_batch(tuples, steemd, updated_at=None):
 # the feed cache allows for efficient querying of blogs+reblogs. this method
 # efficiently builds the feed cache after the initial sync.
 def rebuild_feed_cache(truncate=True):
-    print("[INIT] Rebuilding hive_feed_cache")
+    print("[INIT] Rebuilding hive_feed_cache, this will take a few minutes.")
     if truncate:
         query("TRUNCATE TABLE hive_feed_cache")
 

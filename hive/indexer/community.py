@@ -166,7 +166,7 @@ def is_community_post_valid(community, comment: dict) -> str:
 
 
 def get_community(community_name):
-    return query_row("SELECT * FROM hive_communities WHERE name = '%s' LIMIT 1" % community_name)
+    return query_row("SELECT * FROM hive_communities WHERE name = :n LIMIT 1", n=community_name)
 
 def is_author_muted(author_name: str, community_name: str) -> bool:
     return get_user_role(author_name, community_name) is 'muted'

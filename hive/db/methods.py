@@ -15,10 +15,10 @@ def query(sql, **kwargs):
     ti = time.time()
     query = text(sql).execution_options(autocommit=False)
     res = conn.execute(query, **kwargs)
-    ms = int((time.time() - ti) * 1000)
+    ms = (time.time() - ti) * 1000
     if ms > 100:
-        disp = re.sub('\s+', ' ', sql).strip()[:250]
-        print("\033[93m[SQL][{}ms] {}\033[0m".format(ms, disp))
+        disp = re.sub('\s+', ' ', sql).strip()[:200]
+        print("\033[93m[SQL][{}ms] {}\033[0m".format(int(ms), disp))
     return res
 
 # n*m
