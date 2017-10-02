@@ -47,6 +47,13 @@ class SteemAdapter:
 
     def _gdgp(self):
         ret = self.__exec('get_dynamic_global_properties')
+        tries = 0
+        while not ret:
+            tries += 1
+            print("gdgp failure, retry in {}s".format(tries))
+            time.sleep(tries)
+            ret = self.__exec('get_dynamic_global_properties')
+
         assert ret, "empty response for gdgp: {}".format(ret)
         assert isinstance(ret, dict), "gdgp was not a dict"
         assert 'time' in ret, "gdgp invalid resp: {}".format(ret)
