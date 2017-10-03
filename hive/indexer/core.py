@@ -128,7 +128,7 @@ def register_posts(ops, date):
         # if we're reusing a previously-deleted post (rare!), update it
         if pid:
             query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = 0, parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
-                  is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid))
+                  is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid)
             query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=pid)
         else:
             sql = """
