@@ -73,7 +73,7 @@ def register_accounts(accounts, date):
     for account in set(accounts):
         if not get_account_id(account):
             query("INSERT INTO hive_accounts (name, created_at) "
-                    "VALUES ('%s', '%s')" % (account, date))
+                    "VALUES (:name, :date)", name=account, date=date)
 
 
 # marks posts as deleted and removes them from feed cache
@@ -92,12 +92,15 @@ def register_posts(ops, date):
             "WHERE author = :a AND permlink = :p")
         ret = query_row(sql, a=op['author'], p=op['permlink'])
         pid = None
-        if ret:
-            if ret[1] == 0:
-                # if post has id and is_deleted=0, then it's an edit -- ignore.
-                continue
-            else:
-                pid = ret[0]
+        if not ret:
+            # post does not exist, go ahead and process it
+            pass
+        elif ret[1] == 0:
+            # post exists and is not deleted, thus it's an edit. ignore.
+            continue
+        else:
+            # post exists but was deleted. time to reinstate.
+            pid = ret[0]
 
         # set parent & inherited attributes
         if op['parent_author'] == '':
@@ -327,9 +330,7 @@ def sync_from_steemd(is_initial_sync):
     ubound = steemd.last_irreversible_block_num()
 
     print("[SYNC] {} blocks to batch sync".format(ubound - lbound + 1))
-
-    if not is_initial_sync:
-        query("START TRANSACTION")
+    print("[SYNC] start sync from block %d" % lbound)
 
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
@@ -350,16 +351,14 @@ def sync_from_steemd(is_initial_sync):
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
-        date = steemd.head_time()
 
         print("[PREP] Update {} edited posts".format(len(dirty)))
-        update_posts_batch(urls_to_tuples(dirty), steemd, date)
+        update_posts_batch(urls_to_tuples(dirty), steemd)
 
+        date = steemd.head_time()
         paidout = select_paidout_posts(date)
         print("[PREP] Process {} payouts since {}".format(len(paidout), date))
         update_posts_batch(paidout, steemd, date)
-
-        query("COMMIT")
 
 
 def listen_steemd(trail_blocks=2):
