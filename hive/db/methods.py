@@ -8,6 +8,37 @@ from decimal import Decimal
 
 import time
 import re
+import atexit
+
+
+class QueryStats:
+    stats = {}
+    ttltime = 0.0
+
+    @classmethod
+    def log(cls, sql, ms):
+        nsql = re.sub('\s+', ' ', sql).strip()[0:256] #normalize
+        nsql = re.sub('VALUES (\s*\([^\)]+\),?)+', 'VALUES (...)', nsql)
+        if nsql not in cls.stats:
+            cls.stats[nsql] = [0, 0]
+        cls.stats[nsql][0] += ms
+        cls.stats[nsql][1] += 1
+        cls.ttltime += ms
+        if cls.ttltime > 15 * 60000:
+            cls.print()
+
+    @classmethod
+    def print(cls):
+        ttl = cls.ttltime
+        print("[DEBUG] total SQL time: {}ms".format(int(ttl)))
+        for arr in sorted(cls.stats.items(), key=lambda x:-x[1][0])[0:40]:
+            sql, vals = arr
+            ms, calls = vals
+            print("% 5.1f%% % 10.2fms % 8.2favg % 5dx -- %s" % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+        cls.stats = {}
+        cls.ttltime = 0
+
+atexit.register(QueryStats.print)
 
 # generic
 # -------
@@ -16,6 +47,7 @@ def query(sql, **kwargs):
     query = text(sql).execution_options(autocommit=False)
     res = conn.execute(query, **kwargs)
     ms = (time.time() - ti) * 1000
+    QueryStats.log(sql, ms)
     if ms > 100:
         disp = re.sub('\s+', ' ', sql).strip()[:200]
         print("\033[93m[SQL][{}ms] {}\033[0m".format(int(ms), disp))
