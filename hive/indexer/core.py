@@ -127,13 +127,23 @@ def register_posts(ops, date):
 
         # if we're reusing a previously-deleted post (rare!), update it
         if pid:
-            query("UPDATE hive_posts SET is_valid = %d, is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (is_valid, parent_id or 'NULL', category, community, depth, pid))
+            query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = 0, parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
+                  is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid))
             query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=pid)
         else:
-            query("INSERT INTO hive_posts (is_valid, parent_id, author, permlink, category, community, depth, created_at) "
-                  "VALUES (%d, %s, '%s', '%s', '%s', '%s', %d, '%s')" % (
-                      is_valid, parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
-            pid = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
+            sql = """
+            INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
+                                    category, community, depth, created_at)
+            VALUES (:is_valid, :parent_id, :author, :permlink,
+                    :category, :community, :depth, :date)
+            """
+            query(sql, is_valid=is_valid, parent_id=parent_id,
+                  author=op['author'], permlink=op['permlink'],
+                  category=category, community=community,
+                  depth=depth, date=date)
+
+            pid = query_one("SELECT id FROM hive_posts WHERE author = :a AND "
+                            "permlink = :p", a=op['author'], p=op['permlink'])
 
         # add top-level posts to feed cache
         if depth == 0:
@@ -218,7 +228,8 @@ def process_block(block, is_initial_sync=False):
     txs = block['transactions']
 
     query("INSERT INTO hive_blocks (num, hash, prev, txs, created_at) "
-          "VALUES (%d, '%s', '%s', %d, '%s')" % (block_num, block_id, prev, len(txs), date))
+          "VALUES (:num, :hash, :prev, :txs, :date)",
+          num=block_num, hash=block_id, prev=prev, txs=len(txs), date=date)
 
     accounts = set()
     comments = []
