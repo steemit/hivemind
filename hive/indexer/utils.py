@@ -77,6 +77,7 @@ class SteemAdapter:
 
         while missing:
             for block in self.__exec_batch('get_block', [[i] for i in missing]):
+                assert 'block_id' in block, "invalid block: {}".format(block)
                 blocks[int(block['block_id'][:8], base=16)] = block
             available = set(blocks.keys())
             missing = required - available
