@@ -24,13 +24,13 @@ class QueryStats:
         cls.stats[nsql][0] += ms
         cls.stats[nsql][1] += 1
         cls.ttltime += ms
-        if cls.ttltime > 15 * 60000:
+        if cls.ttltime > 30 * 60 * 1000:
             cls.print()
 
     @classmethod
     def print(cls):
         ttl = cls.ttltime
-        print("[DEBUG] total SQL time: {}ms".format(int(ttl)))
+        print("[DEBUG] total SQL time: {}s".format(int(ttl / 1000)))
         for arr in sorted(cls.stats.items(), key=lambda x:-x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
