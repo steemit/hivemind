@@ -451,6 +451,7 @@ def run():
 
     if is_initial_sync:
         print("[INIT] *** Initial sync ***")
+        print(query("SHOW VARIABLES").fetchall())
     else:
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()
