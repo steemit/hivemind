@@ -16,9 +16,9 @@ hive_blocks = sa.Table(
     sa.Column('prev', CHAR(40, ascii=True)),
     sa.Column('txs', SMALLINT(unsigned=True), server_default='0', nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.UniqueConstraint('hash', name='hive_blocks_ux1'),
-    sa.UniqueConstraint('prev', name='hive_blocks_ux2'),
-    sa.ForeignKeyConstraint(['prev'], ['hive_blocks.hash'], name='hive_blocks_fk1'),
+    #sa.UniqueConstraint('hash', name='hive_blocks_ux1'),
+    #sa.UniqueConstraint('prev', name='hive_blocks_ux2'),
+    #sa.ForeignKeyConstraint(['prev'], ['hive_blocks.hash'], name='hive_blocks_fk1'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )

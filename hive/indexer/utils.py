@@ -79,7 +79,9 @@ class SteemAdapter:
 
         while missing:
             for block in self.__exec_batch('get_block', [[i] for i in missing]):
-                assert 'block_id' in block, "invalid block: {}".format(block)
+                if not 'block_id' in block:
+                    print("WARNING: invalid block returned: {}".format(block))
+                    continue
                 num = int(block['block_id'][:8], base=16)
                 if num in blocks:
                     print("WARNING: batch get_block returned dupe %d" % num)
