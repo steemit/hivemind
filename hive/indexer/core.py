@@ -340,6 +340,8 @@ def sync_from_steemd(is_initial_sync):
     lbound = db_last_block() + 1
     ubound = steemd.last_irreversible_block_num()
 
+    ubound = min(ubound, int(8e6))
+
     print("[SYNC] {} blocks to batch sync".format(ubound - lbound + 1))
     print("[SYNC] start sync from block %d" % lbound)
 
@@ -444,14 +446,17 @@ def run():
         print("[INIT] No tables found. Initializing db...")
         setup()
 
+    if db_last_block() == 0:
+        for row in query("SHOW VARIABLES").fetchall():
+            print(row)
+
     #TODO: if initial sync is interrupted, cache never rebuilt
     #TODO: do not build partial feed_cache during init_sync
     # if this is the initial sync, batch updates until very end
     is_initial_sync = not query_one("SELECT 1 FROM hive_posts_cache LIMIT 1")
 
     if is_initial_sync:
-        print("[INIT] *** Initial sync ***")
-        print(query("SHOW VARIABLES").fetchall())
+        print("[INIT] *** Initial sync. db_last_block: %d ***" % db_last_block())
     else:
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()
