@@ -340,8 +340,6 @@ def sync_from_steemd(is_initial_sync):
     lbound = db_last_block() + 1
     ubound = steemd.last_irreversible_block_num()
 
-    ubound = min(ubound, int(8e6))
-
     print("[SYNC] {} blocks to batch sync".format(ubound - lbound + 1))
     print("[SYNC] start sync from block %d" % lbound)
 

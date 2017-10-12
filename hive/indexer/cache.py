@@ -316,8 +316,6 @@ def generate_cached_post_sql(pid, post, updated_at):
                 vals.append("(:id, :t%d)" % i)
                 params["t%d"%i] = tag
             sqls.append((sql + ','.join(vals), {'id': pid, **params}))
-        else:
-            print("post {} no tags: {}".format(pid, post))
 
     return sqls
 
