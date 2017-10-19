@@ -308,13 +308,14 @@ def generate_cached_post_sql(pid, post, updated_at):
         sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
         sqls.append((sql, {'id': pid}))
 
-        sql = "INSERT IGNORE INTO hive_post_tags (post_id, tag) VALUES "
-        params = {}
-        vals = []
-        for i, tag in enumerate(tags):
-            vals.append("(:id, :t%d)" % i)
-            params["t%d"%i] = tag
-        sqls.append((sql + ','.join(vals), {'id': pid, **params}))
+        if tags:
+            sql = "INSERT IGNORE INTO hive_post_tags (post_id, tag) VALUES "
+            params = {}
+            vals = []
+            for i, tag in enumerate(tags):
+                vals.append("(:id, :t%d)" % i)
+                params["t%d"%i] = tag
+            sqls.append((sql + ','.join(vals), {'id': pid, **params}))
 
     return sqls
 

@@ -46,17 +46,19 @@ class SteemAdapter:
         return self.__exec('get_block', num)
 
     def _gdgp(self):
-        ret = self.__exec('get_dynamic_global_properties')
         tries = 0
-        while not ret:
-            tries += 1
-            print("gdgp failure, retry in {}s".format(tries))
-            time.sleep(tries)
-            ret = self.__exec('get_dynamic_global_properties')
+        while True:
+            try:
+                ret = self.__exec('get_dynamic_global_properties')
+                assert ret, "empty response for gdgp: {}".format(ret)
+                assert 'time' in ret, "gdgp invalid resp: {}".format(ret)
+            except AssertionError as e:
+                tries += 1
+                print("gdgp failure, retry in {}s -- {}".format(tries, e))
+                time.sleep(tries)
+                continue
+            break
 
-        assert ret, "empty response for gdgp: {}".format(ret)
-        assert isinstance(ret, dict), "gdgp was not a dict"
-        assert 'time' in ret, "gdgp invalid resp: {}".format(ret)
         return ret
 
     def head_time(self):
@@ -77,8 +79,13 @@ class SteemAdapter:
 
         while missing:
             for block in self.__exec_batch('get_block', [[i] for i in missing]):
-                assert 'block_id' in block, "invalid block: {}".format(block)
-                blocks[int(block['block_id'][:8], base=16)] = block
+                if not 'block_id' in block:
+                    print("WARNING: invalid block returned: {}".format(block))
+                    continue
+                num = int(block['block_id'][:8], base=16)
+                if num in blocks:
+                    print("WARNING: batch get_block returned dupe %d" % num)
+                blocks[num] = block
             available = set(blocks.keys())
             missing = required - available
             if missing:
