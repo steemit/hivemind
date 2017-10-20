@@ -93,6 +93,15 @@ class SteemAdapter:
     def __exec_batch(self, method, params):
         """If jussi is enabled, use batch requests; otherwise, multi"""
         if self._jussi:
-            return list(self._client.exec_batch(method, params, batch_size=500))
+            tries = 0
+            while True:
+                try:
+                    return list(self._client.exec_batch(method, params, batch_size=500))
+                except AssertionError as e:
+                    tries += 1
+                    print("batch {} failure, retry in {}s -- {}".format(method, tries, e))
+                    time.sleep(tries)
+                    continue
+
         return list(self._client.exec_multi_with_futures(
             method, params, max_workers=10))
