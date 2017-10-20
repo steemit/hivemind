@@ -5,7 +5,6 @@ import time
 import re
 import os
 
-from json import JSONDecodeError
 from funcy.seqs import first, second, drop, flatten
 from hive.db.schema import setup, teardown
 from hive.db.methods import query_one, query, query_row, db_last_block
@@ -14,6 +13,7 @@ from toolz import partition_all
 from hive.indexer.utils import get_adapter
 from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, is_community_post_valid
+from hive.indexer.normalize import load_json_key
 
 log = logging.getLogger(__name__)
 
@@ -53,14 +53,8 @@ def urls_to_tuples(urls):
 
 # given a comment op, safely read 'community' field from json
 def get_op_community(comment):
-    if not comment['json_metadata']:
-        return None
-    md = None
-    try:
-        md = json.loads(comment['json_metadata'])
-    except:
-        return None
-    if type(md) is not dict or 'community' not in md:
+    md = load_json_key(comment, 'json_metadata')
+    if not md or type(md) is not dict or 'community' not in md:
         return None
     return md['community']
 
@@ -274,11 +268,7 @@ def process_block(block, is_initial_sync=False):
             continue
 
         account = op['required_posting_auths'][0]
-        op_json = {}
-        try:
-            op_json = json.loads(op['json'])
-        except JSONDecodeError:
-            pass
+        op_json = load_json_key(op, 'json')
 
         if op['id'] == 'follow':
             if block_num < 6000000 and type(op_json) != list:

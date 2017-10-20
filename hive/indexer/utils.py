@@ -4,13 +4,6 @@ import time
 from datetime import datetime
 from .http_client import HttpClient
 
-def amount(string):
-    return float(string.split(' ')[0])
-
-def parse_time(block_time):
-    return datetime.strptime(block_time, '%Y-%m-%dT%H:%M:%S')
-
-
 _shared_adapter = None
 def get_adapter():
     global _shared_adapter
