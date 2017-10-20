@@ -2,7 +2,7 @@ import os
 import time
 
 from datetime import datetime
-from .http_client import HttpClient
+from .http_client import HttpClient, RPCError
 
 _shared_adapter = None
 def get_adapter():
@@ -45,7 +45,7 @@ class SteemAdapter:
                 ret = self.__exec('get_dynamic_global_properties')
                 assert ret, "empty response for gdgp: {}".format(ret)
                 assert 'time' in ret, "gdgp invalid resp: {}".format(ret)
-            except AssertionError as e:
+            except (AssertionError, RPCError) as e:
                 tries += 1
                 print("gdgp failure, retry in {}s -- {}".format(tries, e))
                 time.sleep(tries)
