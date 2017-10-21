@@ -23,10 +23,8 @@ log = logging.getLogger(__name__)
 # ----
 
 def get_post_id_and_depth(author, permlink):
-    res = None
-    if author:
-        res = query_row("SELECT id, depth FROM hive_posts WHERE "
-                "author = :a AND permlink = :p", a=author, p=permlink)
+    res = query_row("SELECT id, depth FROM hive_posts WHERE "
+            "author = :a AND permlink = :p", a=author, p=permlink)
     return res or (None, -1)
 
 
@@ -95,7 +93,6 @@ def register_posts(ops, date):
 
         # community must be an existing account
         if not Accounts.exists(community):
-            print("Invalid community @{}/{} -- {}".format(op['author'], op['permlink'], community))
             community = op['author']
 
 
