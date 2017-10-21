@@ -10,6 +10,8 @@ from hive.db.schema import setup, teardown
 from hive.db.methods import query_one, query, query_row, db_last_block
 from toolz import partition_all
 
+from hive.indexer.accounts import Accounts
+#from hive.indexer.posts import Posts
 from hive.indexer.utils import get_adapter
 from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, is_community_post_valid
@@ -19,15 +21,6 @@ log = logging.getLogger(__name__)
 
 # core
 # ----
-def is_valid_account_name(name):
-    return re.match('^[a-z][a-z0-9\-.]{2,15}$', name)
-
-
-def get_account_id(name):
-    if is_valid_account_name(name):
-        return query_one("SELECT id FROM hive_accounts "
-                "WHERE name = :n LIMIT 1", n=name)
-
 
 def get_post_id_and_depth(author, permlink):
     res = None
@@ -61,14 +54,6 @@ def get_op_community(comment):
 
 # block-level routines
 # --------------------
-
-# register any new accounts in a block
-def register_accounts(accounts, date):
-    for account in set(accounts):
-        if not get_account_id(account):
-            query("INSERT INTO hive_accounts (name, created_at) "
-                    "VALUES (:name, :date)", name=account, date=date)
-
 
 # marks posts as deleted and removes them from feed cache
 def delete_posts(ops):
@@ -109,7 +94,7 @@ def register_posts(ops, date):
             depth = parent_depth + 1
 
         # community must be an existing account
-        if not get_account_id(community):
+        if not Accounts.exists(community):
             print("Invalid community @{}/{} -- {}".format(op['author'], op['permlink'], community))
             community = op['author']
 
@@ -173,7 +158,7 @@ def process_json_follow_op(account, op_json, block_date):
 
         if follower != account:
             return  # impersonation
-        if not all(filter(is_valid_account_name, [follower, following])):
+        if not all(filter(Accounts.exists, [follower, following])):
             return  # invalid input
 
         sql = """
@@ -190,7 +175,7 @@ def process_json_follow_op(account, op_json, block_date):
 
         if blogger != account:
             return  # impersonation
-        if not all(filter(is_valid_account_name, [author, blogger])):
+        if not all(filter(Accounts.exists, [author, blogger])):
             return
 
         post_id, depth = get_post_id_and_depth(author, permlink)
@@ -250,7 +235,7 @@ def process_block(block, is_initial_sync=False):
             elif op_type == 'vote':
                 dirty.add(op['author']+'/'+op['permlink'])
 
-    register_accounts(accounts, date)  # if an account does not exist, mark it as created in this block
+    Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
     register_posts(comments, date)  # if this is a new post, add the entry and validate community param
     delete_posts(deleted)  # mark hive_posts.is_deleted = 1
 
@@ -448,6 +433,9 @@ def run():
     else:
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()
+
+    # prefetch id->name memory map
+    Accounts.load_ids()
 
     # fast block sync strategies
     sync_from_checkpoints(is_initial_sync)

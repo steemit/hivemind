@@ -32,7 +32,7 @@ hive_accounts = sa.Table(
     sa.Column('display_name', sa.String(20)),
     sa.Column('about', sa.String(160)),
     sa.Column('location', sa.String(30)),
-    sa.Column('url', sa.String(100)),
+    sa.Column('website', sa.String(100)),
     sa.Column('profile_image', sa.String(1024), nullable=False, server_default=''),
     sa.Column('cover_image', sa.String(1024), nullable=False, server_default=''),
     sa.Column('proxy', CHAR(16, ascii=True), nullable=False, server_default=''),

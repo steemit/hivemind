@@ -58,53 +58,6 @@ def safe_img_url(url, max_size=1024):
         return url
 
 
-def safe_account_metadata(account):
-    prof = {}
-    try:
-        prof = json.loads(account['json_metadata'])['profile']
-        if not isinstance(prof, dict):
-            prof = {}
-    except:
-        pass
-
-    name = str(prof['name']) if 'name' in prof else None
-    about = str(prof['about']) if 'about' in prof else None
-    location = str(prof['location']) if 'location' in prof else None
-    website = str(prof['website']) if 'website' in prof else None
-    profile_image = str(prof['profile_image']) if 'profile_image' in prof else None
-    cover_image = str(prof['cover_image']) if 'cover_image' in prof else None
-
-    name = trunc(name, 20)
-    about = trunc(about, 160)
-    location = trunc(location, 30)
-
-    if name and name[0:1] == '@':
-        name = None
-    if website and len(website) > 100:
-        website = None
-    if website and website[0:4] != 'http':
-        website = 'http://' + website
-    # TODO: regex validate `website`
-
-    if profile_image and not re.match('^https?://', profile_image):
-        profile_image = None
-    if cover_image and not re.match('^https?://', cover_image):
-        cover_image = None
-    if profile_image and len(profile_image) > 1024:
-        profile_image = None
-    if cover_image and len(cover_image) > 1024:
-        cover_image = None
-
-    return dict(
-        display_name=name or '',
-        about=about or '',
-        location=location or '',
-        website=website or '',
-        profile_image=profile_image or '',
-        cover_image=cover_image or '',
-    )
-
-
 def get_post_stats(post):
     net_rshares_adj = 0
     neg_rshares = 0

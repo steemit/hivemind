@@ -8,51 +8,10 @@ import re
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col
 from hive.indexer.utils import get_adapter
-from hive.indexer.normalize import amount, parse_time, rep_log10, safe_account_metadata, safe_img_url, get_post_stats
+from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url, get_post_stats
+from hive.indexer.accounts import Accounts
 
 logger = logging.getLogger(__name__)
-
-def get_accounts_follow_stats(accounts):
-    sql = """SELECT follower, COUNT(*) FROM hive_follows
-            WHERE follower IN :lst GROUP BY follower"""
-    following = dict(query(sql, lst=accounts).fetchall())
-    for name in accounts:
-        if name not in following:
-            following[name] = 0
-
-    sql = """SELECT following, COUNT(*) FROM hive_follows
-            WHERE following IN :lst GROUP BY following"""
-    followers = dict(query(sql, lst=accounts).fetchall())
-    for name in accounts:
-        if name not in followers:
-            followers[name] = 0
-
-    return {'followers': followers, 'following': following}
-
-
-def generate_cached_accounts_sql(accounts):
-    fstats = get_accounts_follow_stats(accounts)
-    sqls = []
-    for account in get_adapter().get_accounts(accounts):
-        name = account['name']
-
-        values = {
-            'name': name,
-            'proxy': account['proxy'],
-            'post_count': account['post_count'],
-            'reputation': rep_log10(account['reputation']),
-            'followers': fstats['followers'][name],
-            'following': fstats['following'][name],
-            'proxy_weight': amount(account['vesting_shares']),
-            'vote_weight': amount(account['vesting_shares']),
-            'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
-            **safe_account_metadata(account)
-        }
-
-        update = ', '.join([k+" = :"+k for k in values.keys()][1:])
-        sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
-        sqls.append([(sql, values)])
-    return sqls
 
 
 def score(rshares, created_timestamp, timescale=480000):
@@ -276,32 +235,5 @@ def clean_dead_posts():
     query(sql)
 
 
-def cache_all_accounts():
-    accounts = query_col("SELECT name FROM hive_accounts")
-    processed = 0
-    total = len(accounts)
-
-    for i in range(0, total, 1000):
-        batch = accounts[i:i+1000]
-
-        lap_0 = time.time()
-        sqls = generate_cached_accounts_sql(batch)
-        lap_1 = time.time()
-        batch_queries(sqls)
-        lap_2 = time.time()
-
-        processed += len(batch)
-        rem = total - processed
-        rate = len(batch) / (lap_2 - lap_0)
-        pct_db = int(100 * (lap_2 - lap_1) / (lap_2 - lap_0))
-        print(" -- {} of {} ({}/s, {}% db) -- {}m remaining".format(
-            processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
-
-# testing
-# -------
-def run():
-    #sqls = generate_cached_accounts_sql(['roadscape', 'ned', 'sneak', 'test-safari'])
-    cache_all_accounts()
-
 if __name__ == '__main__':
-    run()
+    Accounts.cache_all()

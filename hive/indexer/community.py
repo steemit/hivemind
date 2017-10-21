@@ -1,6 +1,7 @@
 from funcy.seqs import first, flatten
 from hive.db.methods import query_row
 from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
+from hive.indexer.accounts import Accounts
 
 # community methods
 # -----------------
@@ -36,10 +37,10 @@ def process_json_community_op(account, op_json, date):
         return
 
     # If command references an account, ensure it's valid
-    account_id = get_account_id(cmd_op.get('account'))
+    account_id = Accounts.get_id(cmd_op.get('account'))
 
     # If command references a list of accounts, ensure they are valid
-    account_ids = list(map(get_account_id, cmd_op.get('accounts')))
+    account_ids = list(map(Accounts.get_id, cmd_op.get('accounts')))
 
     # ADMIN Actions
     # -------------
