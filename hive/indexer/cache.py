@@ -8,8 +8,9 @@ import re
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col
 from hive.indexer.steem_client import get_adapter
-from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url, get_post_stats
+from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.accounts import Accounts
+from hive.indexer.posts import Posts
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ def generate_cached_post_sql(pid, post, updated_at):
     hot_score = score(rshares, timestamp, 10000)
     trend_score = score(rshares, timestamp, 480000)
 
-    # TODO: add get_post_stats fields
+    # TODO: add Posts.get_post_stats fields
     values = collections.OrderedDict([
         ('post_id', '%d' % pid),
         ('author', "%s" % post['author']),
