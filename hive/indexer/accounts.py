@@ -1,7 +1,7 @@
 import time
 
 from hive.db.methods import query_one, query_col, query, query_row, query_all
-from hive.indexer.utils import get_adapter
+from hive.indexer.steem_client import get_adapter
 from hive.indexer.normalize import rep_log10, amount, trunc
 
 class Accounts:

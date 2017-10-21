@@ -7,7 +7,7 @@ import re
 
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col
-from hive.indexer.utils import get_adapter
+from hive.indexer.steem_client import get_adapter
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url, get_post_stats
 from hive.indexer.accounts import Accounts
 

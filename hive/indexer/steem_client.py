@@ -1,7 +1,6 @@
 import os
 import time
 
-from datetime import datetime
 from .http_client import HttpClient, RPCError
 
 _shared_adapter = None
@@ -10,11 +9,11 @@ def get_adapter():
     if not _shared_adapter:
         steem = os.environ.get('STEEMD_URL')
         jussi = os.environ.get('JUSSI_URL')
-        _shared_adapter = SteemAdapter(steem, jussi)
+        _shared_adapter = SteemClient(steem, jussi)
     return _shared_adapter
 
 
-class SteemAdapter:
+class SteemClient:
 
     def __init__(self, api_endpoint, jussi=None):
         self._jussi = bool(jussi)

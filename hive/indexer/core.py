@@ -12,7 +12,7 @@ from toolz import partition_all
 
 from hive.indexer.accounts import Accounts
 #from hive.indexer.posts import Posts
-from hive.indexer.utils import get_adapter
+from hive.indexer.steem_client import get_adapter
 from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
 from hive.indexer.community import process_json_community_op, is_community_post_valid
 from hive.indexer.normalize import load_json_key
