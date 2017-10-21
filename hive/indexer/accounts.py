@@ -52,9 +52,17 @@ class Accounts:
 
     @classmethod
     def cache_all(cls):
+        cls.cache_accounts(query_col("SELECT name FROM hive_accounts"))
+
+    @classmethod
+    def cache_dirty(cls):
+        cls.cache_accounts(cls._dirty)
+        cls._dirty = set()
+
+    @classmethod
+    def cache_accounts(cls, accounts):
         from hive.indexer.cache import batch_queries
 
-        accounts = query_col("SELECT name FROM hive_accounts")
         processed = 0
         total = len(accounts)
 
