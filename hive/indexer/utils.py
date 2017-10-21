@@ -97,7 +97,7 @@ class SteemAdapter:
             while True:
                 try:
                     return list(self._client.exec_batch(method, params, batch_size=500))
-                except AssertionError as e:
+                except (AssertionError, RPCError) as e:
                     tries += 1
                     print("batch {} failure, retry in {}s -- {}".format(method, tries, e))
                     time.sleep(tries)
