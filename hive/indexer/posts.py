@@ -32,50 +32,50 @@ class Posts:
 
 
 
-	@classmethod
-	def get_post_stats(cls,post):
-		net_rshares_adj = 0
-		neg_rshares = 0
-		total_votes = 0
-		up_votes = 0
-		for vote in post['active_votes']:
-			if vote['percent'] == 0:
-				continue
+    @classmethod
+    def get_post_stats(cls,post):
+        net_rshares_adj = 0
+        neg_rshares = 0
+        total_votes = 0
+        up_votes = 0
+        for vote in post['active_votes']:
+            if vote['percent'] == 0:
+                continue
 
-			total_votes += 1
-			rshares = int(vote['rshares'])
-			sign = 1 if vote['percent'] > 0 else -1
-			if sign > 0:
-				up_votes += 1
-			if sign < 0:
-				neg_rshares += rshares
+            total_votes += 1
+            rshares = int(vote['rshares'])
+            sign = 1 if vote['percent'] > 0 else -1
+            if sign > 0:
+                up_votes += 1
+            if sign < 0:
+                neg_rshares += rshares
 
-			# For graying: sum rshares, but ignore neg rep users and dust downvotes
-			neg_rep = str(vote['reputation'])[0] == '-'
-			if not (neg_rep and sign < 0 and len(str(rshares)) < 11):
-				net_rshares_adj += rshares
+            # For graying: sum rshares, but ignore neg rep users and dust downvotes
+            neg_rep = str(vote['reputation'])[0] == '-'
+            if not (neg_rep and sign < 0 and len(str(rshares)) < 11):
+                net_rshares_adj += rshares
 
-		# take negative rshares, divide by 2, truncate 10 digits (plus neg sign),
-		#   and count digits. creates a cheap log10, stake-based flag weight.
-		#   result: 1 = approx $400 of downvoting stake; 2 = $4,000; etc
-		flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
+        # take negative rshares, divide by 2, truncate 10 digits (plus neg sign),
+        #   and count digits. creates a cheap log10, stake-based flag weight.
+        #   result: 1 = approx $400 of downvoting stake; 2 = $4,000; etc
+        flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
 
-		allow_delete = post['children'] == 0 and int(post['net_rshares']) <= 0
-		has_pending_payout = amount(post['pending_payout_value']) >= 0.02
-		author_rep = rep_log10(post['author_reputation'])
+        allow_delete = post['children'] == 0 and int(post['net_rshares']) <= 0
+        has_pending_payout = amount(post['pending_payout_value']) >= 0.02
+        author_rep = rep_log10(post['author_reputation'])
 
-		gray_threshold = -9999999999
-		low_value_post = net_rshares_adj < gray_threshold and author_rep < 65
+        gray_threshold = -9999999999
+        low_value_post = net_rshares_adj < gray_threshold and author_rep < 65
 
-		gray = not has_pending_payout and (author_rep < 1 or low_value_post)
-		hide = not has_pending_payout and (author_rep < 0)
+        gray = not has_pending_payout and (author_rep < 1 or low_value_post)
+        hide = not has_pending_payout and (author_rep < 0)
 
-		return {
-			'hide': hide,
-			'gray': gray,
-			'allow_delete': allow_delete,
-			'author_rep': author_rep,
-			'flag_weight': flag_weight,
-			'total_votes': total_votes,
-			'up_votes': up_votes
-		}
+        return {
+            'hide': hide,
+            'gray': gray,
+            'allow_delete': allow_delete,
+            'author_rep': author_rep,
+            'flag_weight': flag_weight,
+            'total_votes': total_votes,
+            'up_votes': up_votes
+        }
