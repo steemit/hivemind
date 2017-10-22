@@ -1,3 +1,3 @@
-from hive.db.schema import connect
+from hive.db.schema import engine
 
-conn = connect(echo=False)
+

@@ -17,11 +17,12 @@ services:
     environment:
       DATABASE_URL: mysql://root:root_password@mysql:3306/testdb
       LOG_LEVEL: DEBUG
-      STEEMD_URL: https://api.steemitdev.com
+      JUSSI_URL: https://api.steemit.com
+      STEEMD_URL: https://api.steemit.com
     links:
       - mysql:db
     ports:
-      - 8080:8080
+      - 9000:9000
     volumes:
       - .:/app
     restart: always

@@ -21,13 +21,20 @@ compose:
 mysql:
 	docker run -d --name steemit_mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root_password -e MYSQL_DATABASE=testdb mysql
 
+
+serve-local:
+	pipenv run python hive/server/serve.py --port 8080 --database_url='mysql://root:root_password@127.0.0.1:3306/testdb'
+
+.PHONY: db-head-state
+db-head-state:
+	curl -H 'Content-Type: application/json' -d '{"id":1,"jsonrpc":"2.0","method":"db_head_state"}' http://localhost:8080
+
 ipython:
 	docker run -it $(PROJECT_DOCKER_RUN_ARGS) $(PROJECT_DOCKER_TAG) ipython
 
 test: test-without-build build
 
 test-without-build: test-without-lint test-pylint
-
 
 test-without-lint:
 	py.test tests

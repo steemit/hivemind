@@ -3,32 +3,32 @@ url = "https://pypi.python.org/simple"
 verify_ssl = true
 
 [packages]
-bottle = "*"
-bottle-sqlalchemy = "*"
-bottle_errorsrest = "*"
-SQLAlchemy = "*"
+
+sqlalchemy = "*"
 mysqlclient = "*"
 click = "*"
-click-spinner = "*"
+"click-spinner" = "*"
 funcy = "*"
 toolz = "*"
 maya = "*"
 ujson = "*"
-PrettyTable = "*"
+prettytable = "*"
+jsonrpcserver = "*"
+aiohttp = "*"
+aiomysql = "*"
 
-[requires]
-python_version = "3.5"
 
 [dev-packages]
+
 ipython = "*"
-pep8 = "*"
+"pep8" = "*"
 pytest = "*"
-pytest-console-scripts = "*"
-pytest-docker = "*"
-pytest-pylint = "*"
+"pytest-console-scripts" = "*"
+"pytest-docker" = "*"
+"pytest-pylint" = "*"
 recommonmark = "*"
-sphinxcontrib-programoutput = "*"
-sphinxcontrib-restbuilder = "*"
+"sphinxcontrib-programoutput" = "*"
+"sphinxcontrib-restbuilder" = "*"
 yapf = "*"
-Sphinx = "*"
-autopep8 = "*"
+sphinx = "*"
+"autopep8" = "*"

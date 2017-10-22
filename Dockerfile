@@ -5,17 +5,16 @@ ENV ENVIRONMENT DEV
 ENV LOG_LEVEL INFO
 ENV LANG en_US.UTF-8
 ENV LC_ALL en_US.UTF-8
+ENV PIPENV_VENV_IN_PROJECT 1
 ENV APP_ROOT /app
 ENV WSGI_APP ${APP_ROOT}/hive/server/serve.py
-ENV HTTP_SERVER_PORT 8080
-ENV HTTP_SERVER_STATS_PORT 9191
+ENV HTTP_SERVER_PORT 9000
 
 RUN \
     apt-get update && \
     apt-get install -y \
         build-essential \
         daemontools \
-        git \
         libffi-dev \
         libmysqlclient-dev \
         libssl-dev \
@@ -31,8 +30,7 @@ RUN \
         libpcre3-dev
 
 RUN \
-    pip3 install --upgrade pip && \
-    pip3 install uwsgi
+    pip3 install --upgrade pip setuptools
 
 ADD . /app
 
@@ -43,9 +41,7 @@ RUN \
 WORKDIR /app
 
 RUN \
-    pip3 install pipenv && \
-    pip3 install -e git+https://github.com/steemit/steem-python.git#egg=steem && \
-    pip3 install -e . && \
+    pip3 install . && \
     apt-get remove -y \
         build-essential \
         libffi-dev \
@@ -61,4 +57,3 @@ RUN \
         /usr/local/include
 
 EXPOSE ${HTTP_SERVER_PORT}
-EXPOSE ${HTTP_SERVER_STATS_PORT}

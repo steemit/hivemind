@@ -1,7 +1,7 @@
 import click
 from hive.db.cli import db
 from hive.indexer.cli import indexer
-from hive.server.cli import server
+
 
 context_settings = dict(help_option_names=['-h', '--help'])
 
@@ -21,4 +21,4 @@ def cli():
 
 cli.add_command(db)
 cli.add_command(indexer)
-cli.add_command(server)
+
