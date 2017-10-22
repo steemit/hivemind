@@ -22,7 +22,7 @@ services:
     links:
       - mysql:db
     ports:
-      - 9000:9000
+      - 8080:8080
     volumes:
       - .:/app
     restart: always
