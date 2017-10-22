@@ -9,6 +9,37 @@ from decimal import Decimal
 
 import time
 import re
+import atexit
+
+
+class QueryStats:
+    stats = {}
+    ttltime = 0.0
+
+    @classmethod
+    def log(cls, sql, ms):
+        nsql = re.sub('\s+', ' ', sql).strip()[0:256] #normalize
+        nsql = re.sub('VALUES (\s*\([^\)]+\),?)+', 'VALUES (...)', nsql)
+        if nsql not in cls.stats:
+            cls.stats[nsql] = [0, 0]
+        cls.stats[nsql][0] += ms
+        cls.stats[nsql][1] += 1
+        cls.ttltime += ms
+        if cls.ttltime > 30 * 60 * 1000:
+            cls.print()
+
+    @classmethod
+    def print(cls):
+        ttl = cls.ttltime
+        print("[DEBUG] total SQL time: {}s".format(int(ttl / 1000)))
+        for arr in sorted(cls.stats.items(), key=lambda x:-x[1][0])[0:40]:
+            sql, vals = arr
+            ms, calls = vals
+            print("% 5.1f%% % 10.2fms % 7.2favg % 7dx -- %s" % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+        cls.stats = {}
+        cls.ttltime = 0
+
+atexit.register(QueryStats.print)
 
 logger = logging.getLogger(__name__)
 
@@ -274,7 +305,7 @@ def get_related_posts(account: str, permlink: str):
         JOIN hive_posts p2 ON p1.category = p2.category
         JOIN hive_posts_cache pc ON p2.id = pc.post_id
        WHERE p1.author = :a AND p1.permlink = :p
-         AND sc_trend > :t
+         AND sc_trend > :t AND p1.id != p2.id
     ORDER BY sc_trend DESC LIMIT 5
     """
     thresh = time.time() / 480000

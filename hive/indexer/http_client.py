@@ -17,7 +17,7 @@ from urllib3.connection import HTTPConnection
 from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.WARNING)
 
 class RPCError(Exception):
     pass
@@ -109,7 +109,7 @@ class HttpClient(object):
         self.request = None
         self.next_node()
 
-        log_level = kwargs.get('log_level', logging.DEBUG)
+        log_level = kwargs.get('log_level', logging.WARNING)
         logger.setLevel(log_level)
 
     def next_node(self):
@@ -227,7 +227,7 @@ class HttpClient(object):
                     if self.re_raise:
                         error_message = error.get(
                             'detail', response_json['error']['message'])
-                        raise RPCError(error_message)
+                        raise RPCError("{}: {}".format(error_message, response_json))
 
                     result = response_json['error']
                 elif isinstance(response_json, dict):
@@ -256,15 +256,17 @@ class HttpClient(object):
 
         batch_requests = ({
                 "method": name,
-                "params": [i],
+                "params": i,
                 "jsonrpc": "2.0",
-                "id": i
+                "id": 0
             } for i in params)
 
 
         for batch in chunkify(batch_requests, batch_size):
             body = json.dumps(batch).encode()
             batch_response = self.exec('ignore',[], body=body)
+            assert batch_response, "batch_response was empty"
+            assert len(batch_response) == len(batch), "batch_response len did not match params ({} vs {})".format(len(batch_response), len(batch))
             for response in batch_response:
                 yield response['result']
 

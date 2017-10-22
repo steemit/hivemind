@@ -10,135 +10,17 @@ from hive.db.schema import setup, teardown
 from hive.db.methods import query_one, query, query_row, db_last_block
 from toolz import partition_all
 
+from hive.indexer.accounts import Accounts
+from hive.indexer.posts import Posts
+from hive.indexer.steem_client import get_adapter
+from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
+from hive.indexer.community import process_json_community_op
+from hive.indexer.normalize import load_json_key
+
 log = logging.getLogger(__name__)
-
-from hive.indexer.utils import json_expand, get_adapter
-from hive.indexer.cache import cache_missing_posts, rebuild_cache, select_paidout_posts, update_posts_batch
-from hive.indexer.community import process_json_community_op, is_community_post_valid
-
-
-STEEMD_URL = os.environ.get('STEEMD_URL')
-
-# core
-# ----
-def is_valid_account_name(name):
-    return re.match('^[a-z][a-z0-9\-.]{2,15}$', name)
-
-
-def get_account_id(name):
-    if is_valid_account_name(name):
-        return query_one("SELECT id FROM hive_accounts "
-                "WHERE name = '%s' LIMIT 1" % name)
-
-
-def get_post_id_and_depth(author, permlink):
-    res = None
-    if author:
-        res = query_row("SELECT id, depth FROM hive_posts WHERE "
-                "author = '%s' AND permlink = '%s'" % (author, permlink))
-    return res or (None, -1)
-
-
-def urls_to_tuples(urls):
-    tuples = []
-    for url in urls:
-        author, permlink = url.split('/')
-        id, is_deleted = query_row("SELECT id,is_deleted FROM hive_posts "
-                "WHERE author = '%s' AND permlink = '%s'" % (author, permlink))
-        if not id:
-            raise Exception("Post not found! {}/{}".format(author, permlink))
-        if is_deleted:
-            continue
-        tuples.append([id, author, permlink])
-    return tuples
-
-
-# given a comment op, safely read 'community' field from json
-def get_op_community(comment):
-    if not comment['json_metadata']:
-        return None
-    md = None
-    try:
-        md = json.loads(comment['json_metadata'])
-    except:
-        return None
-    if type(md) is not dict or 'community' not in md:
-        return None
-    return md['community']
-
 
 # block-level routines
 # --------------------
-
-# register any new accounts in a block
-def register_accounts(accounts, date):
-    for account in set(accounts):
-        if not get_account_id(account):
-            query("INSERT INTO hive_accounts (name, created_at) "
-                    "VALUES ('%s', '%s')" % (account, date))
-
-
-# marks posts as deleted and removes them from feed cache
-def delete_posts(ops):
-    for op in ops:
-        post_id, depth = get_post_id_and_depth(op['author'], op['permlink'])
-        query("UPDATE hive_posts SET is_deleted = 1 WHERE id = :id", id=post_id)
-        query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
-        query("DELETE FROM hive_feed_cache WHERE post_id = :id", id=post_id)
-
-
-# registers new posts (not edits), inserts into feed cache
-def register_posts(ops, date):
-    for op in ops:
-        sql = ("SELECT id, is_deleted FROM hive_posts "
-            "WHERE author = '%s' AND permlink = '%s'")
-        ret = query_row(sql % (op['author'], op['permlink']))
-        id = None
-        if ret:
-            if ret[1] == 0:
-                # if post has id and is_deleted=0, then it's an edit -- ignore.
-                continue
-            else:
-                id = ret[0]
-
-        # set parent & inherited attributes
-        if op['parent_author'] == '':
-            parent_id = None
-            depth = 0
-            category = op['parent_permlink']
-            community = get_op_community(op) or op['author']
-        else:
-            parent_data = query_row("SELECT id, depth, category, community FROM hive_posts WHERE author = '%s' "
-                                      "AND permlink = '%s'" % (op['parent_author'], op['parent_permlink']))
-            parent_id, parent_depth, category, community = parent_data
-            depth = parent_depth + 1
-
-        # community must be an existing account
-        if not get_account_id(community):
-            print("Invalid community @{}/{} -- {}".format(op['author'], op['permlink'], community))
-            community = op['author']
-
-
-        # validated community; will return None if invalid & defaults to author.
-        is_valid = int(is_community_post_valid(community, op))
-        if not is_valid:
-            print("Invalid post @{}/{} in @{}".format(op['author'], op['permlink'], community))
-
-        # if we're reusing a previously-deleted post (rare!), update it
-        if id:
-            query("UPDATE hive_posts SET is_valid = %d, is_deleted = 0, parent_id = %s, category = '%s', community = '%s', depth = %d WHERE id = %d" % (is_valid, parent_id or 'NULL', category, community, depth, id))
-            query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=id)
-        else:
-            query("INSERT INTO hive_posts (is_valid, parent_id, author, permlink, category, community, depth, created_at) "
-                  "VALUES (%d, %s, '%s', '%s', '%s', '%s', %d, '%s')" % (
-                      is_valid, parent_id or 'NULL', op['author'], op['permlink'], category, community, depth, date))
-            id = query_one("SELECT id FROM hive_posts WHERE author = '%s' AND permlink = '%s'" % (op['author'], op['permlink']))
-
-        # add top-level posts to feed cache
-        if depth == 0:
-            sql = "INSERT INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
-            query(sql, account=op['author'], id=id, created_at=date)
-
 
 
 def process_json_follow_op(account, op_json, block_date):
@@ -168,7 +50,7 @@ def process_json_follow_op(account, op_json, block_date):
 
         if follower != account:
             return  # impersonation
-        if not all(filter(is_valid_account_name, [follower, following])):
+        if not all(filter(Accounts.exists, [follower, following])):
             return  # invalid input
 
         sql = """
@@ -185,10 +67,10 @@ def process_json_follow_op(account, op_json, block_date):
 
         if blogger != account:
             return  # impersonation
-        if not all(filter(is_valid_account_name, [author, blogger])):
+        if not all(filter(Accounts.exists, [author, blogger])):
             return
 
-        post_id, depth = get_post_id_and_depth(author, permlink)
+        post_id, depth = Posts.get_id_and_depth(author, permlink)
 
         if depth > 0:
             return  # prevent comment reblogs
@@ -198,18 +80,18 @@ def process_json_follow_op(account, op_json, block_date):
             return
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
-            query("DELETE FROM hive_reblogs WHERE account = '%s' AND post_id = %d LIMIT 1" % (blogger, post_id))
+            query("DELETE FROM hive_reblogs WHERE account = :a AND post_id = :pid LIMIT 1", a=blogger, pid=post_id)
             sql = "DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id"
             query(sql, account=blogger, id=post_id)
         else:
             query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
-                  "VALUES ('%s', %d, '%s')" % (blogger, post_id, block_date))
+                  "VALUES (:a, :pid, :date)", a=blogger, pid=post_id, date=block_date)
             sql = "INSERT IGNORE INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
             query(sql, account=blogger, id=post_id, created_at=block_date)
 
 
 # process a single block. always wrap in a transaction!
-def process_block(block, is_initial_sync = False):
+def process_block(block, is_initial_sync=False):
     date = block['timestamp']
     block_id = block['block_id']
     prev = block['previous']
@@ -217,7 +99,8 @@ def process_block(block, is_initial_sync = False):
     txs = block['transactions']
 
     query("INSERT INTO hive_blocks (num, hash, prev, txs, created_at) "
-          "VALUES (%d, '%s', '%s', %d, '%s')" % (block_num, block_id, prev, len(txs), date))
+          "VALUES (:num, :hash, :prev, :txs, :date)",
+          num=block_num, hash=block_id, prev=prev, txs=len(txs), date=date)
 
     accounts = set()
     comments = []
@@ -244,11 +127,11 @@ def process_block(block, is_initial_sync = False):
             elif op_type == 'vote':
                 dirty.add(op['author']+'/'+op['permlink'])
 
-    register_accounts(accounts, date)  # if an account does not exist, mark it as created in this block
-    register_posts(comments, date)  # if this is a new post, add the entry and validate community param
-    delete_posts(deleted)  # mark hive_posts.is_deleted = 1
+    Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
+    Posts.register(comments, date)  # if this is a new post, add the entry and validate community param
+    Posts.delete(deleted)  # mark hive_posts.is_deleted = 1
 
-    for op in map(json_expand, json_ops):
+    for op in json_ops:
         if op['id'] not in ['follow', 'com.steemit.community']:
             continue
 
@@ -262,7 +145,7 @@ def process_block(block, is_initial_sync = False):
             continue
 
         account = op['required_posting_auths'][0]
-        op_json = op['json']
+        op_json = load_json_key(op, 'json')
 
         if op['id'] == 'follow':
             if block_num < 6000000 and type(op_json) != list:
@@ -277,7 +160,7 @@ def process_block(block, is_initial_sync = False):
 
 
 # batch-process blocks, wrap in a transaction
-def process_blocks(blocks, is_initial_sync = False):
+def process_blocks(blocks, is_initial_sync=False):
     dirty = set()
     query("START TRANSACTION")
     for block in blocks:
@@ -296,7 +179,7 @@ def sync_from_checkpoints(is_initial_sync):
     fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
     mydir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
     files = map(fn, glob.glob(mydir + "/checkpoints/*.json.lst"))
-    files = sorted(files, key = lambda f: f[0])
+    files = sorted(files, key=lambda f: f[0])
 
     last_read = 0
     for (num, path) in files:
@@ -325,37 +208,38 @@ def sync_from_steemd(is_initial_sync):
     ubound = steemd.last_irreversible_block_num()
 
     print("[SYNC] {} blocks to batch sync".format(ubound - lbound + 1))
+    print("[SYNC] start sync from block %d" % lbound)
 
-    if not is_initial_sync:
-        query("START TRANSACTION")
-
-    start_num = lbound
-    start_time = time.time()
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
-        blocks = steemd.get_blocks_range(lbound, to)
-        lbound = to
-        dirty |= process_blocks(blocks, is_initial_sync)
 
-        rate = (lbound - start_num) / (time.time() - start_time)
-        print("[SYNC] Got block {} ({}/s) {}m remaining".format(
-            to - 1, round(rate, 1), round((ubound-lbound) / rate / 60, 2)))
+        lap_0 = time.time()
+        blocks = steemd.get_blocks_range(lbound, to)
+        lap_1 = time.time()
+        dirty |= process_blocks(blocks, is_initial_sync)
+        lap_2 = time.time()
+
+        rate = (to - lbound) / (lap_2 - lap_0)
+        rps = int((to - lbound) / (lap_1 - lap_0))
+        wps = int((to - lbound) / (lap_2 - lap_1))
+        print("[SYNC] Got block {} ({}/s, {}rps {}wps) -- {}m remaining".format(
+            to-1, round(rate, 1), rps, wps, round((ubound-to) / rate / 60, 2)))
+
+        lbound = to
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
-        date = steemd.head_time()
 
         print("[PREP] Update {} edited posts".format(len(dirty)))
-        update_posts_batch(urls_to_tuples(dirty), steemd, date)
+        update_posts_batch(Posts.urls_to_tuples(dirty), steemd)
 
+        date = steemd.head_time()
         paidout = select_paidout_posts(date)
-        print("[PREP] Process {} payouts".format(len(paidout)))
+        print("[PREP] Process {} payouts since {}".format(len(paidout), date))
         update_posts_batch(paidout, steemd, date)
 
-        query("COMMIT")
 
-
-def listen_steemd(trail_blocks = 2):
+def listen_steemd(trail_blocks=2):
     steemd = get_adapter()
     curr_block = db_last_block()
     last_hash = False
@@ -387,23 +271,49 @@ def listen_steemd(trail_blocks = 2):
                 last_hash, block['previous'], block['block_id']))
         last_hash = block['block_id']
 
+        start_time = time.time()
         query("START TRANSACTION")
 
         dirty = process_block(block)
-        update_posts_batch(urls_to_tuples(dirty), steemd, block['timestamp'])
+        update_posts_batch(Posts.urls_to_tuples(dirty), steemd, block['timestamp'])
 
         paidout = select_paidout_posts(block['timestamp'])
         update_posts_batch(paidout, steemd, block['timestamp'])
 
         print("{} edits, {} payouts".format(len(dirty), len(paidout)))
         query("COMMIT")
+        secs = time.time() - start_time
+
+        if secs > 1:
+            print("WARNING: block {} process took {}s".format(num, secs))
+
+
+def cache_missing_posts():
+    # cached posts inserted sequentially, so just compare MAX(id)'s
+    sql = ("SELECT (SELECT IFNULL(MAX(id), 0) FROM hive_posts) - "
+           "(SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache)")
+    missing_count = query_one(sql)
+    print("[INIT] Found {} missing post cache entries".format(missing_count))
+
+    if not missing_count:
+        return
+
+    # process in batches of 1m posts
+    missing = select_missing_posts(1e6)
+    while missing:
+        update_posts_batch(missing, get_adapter())
+        missing = select_missing_posts(1e6)
 
 
 def run():
     # if tables not created, do so now
     if not query_row('SHOW TABLES'):
-        print("No tables found. Initializing db...")
+        print("[INIT] No tables found. Initializing db...")
         setup()
+
+    if db_last_block() == 0:
+        for row in query("SHOW VARIABLES").fetchall():
+            print(row)
 
     #TODO: if initial sync is interrupted, cache never rebuilt
     #TODO: do not build partial feed_cache during init_sync
@@ -411,20 +321,22 @@ def run():
     is_initial_sync = not query_one("SELECT 1 FROM hive_posts_cache LIMIT 1")
 
     if is_initial_sync:
-        print("*** Initial sync ***")
+        print("[INIT] *** Initial sync. db_last_block: %d ***" % db_last_block())
     else:
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()
 
-    # fast-load checkpoint files
-    sync_from_checkpoints(is_initial_sync)
+    # prefetch id->name memory map
+    Accounts.load_ids()
 
-    # fast-load from steemd
+    # fast block sync strategies
+    sync_from_checkpoints(is_initial_sync)
     sync_from_steemd(is_initial_sync)
 
-    # upon completing initial sync, perform some batch processing
     if is_initial_sync:
-        rebuild_cache()
+        print("[INIT] *** Initial sync complete. Rebuilding cache. ***")
+        cache_missing_posts()
+        rebuild_feed_cache()
 
     # initialization complete. follow head blocks
     listen_steemd()

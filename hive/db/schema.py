@@ -17,7 +17,6 @@ hive_blocks = sa.Table(
     sa.Column('txs', SMALLINT(unsigned=True), server_default='0', nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.UniqueConstraint('hash', name='hive_blocks_ux1'),
-    sa.UniqueConstraint('prev', name='hive_blocks_ux2'),
     sa.ForeignKeyConstraint(['prev'], ['hive_blocks.hash'], name='hive_blocks_fk1'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
@@ -33,7 +32,7 @@ hive_accounts = sa.Table(
     sa.Column('display_name', sa.String(20)),
     sa.Column('about', sa.String(160)),
     sa.Column('location', sa.String(30)),
-    sa.Column('url', sa.String(100)),
+    sa.Column('website', sa.String(100)),
     sa.Column('profile_image', sa.String(1024), nullable=False, server_default=''),
     sa.Column('cover_image', sa.String(1024), nullable=False, server_default=''),
     sa.Column('proxy', CHAR(16, ascii=True), nullable=False, server_default=''),
@@ -67,7 +66,7 @@ hive_posts = sa.Table(
     sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
     sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
     sa.Index('hive_posts_ix1', 'parent_id'),
-    sa.Index('hive_posts_ix2', 'is_deleted'),
+    sa.Index('hive_posts_ix2', 'is_deleted', 'depth'),
     sa.Index('hive_posts_ix3', 'created_at', 'author'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
@@ -185,8 +184,7 @@ hive_feed_cache = sa.Table(
     sa.Column('post_id', sa.Integer),
     sa.Column('account', CHAR(16), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_feed_cache_fk1'),
-    sa.UniqueConstraint('post_id', 'account', name='hive_flags_ux1'), #TODO: verify PK
+    sa.UniqueConstraint('post_id', 'account', name='hive_feed_cache_ux1'), #TODO: verify PK
     sa.Index('hive_feed_cache_ix1', 'account', 'post_id', 'created_at'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
