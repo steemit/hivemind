@@ -11,121 +11,16 @@ from hive.db.methods import query_one, query, query_row, db_last_block
 from toolz import partition_all
 
 from hive.indexer.accounts import Accounts
-#from hive.indexer.posts import Posts
+from hive.indexer.posts import Posts
 from hive.indexer.steem_client import get_adapter
 from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
-from hive.indexer.community import process_json_community_op, is_community_post_valid
+from hive.indexer.community import process_json_community_op
 from hive.indexer.normalize import load_json_key
 
 log = logging.getLogger(__name__)
 
-# core
-# ----
-
-def get_post_id_and_depth(author, permlink):
-    res = query_row("SELECT id, depth FROM hive_posts WHERE "
-            "author = :a AND permlink = :p", a=author, p=permlink)
-    return res or (None, -1)
-
-
-def urls_to_tuples(urls):
-    tuples = []
-    for url in urls:
-        author, permlink = url.split('/')
-        pid, is_deleted = query_row("SELECT id,is_deleted FROM hive_posts "
-                "WHERE author = :a AND permlink = :p", a=author, p=permlink)
-        if not pid:
-            raise Exception("Post not found! {}/{}".format(author, permlink))
-        if is_deleted:
-            continue
-        tuples.append([pid, author, permlink])
-    return tuples
-
-
-# given a comment op, safely read 'community' field from json
-def get_op_community(comment):
-    md = load_json_key(comment, 'json_metadata')
-    if not md or type(md) is not dict or 'community' not in md:
-        return None
-    return md['community']
-
-
 # block-level routines
 # --------------------
-
-# marks posts as deleted and removes them from feed cache
-def delete_posts(ops):
-    for op in ops:
-        post_id, depth = get_post_id_and_depth(op['author'], op['permlink'])
-        query("UPDATE hive_posts SET is_deleted = 1 WHERE id = :id", id=post_id)
-        query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
-        query("DELETE FROM hive_feed_cache WHERE post_id = :id", id=post_id)
-
-
-# registers new posts (not edits), inserts into feed cache
-def register_posts(ops, date):
-    for op in ops:
-        sql = ("SELECT id, is_deleted FROM hive_posts "
-            "WHERE author = :a AND permlink = :p")
-        ret = query_row(sql, a=op['author'], p=op['permlink'])
-        pid = None
-        if not ret:
-            # post does not exist, go ahead and process it
-            pass
-        elif ret[1] == 0:
-            # post exists and is not deleted, thus it's an edit. ignore.
-            continue
-        else:
-            # post exists but was deleted. time to reinstate.
-            pid = ret[0]
-
-        # set parent & inherited attributes
-        if op['parent_author'] == '':
-            parent_id = None
-            depth = 0
-            category = op['parent_permlink']
-            community = get_op_community(op) or op['author']
-        else:
-            parent_data = query_row("SELECT id, depth, category, community FROM hive_posts WHERE author = :a "
-                                      "AND permlink = :p", a=op['parent_author'], p=op['parent_permlink'])
-            parent_id, parent_depth, category, community = parent_data
-            depth = parent_depth + 1
-
-        # community must be an existing account
-        if not Accounts.exists(community):
-            community = op['author']
-
-
-        # validated community; will return None if invalid & defaults to author.
-        is_valid = int(is_community_post_valid(community, op))
-        if not is_valid:
-            print("Invalid post @{}/{} in @{}".format(op['author'], op['permlink'], community))
-
-        # if we're reusing a previously-deleted post (rare!), update it
-        if pid:
-            query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = 0, parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
-                  is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid)
-            query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=pid)
-        else:
-            sql = """
-            INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
-                                    category, community, depth, created_at)
-            VALUES (:is_valid, :parent_id, :author, :permlink,
-                    :category, :community, :depth, :date)
-            """
-            query(sql, is_valid=is_valid, parent_id=parent_id,
-                  author=op['author'], permlink=op['permlink'],
-                  category=category, community=community,
-                  depth=depth, date=date)
-
-            pid = query_one("SELECT id FROM hive_posts WHERE author = :a AND "
-                            "permlink = :p", a=op['author'], p=op['permlink'])
-
-        # add top-level posts to feed cache
-        if depth == 0:
-            sql = "INSERT INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
-            query(sql, account=op['author'], id=pid, created_at=date)
-
 
 
 def process_json_follow_op(account, op_json, block_date):
@@ -175,7 +70,7 @@ def process_json_follow_op(account, op_json, block_date):
         if not all(filter(Accounts.exists, [author, blogger])):
             return
 
-        post_id, depth = get_post_id_and_depth(author, permlink)
+        post_id, depth = Posts.get_id_and_depth(author, permlink)
 
         if depth > 0:
             return  # prevent comment reblogs
@@ -233,8 +128,8 @@ def process_block(block, is_initial_sync=False):
                 dirty.add(op['author']+'/'+op['permlink'])
 
     Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
-    register_posts(comments, date)  # if this is a new post, add the entry and validate community param
-    delete_posts(deleted)  # mark hive_posts.is_deleted = 1
+    Posts.register(comments, date)  # if this is a new post, add the entry and validate community param
+    Posts.delete(deleted)  # mark hive_posts.is_deleted = 1
 
     for op in json_ops:
         if op['id'] not in ['follow', 'com.steemit.community']:
@@ -336,7 +231,7 @@ def sync_from_steemd(is_initial_sync):
     if not is_initial_sync:
 
         print("[PREP] Update {} edited posts".format(len(dirty)))
-        update_posts_batch(urls_to_tuples(dirty), steemd)
+        update_posts_batch(Posts.urls_to_tuples(dirty), steemd)
 
         date = steemd.head_time()
         paidout = select_paidout_posts(date)
@@ -380,7 +275,7 @@ def listen_steemd(trail_blocks=2):
         query("START TRANSACTION")
 
         dirty = process_block(block)
-        update_posts_batch(urls_to_tuples(dirty), steemd, block['timestamp'])
+        update_posts_batch(Posts.urls_to_tuples(dirty), steemd, block['timestamp'])
 
         paidout = select_paidout_posts(block['timestamp'])
         update_posts_batch(paidout, steemd, block['timestamp'])

@@ -2,6 +2,7 @@ from funcy.seqs import first, flatten
 from hive.db.methods import query_row
 from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
 from hive.indexer.accounts import Accounts
+from hive.indexer.posts import Posts
 
 # community methods
 # -----------------
@@ -32,7 +33,7 @@ def process_json_community_op(account, op_json, date):
         return
 
     # If command references a post, ensure it's valid
-    post_id, depth = get_post_id_and_depth(cmd_op.get('author'), cmd_op.get('permlink'))
+    post_id, depth = Posts.get_id_and_depth(cmd_op.get('author'), cmd_op.get('permlink'))
     if not post_id:
         return
 
