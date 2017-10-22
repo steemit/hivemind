@@ -87,7 +87,7 @@ async def db_head_state():
     sql = "SELECT num,created_at,UNIX_TIMESTAMP(CONVERT_TZ(created_at, '+00:00', 'SYSTEM')) ts FROM hive_blocks ORDER BY num DESC LIMIT 1"
     row = query_row(sql)
     return dict(db_head_block = row['num'],
-                db_head_time = row['created_at'],
+                db_head_time = str(row['created_at']),
                 db_head_age = int(time.time() - row['ts']))
 
 
