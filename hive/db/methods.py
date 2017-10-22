@@ -1,6 +1,6 @@
 import logging
 from funcy.seqs import first
-from hive.db import engine
+from hive.db import conn
 from hive.db.schema import (
     hive_follows,
 )
@@ -48,7 +48,6 @@ logger = logging.getLogger(__name__)
 def query(sql, **kwargs):
     ti = time.time()
     query = text(sql).execution_options(autocommit=False)
-    conn = engine.connect()
     try:
         res = conn.execute(query, **kwargs)
         ms = int((time.time() - ti) * 1000)

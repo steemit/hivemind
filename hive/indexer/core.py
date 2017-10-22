@@ -313,10 +313,6 @@ def run():
         print("[INIT] No tables found. Initializing db...")
         setup()
 
-    if db_last_block() == 0:
-        for row in query("SHOW VARIABLES").fetchall():
-            print(row)
-
     #TODO: if initial sync is interrupted, cache never rebuilt
     #TODO: do not build partial feed_cache during init_sync
     # if this is the initial sync, batch updates until very end
