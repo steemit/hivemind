@@ -7,7 +7,7 @@ import os
 
 from funcy.seqs import first, second, drop, flatten
 from hive.db.schema import setup, teardown
-from hive.db.methods import query_one, query, query_row, db_last_block
+from hive.db.methods import query_one, query, query_row
 from toolz import partition_all
 
 from hive.indexer.accounts import Accounts
@@ -22,6 +22,8 @@ log = logging.getLogger(__name__)
 # block-level routines
 # --------------------
 
+def db_last_block():
+    return query_one("SELECT MAX(num) FROM hive_blocks") or 0
 
 def process_json_follow_op(account, op_json, block_date):
     """ Process legacy 'follow' plugin ops (follow/mute/clear, reblog) """
