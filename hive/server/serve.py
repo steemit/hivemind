@@ -78,7 +78,12 @@ async def health(request):
             app['config']['hive.MAX_BLOCK_NUM_DIFF'] * 3,
             state['db_head_block'])), status=500)
     else:
-        return web.json_response(data=dict(state=state, timestamp=datetime.utcnow().isoformat()))
+        return web.json_response(data=dict(
+            status='OK',
+            source_commit=os.environ.get('SOURCE_COMMIT'),
+            docker_tag=os.environ.get('DOCKER_TAG'),
+            state=state, 
+            timestamp=datetime.utcnow().isoformat()))
 
 
 async def jsonrpc_handler(request):
