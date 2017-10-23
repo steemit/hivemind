@@ -57,6 +57,9 @@ def health():
                 state['db_head_block']))
     else:
         return dict(
+            status='OK',
+            source_commit=os.environ.get('SOURCE_COMMIT'),
+            docker_tag=os.environ.get('DOCKER_TAG'),
             state=state,
             timestamp=datetime.utcnow().isoformat())
 
