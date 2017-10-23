@@ -215,11 +215,11 @@ def sync_from_steemd(is_initial_sync):
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
 
-        lap_0 = time.time()
+        lap_0 = time.perf_counter()
         blocks = steemd.get_blocks_range(lbound, to)
-        lap_1 = time.time()
+        lap_1 = time.perf_counter()
         dirty |= process_blocks(blocks, is_initial_sync)
-        lap_2 = time.time()
+        lap_2 = time.perf_counter()
 
         rate = (to - lbound) / (lap_2 - lap_0)
         rps = int((to - lbound) / (lap_1 - lap_0))
@@ -273,7 +273,7 @@ def listen_steemd(trail_blocks=2):
                 last_hash, block['previous'], block['block_id']))
         last_hash = block['block_id']
 
-        start_time = time.time()
+        start_time = time.perf_counter()
         query("START TRANSACTION")
 
         dirty = process_block(block)
@@ -284,7 +284,7 @@ def listen_steemd(trail_blocks=2):
 
         print("{} edits, {} payouts".format(len(dirty), len(paidout)))
         query("COMMIT")
-        secs = time.time() - start_time
+        secs = time.perf_counter() - start_time
 
         if secs > 1:
             print("WARNING: block {} process took {}s".format(num, secs))

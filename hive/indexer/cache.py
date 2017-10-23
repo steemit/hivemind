@@ -159,7 +159,7 @@ def update_posts_batch(tuples, steemd, updated_at=None):
     processed = 0
     for i in range(0, total, 1000):
 
-        lap_0 = time.time()
+        lap_0 = time.perf_counter()
         buffer = []
         for post in steemd.get_content_batch(posts[i:i+1000]):
             if not post['author']:
@@ -168,9 +168,9 @@ def update_posts_batch(tuples, steemd, updated_at=None):
             sql = generate_cached_post_sql(ids[url], post, updated_at)
             buffer.append(sql)
 
-        lap_1 = time.time()
+        lap_1 = time.perf_counter()
         batch_queries(buffer)
-        lap_2 = time.time()
+        lap_2 = time.perf_counter()
 
         if total >= 500:
             processed += len(buffer)
@@ -189,14 +189,14 @@ def rebuild_feed_cache(truncate=True):
     if truncate:
         query("TRUNCATE TABLE hive_feed_cache")
 
-    lap_0 = time.time()
+    lap_0 = time.perf_counter()
     query("INSERT IGNORE INTO hive_feed_cache "
           "SELECT author account, id post_id, created_at "
           "FROM hive_posts WHERE depth = 0 AND is_deleted = 0")
-    lap_1 = time.time()
+    lap_1 = time.perf_counter()
     query("INSERT IGNORE INTO hive_feed_cache "
           "SELECT account, post_id, created_at FROM hive_reblogs")
-    lap_2 = time.time()
+    lap_2 = time.perf_counter()
 
     print("[INIT] Rebuilt hive_feed_cache in {}s ({}+{})".format(
           int(lap_2-lap_0), int(lap_1-lap_0), int(lap_2-lap_1)))

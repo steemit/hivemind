@@ -46,11 +46,11 @@ logger = logging.getLogger(__name__)
 # generic
 # -------
 def query(sql, **kwargs):
-    ti = time.time()
+    ti = time.perf_counter()
     query = text(sql).execution_options(autocommit=False)
     try:
         res = conn.execute(query, **kwargs)
-        ms = int((time.time() - ti) * 1000)
+        ms = int((time.perf_counter() - ti) * 1000)
         if ms > 100:
             disp = re.sub('\s+', ' ', sql).strip()[:250]
             print("\033[93m[SQL][{}ms] {}\033[0m".format(ms, disp))
