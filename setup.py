@@ -25,9 +25,9 @@ setup(
                    'pytest-console-scripts'],
 
     install_requires=[
-        'bottle',
-        'bottle_sqlalchemy',
-        'bottle_errorsrest',
+        'aiomysql',
+        'jsonrpcserver',
+        'aiohttp',
         'certifi',
         'sqlalchemy',
         'mysqlclient',
@@ -38,7 +38,7 @@ setup(
         'ujson',
         'urllib3',
         'PrettyTable',
-        'progressbar2',
+        'progressbar2'
     ],
     entry_points={
         'console_scripts': [

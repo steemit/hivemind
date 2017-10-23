@@ -1,11 +1,5 @@
 #!/bin/bash
 
+POPULATE_CMD="$(which hive)"
 
-exec setuidgid nobody uwsgi \
- --master \
- --http :"${HTTP_SERVER_PORT}" \
- --wsgi-file "${WSGI_APP}" \
- --processes "${HTTP_SERVER_PROCESSES:-8}" \
- --threads "${HTTP_SERVER_THREADS:-1}" \
- --stats 0.0.0.0:"${HTTP_SERVER_STATS_PORT}" \
- --stats-http
+python3 /app/hive/server/serve.py --database_url="${DATABASE_URL}" --port="${HTTP_SERVER_PORT}"

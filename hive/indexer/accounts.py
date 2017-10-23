@@ -69,11 +69,11 @@ class Accounts:
         for i in range(0, total, 1000):
             batch = accounts[i:i+1000]
 
-            lap_0 = time.time()
+            lap_0 = time.perf_counter()
             sqls = cls._generate_cache_sqls(batch)
-            lap_1 = time.time()
+            lap_1 = time.perf_counter()
             batch_queries(sqls)
-            lap_2 = time.time()
+            lap_2 = time.perf_counter()
 
             processed += len(batch)
             rem = total - processed

@@ -1,3 +1,4 @@
+import logging
 from funcy.seqs import first
 from hive.db import conn
 from hive.db.schema import (
@@ -40,18 +41,25 @@ class QueryStats:
 
 atexit.register(QueryStats.print)
 
+logger = logging.getLogger(__name__)
+
 # generic
 # -------
 def query(sql, **kwargs):
-    ti = time.time()
+    ti = time.perf_counter()
     query = text(sql).execution_options(autocommit=False)
-    res = conn.execute(query, **kwargs)
-    ms = (time.time() - ti) * 1000
-    QueryStats.log(sql, ms)
-    if ms > 100:
-        disp = re.sub('\s+', ' ', sql).strip()[:200]
-        print("\033[93m[SQL][{}ms] {}\033[0m".format(int(ms), disp))
-    return res
+    try:
+        res = conn.execute(query, **kwargs)
+        ms = int((time.perf_counter() - ti) * 1000)
+        if ms > 100:
+            disp = re.sub('\s+', ' ', sql).strip()[:250]
+            print("\033[93m[SQL][{}ms] {}\033[0m".format(ms, disp))
+        logger.debug(res)
+        return res
+    except Exception as e:
+        conn.close()
+        logger.exception(e)
+        raise e
 
 # n*m
 def query_all(sql, **kwargs):
@@ -75,20 +83,21 @@ def query_one(sql, **kwargs):
         return first(row)
 
 
-def db_head_state():
+async def db_head_state():
     sql = "SELECT num,created_at,UNIX_TIMESTAMP(CONVERT_TZ(created_at, '+00:00', 'SYSTEM')) ts FROM hive_blocks ORDER BY num DESC LIMIT 1"
     row = query_row(sql)
     return dict(db_head_block = row['num'],
-                db_head_time = row['created_at'],
+                db_head_time = str(row['created_at']),
                 db_head_age = int(time.time() - row['ts']))
 
-def db_last_block():
+
+async def db_last_block():
     return query_one("SELECT MAX(num) FROM hive_blocks") or 0
 
 
 # api specific
 # ------------
-def get_followers(account: str, skip: int, limit: int):
+async def get_followers(account: str, skip: int, limit: int):
     sql = """
     SELECT follower, created_at FROM hive_follows WHERE following = :account
     AND state = 1 ORDER BY created_at DESC LIMIT :limit OFFSET :skip
@@ -97,7 +106,7 @@ def get_followers(account: str, skip: int, limit: int):
     return [[r[0],r[1]] for r in res.fetchall()]
 
 
-def get_following(account: str, skip: int, limit: int):
+async def get_following(account: str, skip: int, limit: int):
     sql = """
     SELECT following, created_at FROM hive_follows WHERE follower = :account
     AND state = 1 ORDER BY created_at DESC LIMIT :limit OFFSET :skip
@@ -106,18 +115,18 @@ def get_following(account: str, skip: int, limit: int):
     return [[r[0],r[1]] for r in res.fetchall()]
 
 
-def following_count(account: str):
+async def following_count(account: str):
     sql = "SELECT COUNT(*) FROM hive_follows WHERE follower = :a AND state = 1"
     return query_one(sql, a=account)
 
 
-def follower_count(account: str):
+async def follower_count(account: str):
     sql = "SELECT COUNT(*) FROM hive_follows WHERE following = :a AND state = 1"
     return query_one(sql, a=account)
 
 
 # evaluate replacing two above methods with this
-def follow_stats(account: str):
+async def follow_stats(account: str):
     sql = """
     SELECT SUM(IF(follower  = :account, 1, 0)) following,
            SUM(IF(following = :account, 1, 0)) followers
@@ -127,7 +136,7 @@ def follow_stats(account: str):
     return first(query(sql))
 
 # all completed payouts
-def payouts_total():
+async def payouts_total():
     # memoized historical sum. To update:
     #  SELECT SUM(payout) FROM hive_posts_cache
     #  WHERE is_paidout = 1 AND payout_at <= precalc_date
@@ -143,7 +152,7 @@ def payouts_total():
     return precalc_sum + query_one(sql)
 
 # sum of completed payouts last 24 hrs
-def payouts_last_24h():
+async def payouts_last_24h():
     sql = """
       SELECT SUM(payout) FROM hive_posts_cache
       WHERE is_paidout = 1 AND payout_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)

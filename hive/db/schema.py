@@ -228,7 +228,6 @@ logging.basicConfig()
 #    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
-
 def connect(connection_url=_url, **kwargs):
     return sa.create_engine(connection_url + "?charset=utf8mb4", isolation_level="READ UNCOMMITTED", pool_recycle=3600, **kwargs).connect()
 
