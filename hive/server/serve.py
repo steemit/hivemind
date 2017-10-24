@@ -101,7 +101,7 @@ app.router.add_post('/', jsonrpc_handler)
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description="hivemind jsonrpc server")
-    parser.add_argument('--database_url',type=str, default='mysql://root:root_password@127.0.0.1:3306/testdb')
+    parser.add_argument('--database_url',type=str, default='postgresql://root:root_password@127.0.0.1:5432/testdb')
     parser.add_argument('--port', type=int, default=8080)
     args = parser.parse_args()
     app['config']['args'] = args

@@ -183,12 +183,12 @@ def get_posts(ids, context = None):
     sql = """
     SELECT post_id, author, permlink, title, preview, img_url, payout,
            promoted, created_at, payout_at, is_nsfw, rshares, votes, json
-      FROM hive_posts_cache WHERE post_id IN :ids
+      FROM hive_posts_cache WHERE post_id IN (:ids)
     """
 
     reblogged_ids = []
     if context:
-        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE account = :a AND post_id IN :ids", a=context, ids=ids)
+        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE account = :a AND post_id IN (:ids)", a=context, ids=ids)
 
     # key by id so we can return sorted by input order
     posts_by_id = {}

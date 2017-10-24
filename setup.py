@@ -38,7 +38,8 @@ setup(
         'ujson',
         'urllib3',
         'PrettyTable',
-        'progressbar2'
+        'progressbar2',
+        'psycopg2'
     ],
     entry_points={
         'console_scripts': [

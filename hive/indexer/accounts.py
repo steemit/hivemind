@@ -2,9 +2,11 @@ import time
 import json
 import re
 
+from sqlalchemy.sql.expression import select
 from hive.db.methods import query_one, query_col, query, query_row, query_all
 from hive.indexer.steem_client import get_adapter
 from hive.indexer.normalize import rep_log10, amount, trunc
+
 
 class Accounts:
     _ids = {}
@@ -39,7 +41,7 @@ class Accounts:
             query("INSERT INTO hive_accounts (name, created_at) "
                     "VALUES (:name, :date)", name=name, date=block_date)
 
-        sql = "SELECT name, id FROM hive_accounts WHERE name IN :names"
+        sql = select("SELECT name, id FROM hive_accounts WHERE name IN :names"
         cls._ids = {**dict(query_all(sql, names=new_names)), **cls._ids}
 
 
@@ -173,14 +175,14 @@ class Accounts:
     @classmethod
     def _get_accounts_follow_stats(cls, accounts):
         sql = """SELECT follower, COUNT(*) FROM hive_follows
-                WHERE follower IN :lst GROUP BY follower"""
+                WHERE follower IN (:lst) GROUP BY follower"""
         following = dict(query(sql, lst=accounts).fetchall())
         for name in accounts:
             if name not in following:
                 following[name] = 0
 
         sql = """SELECT following, COUNT(*) FROM hive_follows
-                WHERE following IN :lst GROUP BY following"""
+                WHERE following IN (:lst) GROUP BY following"""
         followers = dict(query(sql, lst=accounts).fetchall())
         for name in accounts:
             if name not in followers:
