@@ -27,10 +27,7 @@ class Accounts:
 
     @classmethod
     def register(cls, names, block_date):
-        new_names = []
-        for name in set(names):
-            if not cls.exists(name):
-                new_names.append(name)
+        new_names = list(filter(lambda n: not cls.exists(n), set(names)))
         if not new_names:
             return
 
@@ -53,6 +50,10 @@ class Accounts:
     @classmethod
     def cache_all(cls):
         cls.cache_accounts(query_col("SELECT name FROM hive_accounts"))
+
+    @classmethod
+    def cache_old(cls):
+        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < NOW() - INTERVAL 1 DAY"))
 
     @classmethod
     def cache_dirty(cls):
@@ -83,7 +84,19 @@ class Accounts:
                 processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
 
     @classmethod
-    def _generate_cache_sqls(cls, accounts):
+    def update_ranks(cls):
+        id_weight = query_all("SELECT id, vote_weight FROM hive_accounts")
+        id_weight = sorted(id_weight, key=lambda el: el[1], reverse=True)
+
+        query("START TRANSACTION")
+        for (i, (_id, _)) in enumerate(id_weight):
+            query("UPDATE hive_accounts SET rank=%d WHERE id=%d" % (i+1, _id))
+        query("COMMIT")
+
+    @classmethod
+    def _generate_cache_sqls(cls, accounts, block_date=None):
+        if not block_date:
+            block_date = get_adapter().head_time()
         fstats = cls._get_accounts_follow_stats(accounts)
         sqls = []
         for account in get_adapter().get_accounts(accounts):
@@ -97,8 +110,10 @@ class Accounts:
                 'followers': fstats['followers'][name],
                 'following': fstats['following'][name],
                 'proxy_weight': amount(account['vesting_shares']),
-                'vote_weight': amount(account['vesting_shares']),
+                'vote_weight': amount(account['vesting_shares']) + amount(account['received_vesting_shares']) - amount(account['delegated_vesting_shares']),
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
+                'active_at': account['last_bandwidth_update'],
+                'cached_at': block_date,
                 **cls._safe_account_metadata(account)
             }
 
@@ -174,6 +189,6 @@ class Accounts:
 
 
 if __name__ == '__main__':
-    sqls = Accounts._generate_cache_sqls(['roadscape', 'ned', 'sneak', 'test-safari'])
-    print(sqls)
+    Accounts.update_ranks()
+    print(Accounts._generate_cache_sqls(['roadscape', 'ned', 'sneak', 'test-safari']))
     #Accounts.cache_all()

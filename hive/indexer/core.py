@@ -122,12 +122,17 @@ def process_block(block, is_initial_sync=False):
             elif op_type == 'comment':
                 comments.append(op)
                 dirty.add(op['author']+'/'+op['permlink'])
+                Accounts.dirty(op['author'])
+                if op['parent_author']:
+                    Accounts.dirty(op['parent_author'])
             elif op_type == 'delete_comment':
                 deleted.append(op)
             elif op_type == 'custom_json':
                 json_ops.append(op)
             elif op_type == 'vote':
                 dirty.add(op['author']+'/'+op['permlink'])
+                Accounts.dirty(op['author'])
+                Accounts.dirty(op['voter'])
 
     Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
     Posts.register(comments, date)  # if this is a new post, add the entry and validate community param
@@ -282,12 +287,18 @@ def listen_steemd(trail_blocks=2):
         paidout = select_paidout_posts(block['timestamp'])
         update_posts_batch(paidout, steemd, block['timestamp'])
 
+        Accounts.cache_dirty()
+
         print("{} edits, {} payouts".format(len(dirty), len(paidout)))
         query("COMMIT")
         secs = time.perf_counter() - start_time
 
         if secs > 1:
             print("WARNING: block {} process took {}s".format(num, secs))
+
+        # TODO: implement hourly/daily maintenance
+        #Accounts.cache_old()
+        #Accounts.update_ranks()
 
 
 def cache_missing_posts():
@@ -330,6 +341,9 @@ def run():
     # fast block sync strategies
     sync_from_checkpoints(is_initial_sync)
     sync_from_steemd(is_initial_sync)
+
+    Accounts.cache_all()
+    Accounts.update_ranks()
 
     if is_initial_sync:
         print("[INIT] *** Initial sync complete. Rebuilding cache. ***")

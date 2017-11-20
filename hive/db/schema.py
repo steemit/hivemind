@@ -42,6 +42,9 @@ hive_accounts = sa.Table(
     sa.Column('proxy_weight', DOUBLE, nullable=False, server_default='0'),
     sa.Column('vote_weight', DOUBLE, nullable=False, server_default='0'),
     sa.Column('kb_used', sa.Integer, nullable=False, server_default='0'),
+    sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
+    sa.Column('active_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
+    sa.Column('cached_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
     sa.UniqueConstraint('name', name='hive_accounts_ux1'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
