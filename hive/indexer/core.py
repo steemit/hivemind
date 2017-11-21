@@ -296,9 +296,11 @@ def listen_steemd(trail_blocks=2):
         if secs > 1:
             print("WARNING: block {} process took {}s".format(num, secs))
 
-        # TODO: implement hourly/daily maintenance
-        #Accounts.cache_old()
-        #Accounts.update_ranks()
+        # approx once per hour, update accounts
+        if num % 1200 == 0:
+            print("Performing account maintenance...")
+            Accounts.cache_old()
+            Accounts.update_ranks()
 
 
 def cache_missing_posts():
