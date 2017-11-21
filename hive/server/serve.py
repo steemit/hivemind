@@ -71,7 +71,7 @@ async def close_db(app):
 # Non JSON-RPC routes
 # -------------------
 async def health(request):
-    state = db_head_state()
+    state = await db_head_state()
     if state['db_head_age'] > app['config']['hive.MAX_BLOCK_NUM_DIFF'] * 3:
         return web.json_response(data=dict(result='head block age (%s) > max allowable (%s); head block num: %s' % (
             state['db_head_age'],
