@@ -52,11 +52,11 @@ def process_json_follow_op(account, op_json, block_date):
 
         if follower != account:
             return  # impersonation
-        if not all(filter(Accounts.exists, [follower, following])):
+        if not all(map(Accounts.exists, [follower, following])):
             return  # invalid input
 
         sql = """
-        INSERT IGNORE INTO hive_follows (follower, following, created_at, state)
+        INSERT INTO hive_follows (follower, following, created_at, state)
         VALUES (:fr, :fg, :at, :state) ON DUPLICATE KEY UPDATE state = :state
         """
         state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
@@ -69,7 +69,7 @@ def process_json_follow_op(account, op_json, block_date):
 
         if blogger != account:
             return  # impersonation
-        if not all(filter(Accounts.exists, [author, blogger])):
+        if not all(map(Accounts.exists, [author, blogger])):
             return
 
         post_id, depth = Posts.get_id_and_depth(author, permlink)
