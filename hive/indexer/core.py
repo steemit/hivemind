@@ -344,7 +344,7 @@ def run():
     sync_from_checkpoints(is_initial_sync)
     sync_from_steemd(is_initial_sync)
 
-    Accounts.cache_all()
+    Accounts.cache_old()
     Accounts.update_ranks()
 
     if is_initial_sync:

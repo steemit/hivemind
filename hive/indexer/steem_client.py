@@ -22,7 +22,11 @@ class SteemClient:
         self._client = HttpClient(nodes=[url])
 
     def get_accounts(self, accounts):
-        return self.__exec('get_accounts', accounts)
+        assert accounts, "no accounts passed to get_accounts"
+        ret = self.__exec('get_accounts', accounts)
+        assert ret, "get_accounts response was blank"
+        assert len(accounts) == len(ret), "requested %d accounts got %d" % (len(accounts),len(ret))
+        return ret
 
     def get_content_batch(self, tuples):
         posts = self.__exec_batch('get_content', tuples)

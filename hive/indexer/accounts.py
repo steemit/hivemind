@@ -1,4 +1,6 @@
 import time
+import json
+import re
 
 from hive.db.methods import query_one, query_col, query, query_row, query_all
 from hive.indexer.steem_client import get_adapter
@@ -53,11 +55,12 @@ class Accounts:
 
     @classmethod
     def cache_old(cls):
-        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < NOW() - INTERVAL 1 DAY"))
+        print("Caching old accounts...")
+        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < NOW() - INTERVAL 1 HOUR"))
 
     @classmethod
     def cache_dirty(cls):
-        cls.cache_accounts(cls._dirty)
+        cls.cache_accounts(list(cls._dirty))
         cls._dirty = set()
 
     @classmethod
@@ -76,22 +79,40 @@ class Accounts:
             batch_queries(sqls)
             lap_2 = time.perf_counter()
 
+            if len(batch) < 1000:
+                continue
+
             processed += len(batch)
             rem = total - processed
             rate = len(batch) / (lap_2 - lap_0)
             pct_db = int(100 * (lap_2 - lap_1) / (lap_2 - lap_0))
-            print(" -- {} of {} ({}/s, {}% db) -- {}m remaining".format(
+            print(" -- account {} of {} ({}/s, {}% db) -- {}m remaining".format(
                 processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
 
     @classmethod
     def update_ranks(cls):
+        sql = """
+        UPDATE hive_accounts JOIN (
+            SELECT id, @rownum:=@rownum+1 rank
+            FROM hive_accounts, (SELECT @rownum:=0) r
+            ORDER BY vote_weight DESC
+        ) ranks USING(id) SET hive_accounts.rank = ranks.rank
+        """
+        query(sql)
+        return
+
+        # the following method is 10-20x slower
         id_weight = query_all("SELECT id, vote_weight FROM hive_accounts")
         id_weight = sorted(id_weight, key=lambda el: el[1], reverse=True)
 
+        print("Updating account ranks...")
+        lap_0 = time.perf_counter()
         query("START TRANSACTION")
         for (i, (_id, _)) in enumerate(id_weight):
             query("UPDATE hive_accounts SET rank=%d WHERE id=%d" % (i+1, _id))
         query("COMMIT")
+        lap_1 = time.perf_counter()
+        print("Updated %d ranks in %ds" % (len(id_weight), lap_1 - lap_0))
 
     @classmethod
     def _generate_cache_sqls(cls, accounts, block_date=None):
