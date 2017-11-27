@@ -83,6 +83,14 @@ def query_one(sql, **kwargs):
     if row:
         return first(row)
 
+def db_needs_setup():
+    db = conn.dialect.name
+    if db == 'postgresql':
+        return not query_row("SELECT * FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema'")
+    elif db == 'mysql':
+        return not query_row('SHOW TABLES')
+    raise Exception("db engine %s not supported" % db)
+
 
 async def db_head_state():
     sql = "SELECT num,created_at,UNIX_TIMESTAMP(CONVERT_TZ(created_at, '+00:00', 'SYSTEM')) ts FROM hive_blocks ORDER BY num DESC LIMIT 1"

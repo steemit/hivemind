@@ -7,7 +7,7 @@ import os
 
 from funcy.seqs import first, second, drop, flatten
 from hive.db.schema import setup, teardown
-from hive.db.methods import query_one, query, query_row
+from hive.db.methods import db_needs_setup, query_one, query, query_row
 from toolz import partition_all
 
 from hive.indexer.accounts import Accounts
@@ -324,9 +324,8 @@ def cache_missing_posts():
 
 
 def run():
-    # if tables not created, do so now
-    if not query_row('SHOW TABLES'):
-        print("[INIT] No tables found. Initializing db...")
+    if db_needs_setup():
+        print("[INIT] Initializing db...")
         setup()
 
     #TODO: if initial sync is interrupted, cache never rebuilt
