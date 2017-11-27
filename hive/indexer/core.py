@@ -57,7 +57,7 @@ def process_json_follow_op(account, op_json, block_date):
 
         sql = """
         INSERT INTO hive_follows (follower, following, created_at, state)
-        VALUES (:fr, :fg, :at, :state) ON DUPLICATE KEY UPDATE state = :state
+        VALUES (:fr, :fg, :at, :state) ON CONFLICT (follower, following) DO UPDATE SET state = :state
         """
         state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
         query(sql, fr=follower, fg=following, at=block_date, state=state)
