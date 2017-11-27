@@ -244,11 +244,10 @@ def setup(connection_url=_url):
     metadata.create_all(engine)
 
     conn = engine.connect()
-    row = query_row("SELECT * FROM hive_blocks")
-    if not row:
-        # Insert hive_blocks data
-        insert = hive_blocks.insert().values(num=0, hash='0000000000000000000000000000000000000000', prev=None, created_at='1970-01-01T00:00:00')
-        conn.execute(insert)
+
+    # Insert hive_blocks data
+    insert = hive_blocks.insert().values(num=0, hash='0000000000000000000000000000000000000000', prev=None, created_at='1970-01-01T00:00:00')
+    conn.execute(insert)
 
     # Insert hive_accounts data
     insert = hive_accounts.insert()
