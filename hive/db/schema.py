@@ -4,6 +4,7 @@ import os
 import sqlalchemy as sa
 from sqlalchemy.types import SMALLINT
 from sqlalchemy.types import CHAR
+from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
 from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION
 
@@ -26,7 +27,7 @@ hive_blocks = sa.Table(
 hive_accounts = sa.Table(
     'hive_accounts', metadata,
     sa.Column('id', sa.Integer, primary_key=True),
-    sa.Column('name', CHAR(16), nullable=False),
+    sa.Column('name', VARCHAR(16), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     #sa.Column('block_num', sa.Integer, nullable=False),
     sa.Column('reputation', sa.Float, nullable=False, server_default='25'),
@@ -36,7 +37,7 @@ hive_accounts = sa.Table(
     sa.Column('website', sa.String(100)),
     sa.Column('profile_image', sa.String(1024), nullable=False, server_default=''),
     sa.Column('cover_image', sa.String(1024), nullable=False, server_default=''),
-    sa.Column('proxy', CHAR(16), nullable=False, server_default=''),
+    sa.Column('proxy', VARCHAR(16), nullable=False, server_default=''),
     sa.Column('post_count', sa.Integer, nullable=False, server_default='0'),
     sa.Column('followers', sa.Integer, nullable=False, server_default='0'),
     sa.Column('following', sa.Integer, nullable=False, server_default='0'),
@@ -55,10 +56,10 @@ hive_posts = sa.Table(
     'hive_posts', metadata,
     sa.Column('id', sa.Integer, primary_key=True),
     sa.Column('parent_id', sa.Integer),
-    sa.Column('author', CHAR(16), nullable=False),
-    sa.Column('permlink', CHAR(255), nullable=False),
-    sa.Column('community', CHAR(16), nullable=False),
-    sa.Column('category', CHAR(255), nullable=False),
+    sa.Column('author', VARCHAR(16), nullable=False),
+    sa.Column('permlink', VARCHAR(255), nullable=False),
+    sa.Column('community', VARCHAR(16), nullable=False),
+    sa.Column('category', VARCHAR(255), nullable=False),
     sa.Column('depth', SMALLINT, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.Column('is_deleted', SMALLINT, nullable=False, server_default='0'),
@@ -97,8 +98,8 @@ hive_post_tags = sa.Table(
 
 hive_follows = sa.Table(
     'hive_follows', metadata,
-    sa.Column('follower', CHAR(16), nullable=False),
-    sa.Column('following', CHAR(16), nullable=False),
+    sa.Column('follower', VARCHAR(16), nullable=False),
+    sa.Column('following', VARCHAR(16), nullable=False),
     sa.Column('state', SMALLINT, nullable=False, server_default='1'),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.ForeignKeyConstraint(['follower'], ['hive_accounts.name'], name='hive_follows_fk1'),
@@ -112,7 +113,7 @@ hive_follows = sa.Table(
 
 hive_reblogs = sa.Table(
     'hive_reblogs', metadata,
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('account', VARCHAR(16), nullable=False),
     sa.Column('post_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_reblogs_fk1'),
@@ -125,7 +126,7 @@ hive_reblogs = sa.Table(
 
 hive_communities = sa.Table(
     'hive_communities', metadata,
-    sa.Column('name', CHAR(16), primary_key=True),
+    sa.Column('name', VARCHAR(16), primary_key=True),
     sa.Column('title', sa.String(32), nullable=False),
     sa.Column('about', sa.String(255), nullable=False, server_default=''),
     sa.Column('description', sa.String(5000), nullable=False, server_default=''),
@@ -141,8 +142,8 @@ hive_communities = sa.Table(
 
 hive_members = sa.Table(
     'hive_members', metadata,
-    sa.Column('community', CHAR(16), nullable=False),
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('community', VARCHAR(16), nullable=False),
+    sa.Column('account', VARCHAR(16), nullable=False),
     sa.Column('is_admin', SMALLINT, nullable=False),
     sa.Column('is_mod', SMALLINT, nullable=False),
     sa.Column('is_approved', SMALLINT, nullable=False),
@@ -157,7 +158,7 @@ hive_members = sa.Table(
 
 hive_flags = sa.Table(
     'hive_flags', metadata,
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('account', VARCHAR(16), nullable=False),
     sa.Column('post_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.Column('notes', sa.String(255), nullable=False),
@@ -171,8 +172,8 @@ hive_flags = sa.Table(
 hive_modlog = sa.Table(
     'hive_modlog', metadata,
     sa.Column('id', sa.Integer, primary_key=True),
-    sa.Column('community', CHAR(16), nullable=False),
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('community', VARCHAR(16), nullable=False),
+    sa.Column('account', VARCHAR(16), nullable=False),
     sa.Column('action', sa.String(32), nullable=False),
     sa.Column('params', sa.String(1000), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
@@ -186,7 +187,7 @@ hive_modlog = sa.Table(
 hive_feed_cache = sa.Table(
     'hive_feed_cache', metadata,
     sa.Column('post_id', sa.Integer),
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('account', VARCHAR(16), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.UniqueConstraint('post_id', 'account', name='hive_feed_cache_ux1'), #TODO: verify PK
     sa.Index('hive_feed_cache_ix1', 'account', 'post_id', 'created_at'),
@@ -197,8 +198,8 @@ hive_feed_cache = sa.Table(
 hive_posts_cache = sa.Table(
     'hive_posts_cache', metadata,
     sa.Column('post_id', sa.Integer, primary_key=True),
-    sa.Column('author', CHAR(16), nullable=False),
-    sa.Column('permlink', CHAR(255), nullable=False),
+    sa.Column('author', VARCHAR(16), nullable=False),
+    sa.Column('permlink', VARCHAR(255), nullable=False),
     sa.Column('title', sa.String(255), nullable=False),
     sa.Column('preview', sa.String(1024), nullable=False),
     sa.Column('img_url', sa.String(1024), nullable=False),

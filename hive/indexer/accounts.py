@@ -41,8 +41,8 @@ class Accounts:
             query("INSERT INTO hive_accounts (name, created_at) "
                     "VALUES (:name, :date)", name=name, date=block_date)
 
-        sql = select("SELECT name, id FROM hive_accounts WHERE name IN :names"
-        cls._ids = {**dict(query_all(sql, names=new_names)), **cls._ids}
+        sql = "SELECT name, id FROM hive_accounts WHERE name IN :names"
+        cls._ids = {**dict(query_all(sql, names=tuple(new_names))), **cls._ids}
 
 
     # account cache methods
