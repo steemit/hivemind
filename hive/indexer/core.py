@@ -88,7 +88,7 @@ def process_json_follow_op(account, op_json, block_date):
             sql = "DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id"
             query(sql, account=blogger, id=post_id)
         else:
-            sql = "INSERT INTO hive_reblogs (account, post_id, created_at) VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING")
+            sql = "INSERT INTO hive_reblogs (account, post_id, created_at) VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING"
             query(sql, a=blogger, pid=post_id, date=block_date)
             sql = "INSERT INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at) ON CONFLICT (account, post_id) DO NOTHING"
             query(sql, account=blogger, id=post_id, created_at=block_date)
