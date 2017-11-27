@@ -61,6 +61,8 @@ def process_json_follow_op(account, op_json, block_date):
         """
         state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
         query(sql, fr=follower, fg=following, at=block_date, state=state)
+        Accounts.dirty_follows(follower)
+        Accounts.dirty_follows(following)
 
     elif cmd == 'reblog':
         blogger = op_json['account']
@@ -288,6 +290,7 @@ def listen_steemd(trail_blocks=2):
         update_posts_batch(paidout, steemd, block['timestamp'])
 
         Accounts.cache_dirty()
+        Accounts.cache_dirty_follows()
 
         print("{} edits, {} payouts".format(len(dirty), len(paidout)))
         query("COMMIT")

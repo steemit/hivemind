@@ -9,6 +9,7 @@ from hive.indexer.normalize import rep_log10, amount, trunc
 class Accounts:
     _ids = {}
     _dirty = set()
+    _dirty_follows = set()
 
     # account core methods
     # --------------------
@@ -50,6 +51,10 @@ class Accounts:
         cls._dirty.add(account)
 
     @classmethod
+    def dirty_follows(cls, account):
+        cls._dirty_follows.add(account)
+
+    @classmethod
     def cache_all(cls):
         cls.cache_accounts(query_col("SELECT name FROM hive_accounts"))
 
@@ -62,6 +67,11 @@ class Accounts:
     def cache_dirty(cls):
         cls.cache_accounts(list(cls._dirty))
         cls._dirty = set()
+
+    @classmethod
+    def cache_dirty_follows(cls):
+        cls.update_follows(list(cls._dirty_follows))
+        cls._dirty_follows = set()
 
     @classmethod
     def cache_accounts(cls, accounts):
@@ -115,10 +125,27 @@ class Accounts:
         print("Updated %d ranks in %ds" % (len(id_weight), lap_1 - lap_0))
 
     @classmethod
+    def update_follows(cls, accounts):
+        fstats = cls._get_accounts_follow_stats(accounts)
+        sqls = []
+        for name in accounts:
+            values = {
+                'name': name,
+                'followers': fstats['followers'][name],
+                'following': fstats['following'][name]
+            }
+
+            update = ', '.join([k+" = :"+k for k in values.keys()][1:])
+            sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
+            sqls.append([(sql, values)])
+        batch_queries(sqls)
+
+    @classmethod
     def _generate_cache_sqls(cls, accounts, block_date=None):
         if not block_date:
             block_date = get_adapter().head_time()
-        fstats = cls._get_accounts_follow_stats(accounts)
+
+        #fstats = cls._get_accounts_follow_stats(accounts)
         sqls = []
         for account in get_adapter().get_accounts(accounts):
             name = account['name']
@@ -128,8 +155,8 @@ class Accounts:
                 'proxy': account['proxy'],
                 'post_count': account['post_count'],
                 'reputation': rep_log10(account['reputation']),
-                'followers': fstats['followers'][name],
-                'following': fstats['following'][name],
+                #'followers': fstats['followers'][name],
+                #'following': fstats['following'][name],
                 'proxy_weight': amount(account['vesting_shares']),
                 'vote_weight': amount(account['vesting_shares']) + amount(account['received_vesting_shares']) - amount(account['delegated_vesting_shares']),
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
