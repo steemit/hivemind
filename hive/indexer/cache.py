@@ -126,7 +126,7 @@ def generate_cached_post_sql(pid, post, updated_at):
     cols = ', '.join(fields)
     params = ', '.join([':'+k for k in fields])
     update = ', '.join([k+" = :"+k for k in fields][1:])
-    sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
+    sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON CONFLICT (post_id) DO UPDATE SET %s"
     sqls.append((sql % (cols, params, update), values))
 
     # update tag metadata only for top-level posts
@@ -135,13 +135,13 @@ def generate_cached_post_sql(pid, post, updated_at):
         sqls.append((sql, {'id': pid}))
 
         if tags:
-            sql = "INSERT IGNORE INTO hive_post_tags (post_id, tag) VALUES "
+            sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES "
             params = {}
             vals = []
             for i, tag in enumerate(tags):
                 vals.append("(:id, :t%d)" % i)
                 params["t%d"%i] = tag
-            sqls.append((sql + ','.join(vals), {'id': pid, **params}))
+            sqls.append((sql + ','.join(vals) + " ON CONFLICT DO NOTHING", {'id': pid, **params}))
 
     return sqls
 
@@ -205,7 +205,7 @@ def rebuild_feed_cache(truncate=True):
 # identify and insert missing cache rows
 def select_missing_posts(limit=None, fast_mode=True):
     if fast_mode:
-        where = "id > (SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache)"
+        where = "id > (SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache)"
     else:
         where = "id NOT IN (SELECT post_id FROM hive_posts_cache)"
 

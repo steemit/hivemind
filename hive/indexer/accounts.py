@@ -61,7 +61,7 @@ class Accounts:
     @classmethod
     def cache_old(cls):
         print("Caching old accounts...")
-        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < NOW() - INTERVAL 1 HOUR"))
+        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < CURRENT_DATE - INTERVAL '1 HOUR'"))
 
     @classmethod
     def cache_dirty(cls):
@@ -102,11 +102,10 @@ class Accounts:
     @classmethod
     def update_ranks(cls):
         sql = """
-        UPDATE hive_accounts JOIN (
-            SELECT id, @rownum:=@rownum+1 rank
-            FROM hive_accounts, (SELECT @rownum:=0) r
-            ORDER BY vote_weight DESC
-        ) ranks USING(id) SET hive_accounts.rank = ranks.rank
+        UPDATE hive_accounts
+           SET rank = r.rnk
+          FROM (SELECT id, RANK() OVER (ORDER BY vote_weight DESC) as rnk FROM hive_accounts) r
+         WHERE hive_accounts.id = r.id;
         """
         query(sql)
         return
@@ -205,6 +204,10 @@ class Accounts:
         profile_image = str(prof['profile_image']) if 'profile_image' in prof else None
         cover_image = str(prof['cover_image']) if 'cover_image' in prof else None
 
+        name = cls._char_police(name)
+        about = cls._char_police(about)
+        location = cls._char_police(location)
+
         name = trunc(name, 20)
         about = trunc(about, 160)
         location = trunc(location, 30)
@@ -234,6 +237,15 @@ class Accounts:
             profile_image=profile_image or '',
             cover_image=cover_image or '',
         )
+
+    @classmethod
+    def _char_police(cls, string):
+        if not string:
+            return None
+        if string.find('\x00') > -1:
+            print("bad string: {}".format(string))
+            return None
+        return string
 
 
 if __name__ == '__main__':

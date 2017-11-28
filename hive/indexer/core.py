@@ -308,8 +308,8 @@ def listen_steemd(trail_blocks=2):
 
 def cache_missing_posts():
     # cached posts inserted sequentially, so just compare MAX(id)'s
-    sql = ("SELECT (SELECT IFNULL(MAX(id), 0) FROM hive_posts) - "
-           "(SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache)")
+    sql = ("SELECT (SELECT COALESCE(MAX(id), 0) FROM hive_posts) - "
+           "(SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache)")
     missing_count = query_one(sql)
     print("[INIT] Found {} missing post cache entries".format(missing_count))
 
