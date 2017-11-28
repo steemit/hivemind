@@ -58,6 +58,7 @@ def query(sql, **kwargs):
         logger.debug(res)
         return res
     except Exception as e:
+        print("[SQL] Error in query {} ({})".format(sql, kwargs))
         conn.close()
         logger.exception(e)
         raise e
