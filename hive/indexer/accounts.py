@@ -61,7 +61,7 @@ class Accounts:
     @classmethod
     def cache_old(cls):
         print("Caching old accounts...")
-        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < CURRENT_DATE - INTERVAL '1 HOUR'"))
+        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < CURRENT_DATE - INTERVAL '12 HOUR'"))
 
     @classmethod
     def cache_dirty(cls):
@@ -125,6 +125,9 @@ class Accounts:
 
     @classmethod
     def update_follows(cls, accounts):
+        if not accounts:
+            return
+        from hive.indexer.cache import batch_queries
         fstats = cls._get_accounts_follow_stats(accounts)
         sqls = []
         for name in accounts:
