@@ -93,6 +93,10 @@ def generate_cached_post_sql(pid, post, updated_at):
     hot_score = score(rshares, timestamp, 10000)
     trend_score = score(rshares, timestamp, 480000)
 
+    if post['body'].find('\x00') > -1:
+        print("bad body: {}".format(post['body']))
+        post['body'] = "INVALID"
+
     # TODO: add Posts.get_post_stats fields
     values = collections.OrderedDict([
         ('post_id', '%d' % pid),
