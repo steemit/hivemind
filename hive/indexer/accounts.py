@@ -70,6 +70,8 @@ class Accounts:
 
     @classmethod
     def cache_dirty_follows(cls):
+        if not cls._dirty_follows:
+            return
         cls.update_follows(list(cls._dirty_follows))
         cls._dirty_follows = set()
 
@@ -125,40 +127,26 @@ class Accounts:
 
     @classmethod
     def update_follows(cls, accounts):
-        if not accounts:
-            return
-        from hive.indexer.cache import batch_queries
-        fstats = cls._get_accounts_follow_stats(accounts)
-        sqls = []
-        for name in accounts:
-            values = {
-                'name': name,
-                'followers': fstats['followers'][name],
-                'following': fstats['following'][name]
-            }
-
-            update = ', '.join([k+" = :"+k for k in values.keys()][1:])
-            sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
-            sqls.append([(sql, values)])
-        batch_queries(sqls)
+        sql = """
+            UPDATE hive_accounts
+               SET followers = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND following = hive_accounts.name),
+                   following = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND follower  = hive_accounts.name)
+             WHERE name IN :names
+        """
+        query(sql, names=tuple(accounts))
 
     @classmethod
     def _generate_cache_sqls(cls, accounts, block_date=None):
         if not block_date:
             block_date = get_adapter().head_time()
 
-        #fstats = cls._get_accounts_follow_stats(accounts)
         sqls = []
         for account in get_adapter().get_accounts(accounts):
-            name = account['name']
-
             values = {
-                'name': name,
+                'name': account['name'],
                 'proxy': account['proxy'],
                 'post_count': account['post_count'],
                 'reputation': rep_log10(account['reputation']),
-                #'followers': fstats['followers'][name],
-                #'following': fstats['following'][name],
                 'proxy_weight': amount(account['vesting_shares']),
                 'vote_weight': amount(account['vesting_shares']) + amount(account['received_vesting_shares']) - amount(account['delegated_vesting_shares']),
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
@@ -171,24 +159,6 @@ class Accounts:
             sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
             sqls.append([(sql, values)])
         return sqls
-
-    @classmethod
-    def _get_accounts_follow_stats(cls, accounts):
-        sql = """SELECT follower, COUNT(*) FROM hive_follows
-                WHERE state = 1 AND follower IN :lst GROUP BY follower"""
-        following = dict(query(sql, lst=tuple(accounts)).fetchall())
-        for name in accounts:
-            if name not in following:
-                following[name] = 0
-
-        sql = """SELECT following, COUNT(*) FROM hive_follows
-                WHERE state = 1 AND following IN :lst GROUP BY following"""
-        followers = dict(query(sql, lst=tuple(accounts)).fetchall())
-        for name in accounts:
-            if name not in followers:
-                followers[name] = 0
-
-        return {'followers': followers, 'following': following}
 
     @classmethod
     def _safe_account_metadata(cls, account):
