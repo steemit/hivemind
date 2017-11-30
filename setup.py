@@ -25,12 +25,11 @@ setup(
                    'pytest-console-scripts'],
 
     install_requires=[
-        'aiomysql',
+        'aiopg',
         'jsonrpcserver',
         'aiohttp',
         'certifi',
         'sqlalchemy',
-        'mysqlclient',
         'click',
         'funcy',
         'toolz',
@@ -38,7 +37,6 @@ setup(
         'ujson',
         'urllib3',
         'PrettyTable',
-        'progressbar2',
         'psycopg2'
     ],
     entry_points={
