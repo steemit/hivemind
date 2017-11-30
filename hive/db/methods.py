@@ -189,11 +189,11 @@ def get_posts(ids, context = None):
 
     reblogged_ids = []
     if context:
-        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE account = :a AND post_id IN :ids", a=context, ids=ids)
+        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE account = :a AND post_id IN :ids", a=context, ids=tuple(ids))
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
-    for row in query(sql, ids=ids).fetchall():
+    for row in query(sql, ids=tuple(ids)).fetchall():
         obj = dict(row)
 
         if context:
