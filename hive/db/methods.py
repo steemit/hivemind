@@ -159,7 +159,7 @@ async def payouts_total():
       WHERE is_paidout = 1 AND payout_at > '%s'
     """ % (precalc_date)
 
-    return precalc_sum + query_one(sql)
+    return float(precalc_sum + query_one(sql)) #TODO: decimal
 
 # sum of completed payouts last 24 hrs
 async def payouts_last_24h():
@@ -167,7 +167,7 @@ async def payouts_last_24h():
       SELECT SUM(payout) FROM hive_posts_cache
       WHERE is_paidout = 1 AND payout_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
     """
-    return query_one(sql)
+    return float(query_one(sql)) # TODO: decimal
 
 # unused
 def get_reblogs_since(account: str, since: str):
@@ -203,6 +203,14 @@ def get_posts(ids, context = None):
                 'voted': context in voters
             }
 
+        # TODO: Object of type 'Decimal' is not JSON serializable
+        obj['payout'] = float(obj['payout'])
+        obj['promoted'] = float(obj['promoted'])
+
+        # TODO: Object of type 'datetime' is not JSON serializable
+        obj['created_at'] = str(obj['created_at'])
+        obj['payout_at'] = str(obj['payout_at'])
+
         obj.pop('votes') # temp
         obj.pop('json')  # temp
         posts_by_id[row['post_id']] = obj
@@ -219,7 +227,7 @@ def get_posts(ids, context = None):
 
 # builds SQL query to pull a list of posts for any sort order or tag
 # sort can be: trending hot new promoted
-def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None):
+async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None):
     if skip > 5000:
         raise Exception("cannot skip {} results".format(skip))
     if limit > 100:
