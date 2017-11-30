@@ -175,14 +175,14 @@ class Accounts:
     @classmethod
     def _get_accounts_follow_stats(cls, accounts):
         sql = """SELECT follower, COUNT(*) FROM hive_follows
-                WHERE follower IN :lst GROUP BY follower"""
+                WHERE state = 1 AND follower IN :lst GROUP BY follower"""
         following = dict(query(sql, lst=tuple(accounts)).fetchall())
         for name in accounts:
             if name not in following:
                 following[name] = 0
 
         sql = """SELECT following, COUNT(*) FROM hive_follows
-                WHERE following IN :lst GROUP BY following"""
+                WHERE state = 1 AND following IN :lst GROUP BY following"""
         followers = dict(query(sql, lst=tuple(accounts)).fetchall())
         for name in accounts:
             if name not in followers:
