@@ -113,7 +113,7 @@ async def get_followers(account: str, skip: int, limit: int):
     AND state = 1 ORDER BY created_at DESC LIMIT :limit OFFSET :skip
     """
     res = query(sql, account=account, skip=int(skip), limit=int(limit))
-    return [[r[0],r[1]] for r in res.fetchall()]
+    return [[r[0],str(r[1])] for r in res.fetchall()]
 
 
 async def get_following(account: str, skip: int, limit: int):
@@ -122,7 +122,7 @@ async def get_following(account: str, skip: int, limit: int):
     AND state = 1 ORDER BY created_at DESC LIMIT :limit OFFSET :skip
     """
     res = query(sql, account=account, skip=int(skip), limit=int(limit))
-    return [[r[0],r[1]] for r in res.fetchall()]
+    return [[r[0],str(r[1])] for r in res.fetchall()]
 
 
 async def following_count(account: str):
@@ -272,7 +272,7 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
 
 
 # returns "homepage" feed for specified account
-def get_user_feed(account: str, skip: int, limit: int, context: str = None):
+async def get_user_feed(account: str, skip: int, limit: int, context: str = None):
     sql = """
       SELECT post_id, GROUP_CONCAT(account) accounts
         FROM hive_feed_cache
@@ -296,7 +296,7 @@ def get_user_feed(account: str, skip: int, limit: int, context: str = None):
 
 
 # returns a blog feed (posts and reblogs from the specified account)
-def get_blog_feed(account: str, skip: int, limit: int, context: str = None):
+async def get_blog_feed(account: str, skip: int, limit: int, context: str = None):
     #sql = """
     #    SELECT id, created_at
     #      FROM hive_posts
@@ -315,7 +315,7 @@ def get_blog_feed(account: str, skip: int, limit: int, context: str = None):
     return get_posts(post_ids, context)
 
 
-def get_related_posts(account: str, permlink: str):
+async def get_related_posts(account: str, permlink: str):
     sql = """
       SELECT p2.id
         FROM hive_posts p1
