@@ -150,8 +150,8 @@ class Accounts:
                 'reputation': rep_log10(account['reputation']),
                 'proxy_weight': amount(account['vesting_shares']),
                 'vote_weight': amount(account['vesting_shares']) + amount(account['received_vesting_shares']) - amount(account['delegated_vesting_shares']),
-                #'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024, # TODO: appbase bug
-                #'active_at': account['last_bandwidth_update'],              # TODO: appbase bug
+                'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
+                'active_at': account['last_bandwidth_update'],
                 'cached_at': block_date,
                 **cls._safe_account_metadata(account)
             }
