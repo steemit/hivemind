@@ -274,7 +274,7 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
 # returns "homepage" feed for specified account
 async def get_user_feed(account: str, skip: int, limit: int, context: str = None):
     sql = """
-      SELECT post_id, GROUP_CONCAT(account) accounts
+      SELECT post_id, string_agg(account, ',') accounts
         FROM hive_feed_cache
        WHERE account IN (SELECT following FROM hive_follows
                           WHERE follower = :account AND state = 1)
