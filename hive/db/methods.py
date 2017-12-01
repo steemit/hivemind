@@ -35,7 +35,7 @@ class QueryStats:
         for arr in sorted(cls.stats.items(), key=lambda x:-x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
-            print("% 5.1f%% % 10.2fms % 7.2favg % 7dx -- %s" % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+            print("% 5.1f%% % 10.2fms % 7.2favg % 8dx -- %s" % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
         cls.stats = {}
         cls.ttltime = 0
 
@@ -58,6 +58,7 @@ def query(sql, **kwargs):
         logger.debug(res)
         return res
     except Exception as e:
+        print("[SQL] Error in query {} ({})".format(sql, kwargs))
         conn.close()
         logger.exception(e)
         raise e
@@ -158,7 +159,7 @@ async def payouts_total():
       WHERE is_paidout = 1 AND payout_at > '%s'
     """ % (precalc_date)
 
-    return precalc_sum + query_one(sql)
+    return float(precalc_sum + query_one(sql)) #TODO: decimal
 
 # sum of completed payouts last 24 hrs
 async def payouts_last_24h():
@@ -166,7 +167,7 @@ async def payouts_last_24h():
       SELECT SUM(payout) FROM hive_posts_cache
       WHERE is_paidout = 1 AND payout_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
     """
-    return query_one(sql)
+    return float(query_one(sql)) # TODO: decimal
 
 # unused
 def get_reblogs_since(account: str, since: str):
@@ -188,11 +189,11 @@ def get_posts(ids, context = None):
 
     reblogged_ids = []
     if context:
-        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE account = :a AND post_id IN :ids", a=context, ids=ids)
+        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE account = :a AND post_id IN :ids", a=context, ids=tuple(ids))
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
-    for row in query(sql, ids=ids).fetchall():
+    for row in query(sql, ids=tuple(ids)).fetchall():
         obj = dict(row)
 
         if context:
@@ -218,7 +219,7 @@ def get_posts(ids, context = None):
 
 # builds SQL query to pull a list of posts for any sort order or tag
 # sort can be: trending hot new promoted
-def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None):
+async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None):
     if skip > 5000:
         raise Exception("cannot skip {} results".format(skip))
     if limit > 100:
