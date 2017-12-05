@@ -6,6 +6,7 @@ from sqlalchemy.types import SMALLINT
 from sqlalchemy.types import CHAR
 from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
+from sqlalchemy.types import BOOLEAN
 from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION
 
 
@@ -62,10 +63,10 @@ hive_posts = sa.Table(
     sa.Column('category', VARCHAR(255), nullable=False),
     sa.Column('depth', SMALLINT, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.Column('is_deleted', SMALLINT, nullable=False, server_default='0'),
-    sa.Column('is_pinned', SMALLINT, nullable=False, server_default='0'),
-    sa.Column('is_muted', SMALLINT, nullable=False, server_default='0'),
-    sa.Column('is_valid', SMALLINT, nullable=False, server_default='1'),
+    sa.Column('is_deleted', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_pinned', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_muted', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_valid', BOOLEAN, nullable=False, server_default='1'),
     sa.ForeignKeyConstraint(['author'], ['hive_accounts.name'], name='hive_posts_fk1'),
     sa.ForeignKeyConstraint(['community'], ['hive_accounts.name'], name='hive_posts_fk2'),
     sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
@@ -133,7 +134,7 @@ hive_communities = sa.Table(
     sa.Column('lang', CHAR(2), nullable=False, server_default='en'),
     sa.Column('settings', TEXT, nullable=False),
     sa.Column('type_id', SMALLINT, nullable=False, server_default='0'),
-    sa.Column('is_nsfw', SMALLINT, nullable=False, server_default='0'),
+    sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.ForeignKeyConstraint(['name'], ['hive_accounts.name'], name='hive_communities_fk1'),
     mysql_engine='InnoDB',
@@ -208,8 +209,8 @@ hive_posts_cache = sa.Table(
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.Column('payout_at', sa.DateTime, nullable=False),
     sa.Column('updated_at', sa.DateTime, nullable=False),
-    sa.Column('is_paidout', SMALLINT, nullable=False, server_default='0'),
-    sa.Column('is_nsfw', SMALLINT, nullable=False, server_default='0'),
+    sa.Column('is_paidout', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
     sa.Column('rshares', sa.BigInteger, nullable=False),
     sa.Column('sc_trend', DOUBLE_PRECISION, nullable=False),
     sa.Column('sc_hot', DOUBLE_PRECISION, nullable=False),
