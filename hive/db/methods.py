@@ -94,7 +94,7 @@ def db_needs_setup():
 
 
 async def db_head_state():
-    sql = "SELECT num,created_at,extract(epoch from created_at) ts FROM hive_blocks ORDER BY num DESC LIMIT 1"
+    sql = "SELECT num,created_at,UNIX_TIMESTAMP(CONVERT_TZ(created_at, '+00:00', 'SYSTEM')) ts FROM hive_blocks ORDER BY num DESC LIMIT 1"
     row = query_row(sql)
     return dict(db_head_block = row['num'],
                 db_head_time = str(row['created_at']),
@@ -274,7 +274,7 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
 # returns "homepage" feed for specified account
 async def get_user_feed(account: str, skip: int, limit: int, context: str = None):
     sql = """
-      SELECT post_id, string_agg(account, ',') accounts
+      SELECT post_id, GROUP_CONCAT(account) accounts
         FROM hive_feed_cache
        WHERE account IN (SELECT following FROM hive_follows
                           WHERE follower = :account AND state = 1)
