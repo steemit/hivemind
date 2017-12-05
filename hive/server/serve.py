@@ -6,7 +6,7 @@ from datetime import datetime
 import sqlalchemy as sa
 from sqlalchemy.engine.url import make_url
 from aiohttp import web
-from aiomysql.sa import create_engine
+from aiopg.sa import create_engine
 from jsonrpcserver.aio import methods
 from jsonrpcserver import config
 config.debug = True
@@ -57,7 +57,7 @@ async def init_db(app):
     args = app['config']['args']
     db = make_url(args.database_url)
     engine = await create_engine(user=db.username,
-                                 db=db.database,
+                                 database=db.database,
                                  password=db.password,
                                  host=db.host,
                                  port=db.port,
@@ -102,7 +102,7 @@ app.router.add_post('/', jsonrpc_handler)
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description="hivemind jsonrpc server")
-    parser.add_argument('--database_url',type=str, default='mysql://root:root_password@127.0.0.1:3306/testdb')
+    parser.add_argument('--database_url',type=str, default='postgresql://root:root_password@127.0.0.1:5432/testdb')
     parser.add_argument('--port', type=int, default=8080)
     args = parser.parse_args()
     app['config']['args'] = args

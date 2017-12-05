@@ -57,7 +57,7 @@ def process_json_follow_op(account, op_json, block_date):
 
         sql = """
         INSERT INTO hive_follows (follower, following, created_at, state)
-        VALUES (:fr, :fg, :at, :state) ON DUPLICATE KEY UPDATE state = :state
+        VALUES (:fr, :fg, :at, :state) ON CONFLICT (follower, following) DO UPDATE SET state = :state
         """
         state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
         query(sql, fr=follower, fg=following, at=block_date, state=state)
@@ -88,9 +88,9 @@ def process_json_follow_op(account, op_json, block_date):
             sql = "DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id"
             query(sql, account=blogger, id=post_id)
         else:
-            query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
-                  "VALUES (:a, :pid, :date)", a=blogger, pid=post_id, date=block_date)
-            sql = "INSERT IGNORE INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
+            sql = "INSERT INTO hive_reblogs (account, post_id, created_at) VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING"
+            query(sql, a=blogger, pid=post_id, date=block_date)
+            sql = "INSERT INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at) ON CONFLICT (account, post_id) DO NOTHING"
             query(sql, account=blogger, id=post_id, created_at=block_date)
 
 
@@ -308,8 +308,8 @@ def listen_steemd(trail_blocks=2):
 
 def cache_missing_posts():
     # cached posts inserted sequentially, so just compare MAX(id)'s
-    sql = ("SELECT (SELECT IFNULL(MAX(id), 0) FROM hive_posts) - "
-           "(SELECT IFNULL(MAX(post_id), 0) FROM hive_posts_cache)")
+    sql = ("SELECT (SELECT COALESCE(MAX(id), 0) FROM hive_posts) - "
+           "(SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache)")
     missing_count = query_one(sql)
     print("[INIT] Found {} missing post cache entries".format(missing_count))
 

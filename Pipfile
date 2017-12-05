@@ -16,6 +16,7 @@ prettytable = "*"
 jsonrpcserver = "*"
 aiohttp = "*"
 aiomysql = "*"
+"psycopg2" = "*"
 
 
 [dev-packages]

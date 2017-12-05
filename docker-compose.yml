@@ -1,29 +1,27 @@
 version: '3'
 services:
-  mysql:
-    image: mysql
+  db:
+    image: postgres
     environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_USERNAME: testuser
-      MYSQL_PASSWORD: testuserpass
-      MYSQL_DATABASE: testdb
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testuserpass
+      POSTGRES_DB: testdb
     ports:
      - 3306:3306
   hive:
     depends_on:
-      - mysql
+      - db
     image: steemit/hive
     build: .
     environment:
-      DATABASE_URL: mysql://root:root_password@mysql:3306/testdb
+      DATABASE_URL: postgresql://testuser:testuserpass@db:5432/testdb
       LOG_LEVEL: DEBUG
       JUSSI_URL: https://api.steemit.com
       STEEMD_URL: https://api.steemit.com
     links:
-      - mysql:db
+      - db:db
     ports:
       - 8080:8080
     volumes:
       - .:/app
     restart: always
-
