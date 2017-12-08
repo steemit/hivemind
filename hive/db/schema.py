@@ -201,22 +201,47 @@ hive_posts_cache = sa.Table(
     sa.Column('post_id', sa.Integer, primary_key=True),
     sa.Column('author', VARCHAR(16), nullable=False),
     sa.Column('permlink', VARCHAR(255), nullable=False),
+    sa.Column('category', VARCHAR(255), nullable=False),
+
+    # important/index
+    sa.Column('depth', SMALLINT, nullable=False),
+    sa.Column('children', SMALLINT, nullable=False),
+    sa.Column('parent_id', sa.Integer, nullable=False),
+
+    # basic/extended-stats
+    sa.Column('flag_weight', sa.Float, nullable=False),
+    sa.Column('total_votes', sa.Integer, nullable=False),
+    sa.Column('up_votes',    sa.Integer, nullable=False),
+
+    # basic ui fields
     sa.Column('title', sa.String(255), nullable=False),
     sa.Column('preview', sa.String(1024), nullable=False),
     sa.Column('img_url', sa.String(1024), nullable=False),
+
+    # core stats/indexes
     sa.Column('payout', sa.types.DECIMAL(10, 3), nullable=False),
     sa.Column('promoted', sa.types.DECIMAL(10, 3), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.Column('payout_at', sa.DateTime, nullable=False),
     sa.Column('updated_at', sa.DateTime, nullable=False),
     sa.Column('is_paidout', BOOLEAN, nullable=False, server_default='0'),
+
+    # ui flags/filters
     sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_declined', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_full_power', BOOLEAN, nullable=False, server_default='0'),
+
+    # important indexes
     sa.Column('rshares', sa.BigInteger, nullable=False),
     sa.Column('sc_trend', DOUBLE_PRECISION, nullable=False),
     sa.Column('sc_hot', DOUBLE_PRECISION, nullable=False),
+
+    # bulk data
     sa.Column('body', TEXT),
     sa.Column('votes', TEXT),
     sa.Column('json', sa.Text),
+    sa.Column('raw_json', sa.Text),
+
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_posts_cache_fk1'),
     sa.Index('hive_posts_cache_ix1', 'payout'),
     sa.Index('hive_posts_cache_ix2', 'promoted'),

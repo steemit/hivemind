@@ -230,16 +230,13 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
     table = 'hive_posts_cache'
     col   = 'post_id'
 
-    # TODO: all discussions need a depth == 0 condition?
     if sort == 'trending':
         order = 'sc_trend DESC'
     elif sort == 'hot':
         order = 'sc_hot DESC'
     elif sort == 'new':
-        order = 'id DESC'
+        order = 'post_id DESC'
         where.append('depth = 0')
-        table = 'hive_posts'
-        col = 'id'
     elif sort == 'promoted':
         order = 'promoted DESC'
         where.append('is_paidout = 0')

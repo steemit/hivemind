@@ -134,7 +134,7 @@ def generate_cached_post_sql(pid, post, updated_at):
     sqls.append((sql % (cols, params, update), values))
 
     # update tag metadata only for top-level posts
-    if post['depth'] == 0:
+    if not post['parent_author']:
         sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
         sqls.append((sql, {'id': pid}))
 

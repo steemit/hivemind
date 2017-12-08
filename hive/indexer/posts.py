@@ -172,20 +172,13 @@ class Posts:
         #   result: 1 = approx $400 of downvoting stake; 2 = $4,000; etc
         flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
 
-        allow_delete = post['children'] == 0 and int(post['net_rshares']) <= 0
-        has_pending_payout = amount(post['pending_payout_value']) >= 0.02
         author_rep = rep_log10(post['author_reputation'])
-
-        gray_threshold = -9999999999
-        low_value_post = net_rshares_adj < gray_threshold and author_rep < 65
-
-        gray = not has_pending_payout and (author_rep < 1 or low_value_post)
-        hide = not has_pending_payout and (author_rep < 0)
+        is_low_value = net_rshares_adj < -9999999999
+        has_pending_payout = amount(post['pending_payout_value']) >= 0.02
 
         return {
-            'hide': hide,
-            'gray': gray,
-            'allow_delete': allow_delete,
+            'hide': not has_pending_payout and (author_rep < 0),
+            'gray': not has_pending_payout and (author_rep < 1 or is_low_value),
             'author_rep': author_rep,
             'flag_weight': flag_weight,
             'total_votes': total_votes,
