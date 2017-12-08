@@ -112,14 +112,14 @@ class Posts:
 
 
             # validated community; will return None if invalid & defaults to author.
-            is_valid = int(is_community_post_valid(community, op))
+            is_valid = is_community_post_valid(community, op)
             if not is_valid:
                 print("Invalid post @{}/{} in @{}".format(op['author'], op['permlink'], community))
 
             # if we're reusing a previously-deleted post (rare!), update it
             if pid:
                 query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0', parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
-                      is_valid=str(is_valid), parent_id=parent_id, category=category, community=community, depth=depth, id=pid)
+                      is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid)
                 query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=pid)
             else:
                 sql = """
@@ -128,7 +128,7 @@ class Posts:
                 VALUES (:is_valid, :parent_id, :author, :permlink,
                         :category, :community, :depth, :date)
                 """
-                query(sql, is_valid=str(is_valid), parent_id=parent_id,
+                query(sql, is_valid=is_valid, parent_id=parent_id,
                       author=op['author'], permlink=op['permlink'],
                       category=category, community=community,
                       depth=depth, date=block_date)
