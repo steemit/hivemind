@@ -247,6 +247,9 @@ def sync_from_steemd(is_initial_sync):
         print("[PREP] Process {} payouts since {}".format(len(paidout), date))
         update_posts_batch(paidout, steemd, date)
 
+        Accounts.cache_dirty()
+        Accounts.cache_dirty_follows()
+
 
 def listen_steemd(trail_blocks=2):
     steemd = get_adapter()
