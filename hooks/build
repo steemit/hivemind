@@ -5,4 +5,12 @@ if [[ -z "$SOURCE_COMMIT" ]]; then
     echo "Updating SOURCE_COMMIT from git rev-parse HEAD"
     echo "SOURCE_COMMIT: $SOURCE_COMMIT"
 fi
-docker build -t "${IMAGE_NAME}" --build-arg SOURCE_COMMIT="${SOURCE_COMMIT}" --build-arg DOCKER_TAG="${DOCKER_TAG}" .
+
+echo "SCHEMA_HASH: $SCHEMA_HASH"
+if [[ -z "$SCHEMA_HASH" ]]; then
+    export SCHEMA_HASH="${SCHEMA_HASH:-$(shasum hive/db/schema.py | cut -c1-8)}"
+    echo "Updating SCHEMA_HASH from sha1 of hive/db/schema.py"
+    echo "SCHEMA_HASH: $SCHEMA_HASH"
+fi
+
+docker build -t "${IMAGE_NAME}" --build-arg SOURCE_COMMIT="${SOURCE_COMMIT}"  --build-arg SCHEMA_HASH="${SCHEMA_HASH}" --build-arg DOCKER_TAG="${DOCKER_TAG}" .
