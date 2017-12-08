@@ -1,9 +1,6 @@
 import logging
 from funcy.seqs import first
 from hive.db import conn
-from hive.db.schema import (
-    hive_follows,
-)
 from sqlalchemy import text, select, func
 from decimal import Decimal
 
@@ -126,23 +123,18 @@ async def get_following(account: str, skip: int, limit: int):
 
 
 async def following_count(account: str):
-    sql = "SELECT COUNT(*) FROM hive_follows WHERE follower = :a AND state = 1"
+    sql = "SELECT following FROM hive_accounts WHERE name = :a"
     return query_one(sql, a=account)
 
 
 async def follower_count(account: str):
-    sql = "SELECT COUNT(*) FROM hive_follows WHERE following = :a AND state = 1"
+    sql = "SELECT followers FROM hive_accounts WHERE name = :a"
     return query_one(sql, a=account)
 
 
 # evaluate replacing two above methods with this
 async def follow_stats(account: str):
-    sql = """
-    SELECT SUM(IF(follower  = :account, 1, 0)) following,
-           SUM(IF(following = :account, 1, 0)) followers
-      FROM hive_follows
-     WHERE state = 1
-    """
+    sql = "SELECT following, followers FROM hive_accounts WHERE name = :account"
     return first(query(sql))
 
 # all completed payouts
