@@ -69,7 +69,7 @@ class Posts:
     def delete(cls, ops):
         for op in ops:
             post_id, depth = cls.get_id_and_depth(op['author'], op['permlink'])
-            query("UPDATE hive_posts SET is_deleted = 1 WHERE id = :id", id=post_id)
+            query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=post_id)
             query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
             query("DELETE FROM hive_feed_cache WHERE post_id = :id", id=post_id)
 
@@ -87,7 +87,7 @@ class Posts:
             if not ret:
                 # post does not exist, go ahead and process it
                 pass
-            elif ret[1] == 0:
+            elif not ret[1]:
                 # post exists and is not deleted, thus it's an edit. ignore.
                 continue
             else:
@@ -112,13 +112,13 @@ class Posts:
 
 
             # validated community; will return None if invalid & defaults to author.
-            is_valid = int(is_community_post_valid(community, op))
+            is_valid = is_community_post_valid(community, op)
             if not is_valid:
                 print("Invalid post @{}/{} in @{}".format(op['author'], op['permlink'], community))
 
             # if we're reusing a previously-deleted post (rare!), update it
             if pid:
-                query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = 0, parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
+                query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0', parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
                       is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid)
                 query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=pid)
             else:

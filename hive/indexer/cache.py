@@ -228,7 +228,7 @@ def select_paidout_posts(block_date):
     sql = """
     SELECT post_id, author, permlink FROM hive_posts_cache
     WHERE post_id IN (SELECT post_id FROM hive_posts_cache
-    WHERE is_paidout = 0 AND payout_at <= :date)
+    WHERE is_paidout = '0' AND payout_at <= :date)
     """
     return list(query(sql, date=block_date))
 
