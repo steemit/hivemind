@@ -145,10 +145,10 @@ hive_members = sa.Table(
     'hive_members', metadata,
     sa.Column('community', VARCHAR(16), nullable=False),
     sa.Column('account', VARCHAR(16), nullable=False),
-    sa.Column('is_admin', SMALLINT, nullable=False),
-    sa.Column('is_mod', SMALLINT, nullable=False),
-    sa.Column('is_approved', SMALLINT, nullable=False),
-    sa.Column('is_muted', SMALLINT, nullable=False),
+    sa.Column('is_admin', BOOLEAN, nullable=False),
+    sa.Column('is_mod', BOOLEAN, nullable=False),
+    sa.Column('is_approved', BOOLEAN, nullable=False),
+    sa.Column('is_muted', BOOLEAN, nullable=False),
     sa.Column('title', sa.String(255), nullable=False, server_default=''),
     sa.ForeignKeyConstraint(['community'], ['hive_communities.name'], name='hive_members_fk1'),
     sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_members_fk2'),
@@ -206,9 +206,9 @@ hive_posts_cache = sa.Table(
     # important/index
     sa.Column('depth', SMALLINT, nullable=False),
     sa.Column('children', SMALLINT, nullable=False),
-    sa.Column('parent_id', sa.Integer, nullable=False),
 
     # basic/extended-stats
+    sa.Column('author_rep', sa.Float, nullable=False),
     sa.Column('flag_weight', sa.Float, nullable=False),
     sa.Column('total_votes', sa.Integer, nullable=False),
     sa.Column('up_votes',    sa.Integer, nullable=False),
@@ -230,6 +230,8 @@ hive_posts_cache = sa.Table(
     sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
     sa.Column('is_declined', BOOLEAN, nullable=False, server_default='0'),
     sa.Column('is_full_power', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_hidden', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_grayed', BOOLEAN, nullable=False, server_default='0'),
 
     # important indexes
     sa.Column('rshares', sa.BigInteger, nullable=False),
