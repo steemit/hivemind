@@ -196,7 +196,7 @@ def rebuild_feed_cache(truncate=True):
     lap_0 = time.perf_counter()
     query("INSERT IGNORE INTO hive_feed_cache "
           "SELECT author account, id post_id, created_at "
-          "FROM hive_posts WHERE depth = 0 AND is_deleted = 0")
+          "FROM hive_posts WHERE depth = 0 AND is_deleted = '0'")
     lap_1 = time.perf_counter()
     query("INSERT IGNORE INTO hive_feed_cache "
           "SELECT account, post_id, created_at FROM hive_reblogs")
@@ -219,7 +219,7 @@ def select_missing_posts(limit=None, fast_mode=True):
         limit = ""
 
     sql = ("SELECT id, author, permlink FROM hive_posts "
-           "WHERE is_deleted = 0 AND %s ORDER BY id %s" % (where, limit))
+           "WHERE is_deleted = '0' AND %s ORDER BY id %s" % (where, limit))
     return list(query(sql))
 
 
