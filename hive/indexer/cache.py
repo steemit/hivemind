@@ -97,11 +97,16 @@ def generate_cached_post_sql(pid, post, updated_at):
         print("bad body: {}".format(post['body']))
         post['body'] = "INVALID"
 
-    # TODO: add Posts.get_post_stats fields
+    stats = Posts.get_post_stats(post)
+
     values = collections.OrderedDict([
         ('post_id', '%d' % pid),
         ('author', "%s" % post['author']),
         ('permlink', "%s" % post['permlink']),
+        ('category', "%s" % post['category']),
+        ('depth', "%d" % post['depth']),
+        ('children', "%d" % post['children']),
+
         ('title', "%s" % post['title']),
         ('preview', "%s" % post['body'][0:1024]),
         ('body', "%s" % post['body']),
@@ -118,8 +123,16 @@ def generate_cached_post_sql(pid, post, updated_at):
         ('is_paidout', "%d" % is_paidout),
         ('sc_trend', "%f" % trend_score),
         ('sc_hot', "%f" % hot_score),
-        #('payout_declined', "%d" % int(payout_declined)),
-        #('full_power', "%d" % int(full_power)),
+
+        ('flag_weight', "%f" % stats['flag_weight']),
+        ('total_votes', "%d" % stats['total_votes']),
+        ('up_votes', "%d" % stats['up_votes']),
+        ('is_hidden', "%d" % stats['hide']),
+        ('is_grayed', "%d" % stats['gray']),
+        ('author_rep', "%f" % stats['author_rep']),
+        ('raw_json', "%s" % json.dumps(post)), # TODO: remove body, json_md, active_votes(?)
+        ('is_declined', "%d" % int(payout_declined)),
+        ('is_full_power', "%d" % int(full_power)),
     ])
     fields = values.keys()
 
@@ -134,7 +147,7 @@ def generate_cached_post_sql(pid, post, updated_at):
     sqls.append((sql % (cols, params, update), values))
 
     # update tag metadata only for top-level posts
-    if post['depth'] == 0:
+    if not post['parent_author']:
         sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
         sqls.append((sql, {'id': pid}))
 

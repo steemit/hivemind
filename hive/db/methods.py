@@ -161,15 +161,6 @@ async def payouts_last_24h():
     """
     return float(query_one(sql)) # TODO: decimal
 
-# unused
-def get_reblogs_since(account: str, since: str):
-    sql = """
-      SELECT r.* FROM hive_reblogs r JOIN hive_posts p ON r.post_id = p.id
-       WHERE p.author = :account AND r.created_at > :since
-    ORDER BY r.created_at DESC
-    """
-    return [dict(r) for r in query_all(sql, account=account, since=since)]
-
 
 # given an array of post ids, returns full metadata in the same order
 def get_posts(ids, context = None):
@@ -227,19 +218,14 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
 
     order = ''
     where = []
-    table = 'hive_posts_cache'
-    col   = 'post_id'
 
-    # TODO: all discussions need a depth == 0 condition?
     if sort == 'trending':
         order = 'sc_trend DESC'
     elif sort == 'hot':
         order = 'sc_hot DESC'
     elif sort == 'new':
-        order = 'id DESC'
+        order = 'post_id DESC'
         where.append('depth = 0')
-        table = 'hive_posts'
-        col = 'id'
     elif sort == 'promoted':
         order = 'promoted DESC'
         where.append('is_paidout = 0')
@@ -248,17 +234,14 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
         raise Exception("unknown sort order {}".format(sort))
 
     if tag:
-        id_col = 'post_id'
-        if table == 'hive_posts':
-            id_col = 'id'
-        where.append('%s IN (SELECT post_id FROM hive_post_tags WHERE tag = :tag)' % (id_col))
+        where.append('post_id IN (SELECT post_id FROM hive_post_tags WHERE tag = :tag)')
 
     if where:
         where = 'WHERE ' + ' AND '.join(where)
     else:
         where = ''
 
-    sql = "SELECT %s FROM %s %s ORDER BY %s LIMIT :limit OFFSET :skip" % (col, table, where, order)
+    sql = "SELECT post_id FROM hive_posts_cache %s ORDER BY %s LIMIT :limit OFFSET :skip" % (where, order)
     ids = [r[0] for r in query(sql, tag=tag, limit=limit, skip=skip).fetchall()]
     return get_posts(ids, context)
 

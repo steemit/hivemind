@@ -145,10 +145,10 @@ hive_members = sa.Table(
     'hive_members', metadata,
     sa.Column('community', VARCHAR(16), nullable=False),
     sa.Column('account', VARCHAR(16), nullable=False),
-    sa.Column('is_admin', SMALLINT, nullable=False),
-    sa.Column('is_mod', SMALLINT, nullable=False),
-    sa.Column('is_approved', SMALLINT, nullable=False),
-    sa.Column('is_muted', SMALLINT, nullable=False),
+    sa.Column('is_admin', BOOLEAN, nullable=False),
+    sa.Column('is_mod', BOOLEAN, nullable=False),
+    sa.Column('is_approved', BOOLEAN, nullable=False),
+    sa.Column('is_muted', BOOLEAN, nullable=False),
     sa.Column('title', sa.String(255), nullable=False, server_default=''),
     sa.ForeignKeyConstraint(['community'], ['hive_communities.name'], name='hive_members_fk1'),
     sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_members_fk2'),
@@ -201,22 +201,49 @@ hive_posts_cache = sa.Table(
     sa.Column('post_id', sa.Integer, primary_key=True),
     sa.Column('author', VARCHAR(16), nullable=False),
     sa.Column('permlink', VARCHAR(255), nullable=False),
+    sa.Column('category', VARCHAR(255), nullable=False),
+
+    # important/index
+    sa.Column('depth', SMALLINT, nullable=False),
+    sa.Column('children', SMALLINT, nullable=False),
+
+    # basic/extended-stats
+    sa.Column('author_rep', sa.Float, nullable=False),
+    sa.Column('flag_weight', sa.Float, nullable=False),
+    sa.Column('total_votes', sa.Integer, nullable=False),
+    sa.Column('up_votes',    sa.Integer, nullable=False),
+
+    # basic ui fields
     sa.Column('title', sa.String(255), nullable=False),
     sa.Column('preview', sa.String(1024), nullable=False),
     sa.Column('img_url', sa.String(1024), nullable=False),
+
+    # core stats/indexes
     sa.Column('payout', sa.types.DECIMAL(10, 3), nullable=False),
     sa.Column('promoted', sa.types.DECIMAL(10, 3), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.Column('payout_at', sa.DateTime, nullable=False),
     sa.Column('updated_at', sa.DateTime, nullable=False),
     sa.Column('is_paidout', BOOLEAN, nullable=False, server_default='0'),
+
+    # ui flags/filters
     sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_declined', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_full_power', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_hidden', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_grayed', BOOLEAN, nullable=False, server_default='0'),
+
+    # important indexes
     sa.Column('rshares', sa.BigInteger, nullable=False),
     sa.Column('sc_trend', DOUBLE_PRECISION, nullable=False),
     sa.Column('sc_hot', DOUBLE_PRECISION, nullable=False),
+
+    # bulk data
     sa.Column('body', TEXT),
     sa.Column('votes', TEXT),
     sa.Column('json', sa.Text),
+    sa.Column('raw_json', sa.Text),
+
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_posts_cache_fk1'),
     sa.Index('hive_posts_cache_ix1', 'payout'),
     sa.Index('hive_posts_cache_ix2', 'promoted'),
