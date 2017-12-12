@@ -99,12 +99,12 @@ hive_post_tags = sa.Table(
 
 hive_follows = sa.Table(
     'hive_follows', metadata,
-    sa.Column('follower', VARCHAR(16), nullable=False),
-    sa.Column('following', VARCHAR(16), nullable=False),
+    sa.Column('follower', sa.Integer, nullable=False),
+    sa.Column('following', sa.Integer, nullable=False),
     sa.Column('state', SMALLINT, nullable=False, server_default='1'),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.ForeignKeyConstraint(['follower'], ['hive_accounts.name'], name='hive_follows_fk1'),
-    sa.ForeignKeyConstraint(['following'], ['hive_accounts.name'], name='hive_follows_fk2'),
+    sa.ForeignKeyConstraint(['follower'], ['hive_accounts.id'], name='hive_follows_fk1'),
+    sa.ForeignKeyConstraint(['following'], ['hive_accounts.id'], name='hive_follows_fk2'),
     sa.UniqueConstraint('follower', 'following', name='hive_follows_ux1'),
     sa.Index('hive_follows_ix1', 'follower', 'state', 'created_at'),
     sa.Index('hive_follows_ix2', 'following', 'state', 'created_at'),
