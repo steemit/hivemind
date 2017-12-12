@@ -60,7 +60,7 @@ def process_json_follow_op(account, op_json, block_date):
         VALUES (:fr, :fg, :at, :state) ON CONFLICT (follower, following) DO UPDATE SET state = :state
         """
         state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
-        query(sql, fr=follower, fg=following, at=block_date, state=state)
+        query(sql, fr=Accounts.get_id(follower), fg=Accounts.get_id(following), at=block_date, state=state)
         Accounts.dirty_follows(follower)
         Accounts.dirty_follows(following)
 

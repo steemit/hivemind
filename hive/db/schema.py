@@ -2,6 +2,7 @@ import logging
 import os
 
 import sqlalchemy as sa
+from sqlalchemy.sql import text as sql_text
 from sqlalchemy.types import SMALLINT
 from sqlalchemy.types import CHAR
 from sqlalchemy.types import VARCHAR
@@ -108,6 +109,7 @@ hive_follows = sa.Table(
     sa.UniqueConstraint('follower', 'following', name='hive_follows_ux1'),
     sa.Index('hive_follows_ix1', 'follower', 'state', 'created_at'),
     sa.Index('hive_follows_ix2', 'following', 'state', 'created_at'),
+    sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where = sql_text("state = 1")),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
