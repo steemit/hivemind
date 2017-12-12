@@ -249,12 +249,13 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
 # returns "homepage" feed for specified account
 async def get_user_feed(account: str, skip: int, limit: int, context: str = None):
     sql = """
-      SELECT post_id, string_agg(account, ',') accounts
+      SELECT post_id, string_agg(name, ',') accounts
         FROM hive_feed_cache
-       WHERE account IN (SELECT following FROM hive_follows
-                          WHERE follower = :account AND state = 1)
+        JOIN hive_accounts ON account_id = hive_accounts.id
+       WHERE account_id IN (SELECT following FROM hive_follows
+                          WHERE follower = (SELECT id FROM hive_accounts WHERE name = :account) AND state = 1)
     GROUP BY post_id
-    ORDER BY MIN(created_at) DESC LIMIT :limit OFFSET :skip
+    ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit OFFSET :skip
     """
     res = query_all(sql, account = account, skip = skip, limit = limit)
     posts = get_posts([r[0] for r in res], context)
@@ -284,7 +285,7 @@ async def get_blog_feed(account: str, skip: int, limit: int, context: str = None
     #  ORDER BY created_at DESC
     #     LIMIT :limit OFFSET :skip
     #"""
-    sql = ("SELECT post_id FROM hive_feed_cache WHERE account = :account "
+    sql = ("SELECT post_id FROM hive_feed_cache WHERE account_id = (SELECT id FROM hive_accounts WHERE name = :account) "
             "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
     post_ids = query_col(sql, account = account, skip = skip, limit = limit)
     return get_posts(post_ids, context)

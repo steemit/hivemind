@@ -207,12 +207,12 @@ def rebuild_feed_cache(truncate=True):
         query("TRUNCATE TABLE hive_feed_cache")
 
     lap_0 = time.perf_counter()
-    query("INSERT IGNORE INTO hive_feed_cache "
-          "SELECT author account, id post_id, created_at "
-          "FROM hive_posts WHERE depth = 0 AND is_deleted = '0'")
+    query("INSERT INTO hive_feed_cache (account_id, post_id, created_at)"
+          "SELECT hive_accounts.id account_id, hive_posts.id post_id, hive_posts.created_at "
+          "FROM hive_posts JOIN hive_accounts ON hive_posts.author = hive_accounts.name WHERE depth = 0 AND is_deleted = '0' ON CONFLICT DO NOTHING")
     lap_1 = time.perf_counter()
-    query("INSERT IGNORE INTO hive_feed_cache "
-          "SELECT account, post_id, created_at FROM hive_reblogs")
+    query("INSERT INTO hive_feed_cache (account_id, post_id, created_at)"
+          "SELECT hive_accounts.id account_id, post_id, hive_reblogs.created_at FROM hive_reblogs JOIN hive_accounts ON hive_reblogs.account = hive_accounts.name ON CONFLICT DO NOTHING")
     lap_2 = time.perf_counter()
 
     print("[INIT] Rebuilt hive feed cache in {}s ({}+{})".format(

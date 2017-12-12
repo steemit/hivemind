@@ -188,10 +188,10 @@ hive_modlog = sa.Table(
 hive_feed_cache = sa.Table(
     'hive_feed_cache', metadata,
     sa.Column('post_id', sa.Integer),
-    sa.Column('account', VARCHAR(16), nullable=False),
+    sa.Column('account_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.UniqueConstraint('post_id', 'account', name='hive_feed_cache_ux1'), #TODO: verify PK
-    sa.Index('hive_feed_cache_ix1', 'account', 'post_id', 'created_at'),
+    sa.UniqueConstraint('post_id', 'account_id', name='hive_feed_cache_ux1'), #TODO: verify PK
+    sa.Index('hive_feed_cache_ix1', 'account_id', 'post_id', 'created_at'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
