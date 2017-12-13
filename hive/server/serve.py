@@ -3,17 +3,11 @@ import os
 import logging
 from datetime import datetime
 
-import sqlalchemy as sa
 from sqlalchemy.engine.url import make_url
 from aiohttp import web
 from aiopg.sa import create_engine
 from jsonrpcserver.aio import methods
 from jsonrpcserver import config
-config.debug = True
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
 from hive.db.methods import (
     db_head_state,
     get_followers,
@@ -26,6 +20,11 @@ from hive.db.methods import (
     payouts_total,
     payouts_last_24h
 )
+
+config.debug = True
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 jrpc_methods = (
     db_head_state,
@@ -76,13 +75,13 @@ async def health(request):
             state['db_head_age'],
             app['config']['hive.MAX_BLOCK_NUM_DIFF'] * 3,
             state['db_head_block'])), status=500)
-    else:
-        return web.json_response(data=dict(
-            status='OK',
-            source_commit=os.environ.get('SOURCE_COMMIT'),
-            docker_tag=os.environ.get('DOCKER_TAG'),
-            state=state, 
-            timestamp=datetime.utcnow().isoformat()))
+
+    return web.json_response(data=dict(
+        status='OK',
+        source_commit=os.environ.get('SOURCE_COMMIT'),
+        docker_tag=os.environ.get('DOCKER_TAG'),
+        state=state,
+        timestamp=datetime.utcnow().isoformat()))
 
 
 async def jsonrpc_handler(request):
@@ -100,7 +99,7 @@ app.router.add_post('/', jsonrpc_handler)
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description="hivemind jsonrpc server")
-    parser.add_argument('--database_url',type=str, default='postgresql://root:root_password@127.0.0.1:5432/testdb')
+    parser.add_argument('--database_url', type=str, default='postgresql://root:root_password@127.0.0.1:5432/testdb')
     parser.add_argument('--port', type=int, default=8080)
     args = parser.parse_args()
     app['config']['args'] = args

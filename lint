@@ -1,1 +1,6 @@
-pylint hive/**/*.py -f colorized -r n
+if [ -z "$1" ]
+  then
+    pylint hive/**/*.py -f colorized -r n
+else
+    pylint $1 -f colorized -r n
+fi
