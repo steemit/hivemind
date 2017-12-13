@@ -101,24 +101,32 @@ async def db_head_state():
 async def db_last_block():
     return query_one("SELECT MAX(num) FROM hive_blocks") or 0
 
+def get_account_id(name):
+    return query_one("SELECT id FROM hive_accounts WHERE name = :n", n = name)
 
 # api specific
 # ------------
 async def get_followers(account: str, skip: int, limit: int):
+    account_id = get_account_id(account)
     sql = """
-    SELECT follower, created_at FROM hive_follows WHERE following = :account
-    AND state = 1 ORDER BY created_at DESC LIMIT :limit OFFSET :skip
+      SELECT name, hf.created_at FROM hive_follows hf
+        JOIN hive_accounts ON hf.follower = id
+       WHERE hf.following = :account_id AND state = 1
+    ORDER BY hf.created_at DESC LIMIT :limit OFFSET :skip
     """
-    res = query(sql, account=account, skip=int(skip), limit=int(limit))
+    res = query(sql, account_id=account_id, skip=int(skip), limit=int(limit))
     return [[r[0],str(r[1])] for r in res.fetchall()]
 
 
 async def get_following(account: str, skip: int, limit: int):
+    account_id = get_account_id(account)
     sql = """
-    SELECT following, created_at FROM hive_follows WHERE follower = :account
-    AND state = 1 ORDER BY created_at DESC LIMIT :limit OFFSET :skip
+      SELECT name, hf.created_at FROM hive_follows hf
+        JOIN hive_accounts ON hf.following = id
+       WHERE hf.follower = :account_id AND state = 1
+    ORDER BY hf.created_at DESC LIMIT :limit OFFSET :skip
     """
-    res = query(sql, account=account, skip=int(skip), limit=int(limit))
+    res = query(sql, account_id=account_id, skip=int(skip), limit=int(limit))
     return [[r[0],str(r[1])] for r in res.fetchall()]
 
 
@@ -248,15 +256,17 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
 
 # returns "homepage" feed for specified account
 async def get_user_feed(account: str, skip: int, limit: int, context: str = None):
+    account_id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=account)
     sql = """
-      SELECT post_id, string_agg(account, ',') accounts
+      SELECT post_id, string_agg(name, ',') accounts
         FROM hive_feed_cache
-       WHERE account IN (SELECT following FROM hive_follows
-                          WHERE follower = :account AND state = 1)
+        JOIN hive_follows ON account_id = hive_follows.following AND state = 1
+        JOIN hive_accounts ON hive_follows.following = hive_accounts.id
+       WHERE hive_follows.follower = :account
     GROUP BY post_id
-    ORDER BY MIN(created_at) DESC LIMIT :limit OFFSET :skip
+    ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit OFFSET :skip
     """
-    res = query_all(sql, account = account, skip = skip, limit = limit)
+    res = query_all(sql, account = account_id, skip = skip, limit = limit)
     posts = get_posts([r[0] for r in res], context)
 
     # Merge reblogged_by data into result set
@@ -284,7 +294,7 @@ async def get_blog_feed(account: str, skip: int, limit: int, context: str = None
     #  ORDER BY created_at DESC
     #     LIMIT :limit OFFSET :skip
     #"""
-    sql = ("SELECT post_id FROM hive_feed_cache WHERE account = :account "
+    sql = ("SELECT post_id FROM hive_feed_cache WHERE account_id = (SELECT id FROM hive_accounts WHERE name = :account) "
             "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
     post_ids = query_col(sql, account = account, skip = skip, limit = limit)
     return get_posts(post_ids, context)

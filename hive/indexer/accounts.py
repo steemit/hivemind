@@ -127,13 +127,14 @@ class Accounts:
 
     @classmethod
     def update_follows(cls, accounts):
+        ids = map(cls.get_id, accounts)
         sql = """
             UPDATE hive_accounts
-               SET followers = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND following = hive_accounts.name),
-                   following = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND follower  = hive_accounts.name)
-             WHERE name IN :names
+               SET followers = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND following = hive_accounts.id),
+                   following = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND follower  = hive_accounts.id)
+             WHERE id IN :ids
         """
-        query(sql, names=tuple(accounts))
+        query(sql, ids=tuple(ids))
 
     @classmethod
     def _generate_cache_sqls(cls, accounts, block_date=None):

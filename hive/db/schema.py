@@ -2,6 +2,7 @@ import logging
 import os
 
 import sqlalchemy as sa
+from sqlalchemy.sql import text as sql_text
 from sqlalchemy.types import SMALLINT
 from sqlalchemy.types import CHAR
 from sqlalchemy.types import VARCHAR
@@ -99,15 +100,16 @@ hive_post_tags = sa.Table(
 
 hive_follows = sa.Table(
     'hive_follows', metadata,
-    sa.Column('follower', VARCHAR(16), nullable=False),
-    sa.Column('following', VARCHAR(16), nullable=False),
+    sa.Column('follower', sa.Integer, nullable=False),
+    sa.Column('following', sa.Integer, nullable=False),
     sa.Column('state', SMALLINT, nullable=False, server_default='1'),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.ForeignKeyConstraint(['follower'], ['hive_accounts.name'], name='hive_follows_fk1'),
-    sa.ForeignKeyConstraint(['following'], ['hive_accounts.name'], name='hive_follows_fk2'),
+    sa.ForeignKeyConstraint(['follower'], ['hive_accounts.id'], name='hive_follows_fk1'),
+    sa.ForeignKeyConstraint(['following'], ['hive_accounts.id'], name='hive_follows_fk2'),
     sa.UniqueConstraint('follower', 'following', name='hive_follows_ux1'),
     sa.Index('hive_follows_ix1', 'follower', 'state', 'created_at'),
     sa.Index('hive_follows_ix2', 'following', 'state', 'created_at'),
+    sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where = sql_text("state = 1")),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -187,11 +189,11 @@ hive_modlog = sa.Table(
 
 hive_feed_cache = sa.Table(
     'hive_feed_cache', metadata,
-    sa.Column('post_id', sa.Integer),
-    sa.Column('account', VARCHAR(16), nullable=False),
+    sa.Column('post_id', sa.Integer, nullable=False),
+    sa.Column('account_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.UniqueConstraint('post_id', 'account', name='hive_feed_cache_ux1'), #TODO: verify PK
-    sa.Index('hive_feed_cache_ix1', 'account', 'post_id', 'created_at'),
+    sa.UniqueConstraint('post_id', 'account_id', name='hive_feed_cache_ux1'),
+    sa.Index('hive_feed_cache_ix1', 'account_id', 'post_id', 'created_at'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )

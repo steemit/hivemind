@@ -137,8 +137,8 @@ class Posts:
 
             # add top-level posts to feed cache
             if not op['parent_permlink']:
-                sql = "INSERT INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
-                query(sql, account=op['author'], id=pid, created_at=block_date)
+                sql = "INSERT INTO hive_feed_cache (account_id, post_id, created_at) VALUES (:account_id, :id, :created_at)"
+                query(sql, account_id=Accounts.get_id(op['author']), id=pid, created_at=block_date)
 
 
     # cache methods
