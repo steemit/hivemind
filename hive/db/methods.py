@@ -148,7 +148,7 @@ async def payouts_total():
     # sum all payouts since `precalc_date`
     sql = """
       SELECT SUM(payout) FROM hive_posts_cache
-      WHERE is_paidout = 1 AND payout_at > '%s'
+      WHERE is_paidout = '1' AND payout_at > '%s'
     """ % (precalc_date)
 
     return float(precalc_sum + query_one(sql)) #TODO: decimal
@@ -156,8 +156,8 @@ async def payouts_total():
 # sum of completed payouts last 24 hrs
 async def payouts_last_24h():
     sql = """
-      SELECT SUM(payout) FROM hive_posts_cache
-      WHERE is_paidout = 1 AND payout_at > (NOW() AT TIME ZONE 'utc') - INTERVAL '24 HOUR'
+      SELECT SUM(payout) FROM hive_posts_cache WHERE is_paidout = '1'
+      AND payout_at > (NOW() AT TIME ZONE 'utc') - INTERVAL '24 HOUR'
     """
     return float(query_one(sql)) # TODO: decimal
 
