@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 import os
 import logging
-from datetime import datetime
 
+from datetime import datetime
 from sqlalchemy.engine.url import make_url
 from aiohttp import web
 from aiopg.sa import create_engine
-from jsonrpcserver.aio import methods
 from jsonrpcserver import config
+from jsonrpcserver.async_methods import AsyncMethods
+
+from hive.server import legacy_api as legacy
+
 from hive.db.methods import (
     db_head_state,
     get_followers,
@@ -39,8 +42,14 @@ jrpc_methods = (
     payouts_last_24h
 )
 
+methods = AsyncMethods()
 for m in jrpc_methods:
     methods.add(m)
+
+legacy_methods = AsyncMethods()
+legacy_methods.add(legacy.get_followers)
+legacy_methods.add(legacy.get_following)
+legacy_methods.add(legacy.get_follow_count)
 
 app = web.Application()
 app['config'] = dict()
@@ -89,11 +98,17 @@ async def jsonrpc_handler(request):
     response = await methods.dispatch(request)
     return web.json_response(response, status=200)
 
+async def legacy_handler(request):
+    request = await request.text()
+    response = await legacy_methods.dispatch(request)
+    return web.json_response(response, status=200)
+
 
 app.on_startup.append(init_db)
 app.on_cleanup.append(close_db)
 app.router.add_get('/health', health)
 app.router.add_post('/', jsonrpc_handler)
+app.router.add_post('/legacy', legacy_handler)
 
 
 if __name__ == '__main__':
