@@ -1,0 +1,1 @@
+pylint hive/**/*.py -f colorized -r n
