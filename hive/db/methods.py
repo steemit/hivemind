@@ -117,8 +117,7 @@ async def get_followers(account: str, skip: int, limit: int):
        WHERE hf.following = :account_id AND state = 1
     ORDER BY hf.created_at DESC LIMIT :limit OFFSET :skip
     """
-    res = query(sql, account_id=account_id, skip=int(skip), limit=int(limit))
-    return [[r[0], str(r[1])] for r in res.fetchall()]
+    return query_col(sql, account_id=account_id, skip=skip, limit=limit)
 
 
 async def get_following(account: str, skip: int, limit: int):
@@ -133,20 +132,10 @@ async def get_following(account: str, skip: int, limit: int):
     return [[r[0], str(r[1])] for r in res.fetchall()]
 
 
-async def following_count(account: str):
-    sql = "SELECT following FROM hive_accounts WHERE name = :a"
-    return query_one(sql, a=account)
+async def get_follow_count(account: str):
+    sql = "SELECT name, following, followers FROM hive_accounts WHERE name = :n"
+    return query_row(sql, n=account)
 
-
-async def follower_count(account: str):
-    sql = "SELECT followers FROM hive_accounts WHERE name = :a"
-    return query_one(sql, a=account)
-
-
-# evaluate replacing two above methods with this
-async def follow_stats(account: str):
-    sql = "SELECT following, followers FROM hive_accounts WHERE name = :account"
-    return first(query(sql, account=account))
 
 # all completed payouts
 async def payouts_total():
