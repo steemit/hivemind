@@ -3,11 +3,9 @@ import logging
 import math
 import collections
 import time
-import re
 
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col
-from hive.indexer.steem_client import get_adapter
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -97,11 +95,16 @@ def generate_cached_post_sql(pid, post, updated_at):
         print("bad body: {}".format(post['body']))
         post['body'] = "INVALID"
 
-    # TODO: add Posts.get_post_stats fields
+    stats = Posts.get_post_stats(post)
+
     values = collections.OrderedDict([
         ('post_id', '%d' % pid),
         ('author', "%s" % post['author']),
         ('permlink', "%s" % post['permlink']),
+        ('category', "%s" % post['category']),
+        ('depth', "%d" % post['depth']),
+        ('children', "%d" % post['children']),
+
         ('title', "%s" % post['title']),
         ('preview', "%s" % post['body'][0:1024]),
         ('body', "%s" % post['body']),
@@ -118,8 +121,16 @@ def generate_cached_post_sql(pid, post, updated_at):
         ('is_paidout', "%d" % is_paidout),
         ('sc_trend', "%f" % trend_score),
         ('sc_hot', "%f" % hot_score),
-        #('payout_declined', "%d" % int(payout_declined)),
-        #('full_power', "%d" % int(full_power)),
+
+        ('flag_weight', "%f" % stats['flag_weight']),
+        ('total_votes', "%d" % stats['total_votes']),
+        ('up_votes', "%d" % stats['up_votes']),
+        ('is_hidden', "%d" % stats['hide']),
+        ('is_grayed', "%d" % stats['gray']),
+        ('author_rep', "%f" % stats['author_rep']),
+        ('raw_json', "%s" % json.dumps(post)), # TODO: remove body, json_md, active_votes(?)
+        ('is_declined', "%d" % int(payout_declined)),
+        ('is_full_power', "%d" % int(full_power)),
     ])
     fields = values.keys()
 
@@ -134,7 +145,7 @@ def generate_cached_post_sql(pid, post, updated_at):
     sqls.append((sql % (cols, params, update), values))
 
     # update tag metadata only for top-level posts
-    if post['depth'] == 0:
+    if not post['parent_author']:
         sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
         sqls.append((sql, {'id': pid}))
 
@@ -189,21 +200,32 @@ def update_posts_batch(tuples, steemd, updated_at=None):
 # the feed cache allows for efficient querying of blogs+reblogs. this method
 # efficiently builds the feed cache after the initial sync.
 def rebuild_feed_cache(truncate=True):
-    print("[INIT] Rebuilding hive_feed_cache, this will take a few minutes.")
+    print("[INIT] Rebuilding hive feed cache, this will take a few minutes.")
+    query("START TRANSACTION")
     if truncate:
         query("TRUNCATE TABLE hive_feed_cache")
 
     lap_0 = time.perf_counter()
-    query("INSERT IGNORE INTO hive_feed_cache "
-          "SELECT author account, id post_id, created_at "
-          "FROM hive_posts WHERE depth = 0 AND is_deleted = 0")
+    query("""
+        INSERT INTO hive_feed_cache (account_id, post_id, created_at)
+             SELECT hive_accounts.id, hive_posts.id, hive_posts.created_at
+               FROM hive_posts
+               JOIN hive_accounts ON hive_posts.author = hive_accounts.name
+              WHERE depth = 0 AND is_deleted = '0'
+    """)
     lap_1 = time.perf_counter()
-    query("INSERT IGNORE INTO hive_feed_cache "
-          "SELECT account, post_id, created_at FROM hive_reblogs")
+    query("""
+        INSERT INTO hive_feed_cache (account_id, post_id, created_at)
+             SELECT hive_accounts.id, post_id, hive_reblogs.created_at
+               FROM hive_reblogs
+               JOIN hive_accounts ON hive_reblogs.account = hive_accounts.name
+        ON CONFLICT DO NOTHING
+    """)
     lap_2 = time.perf_counter()
+    query("COMMIT")
 
-    print("[INIT] Rebuilt hive_feed_cache in {}s ({}+{})".format(
-          int(lap_2-lap_0), int(lap_1-lap_0), int(lap_2-lap_1)))
+    print("[INIT] Rebuilt hive feed cache in {}s ({}+{})".format(
+        int(lap_2-lap_0), int(lap_1-lap_0), int(lap_2-lap_1)))
 
 
 # identify and insert missing cache rows
@@ -219,7 +241,7 @@ def select_missing_posts(limit=None, fast_mode=True):
         limit = ""
 
     sql = ("SELECT id, author, permlink FROM hive_posts "
-           "WHERE is_deleted = 0 AND %s ORDER BY id %s" % (where, limit))
+           "WHERE is_deleted = '0' AND %s ORDER BY id %s" % (where, limit))
     return list(query(sql))
 
 
@@ -227,17 +249,10 @@ def select_missing_posts(limit=None, fast_mode=True):
 def select_paidout_posts(block_date):
     sql = """
     SELECT post_id, author, permlink FROM hive_posts_cache
-    WHERE post_id IN (SELECT post_id FROM hive_posts_cache
-    WHERE is_paidout = '0' AND payout_at <= :date)
+    WHERE is_paidout = '0' AND payout_at <= :date
     """
     return list(query(sql, date=block_date))
 
-
-# remove any rows from cache which belong to a deleted post
-def clean_dead_posts():
-    sql = ("DELETE FROM hive_posts_cache WHERE post_id IN "
-           "(SELECT id FROM hive_posts WHERE is_deleted = 1)")
-    query(sql)
 
 
 if __name__ == '__main__':

@@ -120,7 +120,6 @@ class Posts:
             if pid:
                 query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0', parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
                       is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid)
-                query("DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id", account=op['author'], id=pid)
             else:
                 sql = """
                 INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
@@ -137,9 +136,9 @@ class Posts:
                                 "permlink = :p", a=op['author'], p=op['permlink'])
 
             # add top-level posts to feed cache
-            if depth == 0:
-                sql = "INSERT INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
-                query(sql, account=op['author'], id=pid, created_at=block_date)
+            if not op['parent_permlink']:
+                sql = "INSERT INTO hive_feed_cache (account_id, post_id, created_at) VALUES (:account_id, :id, :created_at)"
+                query(sql, account_id=Accounts.get_id(op['author']), id=pid, created_at=block_date)
 
 
     # cache methods
@@ -173,20 +172,13 @@ class Posts:
         #   result: 1 = approx $400 of downvoting stake; 2 = $4,000; etc
         flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
 
-        allow_delete = post['children'] == 0 and int(post['net_rshares']) <= 0
-        has_pending_payout = amount(post['pending_payout_value']) >= 0.02
         author_rep = rep_log10(post['author_reputation'])
-
-        gray_threshold = -9999999999
-        low_value_post = net_rshares_adj < gray_threshold and author_rep < 65
-
-        gray = not has_pending_payout and (author_rep < 1 or low_value_post)
-        hide = not has_pending_payout and (author_rep < 0)
+        is_low_value = net_rshares_adj < -9999999999
+        has_pending_payout = amount(post['pending_payout_value']) >= 0.02
 
         return {
-            'hide': hide,
-            'gray': gray,
-            'allow_delete': allow_delete,
+            'hide': not has_pending_payout and (author_rep < 0),
+            'gray': not has_pending_payout and (author_rep < 1 or is_low_value),
             'author_rep': author_rep,
             'flag_weight': flag_weight,
             'total_votes': total_votes,

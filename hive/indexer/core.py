@@ -60,7 +60,7 @@ def process_json_follow_op(account, op_json, block_date):
         VALUES (:fr, :fg, :at, :state) ON DUPLICATE KEY UPDATE state = :state
         """
         state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
-        query(sql, fr=follower, fg=following, at=block_date, state=state)
+        query(sql, fr=Accounts.get_id(follower), fg=Accounts.get_id(following), at=block_date, state=state)
         Accounts.dirty_follows(follower)
         Accounts.dirty_follows(following)
 
@@ -85,13 +85,13 @@ def process_json_follow_op(account, op_json, block_date):
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
             query("DELETE FROM hive_reblogs WHERE account = :a AND post_id = :pid LIMIT 1", a=blogger, pid=post_id)
-            sql = "DELETE FROM hive_feed_cache WHERE account = :account AND post_id = :id"
-            query(sql, account=blogger, id=post_id)
+            sql = "DELETE FROM hive_feed_cache WHERE account_id = :account_id AND post_id = :id"
+            query(sql, account_id=Accounts.get_id(blogger), id=post_id)
         else:
-            query("INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) "
-                  "VALUES (:a, :pid, :date)", a=blogger, pid=post_id, date=block_date)
-            sql = "INSERT IGNORE INTO hive_feed_cache (account, post_id, created_at) VALUES (:account, :id, :created_at)"
-            query(sql, account=blogger, id=post_id, created_at=block_date)
+            sql = "INSERT IGNORE INTO hive_reblogs (account, post_id, created_at) VALUES (:a, :pid, :date)"
+            query(sql, a=blogger, pid=post_id, date=block_date)
+            sql = "INSERT IGNORE INTO hive_feed_cache (account_id, post_id, created_at) VALUES (:account_id, :id, :created_at)"
+            query(sql, account_id=Accounts.get_id(blogger), id=post_id, created_at=block_date)
 
 
 # process a single block. always wrap in a transaction!
@@ -138,7 +138,7 @@ def process_block(block, is_initial_sync=False):
 
     Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
     Posts.register(comments, date)  # if this is a new post, add the entry and validate community param
-    Posts.delete(deleted)  # mark hive_posts.is_deleted = 1
+    Posts.delete(deleted)  # mark hive_posts record as deleted
 
     for op in json_ops:
         if op['id'] not in ['follow', 'com.steemit.community']:

@@ -2,6 +2,7 @@ import logging
 import os
 
 import sqlalchemy as sa
+from sqlalchemy.sql import text as sql_text
 from sqlalchemy.dialects.mysql import (
     CHAR, SMALLINT, TINYINT,
     TINYTEXT, MEDIUMTEXT, DOUBLE,
@@ -97,15 +98,16 @@ hive_post_tags = sa.Table(
 
 hive_follows = sa.Table(
     'hive_follows', metadata,
-    sa.Column('follower', CHAR(16, ascii=True), nullable=False),
-    sa.Column('following', CHAR(16, ascii=True), nullable=False),
+    sa.Column('follower', sa.Integer, nullable=False),
+    sa.Column('following', sa.Integer, nullable=False),
     sa.Column('state', TINYINT(1), nullable=False, server_default='1'),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.ForeignKeyConstraint(['follower'], ['hive_accounts.name'], name='hive_follows_fk1'),
-    sa.ForeignKeyConstraint(['following'], ['hive_accounts.name'], name='hive_follows_fk2'),
+    sa.ForeignKeyConstraint(['follower'], ['hive_accounts.id'], name='hive_follows_fk1'),
+    sa.ForeignKeyConstraint(['following'], ['hive_accounts.id'], name='hive_follows_fk2'),
     sa.UniqueConstraint('follower', 'following', name='hive_follows_ux1'),
     sa.Index('hive_follows_ix1', 'follower', 'state', 'created_at'),
     sa.Index('hive_follows_ix2', 'following', 'state', 'created_at'),
+    sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where = sql_text("state = 1")),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -143,10 +145,10 @@ hive_members = sa.Table(
     'hive_members', metadata,
     sa.Column('community', CHAR(16, ascii=True), nullable=False),
     sa.Column('account', CHAR(16, ascii=True), nullable=False),
-    sa.Column('is_admin', TINYINT(1), nullable=False),
-    sa.Column('is_mod', TINYINT(1), nullable=False),
-    sa.Column('is_approved', TINYINT(1), nullable=False),
-    sa.Column('is_muted', TINYINT(1), nullable=False),
+    sa.Column('is_admin', BOOLEAN, nullable=False),
+    sa.Column('is_mod', BOOLEAN, nullable=False),
+    sa.Column('is_approved', BOOLEAN, nullable=False),
+    sa.Column('is_muted', BOOLEAN, nullable=False),
     sa.Column('title', sa.String(255), nullable=False, server_default=''),
     sa.ForeignKeyConstraint(['community'], ['hive_communities.name'], name='hive_members_fk1'),
     sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_members_fk2'),
@@ -185,11 +187,11 @@ hive_modlog = sa.Table(
 
 hive_feed_cache = sa.Table(
     'hive_feed_cache', metadata,
-    sa.Column('post_id', sa.Integer),
-    sa.Column('account', CHAR(16), nullable=False),
+    sa.Column('post_id', sa.Integer, nullable=False),
+    sa.Column('account_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.UniqueConstraint('post_id', 'account', name='hive_feed_cache_ux1'), #TODO: verify PK
-    sa.Index('hive_feed_cache_ix1', 'account', 'post_id', 'created_at'),
+    sa.UniqueConstraint('post_id', 'account_id', name='hive_feed_cache_ux1'),
+    sa.Index('hive_feed_cache_ix1', 'account_id', 'post_id', 'created_at'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -199,22 +201,49 @@ hive_posts_cache = sa.Table(
     sa.Column('post_id', sa.Integer, primary_key=True),
     sa.Column('author', CHAR(16, ascii=True), nullable=False),
     sa.Column('permlink', CHAR(255, ascii=True), nullable=False),
+    sa.Column('category', VARCHAR(255), nullable=False),
+
+    # important/index
+    sa.Column('depth', SMALLINT, nullable=False),
+    sa.Column('children', SMALLINT, nullable=False),
+
+    # basic/extended-stats
+    sa.Column('author_rep', sa.Float, nullable=False),
+    sa.Column('flag_weight', sa.Float, nullable=False),
+    sa.Column('total_votes', sa.Integer, nullable=False),
+    sa.Column('up_votes',    sa.Integer, nullable=False),
+
+    # basic ui fields
     sa.Column('title', sa.String(255), nullable=False),
     sa.Column('preview', sa.String(1024), nullable=False),
     sa.Column('img_url', sa.String(1024), nullable=False),
+
+    # core stats/indexes
     sa.Column('payout', sa.types.DECIMAL(10, 3), nullable=False),
     sa.Column('promoted', sa.types.DECIMAL(10, 3), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     sa.Column('payout_at', sa.DateTime, nullable=False),
     sa.Column('updated_at', sa.DateTime, nullable=False),
     sa.Column('is_paidout', BOOLEAN, nullable=False, server_default='0'),
+
+    # ui flags/filters
     sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_declined', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_full_power', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_hidden', BOOLEAN, nullable=False, server_default='0'),
+    sa.Column('is_grayed', BOOLEAN, nullable=False, server_default='0'),
+
+    # important indexes
     sa.Column('rshares', sa.BigInteger, nullable=False),
     sa.Column('sc_trend', DOUBLE, nullable=False),
     sa.Column('sc_hot', DOUBLE, nullable=False),
+
+    # bulk data
     sa.Column('body', MEDIUMTEXT),
     sa.Column('votes', MEDIUMTEXT),
     sa.Column('json', sa.Text),
+    sa.Column('raw_json', sa.Text),
+
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_posts_cache_fk1'),
     sa.Index('hive_posts_cache_ix1', 'payout'),
     sa.Index('hive_posts_cache_ix2', 'promoted'),
