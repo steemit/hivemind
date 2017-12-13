@@ -8,8 +8,6 @@ from sqlalchemy.types import CHAR
 from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
 from sqlalchemy.types import BOOLEAN
-from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION
-
 
 metadata = sa.MetaData()
 
@@ -32,7 +30,7 @@ hive_accounts = sa.Table(
     sa.Column('name', VARCHAR(16), nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
     #sa.Column('block_num', sa.Integer, nullable=False),
-    sa.Column('reputation', sa.Float, nullable=False, server_default='25'),
+    sa.Column('reputation', sa.Float(precision=6), nullable=False, server_default='25'),
     sa.Column('display_name', sa.String(20)),
     sa.Column('about', sa.String(160)),
     sa.Column('location', sa.String(30)),
@@ -43,8 +41,8 @@ hive_accounts = sa.Table(
     sa.Column('post_count', sa.Integer, nullable=False, server_default='0'),
     sa.Column('followers', sa.Integer, nullable=False, server_default='0'),
     sa.Column('following', sa.Integer, nullable=False, server_default='0'),
-    sa.Column('proxy_weight', DOUBLE_PRECISION, nullable=False, server_default='0'),
-    sa.Column('vote_weight', DOUBLE_PRECISION, nullable=False, server_default='0'),
+    sa.Column('proxy_weight', sa.Float(precision=6), nullable=False, server_default='0'),
+    sa.Column('vote_weight', sa.Float(precision=6), nullable=False, server_default='0'),
     sa.Column('kb_used', sa.Integer, nullable=False, server_default='0'),
     sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
     sa.Column('active_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
@@ -104,12 +102,9 @@ hive_follows = sa.Table(
     sa.Column('following', sa.Integer, nullable=False),
     sa.Column('state', SMALLINT, nullable=False, server_default='1'),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.ForeignKeyConstraint(['follower'], ['hive_accounts.id'], name='hive_follows_fk1'),
-    sa.ForeignKeyConstraint(['following'], ['hive_accounts.id'], name='hive_follows_fk2'),
-    sa.UniqueConstraint('follower', 'following', name='hive_follows_ux1'),
-    sa.Index('hive_follows_ix1', 'follower', 'state', 'created_at'),
-    sa.Index('hive_follows_ix2', 'following', 'state', 'created_at'),
-    sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where = sql_text("state = 1")),
+    sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'),
+    sa.Index('hive_follows_ix2', 'following', 'follower', postgresql_where=sql_text("state = 1")),
+    sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where=sql_text("state = 1")),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -210,10 +205,10 @@ hive_posts_cache = sa.Table(
     sa.Column('children', SMALLINT, nullable=False),
 
     # basic/extended-stats
-    sa.Column('author_rep', sa.Float, nullable=False),
-    sa.Column('flag_weight', sa.Float, nullable=False),
+    sa.Column('author_rep', sa.Float(precision=6), nullable=False),
+    sa.Column('flag_weight', sa.Float(precision=6), nullable=False),
     sa.Column('total_votes', sa.Integer, nullable=False),
-    sa.Column('up_votes',    sa.Integer, nullable=False),
+    sa.Column('up_votes', sa.Integer, nullable=False),
 
     # basic ui fields
     sa.Column('title', sa.String(255), nullable=False),
@@ -237,8 +232,8 @@ hive_posts_cache = sa.Table(
 
     # important indexes
     sa.Column('rshares', sa.BigInteger, nullable=False),
-    sa.Column('sc_trend', DOUBLE_PRECISION, nullable=False),
-    sa.Column('sc_hot', DOUBLE_PRECISION, nullable=False),
+    sa.Column('sc_trend', sa.Float(precision=6), nullable=False),
+    sa.Column('sc_hot', sa.Float(precision=6), nullable=False),
 
     # bulk data
     sa.Column('body', TEXT),
@@ -246,10 +241,8 @@ hive_posts_cache = sa.Table(
     sa.Column('json', sa.Text),
     sa.Column('raw_json', sa.Text),
 
-    sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_posts_cache_fk1'),
-    sa.Index('hive_posts_cache_ix1', 'payout'),
-    sa.Index('hive_posts_cache_ix2', 'promoted'),
-    sa.Index('hive_posts_cache_ix3', 'is_paidout', 'payout_at'),
+    sa.Index('hive_posts_cache_ix2', 'promoted', postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")),
+    sa.Index('hive_posts_cache_ix3', 'payout_at', postgresql_where=sql_text("is_paidout = '0'")),
     sa.Index('hive_posts_cache_ix6', 'sc_trend', 'post_id'),
     sa.Index('hive_posts_cache_ix7', 'sc_hot', 'post_id'),
     mysql_engine='InnoDB',
@@ -264,7 +257,7 @@ logging.basicConfig()
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
 def connect(connection_url=_url, **kwargs):
-    return sa.create_engine(connection_url,  isolation_level="READ UNCOMMITTED", pool_recycle=3600, **kwargs).connect()
+    return sa.create_engine(connection_url, isolation_level="READ UNCOMMITTED", pool_recycle=3600, **kwargs).connect()
 
 
 def setup(connection_url=_url):
