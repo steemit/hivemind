@@ -3,11 +3,9 @@ import logging
 import math
 import collections
 import time
-import re
 
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col
-from hive.indexer.steem_client import get_adapter
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -208,17 +206,26 @@ def rebuild_feed_cache(truncate=True):
         query("TRUNCATE TABLE hive_feed_cache")
 
     lap_0 = time.perf_counter()
-    query("INSERT INTO hive_feed_cache (account_id, post_id, created_at) "
-          "SELECT hive_accounts.id account_id, hive_posts.id post_id, hive_posts.created_at "
-          "FROM hive_posts JOIN hive_accounts ON hive_posts.author = hive_accounts.name WHERE depth = 0 AND is_deleted = '0'")
+    query("""
+        INSERT INTO hive_feed_cache (account_id, post_id, created_at)
+             SELECT hive_accounts.id, hive_posts.id, hive_posts.created_at
+               FROM hive_posts
+               JOIN hive_accounts ON hive_posts.author = hive_accounts.name
+              WHERE depth = 0 AND is_deleted = '0'
+    """)
     lap_1 = time.perf_counter()
-    query("INSERT INTO hive_feed_cache (account_id, post_id, created_at) "
-          "SELECT hive_accounts.id account_id, post_id, hive_reblogs.created_at FROM hive_reblogs JOIN hive_accounts ON hive_reblogs.account = hive_accounts.name ON CONFLICT DO NOTHING")
+    query("""
+        INSERT INTO hive_feed_cache (account_id, post_id, created_at)
+             SELECT hive_accounts.id, post_id, hive_reblogs.created_at
+               FROM hive_reblogs
+               JOIN hive_accounts ON hive_reblogs.account = hive_accounts.name
+        ON CONFLICT DO NOTHING
+    """)
     lap_2 = time.perf_counter()
     query("COMMIT")
 
     print("[INIT] Rebuilt hive feed cache in {}s ({}+{})".format(
-          int(lap_2-lap_0), int(lap_1-lap_0), int(lap_2-lap_1)))
+        int(lap_2-lap_0), int(lap_1-lap_0), int(lap_2-lap_1)))
 
 
 # identify and insert missing cache rows
@@ -242,17 +249,10 @@ def select_missing_posts(limit=None, fast_mode=True):
 def select_paidout_posts(block_date):
     sql = """
     SELECT post_id, author, permlink FROM hive_posts_cache
-    WHERE post_id IN (SELECT post_id FROM hive_posts_cache
-    WHERE is_paidout = '0' AND payout_at <= :date)
+    WHERE is_paidout = '0' AND payout_at <= :date
     """
     return list(query(sql, date=block_date))
 
-
-# remove any rows from cache which belong to a deleted post
-def clean_dead_posts():
-    sql = ("DELETE FROM hive_posts_cache WHERE post_id IN "
-           "(SELECT id FROM hive_posts WHERE is_deleted = 1)")
-    query(sql)
 
 
 if __name__ == '__main__':

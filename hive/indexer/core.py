@@ -138,7 +138,7 @@ def process_block(block, is_initial_sync=False):
 
     Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
     Posts.register(comments, date)  # if this is a new post, add the entry and validate community param
-    Posts.delete(deleted)  # mark hive_posts.is_deleted = 1
+    Posts.delete(deleted)  # mark hive_posts record as deleted
 
     for op in json_ops:
         if op['id'] not in ['follow', 'com.steemit.community']:

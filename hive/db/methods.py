@@ -165,7 +165,7 @@ async def payouts_total():
 async def payouts_last_24h():
     sql = """
       SELECT SUM(payout) FROM hive_posts_cache
-      WHERE is_paidout = 1 AND payout_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+      WHERE is_paidout = 1 AND payout_at > (NOW() AT TIME ZONE 'utc') - INTERVAL '24 HOUR'
     """
     return float(query_one(sql)) # TODO: decimal
 
@@ -256,7 +256,7 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context = None
 
 # returns "homepage" feed for specified account
 async def get_user_feed(account: str, skip: int, limit: int, context: str = None):
-    account_id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=account)
+    account_id = get_account_id(account)
     sql = """
       SELECT post_id, string_agg(name, ',') accounts
         FROM hive_feed_cache
@@ -282,21 +282,10 @@ async def get_user_feed(account: str, skip: int, limit: int, context: str = None
 
 # returns a blog feed (posts and reblogs from the specified account)
 async def get_blog_feed(account: str, skip: int, limit: int, context: str = None):
-    #sql = """
-    #    SELECT id, created_at
-    #      FROM hive_posts
-    #     WHERE depth = 0 AND is_deleted = 0 AND author = :account
-    # UNION ALL
-    #    SELECT post_id, created_at
-    #      FROM hive_reblogs
-    #     WHERE account = :account AND (SELECT is_deleted FROM hive_posts
-    #                                   WHERE id = post_id) = 0
-    #  ORDER BY created_at DESC
-    #     LIMIT :limit OFFSET :skip
-    #"""
-    sql = ("SELECT post_id FROM hive_feed_cache WHERE account_id = (SELECT id FROM hive_accounts WHERE name = :account) "
+    account_id = get_account_id(account)
+    sql = ("SELECT post_id FROM hive_feed_cache WHERE account_id = :account_id "
             "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
-    post_ids = query_col(sql, account = account, skip = skip, limit = limit)
+    post_ids = query_col(sql, account_id=account_id, skip=skip, limit=limit)
     return get_posts(post_ids, context)
 
 
