@@ -18,6 +18,7 @@ hive_blocks = sa.Table(
     sa.Column('prev', CHAR(40)),
     sa.Column('txs', SMALLINT, server_default='0', nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
+
     sa.UniqueConstraint('hash', name='hive_blocks_ux1'),
     sa.ForeignKeyConstraint(['prev'], ['hive_blocks.hash'], name='hive_blocks_fk1'),
     mysql_engine='InnoDB',
@@ -47,6 +48,7 @@ hive_accounts = sa.Table(
     sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
     sa.Column('active_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
     sa.Column('cached_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
+
     sa.UniqueConstraint('name', name='hive_accounts_ux1'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
@@ -66,13 +68,13 @@ hive_posts = sa.Table(
     sa.Column('is_pinned', BOOLEAN, nullable=False, server_default='0'),
     sa.Column('is_muted', BOOLEAN, nullable=False, server_default='0'),
     sa.Column('is_valid', BOOLEAN, nullable=False, server_default='1'),
+
     sa.ForeignKeyConstraint(['author'], ['hive_accounts.name'], name='hive_posts_fk1'),
     sa.ForeignKeyConstraint(['community'], ['hive_accounts.name'], name='hive_posts_fk2'),
     sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
     sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
     sa.Index('hive_posts_ix1', 'parent_id'),
     sa.Index('hive_posts_ix2', 'is_deleted', 'depth'),
-    sa.Index('hive_posts_ix3', 'created_at', 'author'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -88,7 +90,7 @@ hive_posts = sa.Table(
 
 hive_post_tags = sa.Table(
     'hive_post_tags', metadata,
-    sa.Column('post_id', sa.Integer),
+    sa.Column('post_id', sa.Integer, nullable=False),
     sa.Column('tag', sa.String(32), nullable=False),
     sa.UniqueConstraint('tag', 'post_id', name='hive_post_tags_ux1'),
     sa.Index('hive_post_tags_ix1', 'post_id'),
@@ -102,6 +104,7 @@ hive_follows = sa.Table(
     sa.Column('following', sa.Integer, nullable=False),
     sa.Column('state', SMALLINT, nullable=False, server_default='1'),
     sa.Column('created_at', sa.DateTime, nullable=False),
+
     sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'),
     sa.Index('hive_follows_ix2', 'following', 'follower', postgresql_where=sql_text("state = 1")),
     sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where=sql_text("state = 1")),
@@ -114,6 +117,7 @@ hive_reblogs = sa.Table(
     sa.Column('account', VARCHAR(16), nullable=False),
     sa.Column('post_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
+
     sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_reblogs_fk1'),
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_reblogs_fk2'),
     sa.UniqueConstraint('account', 'post_id', name='hive_reblogs_ux1'),

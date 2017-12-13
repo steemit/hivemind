@@ -31,7 +31,8 @@ class QueryStats:
         for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
-            print("% 5.1f%% % 10.2fms % 7.2favg % 8dx -- %s" % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+            print("% 5.1f%% % 10.2fms % 7.2favg % 8dx -- %s"
+                  % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
         cls.stats = {}
         cls.ttltime = 0
 
@@ -48,7 +49,7 @@ def query(sql, **kwargs):
         res = conn.execute(query, **kwargs)
         ms = int((time.perf_counter() - ti) * 1000)
         QueryStats.log(sql, ms)
-        if ms > 25:
+        if ms > 35:
             disp = re.sub('\s+', ' ', sql).strip()[:250]
             print("\033[93m[SQL][{}ms] {}\033[0m".format(ms, disp))
         logger.debug(res)
@@ -83,14 +84,17 @@ def query_one(sql, **kwargs):
 def db_needs_setup():
     db = conn.dialect.name
     if db == 'postgresql':
-        return not query_row("SELECT * FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema'")
+        return not query_row("""
+            SELECT * FROM pg_catalog.pg_tables WHERE schemaname = 'public'
+        """)
     elif db == 'mysql':
         return not query_row('SHOW TABLES')
     raise Exception("db engine %s not supported" % db)
 
 
 async def db_head_state():
-    sql = "SELECT num,created_at,extract(epoch from created_at) ts FROM hive_blocks ORDER BY num DESC LIMIT 1"
+    sql = ("SELECT num,created_at,extract(epoch from created_at) ts "
+           "FROM hive_blocks ORDER BY num DESC LIMIT 1")
     row = query_row(sql)
     return dict(db_head_block=row['num'],
                 db_head_time=str(row['created_at']),
@@ -108,7 +112,7 @@ def get_account_id(name):
 async def get_followers(account: str, skip: int, limit: int):
     account_id = get_account_id(account)
     sql = """
-      SELECT name, hf.created_at FROM hive_follows hf
+      SELECT name FROM hive_follows hf
         JOIN hive_accounts ON hf.follower = id
        WHERE hf.following = :account_id AND state = 1
     ORDER BY hf.created_at DESC LIMIT :limit OFFSET :skip
@@ -120,7 +124,7 @@ async def get_followers(account: str, skip: int, limit: int):
 async def get_following(account: str, skip: int, limit: int):
     account_id = get_account_id(account)
     sql = """
-      SELECT name, hf.created_at FROM hive_follows hf
+      SELECT name FROM hive_follows hf
         JOIN hive_accounts ON hf.following = id
        WHERE hf.follower = :account_id AND state = 1
     ORDER BY hf.created_at DESC LIMIT :limit OFFSET :skip
