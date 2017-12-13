@@ -149,7 +149,7 @@ class HttpClient(object):
         if api:
             body_dict = {**headers, "method": "call", "params": [api, name, args]}
         else:
-            body_dict = {**headers, "method": name, "params": args}
+            body_dict = {**headers, "method": "condenser_api."+name, "params": args}
         if as_json:
             return json.dumps(body_dict, ensure_ascii=False).encode('utf8')
         else:
