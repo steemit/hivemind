@@ -178,6 +178,98 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
     ids = query_col(sql, parent=parent, limit=limit)
     return _get_posts(ids)
 
+# https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
+async def get_state(path: str):
+    if path[0] == '/':
+        path = path[1:]
+
+    if not path:
+        path = 'trending'
+
+    state = {}
+    state['current_route'] = path
+    state['props'] = "TODO: get_dynamic_global_properties"
+    state['feed_price'] = "TODO: get_current_median_history_price"
+    state['tag_idx'] = {}
+    state['tag_idx']['trending'] = "TODO: array of trending tags"
+
+    part = path.split('/')
+
+    if len(part) > 4:
+        print("INVALID PATH: {}".format(path))
+        raise Exception("invalid path")
+
+    tag = path[1].lower()
+
+    if part[0] and part[0][0] == '@':
+        account = part[0][1:]
+        state['accounts'][account] = dict(name=account, misc="TODO: add steem[extended_account] props")
+        #state['accounts'][account].tags_usage = ?deprecated?
+        state['accounts'][account].reputation = 2555 # TODO
+
+        if part[1] == 'transfers':
+            # TODO: get_account_history and filter.
+            # goes to state['accounts'][account][transfer_history/other_history]
+            raise Exception("not implemented")
+        elif part[1] == 'recent-replies':
+            #state['accounts'][account]
+            # get_replies_by_last_update
+            raise Exception("not implemented")
+        elif part[1] == 'comments':
+            #state['accounts'][account]
+            # get_discussions_by_comments
+            raise Exception("not implemented")
+        elif not part[1]: #'blog'
+            #state['accounts'][account]
+            # get_discussions_by_blog
+            raise Exception("not implemented")
+        elif part[1] == 'feed':
+            #state['accounts'][account]
+            # get_discussions_by_feed
+            raise Exception("not implemented")
+    elif part[1] and part[1][0] == '@':
+        # pull a complete discussion (recursively fetch content)
+        pass
+    elif part[0] == 'witnesses':
+        pass
+    elif part[0] == 'trending':
+        # get_discussions_by_trending
+        pass
+    elif part[0] == 'promoted':
+        # get_discussions_by_promoted
+        pass
+    elif part[0] == 'hot':
+        # get_discussions_by_hot
+        pass
+    elif part[0] == 'created':
+        # get_discussions_by_created
+        pass
+    elif part[0] == "tags":
+        # get_trending_tags
+        # state['tag_idx']['trending'] << t.name
+        # state['tags][t.name] << t
+        pass
+    else:
+       raise Exception("unknown path {}".format(path))
+
+    # iterate through state.content, pull out accounts
+    # (only needed for discussion? only post.author_rep used for lists?)
+    # for account in accouts:
+    #   state.accounts[account.name] = extended_account
+
+    raise Exception("unrecognized path {}".format(path))
+
+
+async def get_content(author: str, permlink: str):
+    post_id = _get_post_id(author, permlink)
+    return _get_posts([post_id])[0]
+
+
+async def get_content_replies(parent: str, parent_permlink: str):
+    post_id = _get_post_id(parent, parent_permlink)
+    post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d" % post_id)
+    return _get_posts(post_ids)
+
 
 # sort can be trending, hot, new, promoted
 def _get_discussions(sort, start_author, start_permlink, limit, tag, context=None):
@@ -221,7 +313,7 @@ def _where(conditions):
         return ''
     return 'WHERE ' + ' AND '.join(conditions)
 
-def _validate_limit(limit, ubound = 100):
+def _validate_limit(limit, ubound=100):
     limit = int(limit)
     if limit <= 0:
         raise Exception("invalid limit")
@@ -234,12 +326,7 @@ def _follow_type_to_int(follow_type: str):
         raise Exception("Invalid follow_type")
     return 1 if follow_type == 'blog' else 2
 
-def _get_post_id(author, permlink, extra_fields = None):
-    if extra_fields:
-        fields = ', '.join(['id', *fields])
-        sql = "SELECT %s FROM hive_posts WHERE author = :a AND permlink = :p"
-        return query_row(sql % fields, a=author, p=permlink)
-
+def _get_post_id(author, permlink):
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
     return query_one(sql, a=author, p=permlink)
 
