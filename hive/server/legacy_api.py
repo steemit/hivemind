@@ -62,45 +62,69 @@ async def get_follow_count(account: str):
     return dict(query_row(sql, n=account))
 
 
+async def get_discussions_by_trending(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+    return _get_discussions_by_sort_and_tag('trending', start_author, start_permlink, limit, tag)
+
+async def get_discussions_by_hot(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+    return _get_discussions_by_sort_and_tag('hot', start_author, start_permlink, limit, tag)
+
+async def get_discussions_by_promoted(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+    return _get_discussions_by_sort_and_tag('promoted', start_author, start_permlink, limit, tag)
+
+async def get_discussions_by_created(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+    return _get_discussions_by_sort_and_tag('created', start_author, start_permlink, limit, tag)
+
+# author blog
+async def get_discussions_by_blog(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+    pass
+
+# author feed
+async def get_discussions_by_feed(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+    pass
+
+# author comments
+async def get_discussions_by_comments(start_author: str, start_permlink: str = '', limit: int = 20):
+    pass
+
+# author replies
+async def get_replies_by_last_update(start_author: str, start_permlink: str = '', limit: int = 20):
+    pass
+
 # -- not yet adapted for legacy --
 
 # sort can be trending, hot, new, promoted
-async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context=None):
-    raise Exception("not adapted for legacy")
-    if skip > 5000:
-        raise Exception("cannot skip {} results".format(skip))
+def _get_discussions_by_sort_and_tag(sort, start_author, start_permlink, limit, tag, context = None):
     if limit > 100:
         raise Exception("cannot limit {} results".format(limit))
 
-    order = ''
+    col = ''
     where = []
-
     if sort == 'trending':
-        order = 'sc_trend DESC'
+        col = 'sc_trend'
     elif sort == 'hot':
-        order = 'sc_hot DESC'
-    elif sort == 'new':
-        order = 'post_id DESC'
+        col = 'sc_hot'
+    elif sort == 'created':
+        col = 'post_id'
         where.append('depth = 0')
     elif sort == 'promoted':
-        order = 'promoted DESC'
+        col = 'promoted'
         where.append('is_paidout = 0')
         where.append('promoted > 0')
     else:
         raise Exception("unknown sort order {}".format(sort))
 
     if tag:
-        where.append("post_id IN "
-                     "(SELECT post_id FROM hive_post_tags WHERE tag = :tag)")
+        tagged_posts = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
+        where.append("post_id IN (%s)" % tagged_posts)
 
-    if where:
-        where = 'WHERE ' + ' AND '.join(where)
-    else:
-        where = ''
+    start_id = None
+    if start_permlink:
+        start_id = _get_post_id(start_author, start_permlink)
+        sql = ("SELECT %s FROM hive_posts_cache %s ORDER BY %s DESC LIMIT 1") % (col, _where([*where, "post_id = :start_id"]), col)
+        where.append("%s <= (%s)" % (col, sql))
 
-    sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s "
-           "LIMIT :limit OFFSET :skip") % (where, order)
-    ids = [r[0] for r in query(sql, tag=tag, limit=limit, skip=skip).fetchall()]
+    sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s DESC LIMIT :limit") % (_where(where), col)
+    ids = query_col(sql, tag=tag, start_id=start_id, limit=limit)
     return _get_posts(ids, context)
 
 
@@ -139,17 +163,24 @@ async def get_blog_feed(account: str, skip: int, limit: int, context: str = None
     return _get_posts(post_ids, context)
 
 
+def _where(conditions):
+    if not conditions:
+        return ''
+    return 'WHERE ' + ' AND '.join(conditions)
+
 def _follow_type_to_int(follow_type: str):
     if follow_type not in ['blog', 'ignore']:
         raise Exception("Invalid follow_type")
     return 1 if follow_type == 'blog' else 2
+
+def _get_post_id(author, permlink):
+    return query_one("SELECT id FROM hive_posts WHERE author = :a AND permlink = :p", a=author, p=permlink)
 
 def _get_account_id(name):
     return query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
 
 # given an array of post ids, returns full metadata in the same order
 def _get_posts(ids, context=None):
-    raise Exception("not adapted for legacy")
     sql = """
     SELECT post_id, author, permlink, title, preview, img_url, payout,
            promoted, created_at, payout_at, is_nsfw, rshares, votes, json
@@ -184,6 +215,9 @@ def _get_posts(ids, context=None):
 
         obj.pop('votes') # temp
         obj.pop('json')  # temp
+
+        obj.pop('preview')
+
         posts_by_id[row['post_id']] = obj
 
     # in rare cases of cache inconsistency, recover and warn
