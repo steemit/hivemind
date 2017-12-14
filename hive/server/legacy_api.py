@@ -192,6 +192,7 @@ async def get_state(path: str):
     state['feed_price'] = "TODO: get_current_median_history_price"
     state['tag_idx'] = {}
     state['tag_idx']['trending'] = "TODO: array of trending tags"
+    state['content'] = {}
 
     part = path.split('/')
 
@@ -207,48 +208,77 @@ async def get_state(path: str):
         #state['accounts'][account].tags_usage = ?deprecated?
         state['accounts'][account].reputation = 2555 # TODO
 
+        if not part[1]:
+            part[1] = 'blog'
+
         if part[1] == 'transfers':
-            # TODO: get_account_history and filter.
-            # goes to state['accounts'][account][transfer_history/other_history]
+            # TODO: get_account_history, filter; goes to state['accounts'][account][transfer_history/other_history]
             raise Exception("not implemented")
+
         elif part[1] == 'recent-replies':
-            #state['accounts'][account]
-            # get_replies_by_last_update
-            raise Exception("not implemented")
+            state['accounts'][account]['recent_replies'] = []
+            replies = get_replies_by_last_update(account, "", 50)
+            for reply in replies:
+                ref = reply['author'] + '/' + reply['permlink']
+                state['accounts'][account]['recent_replies'] << ref
+                state['content'][ref] = reply
+
         elif part[1] == 'comments':
-            #state['accounts'][account]
-            # get_discussions_by_comments
-            raise Exception("not implemented")
-        elif not part[1]: #'blog'
-            #state['accounts'][account]
-            # get_discussions_by_blog
-            raise Exception("not implemented")
+            state['accounts'][account]['comments'] = []
+            replies = get_discussion_by_comments(account, "", 20)
+            for reply in replies:
+                ref = reply['author'] + '/' + reply['permlink']
+                state['accounts'][account]['comments'] << ref
+                state['content'][ref] = reply
+
+        elif part[1] = 'blog':
+            state['accounts'][account]['blog'] = []
+            posts = get_discussions_by_blog(account, "", "", 20)
+            for post in posts:
+                ref = post['author'] + '/' + post['permlink']
+                state['accounts'][account]['blog'] << ref
+                state['content'][ref] = post
+
         elif part[1] == 'feed':
-            #state['accounts'][account]
-            # get_discussions_by_feed
-            raise Exception("not implemented")
+            state['accounts'][account]['feed'] = []
+            posts = get_discussions_by_feed(account, "", "", 20)
+            for post in posts:
+                ref = post['author'] + '/' + post['permlink']
+                state['accounts'][account]['feed'] << ref
+                state['content'][ref] = post
+
+    # complete discussion
     elif part[1] and part[1][0] == '@':
-        # pull a complete discussion (recursively fetch content)
+        account = part[0][1:]
+        slug = part[2]
+        #
         pass
+
     elif part[0] == 'witnesses':
         pass
+
     elif part[0] == 'trending':
         # get_discussions_by_trending
         pass
+
     elif part[0] == 'promoted':
         # get_discussions_by_promoted
         pass
+
     elif part[0] == 'hot':
         # get_discussions_by_hot
         pass
+
     elif part[0] == 'created':
         # get_discussions_by_created
         pass
+
     elif part[0] == "tags":
         # get_trending_tags
         # state['tag_idx']['trending'] << t.name
         # state['tags][t.name] << t
         pass
+
     else:
        raise Exception("unknown path {}".format(path))
 
