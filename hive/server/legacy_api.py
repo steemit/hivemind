@@ -63,24 +63,72 @@ async def get_follow_count(account: str):
 
 
 async def get_discussions_by_trending(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
-    return _get_discussions_by_sort_and_tag('trending', start_author, start_permlink, limit, tag)
+    return _get_discussions('trending', start_author, start_permlink, limit, tag)
 
 async def get_discussions_by_hot(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
-    return _get_discussions_by_sort_and_tag('hot', start_author, start_permlink, limit, tag)
+    return _get_discussions('hot', start_author, start_permlink, limit, tag)
 
 async def get_discussions_by_promoted(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
-    return _get_discussions_by_sort_and_tag('promoted', start_author, start_permlink, limit, tag)
+    return _get_discussions('promoted', start_author, start_permlink, limit, tag)
 
 async def get_discussions_by_created(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
-    return _get_discussions_by_sort_and_tag('created', start_author, start_permlink, limit, tag)
+    return _get_discussions('created', start_author, start_permlink, limit, tag)
 
 # author blog
-async def get_discussions_by_blog(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
-    pass
+async def get_discussions_by_blog(tag: str, start_author: str = '', start_permlink: str = '', limit: int = 20):
+    if limit > 100:
+        raise Exception("cannot limit {} results".format(limit))
+
+    col = 'created_at'
+    where = []
+    where.append('account_id = %d' % _get_account_id(tag))
+
+    start_id = None
+    if start_permlink:
+        start_id = _get_post_id(start_author, start_permlink)
+        sql = ("SELECT %s FROM hive_feed_cache %s ORDER BY %s DESC LIMIT 1") % (col, _where([*where, "post_id = :start_id"]), col)
+        where.append("%s <= (%s)" % (col, sql))
+
+    sql = ("SELECT post_id FROM hive_feed_cache %s ORDER BY %s DESC LIMIT :limit") % (_where(where), col)
+    ids = query_col(sql, tag=tag, start_id=start_id, limit=limit)
+    return _get_posts(ids)
 
 # author feed
-async def get_discussions_by_feed(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
-    pass
+async def get_discussions_by_feed(tag: str, start_author: str = '', start_permlink: str = '', limit: int = 20):
+    account_id = _get_account_id(tag)
+
+    having = ""
+    start_id = None
+    if start_permlink:
+        start_id = _get_post_id(start_author, start_permlink)
+        sql = ("""
+        SELECT MIN(hive_feed_cache.created_at) FROM hive_feed_cache
+        WHERE account_id IN (SELECT following FROM hive_follows WHERE follower = %d AND state = 1)
+        AND post_id = %d
+        """) % (account_id, start_id)
+        having = "HAVING MIN(hive_feed_cache.created_at) <= (%s)" % sql
+
+    sql = """
+      SELECT post_id, string_agg(name, ',') accounts
+        FROM hive_feed_cache
+        JOIN hive_follows ON account_id = hive_follows.following AND state = 1
+        JOIN hive_accounts ON hive_follows.following = hive_accounts.id
+       WHERE hive_follows.follower = :account
+    GROUP BY post_id %s
+    ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit
+    """ % (having)
+    res = query_all(sql, account=account_id, start_id=start_id, limit=limit)
+    posts = _get_posts([r[0] for r in res])
+
+    # Merge reblogged_by data into result set
+    accts = dict(res)
+    for post in posts:
+        rby = set(accts[post['post_id']].split(','))
+        rby.discard(post['author'])
+        if rby:
+            post['reblogged_by'] = list(rby)
+
+    return posts
 
 # author comments
 async def get_discussions_by_comments(start_author: str, start_permlink: str = '', limit: int = 20):
@@ -93,7 +141,7 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
 # -- not yet adapted for legacy --
 
 # sort can be trending, hot, new, promoted
-def _get_discussions_by_sort_and_tag(sort, start_author, start_permlink, limit, tag, context = None):
+def _get_discussions(sort, start_author, start_permlink, limit, tag, context = None):
     if limit > 100:
         raise Exception("cannot limit {} results".format(limit))
 
@@ -126,41 +174,6 @@ def _get_discussions_by_sort_and_tag(sort, start_author, start_permlink, limit, 
     sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s DESC LIMIT :limit") % (_where(where), col)
     ids = query_col(sql, tag=tag, start_id=start_id, limit=limit)
     return _get_posts(ids, context)
-
-
-# returns "homepage" chronological feed for specified account
-async def get_user_feed(account: str, skip: int, limit: int, context: str = None):
-    account_id = _get_account_id(account)
-    sql = """
-      SELECT post_id, string_agg(name, ',') accounts
-        FROM hive_feed_cache
-        JOIN hive_follows ON account_id = hive_follows.following AND state = 1
-        JOIN hive_accounts ON hive_follows.following = hive_accounts.id
-       WHERE hive_follows.follower = :account
-    GROUP BY post_id
-    ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit OFFSET :skip
-    """
-    res = query_all(sql, account=account_id, skip=skip, limit=limit)
-    posts = _get_posts([r[0] for r in res], context)
-
-    # Merge reblogged_by data into result set
-    accts = dict(res)
-    for post in posts:
-        rby = set(accts[post['post_id']].split(','))
-        rby.discard(post['author'])
-        if rby:
-            post['reblogged_by'] = list(rby)
-
-    return posts
-
-
-# returns a blog feed (posts and reblogs from the specified account)
-async def get_blog_feed(account: str, skip: int, limit: int, context: str = None):
-    account_id = _get_account_id(account)
-    sql = ("SELECT post_id FROM hive_feed_cache WHERE account_id = :account_id "
-           "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
-    post_ids = query_col(sql, account_id=account_id, skip=skip, limit=limit)
-    return _get_posts(post_ids, context)
 
 
 def _where(conditions):
