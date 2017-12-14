@@ -86,10 +86,12 @@ async def get_discussions_by_blog(tag: str, start_author: str = '', start_permli
     start_id = None
     if start_permlink:
         start_id = _get_post_id(start_author, start_permlink)
-        sql = ("SELECT %s FROM hive_feed_cache %s ORDER BY %s DESC LIMIT 1") % (col, _where([*where, "post_id = :start_id"]), col)
+        sql = ("SELECT %s FROM hive_feed_cache %s ORDER BY %s DESC LIMIT 1"
+               % (col, _where([*where, "post_id = :start_id"]), col))
         where.append("%s <= (%s)" % (col, sql))
 
-    sql = ("SELECT post_id FROM hive_feed_cache %s ORDER BY %s DESC LIMIT :limit") % (_where(where), col)
+    sql = ("SELECT post_id FROM hive_feed_cache %s ORDER BY %s DESC LIMIT :limit"
+           % (_where(where), col))
     ids = query_col(sql, tag=tag, start_id=start_id, limit=limit)
     return _get_posts(ids)
 
@@ -102,9 +104,10 @@ async def get_discussions_by_feed(tag: str, start_author: str = '', start_permli
     if start_permlink:
         start_id = _get_post_id(start_author, start_permlink)
         sql = ("""
-        SELECT MIN(hive_feed_cache.created_at) FROM hive_feed_cache
-        WHERE account_id IN (SELECT following FROM hive_follows WHERE follower = %d AND state = 1)
-        AND post_id = %d
+          SELECT MIN(hive_feed_cache.created_at) FROM hive_feed_cache
+           WHERE account_id IN (SELECT following FROM hive_follows
+                                WHERE follower = %d AND state = 1)
+             AND post_id = %d
         """) % (account_id, start_id)
         having = "HAVING MIN(hive_feed_cache.created_at) <= (%s)" % sql
 
@@ -138,10 +141,8 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
 async def get_replies_by_last_update(start_author: str, start_permlink: str = '', limit: int = 20):
     pass
 
-# -- not yet adapted for legacy --
-
 # sort can be trending, hot, new, promoted
-def _get_discussions(sort, start_author, start_permlink, limit, tag, context = None):
+def _get_discussions(sort, start_author, start_permlink, limit, tag, context=None):
     if limit > 100:
         raise Exception("cannot limit {} results".format(limit))
 
@@ -168,10 +169,12 @@ def _get_discussions(sort, start_author, start_permlink, limit, tag, context = N
     start_id = None
     if start_permlink:
         start_id = _get_post_id(start_author, start_permlink)
-        sql = ("SELECT %s FROM hive_posts_cache %s ORDER BY %s DESC LIMIT 1") % (col, _where([*where, "post_id = :start_id"]), col)
+        sql = ("SELECT %s FROM hive_posts_cache %s ORDER BY %s DESC LIMIT 1"
+               % (col, _where([*where, "post_id = :start_id"]), col))
         where.append("%s <= (%s)" % (col, sql))
 
-    sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s DESC LIMIT :limit") % (_where(where), col)
+    sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s DESC LIMIT :limit"
+           % (_where(where), col))
     ids = query_col(sql, tag=tag, start_id=start_id, limit=limit)
     return _get_posts(ids, context)
 
@@ -187,13 +190,15 @@ def _follow_type_to_int(follow_type: str):
     return 1 if follow_type == 'blog' else 2
 
 def _get_post_id(author, permlink):
-    return query_one("SELECT id FROM hive_posts WHERE author = :a AND permlink = :p", a=author, p=permlink)
+    sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
+    return query_one(sql, a=author, p=permlink)
 
 def _get_account_id(name):
     return query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
 
 # given an array of post ids, returns full metadata in the same order
 def _get_posts(ids, context=None):
+    # TODO: output format must match steemd
     sql = """
     SELECT post_id, author, permlink, title, preview, img_url, payout,
            promoted, created_at, payout_at, is_nsfw, rshares, votes, json
