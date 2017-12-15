@@ -178,6 +178,7 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
     ids = query_col(sql, parent=parent, limit=limit)
     return _get_posts(ids)
 
+
 # https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
 async def get_state(path: str):
     if path[0] == '/':
@@ -188,8 +189,8 @@ async def get_state(path: str):
 
     state = {}
     state['current_route'] = path
-    state['props'] = "TODO: get_dynamic_global_properties"
-    state['feed_price'] = "TODO: get_current_median_history_price"
+    state['props'] = "TODO: get_dynamic_global_properties" # TODO
+    state['feed_price'] = "TODO: get_current_median_history_price" #TODO (only need for market,transfers)
     state['tag_idx'] = {}
     state['tag_idx']['trending'] = "TODO: array of trending tags"
     state['content'] = {}
@@ -204,8 +205,7 @@ async def get_state(path: str):
 
     if part[0] and part[0][0] == '@':
         account = part[0][1:]
-        state['accounts'][account] = dict(name=account, misc="TODO: add steem[extended_account] props")
-        #state['accounts'][account].tags_usage = ?deprecated?
+        state['accounts'][account] = dict(name=account, misc="TODO: add steem[extended_account] props") # TODO
         state['accounts'][account].reputation = 2555 # TODO
 
         if not part[1]:
@@ -255,7 +255,7 @@ async def get_state(path: str):
         pass
 
     elif part[0] == 'witnesses':
-        pass
+        raise Exception("not implemented")
 
     elif part[0] == 'trending':
         # get_discussions_by_trending
@@ -277,15 +277,10 @@ async def get_state(path: str):
         # get_trending_tags
         # state['tag_idx']['trending'] << t.name
         # state['tags][t.name] << t
-        pass
+        raise Exception("not implemented")
 
     else:
        raise Exception("unknown path {}".format(path))
-
-    # iterate through state.content, pull out accounts
-    # (only needed for discussion? only post.author_rep used for lists?)
-    # for account in accouts:
-    #   state.accounts[account.name] = extended_account
 
     raise Exception("unrecognized path {}".format(path))
 
