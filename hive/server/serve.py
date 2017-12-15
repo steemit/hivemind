@@ -11,7 +11,7 @@ from jsonrpcserver.async_methods import AsyncMethods
 
 from hive.server import legacy_api as condenser_api
 
-from hive.db.methods import (
+from hive.server.hive_api import (
     db_head_state,
     get_followers,
     get_following,
