@@ -48,6 +48,7 @@ for m in jrpc_methods:
 
 legacy_methods = AsyncMethods()
 #legacy_methods.add(condenser_api.get_followers, 'condenser_api.get_followers')
+legacy_methods.add(condenser_api.call)
 legacy_methods.add(condenser_api.get_followers)
 legacy_methods.add(condenser_api.get_following)
 legacy_methods.add(condenser_api.get_follow_count)

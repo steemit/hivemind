@@ -1,5 +1,11 @@
 from hive.db.methods import query, query_one, query_col, query_row, query_all
 
+#  INFO:jsonrpcserver.dispatcher.request:{"id":0,"jsonrpc":"2.0","method":"call","params":["database_api","get_state",["trending"]]}
+async def call(api, method, params):
+    if method == 'get_state':
+        return await get_state(params[0])
+    else:
+        raise Exception("not handled: {}/{}/{}".format(api, method, params))
 
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
     limit = _validate_limit(limit, 1000)
@@ -193,9 +199,11 @@ async def get_state(path: str):
     state['props'] = "TODO: get_dynamic_global_properties" # TODO
     state['feed_price'] = "TODO: get_current_median_history_price" #TODO (only need for market,transfers)
     state['tag_idx'] = {}
-    state['tag_idx']['trending'] = "TODO: array of trending tags"
+    state['tag_idx']['trending'] = ['fake'] # TODO
     state['content'] = {}
+    state['accounts'] = {}
     state['discussion_idx'] = {}
+    state['feed_price'] = {"base": "1234.000 SBD", "quote": "1.000 STEEM"} # TODO?
 
     part = path.split('/')
     while len(part) < 3:
@@ -434,6 +442,7 @@ def _get_posts(ids, context=None):
         obj.pop('preview')
 
         obj['replies'] = []
+        obj['active_votes'] = []
 
         posts_by_id[row['post_id']] = obj
 
