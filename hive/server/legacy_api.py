@@ -120,7 +120,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '', start_permli
          WHERE hive_follows.follower = :account
       GROUP BY post_id %s
       ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit
-    """ % (seek)
+    """ % seek
 
     res = query_all(sql, account=account_id, limit=limit)
     posts = _get_posts([r[0] for r in res])
@@ -162,11 +162,12 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
     seek = ''
 
     if start_permlink:
-        parent_id, start_date = query_row("""
-          SELECT parent_id, created_at FROM hive_posts
-           WHERE author = :a AND permlink = :p
+        parent, start_date = query_row("""
+          SELECT p.author, c.created_at
+            FROM hive_posts c
+            JOIN hive_posts p ON c.parent_id = p.id
+           WHERE c.author = :a AND c.permlink = :p
         """, a=start_author, p=start_permlink)
-        parent = query_one("SELECT author FROM hive_posts WHERE id = %d" % parent_id)
         seek = "AND created_at <= '%s'" % start_date
 
     sql = """
@@ -225,13 +226,13 @@ async def get_state(path: str):
 
         elif part[1] == 'comments':
             state['accounts'][account]['comments'] = []
-            replies = get_discussion_by_comments(account, "", 20)
+            replies = get_discussions_by_comments(account, "", 20)
             for reply in replies:
                 ref = reply['author'] + '/' + reply['permlink']
                 state['accounts'][account]['comments'] << ref
                 state['content'][ref] = reply
 
-        elif part[1] = 'blog':
+        elif part[1] == 'blog':
             state['accounts'][account]['blog'] = []
             posts = get_discussions_by_blog(account, "", "", 20)
             for post in posts:
@@ -280,7 +281,7 @@ async def get_state(path: str):
         raise Exception("not implemented")
 
     else:
-       raise Exception("unknown path {}".format(path))
+        raise Exception("unknown path {}".format(path))
 
     raise Exception("unrecognized path {}".format(path))
 
