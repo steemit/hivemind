@@ -1,11 +1,21 @@
+import json
+
 from hive.db.methods import query, query_one, query_col, query_row, query_all
+from hive.indexer.steem_client import get_adapter
 
 #  INFO:jsonrpcserver.dispatcher.request:{"id":0,"jsonrpc":"2.0","method":"call","params":["database_api","get_state",["trending"]]}
 async def call(api, method, params):
     if method == 'get_state':
         return await get_state(params[0])
+    elif method == 'get_dynamic_global_properties':
+        return get_adapter()._gdgp()
+    elif method == 'get_accounts':
+        return _load_accounts(params[0])
+    elif method == 'get_discussions_by_trending':
+        return await get_discussions_by_trending(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
     else:
         raise Exception("not handled: {}/{}/{}".format(api, method, params))
+
 
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
     limit = _validate_limit(limit, 1000)
@@ -199,10 +209,10 @@ async def get_state(path: str):
     state['props'] = "TODO: get_dynamic_global_properties" # TODO
     state['feed_price'] = "TODO: get_current_median_history_price" #TODO (only need for market,transfers)
     state['tag_idx'] = {}
-    state['tag_idx']['trending'] = ['fake'] # TODO
+    state['tag_idx']['trending'] = ["fake%d" % i for i in range(1, 21)] #TODO
     state['content'] = {}
     state['accounts'] = {}
-    state['discussion_idx'] = {}
+    state['discussion_idx'] = {"": {}}
     state['feed_price'] = {"base": "1234.000 SBD", "quote": "1.000 STEEM"} # TODO?
 
     part = path.split('/')
@@ -269,17 +279,17 @@ async def get_state(path: str):
         accounts = set()
         for ref, post in state['content'].items():
             accounts.add(post['author'])
-        state['accounts'] = _load_accounts(accounts)
+        state['accounts'] = {a['name']: a for a in _load_accounts(accounts)}
 
     elif part[0] in ['trending', 'promoted', 'hot', 'created']:
         sort = part[0]
         tag = part[1]
         posts = _get_discussions(sort, '', '', 20, tag)
-        state['discussion_idx'][sort] = []
+        state['discussion_idx'][tag][sort] = []
         for post in posts:
             ref = post['author'] + '/' + post['permlink']
             state['content'][ref] = post
-            state['discussion_idx'][sort].append(ref)
+            state['discussion_idx'][tag][sort].append(ref)
 
     elif part[0] == 'witnesses':
         raise Exception("not implemented")
@@ -369,9 +379,15 @@ def _get_discussions(sort, start_author, start_permlink, limit, tag, context=Non
     return _get_posts(ids, context)
 
 def _load_accounts(names):
-    sql = "SELECT id,name,vote_weight,display_name,about FROM hive_accounts WHERE name IN :names"
-    rows = query_all(sql, names=tuple(names))
-    return {a['name']: dict(a) for a in rows}
+    sql = "SELECT id,name,vote_weight,display_name,about,reputation FROM hive_accounts WHERE name IN :names"
+    accounts = []
+    for row in query_all(sql, names=tuple(names)):
+        account = {}
+        account['name'] = row['name']
+        account['reputation'] = _rep_to_raw(row['reputation'])
+        accounts.append(account)
+
+    return accounts
 
 def _where(conditions):
     if not conditions:
@@ -403,48 +419,69 @@ def _get_posts(ids, context=None):
     if not ids:
         raise Exception("no ids provided")
 
-    # TODO: output format must match steemd
     sql = """
-    SELECT post_id, author, permlink, title, preview, img_url, payout,
-           promoted, created_at, payout_at, is_nsfw, rshares, votes, json
+    SELECT post_id, author, permlink, title, body, promoted, payout, created_at,
+           payout_at, is_paidout, rshares, raw_json, category, depth, json,
+           children, votes, author_rep,
+
+           preview, img_url, is_nsfw
       FROM hive_posts_cache WHERE post_id IN :ids
     """
-
-    reblogged_ids = []
-    if context:
-        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE "
-                                  "account = :a AND post_id IN :ids",
-                                  a=context, ids=tuple(ids))
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
     for row in query(sql, ids=tuple(ids)).fetchall():
-        obj = dict(row)
+        row = dict(row)
 
-        if context:
-            voters = [csa.split(",")[0] for csa in obj['votes'].split("\n")]
-            obj['user_state'] = {
-                'reblogged': row['post_id'] in reblogged_ids,
-                'voted': context in voters
-            }
+        row_json_md = {} if not row['json'] else json.loads(row['json'])
 
-        # TODO: Object of type 'Decimal' is not JSON serializable
-        obj['payout'] = float(obj['payout'])
-        obj['promoted'] = float(obj['promoted'])
+        raw = {} if not row['raw_json'] else json.loads(row['raw_json'])
 
-        # TODO: Object of type 'datetime' is not JSON serializable
-        obj['created_at'] = str(obj['created_at'])
-        obj['payout_at'] = str(obj['payout_at'])
+        pending = not row['is_paidout']
 
-        obj.pop('votes') # temp
-        obj.pop('json')  # temp
+        post = {}
 
-        obj.pop('preview')
+        post['total_payout_value'] = '0.000 SBD' if pending else ("%.3f SBD" % row['payout'])
+        post['curator_payout_value'] = '0.000 SBD'
+        post['pending_payout_value'] = ("%.3f SBD" % row['payout']) if pending else '0.000 SBD'
+        post['cashout_time'] = _json_date(row['payout_at']) if pending else '1969-12-31T23:59:59'
+        post['promoted'] = "%.3f SBD" % row['promoted']
 
-        obj['replies'] = []
-        obj['active_votes'] = []
+        post['replies'] = []
+        post['active_votes'] = _hydrate_active_votes(row['votes'])
+        post['root_title'] = "root title"
 
-        posts_by_id[row['post_id']] = obj
+        post['created'] = _json_date(row['created_at'])
+        post['author'] = row['author']
+        post['permlink'] = row['permlink']
+        post['title'] = row['title']
+        post['body'] = row['body']
+        post['rshares'] = row['rshares']
+        post['category'] = row['category']
+        post['depth'] = row['depth']
+        post['children'] = row['children']
+
+        post['author_reputation'] = _rep_to_raw(row['author_rep'])
+
+        json_md = {}
+        if 'tags' in row_json_md:
+            json_md['tags'] = row_json_md['tags']
+        post['json_metadata'] = json.dumps(json_md)
+
+        if row['depth'] > 0:
+            if raw:
+                post['parent_permlink'] = raw['parent_permlink']
+                post['parent_author'] = raw['parent_author']
+            else:
+                sql = "SELECT author, permlink FROM hive_posts WHERE id = (SELECT parent_id FROM hive_posts WHERE id = %d)"
+                row2 = query_row(sql % row['post_id'])
+                post['parent_permlink'] = row2['permlink']
+                post['parent_author'] = row2['author']
+        else:
+            post['parent_permlink'] = 0
+            post['parent_author'] = 0
+
+        posts_by_id[row['post_id']] = post
 
     # in rare cases of cache inconsistency, recover and warn
     missed = set(ids) - posts_by_id.keys()
@@ -454,6 +491,30 @@ def _get_posts(ids, context=None):
             ids.remove(_id)
 
     return [posts_by_id[_id] for _id in ids]
+
+
+def _hydrate_active_votes(vote_csv):
+    if not vote_csv:
+        return []
+
+    votes = []
+    for line in vote_csv.split("\n"):
+        voter, rshares, percent, reputation = line.split(',')
+        votes.append(dict(voter=voter, rshares=rshares, percent=percent, reputation=_rep_to_raw(reputation)))
+
+    return votes
+
+def _json_date(date):
+    return 'T'.join(str(date).split(' '))
+
+def _rep_to_raw(rep):
+    if not isinstance(rep, (str, float, int)):
+        return 0
+    rep = float(rep) - 25
+    rep = rep / 9
+    rep = rep + 9
+    sign = 1 if rep >= 0 else -1
+    return int(sign * pow(10, rep))
 
 
 if __name__ == '__main__':

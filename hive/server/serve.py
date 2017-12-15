@@ -114,7 +114,7 @@ async def jsonrpc_handler(request):
 async def legacy_handler(request):
     request = await request.text()
     response = await legacy_methods.dispatch(request)
-    return web.json_response(response, status=200)
+    return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
 
 
 app.on_startup.append(init_db)
