@@ -195,10 +195,15 @@ async def get_state(path: str):
     state['tag_idx'] = {}
     state['tag_idx']['trending'] = "TODO: array of trending tags"
     state['content'] = {}
+    state['discussion_idx'] = {}
 
     part = path.split('/')
+    while len(part) < 3:
+        part.append('')
 
-    if len(part) > 4:
+    state1 = "{}".format(state)
+
+    if len(part) > 3:
         print("INVALID PATH: {}".format(path))
         raise Exception("invalid path")
 
@@ -221,7 +226,7 @@ async def get_state(path: str):
             replies = get_replies_by_last_update(account, "", 50)
             for reply in replies:
                 ref = reply['author'] + '/' + reply['permlink']
-                state['accounts'][account]['recent_replies'] << ref
+                state['accounts'][account]['recent_replies'].append(ref)
                 state['content'][ref] = reply
 
         elif part[1] == 'comments':
@@ -229,7 +234,7 @@ async def get_state(path: str):
             replies = get_discussions_by_comments(account, "", 20)
             for reply in replies:
                 ref = reply['author'] + '/' + reply['permlink']
-                state['accounts'][account]['comments'] << ref
+                state['accounts'][account]['comments'].append(ref)
                 state['content'][ref] = reply
 
         elif part[1] == 'blog':
@@ -237,7 +242,7 @@ async def get_state(path: str):
             posts = get_discussions_by_blog(account, "", "", 20)
             for post in posts:
                 ref = post['author'] + '/' + post['permlink']
-                state['accounts'][account]['blog'] << ref
+                state['accounts'][account]['blog'].append(ref)
                 state['content'][ref] = post
 
         elif part[1] == 'feed':
@@ -245,34 +250,31 @@ async def get_state(path: str):
             posts = get_discussions_by_feed(account, "", "", 20)
             for post in posts:
                 ref = post['author'] + '/' + post['permlink']
-                state['accounts'][account]['feed'] << ref
+                state['accounts'][account]['feed'].append(ref)
                 state['content'][ref] = post
 
     # complete discussion
     elif part[1] and part[1][0] == '@':
-        account = part[0][1:]
-        slug = part[2]
-        #
-        pass
+        author = part[1][1:]
+        permlink = part[2]
+        state['content'] = _load_discussion_recursive(author, permlink)
+        accounts = set()
+        for ref, post in state['content'].items():
+            accounts.add(post['author'])
+        state['accounts'] = _load_accounts(accounts)
+
+    elif part[0] in ['trending', 'promoted', 'hot', 'created']:
+        sort = part[0]
+        tag = part[1]
+        posts = _get_discussions(sort, '', '', 20, tag)
+        state['discussion_idx'][sort] = []
+        for post in posts:
+            ref = post['author'] + '/' + post['permlink']
+            state['content'][ref] = post
+            state['discussion_idx'][sort].append(ref)
 
     elif part[0] == 'witnesses':
         raise Exception("not implemented")
-
-    elif part[0] == 'trending':
-        # get_discussions_by_trending
-        pass
-
-    elif part[0] == 'promoted':
-        # get_discussions_by_promoted
-        pass
-
-    elif part[0] == 'hot':
-        # get_discussions_by_hot
-        pass
-
-    elif part[0] == 'created':
-        # get_discussions_by_created
-        pass
 
     elif part[0] == "tags":
         # get_trending_tags
@@ -283,7 +285,11 @@ async def get_state(path: str):
     else:
         raise Exception("unknown path {}".format(path))
 
-    raise Exception("unrecognized path {}".format(path))
+    state2 = "{}".format(state)
+    if state1 == state2:
+        raise Exception("unrecognized path {}: {},{}".format(path, part[1], part[1][0]))
+
+    return state
 
 
 async def get_content(author: str, permlink: str):
@@ -296,6 +302,27 @@ async def get_content_replies(parent: str, parent_permlink: str):
     post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d" % post_id)
     return _get_posts(post_ids)
 
+
+def _load_discussion_recursive(author, permlink):
+    post_id = _get_post_id(author, permlink)
+    if not post_id:
+        raise Exception("Post not found: {}/{}".format(author, permlink))
+    return _load_posts_recursive([post_id])
+
+def _load_posts_recursive(post_ids):
+    posts = _get_posts(post_ids)
+
+    out = {}
+    for post, post_id in zip(posts, post_ids):
+        out[post['author'] + '/' + post['permlink']] = post
+
+        child_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d" % post_id)
+        if child_ids:
+            children = _load_posts_recursive(child_ids)
+            post['replies'] = list(children.keys())
+            out = {**out, **children}
+
+    return out
 
 # sort can be trending, hot, new, promoted
 def _get_discussions(sort, start_author, start_permlink, limit, tag, context=None):
@@ -333,6 +360,10 @@ def _get_discussions(sort, start_author, start_permlink, limit, tag, context=Non
     ids = query_col(sql, tag=tag, start_id=start_id, limit=limit)
     return _get_posts(ids, context)
 
+def _load_accounts(names):
+    sql = "SELECT id,name,vote_weight,display_name,about FROM hive_accounts WHERE name IN :names"
+    rows = query_all(sql, names=tuple(names))
+    return {a['name']: dict(a) for a in rows}
 
 def _where(conditions):
     if not conditions:
@@ -361,6 +392,9 @@ def _get_account_id(name):
 
 # given an array of post ids, returns full metadata in the same order
 def _get_posts(ids, context=None):
+    if not ids:
+        raise Exception("no ids provided")
+
     # TODO: output format must match steemd
     sql = """
     SELECT post_id, author, permlink, title, preview, img_url, payout,
@@ -399,6 +433,8 @@ def _get_posts(ids, context=None):
 
         obj.pop('preview')
 
+        obj['replies'] = []
+
         posts_by_id[row['post_id']] = obj
 
     # in rare cases of cache inconsistency, recover and warn
@@ -409,3 +445,7 @@ def _get_posts(ids, context=None):
             ids.remove(_id)
 
     return [posts_by_id[_id] for _id in ids]
+
+
+if __name__ == '__main__':
+    print(_load_discussion_recursive('roadscape', 'hello-world'))

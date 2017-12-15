@@ -9,7 +9,7 @@ from aiopg.sa import create_engine
 from jsonrpcserver import config
 from jsonrpcserver.async_methods import AsyncMethods
 
-from hive.server import legacy_api as legacy
+from hive.server import legacy_api as condenser_api
 
 from hive.db.methods import (
     db_head_state,
@@ -47,20 +47,21 @@ for m in jrpc_methods:
     methods.add(m)
 
 legacy_methods = AsyncMethods()
-legacy_methods.add(legacy.get_followers)
-legacy_methods.add(legacy.get_following)
-legacy_methods.add(legacy.get_follow_count)
-legacy_methods.add(legacy.get_discussions_by_trending)
-legacy_methods.add(legacy.get_discussions_by_hot)
-legacy_methods.add(legacy.get_discussions_by_promoted)
-legacy_methods.add(legacy.get_discussions_by_created)
-legacy_methods.add(legacy.get_discussions_by_blog)
-legacy_methods.add(legacy.get_discussions_by_feed)
-legacy_methods.add(legacy.get_discussions_by_comments)
-legacy_methods.add(legacy.get_replies_by_last_update)
-legacy_methods.add(legacy.get_content)
-legacy_methods.add(legacy.get_content_replies)
-legacy_methods.add(legacy.get_state)
+#legacy_methods.add(condenser_api.get_followers, 'condenser_api.get_followers')
+legacy_methods.add(condenser_api.get_followers)
+legacy_methods.add(condenser_api.get_following)
+legacy_methods.add(condenser_api.get_follow_count)
+legacy_methods.add(condenser_api.get_discussions_by_trending)
+legacy_methods.add(condenser_api.get_discussions_by_hot)
+legacy_methods.add(condenser_api.get_discussions_by_promoted)
+legacy_methods.add(condenser_api.get_discussions_by_created)
+legacy_methods.add(condenser_api.get_discussions_by_blog)
+legacy_methods.add(condenser_api.get_discussions_by_feed)
+legacy_methods.add(condenser_api.get_discussions_by_comments)
+legacy_methods.add(condenser_api.get_replies_by_last_update)
+legacy_methods.add(condenser_api.get_content)
+legacy_methods.add(condenser_api.get_content_replies)
+legacy_methods.add(condenser_api.get_state)
 
 app = web.Application()
 app['config'] = dict()
