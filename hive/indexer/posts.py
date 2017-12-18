@@ -1,8 +1,5 @@
-#from hive.db.methods import query_one, query_col, query, query_row, query_all
 from hive.db.methods import query, query_one, query_row, query_all
-#from hive.indexer.steem_client import get_adapter
 from hive.indexer.normalize import rep_log10, amount, load_json_key
-
 from hive.indexer.accounts import Accounts
 
 class Posts:
@@ -78,7 +75,7 @@ class Posts:
     @classmethod
     def register(cls, ops, block_date):
         from hive.indexer.community import is_community_post_valid
-        
+
         for op in ops:
             sql = ("SELECT id, is_deleted FROM hive_posts "
                 "WHERE author = :a AND permlink = :p")

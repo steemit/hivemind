@@ -8,6 +8,7 @@ async def call(api, method, params):
     if method == 'get_state':
         return await get_state(params[0])
     elif method == 'get_dynamic_global_properties':
+        # NOTE: condenser only uses total_vesting_fund_steem, total_vesting_shares
         return get_adapter()._gdgp()
     elif method == 'get_accounts':
         return _load_accounts(params[0])
@@ -432,54 +433,55 @@ def _get_posts(ids, context=None):
     posts_by_id = {}
     for row in query(sql, ids=tuple(ids)).fetchall():
         row = dict(row)
-
-        row_json_md = {} if not row['json'] else json.loads(row['json'])
-
-        raw = {} if not row['raw_json'] else json.loads(row['raw_json'])
-
-        pending = not row['is_paidout']
-
         post = {}
 
-        post['total_payout_value'] = '0.000 SBD' if pending else ("%.3f SBD" % row['payout'])
+        post['author'] = row['author']
+        post['permlink'] = row['permlink']
+        post['category'] = row['category']
+        post['parent_permlink'] = ''
+        post['parent_author'] = ''
+
+        post['title'] = row['title']
+        post['body'] = row['body']
+        post['json_metadata'] = row['json']
+
+        post['created'] = _json_date(row['created_at'])
+        post['depth'] = row['depth']
+        post['children'] = row['children']
+        post['net_rshares'] = row['rshares']
+
+        post['cashout_time'] = '1969-12-31T23:59:59' if row['is_paidout'] else _json_date(row['payout_at'])
+        post['total_payout_value'] = ("%.3f SBD" % row['payout']) if row['is_paidout'] else '0.000 SBD'
         post['curator_payout_value'] = '0.000 SBD'
-        post['pending_payout_value'] = ("%.3f SBD" % row['payout']) if pending else '0.000 SBD'
-        post['cashout_time'] = _json_date(row['payout_at']) if pending else '1969-12-31T23:59:59'
+        post['pending_payout_value'] = '0.000 SBD' if row['is_paidout'] else ("%.3f SBD" % row['payout'])
         post['promoted'] = "%.3f SBD" % row['promoted']
 
         post['replies'] = []
+        post['body_length'] = len(row['body'])
         post['active_votes'] = _hydrate_active_votes(row['votes'])
-        post['root_title'] = "root title"
-
-        post['created'] = _json_date(row['created_at'])
-        post['author'] = row['author']
-        post['permlink'] = row['permlink']
-        post['title'] = row['title']
-        post['body'] = row['body']
-        post['rshares'] = row['rshares']
-        post['category'] = row['category']
-        post['depth'] = row['depth']
-        post['children'] = row['children']
-
         post['author_reputation'] = _rep_to_raw(row['author_rep'])
 
-        json_md = {}
-        if 'tags' in row_json_md:
-            json_md['tags'] = row_json_md['tags']
-        post['json_metadata'] = json.dumps(json_md)
-
+        raw_json = {} if not row['raw_json'] else json.loads(row['raw_json'])
         if row['depth'] > 0:
-            if raw:
-                post['parent_permlink'] = raw['parent_permlink']
-                post['parent_author'] = raw['parent_author']
+            if raw_json:
+                post['parent_permlink'] = raw_json['parent_permlink']
+                post['parent_author'] = raw_json['parent_author']
             else:
                 sql = "SELECT author, permlink FROM hive_posts WHERE id = (SELECT parent_id FROM hive_posts WHERE id = %d)"
                 row2 = query_row(sql % row['post_id'])
                 post['parent_permlink'] = row2['permlink']
                 post['parent_author'] = row2['author']
-        else:
-            post['parent_permlink'] = 0
-            post['parent_author'] = 0
+
+        if raw_json:
+            post['root_title'] = raw_json['root_title']
+            post['max_accepted_payout'] = raw_json['max_accepted_payout']
+            post['percent_steem_dollars'] = raw_json['percent_steem_dollars']
+            post['url'] = raw_json['url']
+            #post['net_votes']
+            #post['allow_replies']
+            #post['allow_votes']
+            #post['allow_curation_rewards']
+            #post['beneficiaries']
 
         posts_by_id[row['post_id']] = post
 
