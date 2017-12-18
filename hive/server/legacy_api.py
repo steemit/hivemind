@@ -5,15 +5,33 @@ from hive.indexer.steem_client import get_adapter
 
 #  INFO:jsonrpcserver.dispatcher.request:{"id":0,"jsonrpc":"2.0","method":"call","params":["database_api","get_state",["trending"]]}
 async def call(api, method, params):
+    # passthrough
+    if method == 'get_dynamic_global_properties':
+        return get_adapter()._gdgp() # condenser only uses total_vesting_fund_steem, total_vesting_shares
+    elif method == 'get_accounts':
+        return get_adapter().get_accounts(params[0])
+    elif method == 'get_open_orders':
+        return get_adapter()._client.exec('get_open_orders', params[0])
+    elif method == 'get_block':
+        return get_adapter()._client.exec('get_block', params[0])
+    elif method == 'broadcast_transaction_synchronous':
+        return get_adapter()._client.exec('broadcast_transaction_synchronous', params[0], api='network_broadcast_api')
+
+    # native
     if method == 'get_state':
         return await get_state(params[0])
-    elif method == 'get_dynamic_global_properties':
-        # NOTE: condenser only uses total_vesting_fund_steem, total_vesting_shares
-        return get_adapter()._gdgp()
-    elif method == 'get_accounts':
-        return _load_accounts(params[0])
+    elif method == 'get_content':
+        return await get_content(params[0], params[1]) # after submit vote/post
     elif method == 'get_discussions_by_trending':
         return await get_discussions_by_trending(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+    elif method == 'get_discussions_by_blog':
+        return await get_discussions_by_blog(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+    elif method == 'get_following':
+        return await get_following(params[0], params[1], params[2], params[3])
+    elif method == 'get_followers':
+        return await get_followers(params[0], params[1], params[2], params[3])
+    elif method == 'get_follow_count':
+        return await get_follow_count(params[0])
     else:
         raise Exception("not handled: {}/{}/{}".format(api, method, params))
 
@@ -230,8 +248,7 @@ async def get_state(path: str):
 
     if part[0] and part[0][0] == '@':
         account = part[0][1:]
-        state['accounts'][account] = dict(name=account, misc="TODO: add steem[extended_account] props") # TODO
-        state['accounts'][account].reputation = 2555 # TODO
+        state['accounts'][account] = get_adapter().get_accounts([account])[0] #_load_accounts([account])[0]
 
         if not part[1]:
             part[1] = 'blog'
@@ -242,7 +259,7 @@ async def get_state(path: str):
 
         elif part[1] == 'recent-replies':
             state['accounts'][account]['recent_replies'] = []
-            replies = get_replies_by_last_update(account, "", 50)
+            replies = await get_replies_by_last_update(account, "", 50)
             for reply in replies:
                 ref = reply['author'] + '/' + reply['permlink']
                 state['accounts'][account]['recent_replies'].append(ref)
@@ -250,7 +267,7 @@ async def get_state(path: str):
 
         elif part[1] == 'comments':
             state['accounts'][account]['comments'] = []
-            replies = get_discussions_by_comments(account, "", 20)
+            replies = await get_discussions_by_comments(account, "", 20)
             for reply in replies:
                 ref = reply['author'] + '/' + reply['permlink']
                 state['accounts'][account]['comments'].append(ref)
@@ -258,7 +275,7 @@ async def get_state(path: str):
 
         elif part[1] == 'blog':
             state['accounts'][account]['blog'] = []
-            posts = get_discussions_by_blog(account, "", "", 20)
+            posts = await get_discussions_by_blog(account, "", "", 20)
             for post in posts:
                 ref = post['author'] + '/' + post['permlink']
                 state['accounts'][account]['blog'].append(ref)
@@ -266,7 +283,7 @@ async def get_state(path: str):
 
         elif part[1] == 'feed':
             state['accounts'][account]['feed'] = []
-            posts = get_discussions_by_feed(account, "", "", 20)
+            posts = await get_discussions_by_feed(account, "", "", 20)
             for post in posts:
                 ref = post['author'] + '/' + post['permlink']
                 state['accounts'][account]['feed'].append(ref)
@@ -386,6 +403,7 @@ def _load_accounts(names):
         account = {}
         account['name'] = row['name']
         account['reputation'] = _rep_to_raw(row['reputation'])
+        account['json_metadata'] = json.dumps({'profile':{'display_name':row['display_name'],'about':row['about']}})
         accounts.append(account)
 
     return accounts
@@ -435,6 +453,7 @@ def _get_posts(ids, context=None):
         row = dict(row)
         post = {}
 
+        post['post_id'] = row['post_id']
         post['author'] = row['author']
         post['permlink'] = row['permlink']
         post['category'] = row['category']

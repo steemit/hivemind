@@ -21,6 +21,8 @@ config.debug = (log_level == logging.DEBUG)
 logging.basicConfig(level=log_level)
 logger = logging.getLogger(__name__)
 
+logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
+
 
 jrpc_methods = (
     hive_api.db_head_state,
