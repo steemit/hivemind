@@ -16,6 +16,10 @@ async def call(api, method, params):
         return get_adapter()._client.exec('get_block', params[0])
     elif method == 'broadcast_transaction_synchronous':
         return get_adapter()._client.exec('broadcast_transaction_synchronous', params[0], api='network_broadcast_api')
+    elif method == 'get_savings_withdraw_to':
+        return get_adapter()._client.exec('get_savings_withdraw_to', params[0])
+    elif method == 'get_savings_withdraw_from':
+        return get_adapter()._client.exec('get_savings_withdraw_from', params[0])
 
     # native
     if method == 'get_state':
@@ -24,8 +28,20 @@ async def call(api, method, params):
         return await get_content(params[0], params[1]) # after submit vote/post
     elif method == 'get_discussions_by_trending':
         return await get_discussions_by_trending(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+    elif method == 'get_discussions_by_hot':
+        return await get_discussions_by_hot(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+    elif method == 'get_discussions_by_created':
+        return await get_discussions_by_created(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+    elif method == 'get_discussions_by_promoted':
+        return await get_discussions_by_promoted(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
     elif method == 'get_discussions_by_blog':
         return await get_discussions_by_blog(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+    elif method == 'get_discussions_by_feed':
+        return await get_discussions_by_feed(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+    elif method == 'get_discussions_by_comments':
+        return await get_discussions_by_comments(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+    elif method == 'get_replies_by_last_update':
+        return await get_replies_by_last_update(params[0], params[1], params[2])
     elif method == 'get_following':
         return await get_following(params[0], params[1], params[2], params[3])
     elif method == 'get_followers':
@@ -192,7 +208,7 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
 
 # author replies
 async def get_replies_by_last_update(start_author: str, start_permlink: str = '', limit: int = 20):
-    limit = _validate_limit(limit, 20)
+    limit = _validate_limit(limit, 50)
     parent = start_author
     seek = ''
 
@@ -225,8 +241,7 @@ async def get_state(path: str):
 
     state = {}
     state['current_route'] = path
-    state['props'] = "TODO: get_dynamic_global_properties" # TODO
-    state['feed_price'] = "TODO: get_current_median_history_price" #TODO (only need for market,transfers)
+    state['props'] = {'total_vesting_fund_steem': '194924668.034 STEEM', 'total_vesting_shares': '399773972659.129698 VESTS', 'sbd_interest_rate': '0'} # TODO
     state['tag_idx'] = {}
     state['tag_idx']['trending'] = ["fake%d" % i for i in range(1, 21)] #TODO
     state['content'] = {}
@@ -254,12 +269,13 @@ async def get_state(path: str):
             part[1] = 'blog'
 
         if part[1] == 'transfers':
-            # TODO: get_account_history, filter; goes to state['accounts'][account][transfer_history/other_history]
-            raise Exception("not implemented")
+            # TODO: proxy to steemd
+            state['accounts'][account]['transfer_history'] = [] # filtered get_account_history
+            state['accounts'][account]['other_history'] = [] # filtered get_account_history
 
         elif part[1] == 'recent-replies':
             state['accounts'][account]['recent_replies'] = []
-            replies = await get_replies_by_last_update(account, "", 50)
+            replies = await get_replies_by_last_update(account, "", 20)
             for reply in replies:
                 ref = reply['author'] + '/' + reply['permlink']
                 state['accounts'][account]['recent_replies'].append(ref)
@@ -375,7 +391,7 @@ def _get_discussions(sort, start_author, start_permlink, limit, tag, context=Non
         where.append('depth = 0')
     elif sort == 'promoted':
         col = 'promoted'
-        where.append('is_paidout = 0')
+        where.append("is_paidout = '0'")
         where.append('promoted > 0')
     else:
         raise Exception("unknown sort order {}".format(sort))
@@ -501,6 +517,8 @@ def _get_posts(ids, context=None):
             #post['allow_votes']
             #post['allow_curation_rewards']
             #post['beneficiaries']
+        else:
+            post['root_title'] = 'RE: ' + post['title']
 
         posts_by_id[row['post_id']] = post
 
