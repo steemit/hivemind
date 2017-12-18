@@ -10,59 +10,58 @@ from jsonrpcserver import config
 from jsonrpcserver.async_methods import AsyncMethods
 
 from hive.server import legacy_api as condenser_api
+from hive.server import hive_api
 
-from hive.server.hive_api import (
-    db_head_state,
-    get_followers,
-    get_following,
-    get_follow_count,
-    get_user_feed,
-    get_blog_feed,
-    get_discussions_by_sort_and_tag,
-    get_related_posts,
-    payouts_total,
-    payouts_last_24h
-)
+str_log_level = os.environ.get('LOG_LEVEL') or 'DEBUG'
+log_level = getattr(logging, str_log_level.upper(), None)
+if not isinstance(log_level, int):
+    raise ValueError('Invalid log level: %s' % str_log_level)
 
-config.debug = True
-
-logging.basicConfig(level=logging.DEBUG)
+config.debug = (log_level == logging.DEBUG)
+logging.basicConfig(level=log_level)
 logger = logging.getLogger(__name__)
 
+
 jrpc_methods = (
-    db_head_state,
-    get_followers,
-    get_following,
-    get_follow_count,
-    get_user_feed,
-    get_blog_feed,
-    get_discussions_by_sort_and_tag,
-    get_related_posts,
-    payouts_total,
-    payouts_last_24h
+    hive_api.db_head_state,
+    hive_api.get_followers,
+    hive_api.get_following,
+    hive_api.get_follow_count,
+    hive_api.get_user_feed,
+    hive_api.get_blog_feed,
+    hive_api.get_discussions_by_sort_and_tag,
+    hive_api.get_related_posts,
+    hive_api.payouts_total,
+    hive_api.payouts_last_24h
+)
+
+jrpc_condenser = (
+    condenser_api.get_followers,
+    condenser_api.get_following,
+    condenser_api.get_follow_count,
+    condenser_api.get_discussions_by_trending,
+    condenser_api.get_discussions_by_hot,
+    condenser_api.get_discussions_by_promoted,
+    condenser_api.get_discussions_by_created,
+    condenser_api.get_discussions_by_blog,
+    condenser_api.get_discussions_by_feed,
+    condenser_api.get_discussions_by_comments,
+    condenser_api.get_replies_by_last_update,
+    condenser_api.get_content,
+    condenser_api.get_content_replies,
+    condenser_api.get_state
 )
 
 methods = AsyncMethods()
+legacy_methods = AsyncMethods()
+legacy_methods.add(condenser_api.call, 'call')
+methods.add(condenser_api.call, 'call')
 for m in jrpc_methods:
     methods.add(m)
+for m in jrpc_condenser:
+    methods.add(m, 'condenser_api.' + m.__name__)
+    legacy_methods.add(m)
 
-legacy_methods = AsyncMethods()
-#legacy_methods.add(condenser_api.get_followers, 'condenser_api.get_followers')
-legacy_methods.add(condenser_api.call)
-legacy_methods.add(condenser_api.get_followers)
-legacy_methods.add(condenser_api.get_following)
-legacy_methods.add(condenser_api.get_follow_count)
-legacy_methods.add(condenser_api.get_discussions_by_trending)
-legacy_methods.add(condenser_api.get_discussions_by_hot)
-legacy_methods.add(condenser_api.get_discussions_by_promoted)
-legacy_methods.add(condenser_api.get_discussions_by_created)
-legacy_methods.add(condenser_api.get_discussions_by_blog)
-legacy_methods.add(condenser_api.get_discussions_by_feed)
-legacy_methods.add(condenser_api.get_discussions_by_comments)
-legacy_methods.add(condenser_api.get_replies_by_last_update)
-legacy_methods.add(condenser_api.get_content)
-legacy_methods.add(condenser_api.get_content_replies)
-legacy_methods.add(condenser_api.get_state)
 
 app = web.Application()
 app['config'] = dict()
@@ -91,7 +90,7 @@ async def close_db(app):
 # Non JSON-RPC routes
 # -------------------
 async def health(request):
-    state = await db_head_state()
+    state = await hive_api.db_head_state()
     if state['db_head_age'] > app['config']['hive.MAX_BLOCK_NUM_DIFF'] * 3:
         return web.json_response(data=dict(result='head block age (%s) > max allowable (%s); head block num: %s' % (
             state['db_head_age'],

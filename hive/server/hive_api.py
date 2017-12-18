@@ -41,7 +41,7 @@ async def get_following(account: str, skip: int, limit: int):
 
 async def get_follow_count(account: str):
     sql = "SELECT name, following, followers FROM hive_accounts WHERE name = :n"
-    return query_row(sql, n=account)
+    return dict(query_row(sql, n=account))
 
 
 # stats methods
