@@ -7,7 +7,6 @@ import time
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
-from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 
 logger = logging.getLogger(__name__)
@@ -54,7 +53,7 @@ def generate_cached_post_sql(pid, post, updated_at):
     tags = [post['category']]
     if md and 'tags' in md and isinstance(md['tags'], list):
         tags = tags + md['tags']
-    tags = set(list(map(lambda str: (str or '').strip('# ').lower()[:32], tags))[0:5])
+    tags = set(list(map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags))[0:5])
     tags.discard('')
     is_nsfw = int('nsfw' in tags)
 
@@ -95,6 +94,10 @@ def generate_cached_post_sql(pid, post, updated_at):
         print("bad body: {}".format(post['body']))
         post['body'] = "INVALID"
 
+    children = post['children']
+    if children > 32767:
+        children = 32767
+
     stats = Posts.get_post_stats(post)
 
     values = collections.OrderedDict([
@@ -103,7 +106,7 @@ def generate_cached_post_sql(pid, post, updated_at):
         ('permlink', "%s" % post['permlink']),
         ('category', "%s" % post['category']),
         ('depth', "%d" % post['depth']),
-        ('children', "%d" % post['children']),
+        ('children', "%d" % children),
 
         ('title', "%s" % post['title']),
         ('preview', "%s" % post['body'][0:1024]),
@@ -256,4 +259,4 @@ def select_paidout_posts(block_date):
 
 
 if __name__ == '__main__':
-    Accounts.cache_all()
+    pass

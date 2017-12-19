@@ -37,7 +37,8 @@ setup(
         'ujson',
         'urllib3',
         'PrettyTable',
-        'psycopg2'
+        'psycopg2',
+        'aiocache',
     ],
     entry_points={
         'console_scripts': [
