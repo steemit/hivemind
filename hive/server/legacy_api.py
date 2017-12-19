@@ -249,65 +249,48 @@ async def get_state(path: str):
 
     state = {}
     state['current_route'] = path
-    state['props'] = {'total_vesting_fund_steem': '194924668.034 STEEM', 'total_vesting_shares': '399773972659.129698 VESTS', 'sbd_interest_rate': '0'} # TODO
+    state['props'] = _get_props_lite()
     state['tags'] = {}
     state['tag_idx'] = {}
     state['tag_idx']['trending'] = []
     state['content'] = {}
     state['accounts'] = {}
     state['discussion_idx'] = {"": {}}
-    state['feed_price'] = {"base": "1234.000 SBD", "quote": "1.000 STEEM"} # TODO?
+    state['feed_price'] = _get_feed_price()
     state1 = "{}".format(state)
 
+    # account tabs (feed, blog, comments, replies)
     if part[0] and part[0][0] == '@':
-        account = part[0][1:]
-        state['accounts'][account] = get_adapter().get_accounts([account])[0] #_load_accounts([account])[0]
-
         if not part[1]:
             part[1] = 'blog'
-        if part[2]:
-            raise Exception("unknown account path part %s" % path)
-
         if part[1] == 'transfers':
             raise Exception("transfers API not served by hive")
-            # TODO: proxy to steemd, or filter get_account_history
-            state['accounts'][account]['transfer_history'] = []
-            state['accounts'][account]['other_history'] = []
+        if part[2]:
+            raise Exception("unexpected account path part[2] %s" % path)
 
-        elif part[1] == 'recent-replies':
-            state['accounts'][account]['recent_replies'] = []
-            replies = await get_replies_by_last_update(account, "", 20)
-            for reply in replies:
-                ref = reply['author'] + '/' + reply['permlink']
-                state['accounts'][account]['recent_replies'].append(ref)
-                state['content'][ref] = reply
+        account = part[0][1:]
+        state['accounts'][account] = get_adapter().get_accounts([account])[0] # TODO: _load_accounts([account])[0]
 
+        if part[1] == 'recent-replies':
+            key = 'recent_replies'
+            posts = await get_replies_by_last_update(account, "", 20)
         elif part[1] == 'comments':
-            state['accounts'][account]['comments'] = []
-            replies = await get_discussions_by_comments(account, "", 20)
-            for reply in replies:
-                ref = reply['author'] + '/' + reply['permlink']
-                state['accounts'][account]['comments'].append(ref)
-                state['content'][ref] = reply
-
+            key = 'comments'
+            posts = await get_discussions_by_comments(account, "", 20)
         elif part[1] == 'blog':
-            state['accounts'][account]['blog'] = []
+            key = 'blog'
             posts = await get_discussions_by_blog(account, "", "", 20)
-            for post in posts:
-                ref = post['author'] + '/' + post['permlink']
-                state['accounts'][account]['blog'].append(ref)
-                state['content'][ref] = post
-
         elif part[1] == 'feed':
-            state['accounts'][account]['feed'] = []
+            key = 'feed'
             posts = await get_discussions_by_feed(account, "", "", 20)
-            for post in posts:
-                ref = post['author'] + '/' + post['permlink']
-                state['accounts'][account]['feed'].append(ref)
-                state['content'][ref] = post
-
         else:
             raise Exception("unknown account path %s" % path)
+
+        state['accounts'][account][key] = []
+        for post in posts:
+            ref = post['author'] + '/' + post['permlink']
+            state['accounts'][account][key].append(ref)
+            state['content'][ref] = post
 
     # complete discussion
     elif part[1] and part[1][0] == '@':
@@ -319,11 +302,12 @@ async def get_state(path: str):
 
     # trending pages
     elif part[0] in ['trending', 'promoted', 'hot', 'created']:
+        if part[2]:
+            raise Exception("unexpected discussion path part[2] %s" % path)
         sort = part[0]
         tag = part[1].lower()
         posts = _get_discussions(sort, '', '', 20, tag)
-        state['discussion_idx'][tag] = {}
-        state['discussion_idx'][tag][sort] = []
+        state['discussion_idx'][tag] = {sort: []}
         for post in posts:
             ref = post['author'] + '/' + post['permlink']
             state['content'][ref] = post
@@ -345,6 +329,7 @@ async def get_state(path: str):
     else:
         raise Exception("unknown path {}".format(path))
 
+    # (debug; should not happen) if state did not change, complain
     state2 = "{}".format(state)
     if state1 == state2:
         raise Exception("unrecognized path `{}`" % path)
@@ -364,12 +349,11 @@ async def get_content_replies(parent: str, parent_permlink: str):
 
 @cached(ttl=3600)
 async def _get_top_trending_tags():
-    print("LOADING TAGS")
     sql = """
         SELECT category FROM hive_posts_cache WHERE is_paidout = '0'
       GROUP BY category ORDER BY SUM(payout) DESC LIMIT 50
     """
-    return query_col(sql, limit=limit)
+    return query_col(sql)
 
 @cached(ttl=3600)
 async def _get_trending_tags():
@@ -385,7 +369,7 @@ async def _get_trending_tags():
        LIMIT 250
     """
     out = []
-    for row in query_all(sql, limit=limit):
+    for row in query_all(sql):
         out.append({
             'comments': row['total_posts'] - row['top_posts'],
             'name': row['category'],
@@ -393,6 +377,16 @@ async def _get_trending_tags():
             'total_payouts': "%.3f SBD" % row['total_payouts']})
 
     return out
+
+def _get_props_lite():
+    # TODO
+    return {'total_vesting_fund_steem': '194924668.034 STEEM',
+            'total_vesting_shares': '399773972659.129698 VESTS',
+            'sbd_interest_rate': '0'}
+
+def _get_feed_price():
+    # TODO
+    return {"base": "1234.000 SBD", "quote": "1.000 STEEM"}
 
 def _load_discussion_recursive(author, permlink):
     post_id = _get_post_id(author, permlink)
