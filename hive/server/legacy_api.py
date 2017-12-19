@@ -1,5 +1,6 @@
 import json
 
+from aiocache import cached
 from hive.db.methods import query, query_one, query_col, query_row, query_all
 from hive.indexer.steem_client import get_adapter
 
@@ -251,7 +252,7 @@ async def get_state(path: str):
     state['props'] = {'total_vesting_fund_steem': '194924668.034 STEEM', 'total_vesting_shares': '399773972659.129698 VESTS', 'sbd_interest_rate': '0'} # TODO
     state['tags'] = {}
     state['tag_idx'] = {}
-    state['tag_idx']['trending'] = [t['name'] for t in _get_trending_tags(50)]
+    state['tag_idx']['trending'] = []
     state['content'] = {}
     state['accounts'] = {}
     state['discussion_idx'] = {"": {}}
@@ -268,6 +269,7 @@ async def get_state(path: str):
             raise Exception("unknown account path part %s" % path)
 
         if part[1] == 'transfers':
+            raise Exception("transfers API not served by hive")
             # TODO: proxy to steemd, or filter get_account_history
             state['accounts'][account]['transfer_history'] = []
             state['accounts'][account]['other_history'] = []
@@ -326,6 +328,7 @@ async def get_state(path: str):
             ref = post['author'] + '/' + post['permlink']
             state['content'][ref] = post
             state['discussion_idx'][tag][sort].append(ref)
+        state['tag_idx']['trending'] = await _get_top_trending_tags()
 
     # witness list
     elif part[0] == 'witnesses':
@@ -334,7 +337,7 @@ async def get_state(path: str):
     # tag "explorer"
     elif part[0] == "tags":
         state['tag_idx']['trending'] = []
-        tags = _get_trending_tags(250)
+        tags = await _get_trending_tags()
         for t in tags:
             state['tag_idx']['trending'].append(t['name'])
             state['tags'][t['name']] = t
@@ -359,8 +362,17 @@ async def get_content_replies(parent: str, parent_permlink: str):
     post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d" % post_id)
     return _get_posts(post_ids)
 
+@cached(ttl=3600)
+async def _get_top_trending_tags():
+    print("LOADING TAGS")
+    sql = """
+        SELECT category FROM hive_posts_cache WHERE is_paidout = '0'
+      GROUP BY category ORDER BY SUM(payout) DESC LIMIT 50
+    """
+    return query_col(sql, limit=limit)
 
-def _get_trending_tags(limit: int):
+@cached(ttl=3600)
+async def _get_trending_tags():
     sql = """
       SELECT category,
              COUNT(*) AS total_posts,
@@ -370,7 +382,7 @@ def _get_trending_tags(limit: int):
        WHERE is_paidout = '0'
     GROUP BY category
     ORDER BY SUM(payout) DESC
-       LIMIT :limit
+       LIMIT 250
     """
     out = []
     for row in query_all(sql, limit=limit):
