@@ -269,22 +269,28 @@ async def get_state(path: str):
             raise Exception("unexpected account path part[2] %s" % path)
 
         account = part[0][1:]
-        state['accounts'][account] = get_adapter().get_accounts([account])[0] # TODO: _load_accounts([account])[0]
 
-        if part[1] == 'recent-replies':
-            key = 'recent_replies'
+        keys = {'recent-replies': 'recent_replies',
+                'comments': 'comments',
+                'blog': 'blog',
+                'feed': 'feed'}
+
+        if part[1] not in keys:
+            raise Exception("invalid account path %s" % path)
+        key = keys[part[1]]
+
+        # TODO: use _load_accounts([account])? Examine issue w/ login
+        account_obj = get_adapter().get_accounts([account])[0]
+        state['accounts'][account] = account_obj
+
+        if key == 'recent_replies':
             posts = await get_replies_by_last_update(account, "", 20)
-        elif part[1] == 'comments':
-            key = 'comments'
+        elif key == 'comments':
             posts = await get_discussions_by_comments(account, "", 20)
-        elif part[1] == 'blog':
-            key = 'blog'
+        elif key == 'blog':
             posts = await get_discussions_by_blog(account, "", "", 20)
-        elif part[1] == 'feed':
-            key = 'feed'
+        elif key == 'feed':
             posts = await get_discussions_by_feed(account, "", "", 20)
-        else:
-            raise Exception("unknown account path %s" % path)
 
         state['accounts'][account][key] = []
         for post in posts:
@@ -292,7 +298,7 @@ async def get_state(path: str):
             state['accounts'][account][key].append(ref)
             state['content'][ref] = post
 
-    # complete discussion
+    # discussion thread
     elif part[1] and part[1][0] == '@':
         author = part[1][1:]
         permlink = part[2]
@@ -300,7 +306,7 @@ async def get_state(path: str):
         accounts = set(map(lambda p: p['author'], state['content'].values()))
         state['accounts'] = {a['name']: a for a in _load_accounts(accounts)}
 
-    # trending pages
+    # trending/etc pages
     elif part[0] in ['trending', 'promoted', 'hot', 'created']:
         if part[2]:
             raise Exception("unexpected discussion path part[2] %s" % path)
@@ -379,13 +385,13 @@ async def _get_trending_tags():
     return out
 
 def _get_props_lite():
-    # TODO
+    # TODO: indexer should track basic props
     return {'total_vesting_fund_steem': '194924668.034 STEEM',
             'total_vesting_shares': '399773972659.129698 VESTS',
             'sbd_interest_rate': '0'}
 
 def _get_feed_price():
-    # TODO
+    # TODO: indexer should track head feed price
     return {"base": "1234.000 SBD", "quote": "1.000 STEEM"}
 
 def _load_discussion_recursive(author, permlink):
