@@ -3,11 +3,40 @@ import json
 from hive.db.methods import query, query_one, query_col, query_row, query_all
 from hive.indexer.steem_client import get_adapter
 
-#  INFO:jsonrpcserver.dispatcher.request:{"id":0,"jsonrpc":"2.0","method":"call","params":["database_api","get_state",["trending"]]}
+# e.g. {"id":0,"jsonrpc":"2.0","method":"call","params":["database_api","get_state",["trending"]]}
 async def call(api, method, params):
-    # passthrough
+    if method == 'get_followers':
+        return await get_followers(params[0], params[1], params[2], params[3])
+    elif method == 'get_following':
+        return await get_following(params[0], params[1], params[2], params[3])
+    elif method == 'get_follow_count':
+        return await get_follow_count(params[0])
+    elif method == 'get_discussions_by_trending':
+        return await get_discussions_by_trending(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+    elif method == 'get_discussions_by_hot':
+        return await get_discussions_by_hot(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+    elif method == 'get_discussions_by_promoted':
+        return await get_discussions_by_promoted(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+    elif method == 'get_discussions_by_created':
+        return await get_discussions_by_created(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+    elif method == 'get_discussions_by_blog':
+        return await get_discussions_by_blog(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+    elif method == 'get_discussions_by_feed':
+        return await get_discussions_by_feed(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+    elif method == 'get_discussions_by_comments':
+        return await get_discussions_by_comments(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+    elif method == 'get_replies_by_last_update':
+        return await get_replies_by_last_update(params[0], params[1], params[2])
+    elif method == 'get_content':
+        return await get_content(params[0], params[1]) # after submit vote/post
+    elif method == 'get_content_replies':
+        return await get_content_replies(params[0], params[1])
+    elif method == 'get_state':
+        return await get_state(params[0])
+
+    # passthrough -- TESTING ONLY!
     if method == 'get_dynamic_global_properties':
-        return get_adapter()._gdgp() # condenser only uses total_vesting_fund_steem, total_vesting_shares
+        return get_adapter()._gdgp() # condenser only uses total_vesting_fund_steem, total_vesting_shares, sbd_interest_rate
     elif method == 'get_accounts':
         return get_adapter().get_accounts(params[0])
     elif method == 'get_open_orders':
@@ -21,35 +50,7 @@ async def call(api, method, params):
     elif method == 'get_savings_withdraw_from':
         return get_adapter()._client.exec('get_savings_withdraw_from', params[0])
 
-    # native
-    if method == 'get_state':
-        return await get_state(params[0])
-    elif method == 'get_content':
-        return await get_content(params[0], params[1]) # after submit vote/post
-    elif method == 'get_discussions_by_trending':
-        return await get_discussions_by_trending(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
-    elif method == 'get_discussions_by_hot':
-        return await get_discussions_by_hot(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
-    elif method == 'get_discussions_by_created':
-        return await get_discussions_by_created(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
-    elif method == 'get_discussions_by_promoted':
-        return await get_discussions_by_promoted(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
-    elif method == 'get_discussions_by_blog':
-        return await get_discussions_by_blog(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
-    elif method == 'get_discussions_by_feed':
-        return await get_discussions_by_feed(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
-    elif method == 'get_discussions_by_comments':
-        return await get_discussions_by_comments(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
-    elif method == 'get_replies_by_last_update':
-        return await get_replies_by_last_update(params[0], params[1], params[2])
-    elif method == 'get_following':
-        return await get_following(params[0], params[1], params[2], params[3])
-    elif method == 'get_followers':
-        return await get_followers(params[0], params[1], params[2], params[3])
-    elif method == 'get_follow_count':
-        return await get_follow_count(params[0])
-    else:
-        raise Exception("not handled: {}/{}/{}".format(api, method, params))
+    raise Exception("unknown method: {}.{}({})".format(api, method, params))
 
 
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
@@ -112,16 +113,20 @@ async def get_follow_count(account: str):
     return dict(query_row(sql, n=account))
 
 
-async def get_discussions_by_trending(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+async def get_discussions_by_trending(start_author: str, start_permlink: str = '',
+                                      limit: int = 20, tag: str = None):
     return _get_discussions('trending', start_author, start_permlink, limit, tag)
 
-async def get_discussions_by_hot(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+async def get_discussions_by_hot(start_author: str, start_permlink: str = '',
+                                 limit: int = 20, tag: str = None):
     return _get_discussions('hot', start_author, start_permlink, limit, tag)
 
-async def get_discussions_by_promoted(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+async def get_discussions_by_promoted(start_author: str, start_permlink: str = '',
+                                      limit: int = 20, tag: str = None):
     return _get_discussions('promoted', start_author, start_permlink, limit, tag)
 
-async def get_discussions_by_created(start_author: str, start_permlink: str = '', limit: int = 20, tag: str = None):
+async def get_discussions_by_created(start_author: str, start_permlink: str = '',
+                                     limit: int = 20, tag: str = None):
     return _get_discussions('created', start_author, start_permlink, limit, tag)
 
 
@@ -132,12 +137,11 @@ async def get_discussions_by_blog(tag: str, start_author: str = '', start_permli
     seek = ''
 
     if start_permlink:
-        start_id = _get_post_id(start_author, start_permlink)
         seek = """
           AND created_at <= (
             SELECT created_at FROM hive_feed_cache
              WHERE account_id = :account_id AND post_id = %d)
-        """ % start_id
+        """ % _get_post_id(start_author, start_permlink)
 
     sql = """
         SELECT post_id FROM hive_feed_cache WHERE account_id = :account_id %s
@@ -155,13 +159,12 @@ async def get_discussions_by_feed(tag: str, start_author: str = '', start_permli
     seek = ''
 
     if start_permlink:
-        start_id = _get_post_id(start_author, start_permlink)
         seek = """
           HAVING MIN(hive_feed_cache.created_at) <= (
             SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = %d
                AND account_id IN (SELECT following FROM hive_follows
                                   WHERE follower = :account AND state = 1))
-        """ % start_id
+        """ % _get_post_id(start_author, start_permlink)
 
     sql = """
         SELECT post_id, string_agg(name, ',') accounts
@@ -193,9 +196,9 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
     seek = ''
 
     if start_permlink:
-        start_id = _get_post_id(start_author, start_permlink)
-        seek = ("AND created_at <= (SELECT created_at FROM hive_posts WHERE id = %d)"
-                % start_id)
+        seek = """
+          AND created_at <= (SELECT created_at FROM hive_posts WHERE id = %d)
+        """ % _get_post_id(start_author, start_permlink)
 
     sql = """
         SELECT id FROM hive_posts WHERE author = :account %s AND depth > 0
@@ -381,8 +384,6 @@ def _get_trending_tags(limit: int):
 
 def _load_discussion_recursive(author, permlink):
     post_id = _get_post_id(author, permlink)
-    if not post_id:
-        raise Exception("Post not found: {}/{}".format(author, permlink))
     return _load_posts_recursive([post_id])
 
 def _load_posts_recursive(post_ids):
@@ -468,10 +469,16 @@ def _follow_type_to_int(follow_type: str):
 
 def _get_post_id(author, permlink):
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    return query_one(sql, a=author, p=permlink)
+    _id = query_one(sql, a=author, p=permlink)
+    if not _id:
+        raise Exception("post not found: %s/%s" % (author, permlink))
+    return _id
 
 def _get_account_id(name):
-    return query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
+    _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
+    if not _id:
+        raise Exception("invalid account `%s`" % name)
+    return _id
 
 # given an array of post ids, returns full metadata in the same order
 def _get_posts(ids, context=None):
