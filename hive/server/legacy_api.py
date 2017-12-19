@@ -222,9 +222,9 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
         seek = "AND created_at <= '%s'" % start_date
 
     sql = """
-      SELECT id FROM hive_posts
-      WHERE parent_id IN (SELECT id FROM hive_posts WHERE author = :parent) %s
-      ORDER BY created_at DESC LIMIT :limit
+       SELECT id FROM hive_posts
+        WHERE parent_id IN (SELECT id FROM hive_posts WHERE author = :parent) %s
+     ORDER BY created_at DESC LIMIT :limit
     """ % seek
 
     ids = query_col(sql, parent=parent, limit=limit)
@@ -235,31 +235,25 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
 async def get_state(path: str):
     if path[0] == '/':
         path = path[1:]
-
     if not path:
         path = 'trending'
+    part = path.split('/')
+    if len(part) > 3:
+        raise Exception("invalid path %s" % path)
+    while len(part) < 3:
+        part.append('')
 
     state = {}
     state['current_route'] = path
     state['props'] = {'total_vesting_fund_steem': '194924668.034 STEEM', 'total_vesting_shares': '399773972659.129698 VESTS', 'sbd_interest_rate': '0'} # TODO
+    state['tags'] = {}
     state['tag_idx'] = {}
-    state['tag_idx']['trending'] = ["fake%d" % i for i in range(1, 21)] #TODO
+    state['tag_idx']['trending'] = [t['name'] for t in _get_trending_tags(50)]
     state['content'] = {}
     state['accounts'] = {}
     state['discussion_idx'] = {"": {}}
     state['feed_price'] = {"base": "1234.000 SBD", "quote": "1.000 STEEM"} # TODO?
-
-    part = path.split('/')
-    while len(part) < 3:
-        part.append('')
-
     state1 = "{}".format(state)
-
-    if len(part) > 3:
-        print("INVALID PATH: {}".format(path))
-        raise Exception("invalid path")
-
-    tag = path[1].lower()
 
     if part[0] and part[0][0] == '@':
         account = part[0][1:]
@@ -267,11 +261,13 @@ async def get_state(path: str):
 
         if not part[1]:
             part[1] = 'blog'
+        if part[2]:
+            raise Exception("unknown account path part %s" % path)
 
         if part[1] == 'transfers':
-            # TODO: proxy to steemd
-            state['accounts'][account]['transfer_history'] = [] # filtered get_account_history
-            state['accounts'][account]['other_history'] = [] # filtered get_account_history
+            # TODO: proxy to steemd, or filter get_account_history
+            state['accounts'][account]['transfer_history'] = []
+            state['accounts'][account]['other_history'] = []
 
         elif part[1] == 'recent-replies':
             state['accounts'][account]['recent_replies'] = []
@@ -305,41 +301,47 @@ async def get_state(path: str):
                 state['accounts'][account]['feed'].append(ref)
                 state['content'][ref] = post
 
+        else:
+            raise Exception("unknown account path %s" % path)
+
     # complete discussion
     elif part[1] and part[1][0] == '@':
         author = part[1][1:]
         permlink = part[2]
         state['content'] = _load_discussion_recursive(author, permlink)
-        accounts = set()
-        for ref, post in state['content'].items():
-            accounts.add(post['author'])
+        accounts = set(map(lambda p: p['author'], state['content'].values()))
         state['accounts'] = {a['name']: a for a in _load_accounts(accounts)}
 
+    # trending pages
     elif part[0] in ['trending', 'promoted', 'hot', 'created']:
         sort = part[0]
-        tag = part[1]
+        tag = part[1].lower()
         posts = _get_discussions(sort, '', '', 20, tag)
+        state['discussion_idx'][tag] = {}
         state['discussion_idx'][tag][sort] = []
         for post in posts:
             ref = post['author'] + '/' + post['permlink']
             state['content'][ref] = post
             state['discussion_idx'][tag][sort].append(ref)
 
+    # witness list
     elif part[0] == 'witnesses':
         raise Exception("not implemented")
 
+    # tag "explorer"
     elif part[0] == "tags":
-        # get_trending_tags
-        # state['tag_idx']['trending'] << t.name
-        # state['tags][t.name] << t
-        raise Exception("not implemented")
+        state['tag_idx']['trending'] = []
+        tags = _get_trending_tags(250)
+        for t in tags:
+            state['tag_idx']['trending'].append(t['name'])
+            state['tags'][t['name']] = t
 
     else:
         raise Exception("unknown path {}".format(path))
 
     state2 = "{}".format(state)
     if state1 == state2:
-        raise Exception("unrecognized path {}: {},{}".format(path, part[1], part[1][0]))
+        raise Exception("unrecognized path `{}`" % path)
 
     return state
 
@@ -354,6 +356,28 @@ async def get_content_replies(parent: str, parent_permlink: str):
     post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d" % post_id)
     return _get_posts(post_ids)
 
+
+def _get_trending_tags(limit: int):
+    sql = """
+      SELECT category,
+             COUNT(*) AS total_posts,
+             SUM(CASE WHEN depth = 0 THEN 1 ELSE 0 END) AS top_posts,
+             SUM(payout) AS total_payouts
+        FROM hive_posts_cache
+       WHERE is_paidout = '0'
+    GROUP BY category
+    ORDER BY SUM(payout) DESC
+       LIMIT :limit
+    """
+    out = []
+    for row in query_all(sql, limit=limit):
+        out.append({
+            'comments': row['total_posts'] - row['top_posts'],
+            'name': row['category'],
+            'top_posts': row['top_posts'],
+            'total_payouts': "%.3f SBD" % row['total_payouts']})
+
+    return out
 
 def _load_discussion_recursive(author, permlink):
     post_id = _get_post_id(author, permlink)
@@ -413,13 +437,13 @@ def _get_discussions(sort, start_author, start_permlink, limit, tag, context=Non
     return _get_posts(ids, context)
 
 def _load_accounts(names):
-    sql = "SELECT id,name,vote_weight,display_name,about,reputation FROM hive_accounts WHERE name IN :names"
+    sql = "SELECT id,name,display_name,about,reputation FROM hive_accounts WHERE name IN :names"
     accounts = []
     for row in query_all(sql, names=tuple(names)):
         account = {}
         account['name'] = row['name']
         account['reputation'] = _rep_to_raw(row['reputation'])
-        account['json_metadata'] = json.dumps({'profile':{'display_name':row['display_name'],'about':row['about']}})
+        account['json_metadata'] = json.dumps({'profile': {'name': row['display_name'], 'about': row['about']}})
         accounts.append(account)
 
     return accounts
