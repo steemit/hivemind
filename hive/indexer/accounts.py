@@ -153,7 +153,8 @@ class Accounts:
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
                 'active_at': account['last_bandwidth_update'],
                 'cached_at': block_date,
-                **cls._safe_account_metadata(account)
+                **cls._safe_account_metadata(account),
+                'raw_json': json.dumps(account)
             }
 
             update = ', '.join([k+" = :"+k for k in values.keys()][1:])

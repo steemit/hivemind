@@ -17,6 +17,7 @@ hive_blocks = sa.Table(
     sa.Column('hash', CHAR(40), nullable=False),
     sa.Column('prev', CHAR(40)),
     sa.Column('txs', SMALLINT, server_default='0', nullable=False),
+    sa.Column('ops', SMALLINT, server_default='0', nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
 
     sa.UniqueConstraint('hash', name='hive_blocks_ux1'),
@@ -32,24 +33,30 @@ hive_accounts = sa.Table(
     sa.Column('created_at', sa.DateTime, nullable=False),
     #sa.Column('block_num', sa.Integer, nullable=False),
     sa.Column('reputation', sa.Float(precision=6), nullable=False, server_default='25'),
+
     sa.Column('display_name', sa.String(20)),
     sa.Column('about', sa.String(160)),
     sa.Column('location', sa.String(30)),
     sa.Column('website', sa.String(100)),
     sa.Column('profile_image', sa.String(1024), nullable=False, server_default=''),
     sa.Column('cover_image', sa.String(1024), nullable=False, server_default=''),
-    sa.Column('proxy', VARCHAR(16), nullable=False, server_default=''),
-    sa.Column('post_count', sa.Integer, nullable=False, server_default='0'),
+
     sa.Column('followers', sa.Integer, nullable=False, server_default='0'),
     sa.Column('following', sa.Integer, nullable=False, server_default='0'),
+
+    sa.Column('proxy', VARCHAR(16), nullable=False, server_default=''),
+    sa.Column('post_count', sa.Integer, nullable=False, server_default='0'),
     sa.Column('proxy_weight', sa.Float(precision=6), nullable=False, server_default='0'),
     sa.Column('vote_weight', sa.Float(precision=6), nullable=False, server_default='0'),
     sa.Column('kb_used', sa.Integer, nullable=False, server_default='0'),
     sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
+
     sa.Column('active_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
     sa.Column('cached_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
+    sa.Column('raw_json', sa.Text),
 
     sa.UniqueConstraint('name', name='hive_accounts_ux1'),
+    sa.Index('hive_accounts_ix1', 'vote_weight', 'id'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -253,6 +260,18 @@ hive_posts_cache = sa.Table(
     mysql_default_charset='utf8mb4'
 )
 
+hive_state = sa.Table(
+    'hive_state', metadata,
+    sa.Column('block_num', sa.Integer, primary_key=True, autoincrement=False),
+    sa.Column('db_version', sa.Integer, nullable=False),
+    sa.Column('steem_per_mvest', sa.types.DECIMAL(6, 3), nullable=False),
+    sa.Column('usd_per_steem', sa.types.DECIMAL(6, 3), nullable=False),
+    sa.Column('sbd_per_steem', sa.types.DECIMAL(6, 3), nullable=False),
+    sa.Column('dgpo', sa.Text, nullable=False),
+
+    mysql_engine='InnoDB',
+    mysql_default_charset='utf8mb4'
+)
 
 _url = os.environ.get('DATABASE_URL', 'missing ENV DATABASE_URL')
 logging.basicConfig()
@@ -282,6 +301,10 @@ def setup(connection_url=_url):
         {'name': 'temp', 'created_at': '1970-01-01T00:00:00'},
         {'name': 'initminer', 'created_at': '1970-01-01T00:00:00'}
     ])
+
+    # Insert hive_state data
+    insert = hive_state.insert().values(block_num=0, db_version=0, steem_per_mvest=0, usd_per_steem=0, sbd_per_steem=0, dgpo='')
+    conn.execute(insert)
 
 
 def teardown(connection_url=_url):

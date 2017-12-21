@@ -385,14 +385,13 @@ async def _get_trending_tags():
     return out
 
 def _get_props_lite():
-    # TODO: indexer should track basic props
-    return {'total_vesting_fund_steem': '194924668.034 STEEM',
-            'total_vesting_shares': '399773972659.129698 VESTS',
-            'sbd_interest_rate': '0'}
+    # TODO: trim this response; really only need: total_vesting_fund_steem,
+    #   total_vesting_shares, sbd_interest_rate
+    return json.loads(query_one("SELECT dgpo FROM hive_state"))
 
 def _get_feed_price():
-    # TODO: indexer should track head feed price
-    return {"base": "1234.000 SBD", "quote": "1.000 STEEM"}
+    price = query_one("SELECT usd_per_steem FROM hive_state")
+    return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
 
 def _load_discussion_recursive(author, permlink):
     post_id = _get_post_id(author, permlink)

@@ -1,6 +1,7 @@
 import os
 import time
 import atexit
+from decimal import Decimal
 
 from .http_client import HttpClient, RPCError
 
@@ -9,7 +10,7 @@ class ClientStats:
     ttltime = 0.0
 
     @classmethod
-    def log(cls, nsql, ms, batch_size = 1):
+    def log(cls, nsql, ms, batch_size=1):
         if nsql not in cls.stats:
             cls.stats[nsql] = [0, 0]
         cls.stats[nsql][0] += ms
@@ -53,7 +54,8 @@ class SteemClient:
     def get_accounts(self, accounts):
         assert accounts, "no accounts passed to get_accounts"
         ret = self.__exec('get_accounts', accounts)
-        assert len(accounts) == len(ret), "requested %d accounts got %d" % (len(accounts),len(ret))
+        assert len(accounts) == len(ret), ("requested %d accounts got %d"
+                                           % (len(accounts), len(ret)))
         return ret
 
     def get_content_batch(self, tuples):
@@ -78,6 +80,33 @@ class SteemClient:
 
     def last_irreversible_block_num(self):
         return self._gdgp()['last_irreversible_block_num']
+
+    def gdgp_extended(self):
+        dgpo = self._gdgp()
+        return {
+            'dgpo': dgpo,
+            'usd_per_steem': self._get_feed_price(),
+            'sbd_per_steem': self._get_steem_price(),
+            'steem_per_mvest': self._get_steem_per_mvest(dgpo)}
+
+    def _get_steem_per_mvest(self, dgpo):
+        steem = Decimal(dgpo['total_vesting_fund_steem'].split(' ')[0])
+        mvests = Decimal(dgpo['total_vesting_shares'].split(' ')[0]) / Decimal(1e6)
+        return "0.000" # TODO: fix dumb column type
+        return "%.6f" % (steem / mvests)
+
+    def _get_feed_price(self):
+        feed = self.__exec('get_current_median_history_price')
+        units = dict([feed[k].split(' ')[::-1] for k in ['base', 'quote']])
+        price = Decimal(units['SBD']) / Decimal(units['STEEM'])
+        return "%.6f" % price
+
+    def _get_steem_price(self):
+        orders = self.__exec('get_order_book', 1)
+        ask = Decimal(orders['asks'][0]['real_price'])
+        bid = Decimal(orders['bids'][0]['real_price'])
+        price = (ask + bid) / 2
+        return "%.6f" % price
 
     def get_blocks_range(self, lbound, ubound): # [lbound, ubound)
         block_nums = range(lbound, ubound)
