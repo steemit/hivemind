@@ -83,6 +83,7 @@ class SteemClient:
 
     def gdgp_extended(self):
         dgpo = self._gdgp()
+        # TODO: fetch latest feed price in addition to median
         return {
             'dgpo': dgpo,
             'usd_per_steem': self._get_feed_price(),
