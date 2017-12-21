@@ -1,7 +1,36 @@
 import os
 import time
+import atexit
 
 from .http_client import HttpClient, RPCError
+
+class ClientStats:
+    stats = {}
+    ttltime = 0.0
+
+    @classmethod
+    def log(cls, nsql, ms, batch_size = 1):
+        if nsql not in cls.stats:
+            cls.stats[nsql] = [0, 0]
+        cls.stats[nsql][0] += ms
+        cls.stats[nsql][1] += batch_size
+        cls.ttltime += ms
+        if cls.ttltime > 30 * 60 * 1000:
+            cls.print()
+
+    @classmethod
+    def print(cls):
+        ttl = cls.ttltime
+        print("[DEBUG] total STEEM time: {}s".format(int(ttl / 1000)))
+        for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:
+            sql, vals = arr
+            ms, calls = vals
+            print("% 5.1f%% % 10.2fms % 7.2favg % 8dx -- %s"
+                  % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+        cls.stats = {}
+        cls.ttltime = 0
+
+atexit.register(ClientStats.print)
 
 _shared_adapter = None
 def get_adapter():
@@ -24,37 +53,21 @@ class SteemClient:
     def get_accounts(self, accounts):
         assert accounts, "no accounts passed to get_accounts"
         ret = self.__exec('get_accounts', accounts)
-        assert ret, "get_accounts response was blank"
         assert len(accounts) == len(ret), "requested %d accounts got %d" % (len(accounts),len(ret))
         return ret
 
     def get_content_batch(self, tuples):
         posts = self.__exec_batch('get_content', tuples)
-
-        # sanity-checking jussi responses
-        for post in posts:
-            assert post, "unexpected empty response: {}".format(post)
+        for post in posts: # sanity-checking jussi responses
             assert 'author' in post, "invalid post: {}".format(post)
-
         return posts
 
     def get_block(self, num):
         return self.__exec('get_block', num)
 
     def _gdgp(self):
-        tries = 0
-        while True:
-            try:
-                ret = self.__exec('get_dynamic_global_properties')
-                assert ret, "empty response for gdgp: {}".format(ret)
-                assert 'time' in ret, "gdgp invalid resp: {}".format(ret)
-            except (AssertionError, RPCError) as e:
-                tries += 1
-                print("gdgp failure, retry in {}s -- {}".format(tries, e))
-                time.sleep(tries)
-                continue
-            break
-
+        ret = self.__exec('get_dynamic_global_properties')
+        assert 'time' in ret, "gdgp invalid resp: {}".format(ret)
         return ret
 
     def head_time(self):
@@ -90,21 +103,47 @@ class SteemClient:
 
         return [blocks[x] for x in block_nums]
 
-    def __exec(self, method, *params):
-        return self._client.exec(method, *params)
 
+    # perform single steemd call
+    def __exec(self, method, *params):
+        time_start = time.perf_counter()
+        tries = 0
+        while True:
+            try:
+                result = self._client.exec(method, *params)
+                assert result, "empty response {}".format(result)
+            except (AssertionError, RPCError) as e:
+                tries += 1
+                print("{} failure, retry in {}s -- {}".format(method, tries, e))
+                time.sleep(tries)
+                continue
+            break
+
+        batch_size = len(params[0]) if method == 'get_accounts' else 1
+        total_time = int((time.perf_counter() - time_start) * 1000)
+        ClientStats.log("%s()" % method, total_time, batch_size)
+        return result
+
+    # perform batch call (if jussi is enabled, use batches; otherwise, multi)
     def __exec_batch(self, method, params):
-        """If jussi is enabled, use batch requests; otherwise, multi"""
+        time_start = time.perf_counter()
+        result = None
+
         if self._jussi:
             tries = 0
             while True:
                 try:
-                    return list(self._client.exec_batch(method, params, batch_size=500))
+                    result = list(self._client.exec_batch(method, params, batch_size=500))
+                    break
                 except (AssertionError, RPCError) as e:
                     tries += 1
                     print("batch {} failure, retry in {}s -- {}".format(method, tries, e))
                     time.sleep(tries)
                     continue
+        else:
+            result = list(self._client.exec_multi_with_futures(
+                method, params, max_workers=10))
 
-        return list(self._client.exec_multi_with_futures(
-            method, params, max_workers=10))
+        total_time = int((time.perf_counter() - time_start) * 1000)
+        ClientStats.log("%s()" % method, total_time, len(params))
+        return result
