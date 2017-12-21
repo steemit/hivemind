@@ -10,7 +10,7 @@ class ClientStats:
     ttltime = 0.0
 
     @classmethod
-    def log(cls, nsql, ms, batch_size = 1):
+    def log(cls, nsql, ms, batch_size=1):
         if nsql not in cls.stats:
             cls.stats[nsql] = [0, 0]
         cls.stats[nsql][0] += ms
@@ -54,7 +54,8 @@ class SteemClient:
     def get_accounts(self, accounts):
         assert accounts, "no accounts passed to get_accounts"
         ret = self.__exec('get_accounts', accounts)
-        assert len(accounts) == len(ret), "requested %d accounts got %d" % (len(accounts),len(ret))
+        assert len(accounts) == len(ret), ("requested %d accounts got %d"
+                                           % (len(accounts), len(ret)))
         return ret
 
     def get_content_batch(self, tuples):
@@ -82,9 +83,17 @@ class SteemClient:
 
     def gdgp_extended(self):
         dgpo = self._gdgp()
-        feed = self._get_feed_price()
-        price = self._get_steem_price()
-        return {'dgpo': dgpo, 'usd_per_steem': feed, 'sbd_per_steem': price}
+        return {
+            'dgpo': dgpo,
+            'usd_per_steem': self._get_feed_price(),
+            'sbd_per_steem': self._get_steem_price(),
+            'steem_per_mvest': self._get_steem_per_mvest(dgpo)}
+
+    def _get_steem_per_mvest(self, dgpo):
+        steem = Decimal(dgpo['total_vesting_fund_steem'].split(' ')[0])
+        mvests = Decimal(dgpo['total_vesting_shares'].split(' ')[0]) / Decimal(1e6)
+        return "0.000" # TODO: fix dumb column type
+        return "%.6f" % (steem / mvests)
 
     def _get_feed_price(self):
         feed = self.__exec('get_current_median_history_price')

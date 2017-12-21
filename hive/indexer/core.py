@@ -304,6 +304,10 @@ def listen_steemd(trail_blocks=2):
         secs = time.perf_counter() - start_time
         print(" -- {}ms{}".format(int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
+        # once a minute, update chain props
+        if num % 20 == 0:
+            update_chain_state()
+
         # approx once per hour, update accounts
         if num % 1200 == 0:
             print("Performing account maintenance...")
@@ -326,6 +330,19 @@ def cache_missing_posts():
     while missing:
         update_posts_batch(missing, get_adapter())
         missing = select_missing_posts(1e6)
+
+
+# refetch dynamic_global_properties, feed price, etc
+def update_chain_state():
+    state = get_adapter().gdgp_extended()
+    query("""UPDATE hive_state SET block_num = :block_num,
+             steem_per_mvest = :spm, usd_per_steem = :ups,
+             sbd_per_steem = :sps, dgpo = :dgpo""",
+          block_num=state['dgpo']['head_block_number'],
+          spm=state['steem_per_mvest'],
+          ups=state['usd_per_steem'],
+          sps=state['sbd_per_steem'],
+          dgpo=json.dumps(state['dgpo']))
 
 
 def run():
