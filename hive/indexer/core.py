@@ -103,10 +103,11 @@ def process_block(block, is_initial_sync=False):
     prev = block['previous']
     block_num = int(block_id[:8], base=16)
     txs = block['transactions']
+    ops = sum([len(tx['operations']) for tx in txs])
 
-    query("INSERT INTO hive_blocks (num, hash, prev, txs, created_at) "
-          "VALUES (:num, :hash, :prev, :txs, :date)",
-          num=block_num, hash=block_id, prev=prev, txs=len(txs), date=date)
+    query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
+          "VALUES (:num, :hash, :prev, :txs, :ops, :date)",
+          num=block_num, hash=block_id, prev=prev, txs=len(txs), ops=ops, date=date)
 
     accounts = set()
     comments = []
