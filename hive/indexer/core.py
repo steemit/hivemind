@@ -27,7 +27,7 @@ def db_last_block():
 
 def process_json_follow_op(account, op_json, block_date):
     """ Process legacy 'follow' plugin ops (follow/mute/clear, reblog) """
-    if type(op_json) != list:
+    if not isinstance(op_json, list):
         return
     if len(op_json) != 2:
         return
@@ -38,7 +38,7 @@ def process_json_follow_op(account, op_json, block_date):
 
     cmd, op_json = op_json  # ['follow', {data...}]
     if cmd == 'follow':
-        if type(op_json['what']) != list:
+        if not isinstance(op_json['what'], list):
             return
         what = first(op_json['what']) or 'clear'
         if what not in ['blog', 'clear', 'ignore']:
@@ -50,6 +50,8 @@ def process_json_follow_op(account, op_json, block_date):
         follower = op_json['follower']
         following = op_json['following']
 
+        if follower == following:
+            return  # can't follow self
         if follower != account:
             return  # impersonation
         if not all(map(Accounts.exists, [follower, following])):
@@ -157,7 +159,7 @@ def process_block(block, is_initial_sync=False):
         op_json = load_json_key(op, 'json')
 
         if op['id'] == 'follow':
-            if block_num < 6000000 and type(op_json) != list:
+            if block_num < 6000000 and not isinstance(op_json, list):
                 op_json = ['follow', op_json]  # legacy compat
             process_json_follow_op(account, op_json, date)
         elif op['id'] == 'com.steemit.community':
@@ -272,8 +274,8 @@ def listen_steemd(trail_blocks=2):
             block = steemd.get_block(curr_block)
 
         num = int(block['block_id'][:8], base=16)
-        print("[LIVE] Got block {} at {} with {} txs -- ".format(num,
-            block['timestamp'], len(block['transactions'])), end='')
+        print("[LIVE] Got block {} at {} with {} txs -- ".format(
+            num, block['timestamp'], len(block['transactions'])), end='')
 
         # ensure the block we received links to our last
         if last_hash and last_hash != block['previous']:
@@ -295,12 +297,11 @@ def listen_steemd(trail_blocks=2):
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
 
-        print("{} edits, {} payouts".format(len(dirty), len(paidout)))
+        print("{} edits, {} payouts".format(len(dirty), len(paidout)), end='')
         query("COMMIT")
-        secs = time.perf_counter() - start_time
 
-        if secs > 1:
-            print("WARNING: block {} process took {}s".format(num, secs))
+        secs = time.perf_counter() - start_time
+        print(" -- {}ms{}".format(int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
         # approx once per hour, update accounts
         if num % 1200 == 0:
