@@ -12,16 +12,13 @@ from toolz import partition_all
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
+from hive.indexer.cached_post import CachedPost
 from hive.indexer.steem_client import get_adapter
-from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts
+from hive.indexer.jobs import select_missing_posts, rebuild_feed_cache, select_paidout_posts
 from hive.indexer.community import process_json_community_op
 from hive.indexer.normalize import load_json_key
-from hive.indexer.cached_post import CachedPost
 
 log = logging.getLogger(__name__)
-
-def update_posts_batch(tuples, steemd, updated_at=None):
-    CachedPost.update_posts_batch(tuples, steemd, updated_at)
 
 # block-level routines
 # --------------------
@@ -247,12 +244,12 @@ def sync_from_steemd(is_initial_sync):
     if not is_initial_sync:
 
         print("[PREP] Update {} edited posts".format(len(dirty)))
-        update_posts_batch(Posts.urls_to_tuples(dirty), steemd)
+        CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd)
 
         date = steemd.head_time()
         paidout = select_paidout_posts(date)
         print("[PREP] Process {} payouts since {}".format(len(paidout), date))
-        update_posts_batch(paidout, steemd, date)
+        CachedPost.update_batch(paidout, steemd, date)
 
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
@@ -294,10 +291,10 @@ def listen_steemd(trail_blocks=2):
         query("START TRANSACTION")
 
         dirty = process_block(block)
-        update_posts_batch(Posts.urls_to_tuples(dirty), steemd, block['timestamp'])
+        CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd, block['timestamp'])
 
         paidout = select_paidout_posts(block['timestamp'])
-        update_posts_batch(paidout, steemd, block['timestamp'])
+        CachedPost.update_batch(paidout, steemd, block['timestamp'])
 
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
@@ -332,7 +329,7 @@ def cache_missing_posts(slow_mode=False):
     # process in batches of 1m posts
     missing = select_missing_posts(1e6, slow_mode)
     while missing:
-        update_posts_batch(missing, get_adapter())
+        CachedPost.update_batch(missing, get_adapter())
         missing = select_missing_posts(1e6)
 
 

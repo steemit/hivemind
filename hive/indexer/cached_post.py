@@ -10,7 +10,7 @@ from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 class CachedPost:
 
     @classmethod
-    def update_posts_batch(cls, tuples, steemd, updated_at=None):
+    def update_batch(cls, tuples, steemd, updated_at=None):
         # if calling function already has head_time, saves us a call
         if not updated_at:
             updated_at = steemd.head_time()
