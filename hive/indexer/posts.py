@@ -1,5 +1,5 @@
 from hive.db.methods import query, query_one, query_row, query_all
-from hive.indexer.normalize import rep_log10, amount, load_json_key
+from hive.indexer.normalize import load_json_key
 from hive.indexer.accounts import Accounts
 
 class Posts:
@@ -50,7 +50,6 @@ class Posts:
             tuples.append([pid, author, permlink])
         return tuples
 
-
     # given a comment op, safely read 'community' field from json
     @classmethod
     def _get_op_community(cls, comment):
@@ -58,8 +57,6 @@ class Posts:
         if not md or type(md) is not dict or 'community' not in md:
             return None
         return md['community']
-
-
 
     # marks posts as deleted and removes them from feed cache
     @classmethod
@@ -69,7 +66,6 @@ class Posts:
             query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=post_id)
             query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
             query("DELETE FROM hive_feed_cache WHERE post_id = :id", id=post_id)
-
 
     # registers new posts (not edits), inserts into feed cache
     @classmethod
@@ -137,48 +133,3 @@ class Posts:
             if not op['parent_permlink']:
                 sql = "INSERT INTO hive_feed_cache (account_id, post_id, created_at) VALUES (:account_id, :id, :created_at)"
                 query(sql, account_id=Accounts.get_id(op['author']), id=pid, created_at=block_date)
-
-
-    # cache methods
-    # -------------
-
-    @classmethod
-    def get_post_stats(cls,post):
-        net_rshares_adj = 0
-        neg_rshares = 0
-        total_votes = 0
-        up_votes = 0
-        for vote in post['active_votes']:
-            if vote['percent'] == 0:
-                continue
-
-            total_votes += 1
-            rshares = int(vote['rshares'])
-            sign = 1 if vote['percent'] > 0 else -1
-            if sign > 0:
-                up_votes += 1
-            if sign < 0:
-                neg_rshares += rshares
-
-            # For graying: sum rshares, but ignore neg rep users and dust downvotes
-            neg_rep = str(vote['reputation'])[0] == '-'
-            if not (neg_rep and sign < 0 and len(str(rshares)) < 11):
-                net_rshares_adj += rshares
-
-        # take negative rshares, divide by 2, truncate 10 digits (plus neg sign),
-        #   and count digits. creates a cheap log10, stake-based flag weight.
-        #   result: 1 = approx $400 of downvoting stake; 2 = $4,000; etc
-        flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
-
-        author_rep = rep_log10(post['author_reputation'])
-        is_low_value = net_rshares_adj < -9999999999
-        has_pending_payout = amount(post['pending_payout_value']) >= 0.02
-
-        return {
-            'hide': not has_pending_payout and (author_rep < 0),
-            'gray': not has_pending_payout and (author_rep < 1 or is_low_value),
-            'author_rep': author_rep,
-            'flag_weight': flag_weight,
-            'total_votes': total_votes,
-            'up_votes': up_votes
-        }

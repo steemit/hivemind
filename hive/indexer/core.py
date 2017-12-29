@@ -13,11 +13,15 @@ from toolz import partition_all
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.steem_client import get_adapter
-from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts, update_posts_batch
+from hive.indexer.cache import select_missing_posts, rebuild_feed_cache, select_paidout_posts
 from hive.indexer.community import process_json_community_op
 from hive.indexer.normalize import load_json_key
+from hive.indexer.cached_post import CachedPost
 
 log = logging.getLogger(__name__)
+
+def update_posts_batch(tuples, steemd, updated_at=None):
+    CachedPost.update_posts_batch(tuples, steemd, updated_at)
 
 # block-level routines
 # --------------------
@@ -315,18 +319,18 @@ def listen_steemd(trail_blocks=2):
             Accounts.update_ranks()
 
 
-def cache_missing_posts():
+def cache_missing_posts(slow_mode=False):
     # cached posts inserted sequentially, so just compare MAX(id)'s
     sql = ("SELECT (SELECT COALESCE(MAX(id), 0) FROM hive_posts) - "
            "(SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache)")
     missing_count = query_one(sql)
     print("[INIT] Found {} missing post cache entries".format(missing_count))
 
-    if not missing_count:
+    if not missing_count and not slow_mode:
         return
 
     # process in batches of 1m posts
-    missing = select_missing_posts(1e6)
+    missing = select_missing_posts(1e6, slow_mode)
     while missing:
         update_posts_batch(missing, get_adapter())
         missing = select_missing_posts(1e6)
