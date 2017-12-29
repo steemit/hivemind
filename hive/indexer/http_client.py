@@ -209,6 +209,20 @@ class HttpClient(object):
                     [*response.REDIRECT_STATUSES, 200]):
                 logger.info('non 200 response:%s', response.status)
 
+            # //---
+            # (debug) retry on appbase random lock error
+            #try:
+            #    response_json = json.loads(response.data.decode('utf-8'))
+            #except Exception as e:
+            #    extra = dict(response=response, request_args=args, err=e)
+            #    logger.error('failed to load response', extra=extra)
+            #if response_json and 'error' in response_json:
+            #    print("RPC Error Response, retrying. {} -- {} {}".format(response_json, name, args))
+            #    return self.exec(name, *args,
+            #                     return_with_args=return_with_args,
+            #                     _ret_cnt=_ret_cnt + 1)
+            # //---
+
             return self._return(
                 response=response,
                 args=args,
