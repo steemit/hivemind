@@ -61,7 +61,7 @@ class Accounts:
     @classmethod
     def cache_old(cls):
         print("Caching old accounts...")
-        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < (NOW() AT TIME ZONE 'utc') - INTERVAL '12 HOUR' ORDER BY cached_at LIMIT 50000"))
+        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < NOW() - INTERVAL 12 HOUR ORDER BY cached_at LIMIT 50000"))
 
     @classmethod
     def cache_dirty(cls):
@@ -102,10 +102,11 @@ class Accounts:
     @classmethod
     def update_ranks(cls):
         sql = """
-        UPDATE hive_accounts
-           SET rank = r.rnk
-          FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY vote_weight DESC) as rnk FROM hive_accounts) r
-         WHERE hive_accounts.id = r.id AND rank != r.rnk;
+        UPDATE hive_accounts JOIN (
+            SELECT id, @rownum:=@rownum+1 rank
+            FROM hive_accounts, (SELECT @rownum:=0) r
+            ORDER BY vote_weight DESC
+        ) ranks USING(id) SET hive_accounts.rank = ranks.rank
         """
         query(sql)
         return

@@ -219,7 +219,7 @@ class CachedPost:
         cols = ', '.join(fields)
         params = ', '.join([':'+k for k in fields])
         update = ', '.join([k+" = :"+k for k in fields][1:])
-        sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON CONFLICT (post_id) DO UPDATE SET %s"
+        sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON DUPLICATE KEY UPDATE %s"
         sqls.append((sql % (cols, params, update), values))
 
         # update tag metadata only for top-level posts
@@ -228,12 +228,12 @@ class CachedPost:
             sqls.append((sql, {'id': pid}))
 
             if tags:
-                sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES "
+                sql = "INSERT IGNORE INTO hive_post_tags (post_id, tag) VALUES "
                 params = {}
                 vals = []
                 for i, tag in enumerate(tags):
                     vals.append("(:id, :t%d)" % i)
                     params["t%d"%i] = tag
-                sqls.append((sql + ','.join(vals) + " ON CONFLICT DO NOTHING", {'id': pid, **params}))
+                sqls.append((sql + ','.join(vals), {'id': pid, **params}))
 
         return sqls
