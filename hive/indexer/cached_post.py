@@ -6,8 +6,24 @@ import collections
 from funcy.seqs import first
 from hive.db.methods import query
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
+from hive.indexer.steem_client import get_adapter
 
 class CachedPost:
+
+    @classmethod
+    def update(cls, post_id, author, permlink, block_date=None):
+        # TODO: replace with cache queue? otherwise, re-insert previously-deleted posts. see #48
+        steemd = get_adapter()
+        if not block_date:
+            block_date = steemd.head_time()
+        post = first(steemd.get_content_batch([[author, permlink]]))
+        if not post['author']:
+            print("attempt to update single post failed: %s/%s" % (author,permlink))
+            return # post has been deleted
+        sqls = cls._generate_cached_post_sql(post_id, post, block_date)
+        for (sql, params) in sqls:
+            query(sql, **params)
+        print("single post updated: %s/%s" % (author, permlink))
 
     @classmethod
     def update_batch(cls, tuples, steemd, updated_at=None):

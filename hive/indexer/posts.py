@@ -113,7 +113,7 @@ class Posts:
             if pid:
                 query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0', parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
                       is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid)
-                # TODO: ensure that a hive_posts_cache record is created immediately (#48)
+                CachedPost.update(pid, op['author'], op['permlink'], block_date) # ensure cache record is rebuilt. #48
             else:
                 sql = """
                 INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
