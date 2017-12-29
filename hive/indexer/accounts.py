@@ -61,7 +61,7 @@ class Accounts:
     @classmethod
     def cache_old(cls):
         print("Caching old accounts...")
-        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < (NOW() AT TIME ZONE 'utc') - INTERVAL '12 HOUR'"))
+        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < (NOW() AT TIME ZONE 'utc') - INTERVAL '12 HOUR' ORDER BY cached_at LIMIT 50000"))
 
     @classmethod
     def cache_dirty(cls):
@@ -77,8 +77,6 @@ class Accounts:
 
     @classmethod
     def cache_accounts(cls, accounts):
-        from hive.indexer.cache import batch_queries
-
         processed = 0
         total = len(accounts)
 
@@ -88,7 +86,7 @@ class Accounts:
             lap_0 = time.perf_counter()
             sqls = cls._generate_cache_sqls(batch)
             lap_1 = time.perf_counter()
-            batch_queries(sqls)
+            self._batch_update(sqls)
             lap_2 = time.perf_counter()
 
             if len(batch) < 1000:
@@ -137,6 +135,13 @@ class Accounts:
         query(sql, ids=tuple(ids))
 
     @classmethod
+    def _batch_update(sqls):
+        query("START TRANSACTION")
+        for (sql, params) in sqls:
+            query(sql, **params)
+        query("COMMIT")
+
+    @classmethod
     def _generate_cache_sqls(cls, accounts, block_date=None):
         if not block_date:
             block_date = get_adapter().head_time()
@@ -159,7 +164,7 @@ class Accounts:
 
             update = ', '.join([k+" = :"+k for k in values.keys()][1:])
             sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
-            sqls.append([(sql, values)])
+            sqls.append((sql, values))
         return sqls
 
     @classmethod
