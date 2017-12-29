@@ -12,7 +12,7 @@ from hive.indexer.posts import Posts
 logger = logging.getLogger(__name__)
 
 
-def score(rshares, created_timestamp, timescale=480000):
+def _score(rshares, created_timestamp, timescale=480000):
     mod_score = rshares / 10000000.0
     order = math.log10(max((abs(mod_score), 1)))
     sign = 1 if mod_score > 0 else -1
@@ -87,8 +87,8 @@ def _generate_cached_post_sql(pid, post, updated_at):
 
     # trending scores
     timestamp = parse_time(post['created']).timestamp()
-    hot_score = score(rshares, timestamp, 10000)
-    trend_score = score(rshares, timestamp, 480000)
+    hot_score = _score(rshares, timestamp, 10000)
+    trend_score = _score(rshares, timestamp, 480000)
 
     if post['body'].find('\x00') > -1:
         print("bad body: {}".format(post['body']))
@@ -239,6 +239,8 @@ def select_missing_posts(limit=None, fast_mode=True):
         all_ids = query_col("SELECT id FROM hive_posts WHERE is_deleted = '0'")
         cached_ids = query_col("SELECT post_id FROM hive_posts_cache")
         missing_ids = set(all_ids) - set(cached_ids)
+        if not missing_ids:
+            return []
         where = "id IN (%s)" % ','.join(map(str, missing_ids))
 
     if limit:
@@ -259,7 +261,23 @@ def select_paidout_posts(block_date):
     """
     return list(query(sql, date=block_date))
 
+# (debug) thorough scan for missing posts_cache records
+def audit_missing_posts():
+    start = 20400000
+    id1 = query_col("SELECT id FROM hive_posts WHERE is_deleted = '0' AND id >= %d" % start)
+    id2 = query_col("SELECT post_id FROM hive_posts_cache WHERE post_id >= %d" % start)
+    missing = set(id1) - set(id2)
+
+    print("missing count: %d -- %s" % (len(missing), missing))
+    if not missing:
+        return
+
+    sql = "SELECT id, author, permlink, to_char(created_at, 'YYYY-MM-DD HH24:MI') created FROM hive_posts WHERE id IN :ids"
+    rows = query_all(sql, ids=tuple(missing))
+    for row in rows:
+        print(row)
 
 
 if __name__ == '__main__':
+    audit_missing_posts()
     pass

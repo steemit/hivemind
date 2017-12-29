@@ -86,7 +86,7 @@ class Accounts:
             lap_0 = time.perf_counter()
             sqls = cls._generate_cache_sqls(batch)
             lap_1 = time.perf_counter()
-            self._batch_update(sqls)
+            cls._batch_update(sqls)
             lap_2 = time.perf_counter()
 
             if len(batch) < 1000:
@@ -135,7 +135,7 @@ class Accounts:
         query(sql, ids=tuple(ids))
 
     @classmethod
-    def _batch_update(sqls):
+    def _batch_update(cls, sqls):
         query("START TRANSACTION")
         for (sql, params) in sqls:
             query(sql, **params)
