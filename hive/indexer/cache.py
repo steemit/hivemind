@@ -19,7 +19,7 @@ def score(rshares, created_timestamp, timescale=480000):
     return sign * order + created_timestamp / timescale
 
 
-def batch_queries(batches):
+def _batch_queries(batches):
     query("START TRANSACTION")
     for queries in batches:
         for (sql, params) in queries:
@@ -27,12 +27,12 @@ def batch_queries(batches):
     query("COMMIT")
 
 
-def vote_csv_row(vote):
+def _vote_csv_row(vote):
     return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']),
                      str(rep_log10(vote['reputation']))))
 
 
-def generate_cached_post_sql(pid, post, updated_at):
+def _generate_cached_post_sql(pid, post, updated_at):
     if not post['author']:
         raise Exception("ERROR: post id {} has no chain state.".format(pid))
 
@@ -63,7 +63,7 @@ def generate_cached_post_sql(pid, post, updated_at):
 
     # get total rshares, and create comma-separated vote data blob
     rshares = sum(int(v['rshares']) for v in post['active_votes'])
-    csvotes = "\n".join(map(vote_csv_row, post['active_votes']))
+    csvotes = "\n".join(map(_vote_csv_row, post['active_votes']))
 
     payout_declined = False
     if amount(post['max_accepted_payout']) == 0:
@@ -183,11 +183,11 @@ def update_posts_batch(tuples, steemd, updated_at=None):
             if not post['author']:
                 continue # post has been deleted
             url = post['author'] + '/' + post['permlink']
-            sql = generate_cached_post_sql(ids[url], post, updated_at)
+            sql = _generate_cached_post_sql(ids[url], post, updated_at)
             buffer.append(sql)
 
         lap_1 = time.perf_counter()
-        batch_queries(buffer)
+        _batch_queries(buffer)
         lap_2 = time.perf_counter()
 
         if total >= 500:
@@ -236,7 +236,10 @@ def select_missing_posts(limit=None, fast_mode=True):
     if fast_mode:
         where = "id > (SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache)"
     else:
-        where = "id NOT IN (SELECT post_id FROM hive_posts_cache)"
+        all_ids = query_col("SELECT id FROM hive_posts WHERE is_deleted = '0'")
+        cached_ids = query_col("SELECT post_id FROM hive_posts_cache")
+        missing_ids = set(all_ids) - set(cached_ids)
+        where = "id IN (%s)" % ','.join(map(str, missing_ids))
 
     if limit:
         limit = "LIMIT %d" % limit
