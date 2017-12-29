@@ -4,6 +4,7 @@ import json
 import logging
 import socket
 import time
+import os
 from functools import partial
 from http.client import RemoteDisconnected
 from itertools import cycle
@@ -15,6 +16,8 @@ import urllib3
 
 from urllib3.connection import HTTPConnection
 from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError
+
+USE_APPBASE = (os.environ.get('USE_APPBASE') in ('true', 'yes', '1'))
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
@@ -149,7 +152,10 @@ class HttpClient(object):
         if api:
             body_dict = {**headers, "method": "call", "params": [api, name, args]}
         else:
-            body_dict = {**headers, "method": name, "params": args}
+            if USE_APPBASE:
+                body_dict = {**headers, "method": "condenser_api."+name, "params": args}
+            else:
+                body_dict = {**headers, "method": name, "params": args}
         if as_json:
             return json.dumps(body_dict, ensure_ascii=False).encode('utf8')
         else:
