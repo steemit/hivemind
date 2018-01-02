@@ -5,19 +5,20 @@ import time
 import re
 import os
 
-from funcy.seqs import first, second, drop, flatten
-from hive.db.schema import setup, teardown
-from hive.db.methods import db_needs_setup, query_one, query, query_row
+from funcy.seqs import drop
 from toolz import partition_all
+
+from hive.db.db_state import DbState
+from hive.db.methods import query_one, query
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
+from hive.indexer.custom_op import CustomOp
+
 from hive.indexer.steem_client import get_adapter
 from hive.indexer.jobs import select_missing_posts, select_paidout_posts
-from hive.indexer.community import process_json_community_op
-from hive.indexer.normalize import load_json_key
 
 log = logging.getLogger(__name__)
 
@@ -27,87 +28,18 @@ log = logging.getLogger(__name__)
 def db_last_block():
     return query_one("SELECT MAX(num) FROM hive_blocks") or 0
 
-def process_json_follow_op(account, op_json, block_date):
-    """ Process legacy 'follow' plugin ops (follow/mute/clear, reblog) """
-    if not isinstance(op_json, list):
-        return
-    if len(op_json) != 2:
-        return
-    if first(op_json) not in ['follow', 'reblog']:
-        return
-    if not isinstance(second(op_json), dict):
-        return
-
-    cmd, op_json = op_json  # ['follow', {data...}]
-    if cmd == 'follow':
-        if not isinstance(op_json['what'], list):
-            return
-        what = first(op_json['what']) or 'clear'
-        if what not in ['blog', 'clear', 'ignore']:
-            return
-        if not all([key in op_json for key in ['follower', 'following']]):
-            print("bad follow op: {} {}".format(block_date, op_json))
-            return
-
-        follower = op_json['follower']
-        following = op_json['following']
-
-        if follower == following:
-            return  # can't follow self
-        if follower != account:
-            return  # impersonation
-        if not all(map(Accounts.exists, [follower, following])):
-            return  # invalid input
-
-        sql = """
-        INSERT INTO hive_follows (follower, following, created_at, state)
-        VALUES (:fr, :fg, :at, :state) ON CONFLICT (follower, following) DO UPDATE SET state = :state
-        """
-        state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
-        query(sql, fr=Accounts.get_id(follower), fg=Accounts.get_id(following), at=block_date, state=state)
-        Accounts.dirty_follows(follower)
-        Accounts.dirty_follows(following)
-
-    elif cmd == 'reblog':
-        blogger = op_json['account']
-        author = op_json['author']
-        permlink = op_json['permlink']
-
-        if blogger != account:
-            return  # impersonation
-        if not all(map(Accounts.exists, [author, blogger])):
-            return
-
-        post_id, depth = Posts.get_id_and_depth(author, permlink)
-
-        if depth > 0:
-            return  # prevent comment reblogs
-
-        if not post_id:
-            print("reblog: post not found: {}/{}".format(author, permlink))
-            return
-
-        if 'delete' in op_json and op_json['delete'] == 'delete':
-            query("DELETE FROM hive_reblogs WHERE account = :a AND post_id = :pid LIMIT 1", a=blogger, pid=post_id)
-            FeedCache.delete(post_id, Accounts.get_id(blogger))
-        else:
-            sql = "INSERT INTO hive_reblogs (account, post_id, created_at) VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING"
-            query(sql, a=blogger, pid=post_id, date=block_date)
-            FeedCache.insert(post_id, Accounts.get_id(blogger), block_date)
-
-
 # process a single block. always wrap in a transaction!
 def process_block(block, is_initial_sync=False):
     date = block['timestamp']
     block_id = block['block_id']
     prev = block['previous']
-    block_num = int(block_id[:8], base=16)
+    num = int(block_id[:8], base=16)
     txs = block['transactions']
     ops = sum([len(tx['operations']) for tx in txs])
 
     query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
           "VALUES (:num, :hash, :prev, :txs, :ops, :date)",
-          num=block_num, hash=block_id, prev=prev, txs=len(txs), ops=ops, date=date)
+          num=num, hash=block_id, prev=prev, txs=len(txs), ops=ops, date=date)
 
     accounts = set()
     comments = []
@@ -142,30 +74,11 @@ def process_block(block, is_initial_sync=False):
     Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
     Posts.register(comments, date)  # if this is a new post, add the entry and validate community param
     Posts.delete(deleted)  # mark hive_posts record as deleted
+    CustomOp.process_ops(json_ops, num, date)  # take care of follows, reblogs, community actions
 
-    for op in json_ops:
-        if op['id'] not in ['follow', 'com.steemit.community']:
-            continue
-
-        # we are assuming `required_posting_auths` is always used and length 1.
-        # it may be that some ops will require `required_active_auths` instead
-        # (e.g. if we use that route for admin action of acct creation)
-        # if op['required_active_auths']:
-        #    log.warning("unexpected active auths: %s" % op)
-        if len(op['required_posting_auths']) != 1:
-            log.warning("unexpected auths: %s" % op)
-            continue
-
-        account = op['required_posting_auths'][0]
-        op_json = load_json_key(op, 'json')
-
-        if op['id'] == 'follow':
-            if block_num < 6000000 and not isinstance(op_json, list):
-                op_json = ['follow', op_json]  # legacy compat
-            process_json_follow_op(account, op_json, date)
-        elif op['id'] == 'com.steemit.community':
-            if block_num > 13e6:
-                process_json_community_op(account, op_json, date)
+    # on initial sync, don't bother returning touched posts
+    if is_initial_sync:
+        return set()
 
     # return all posts modified this block
     return dirty
@@ -218,9 +131,10 @@ def sync_from_steemd(is_initial_sync):
 
     lbound = db_last_block() + 1
     ubound = steemd.last_irreversible_block_num()
+    if ubound < lbound:
+        return
 
-    print("[SYNC] {} blocks to batch sync".format(ubound - lbound + 1))
-    print("[SYNC] start sync from block %d" % lbound)
+    print("[SYNC] from %d +%d blocks to sync" % (lbound, ubound - lbound + 1))
 
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
@@ -240,7 +154,7 @@ def sync_from_steemd(is_initial_sync):
         lbound = to
 
     # batch update post cache after catching up to head block
-    if not is_initial_sync:
+    if not DbState.is_initial_sync():
 
         print("[PREP] Update {} edited posts".format(len(dirty)))
         CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd, None, True)
@@ -278,10 +192,6 @@ def listen_steemd(trail_blocks=2):
             time.sleep(0.5)
             block = steemd.get_block(curr_block)
 
-        num = int(block['block_id'][:8], base=16)
-        print("[LIVE] Got block {} at {} with {} txs -- ".format(
-            num, block['timestamp'], len(block['transactions'])), end='')
-
         # ensure the block we received links to our last
         if last_hash and last_hash != block['previous']:
             # this condition is very rare unless trail_blocks is 0 and fork is
@@ -302,9 +212,12 @@ def listen_steemd(trail_blocks=2):
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
 
-        print("{} edits, {} payouts".format(len(dirty), len(paidout)), end='')
         query("COMMIT")
 
+        num = int(block['block_id'][:8], base=16)
+        print("[LIVE] Got block {} at {} with {} txs -- ".format(
+            num, block['timestamp'], len(block['transactions'])), end='')
+        print("{} edits, {} payouts".format(len(dirty), len(paidout)), end='')
         secs = time.perf_counter() - start_time
         print(" -- {}ms{}".format(int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
@@ -315,7 +228,7 @@ def listen_steemd(trail_blocks=2):
         # approx once per hour, update accounts
         if num % 1200 == 0:
             print("Performing account maintenance...")
-            Accounts.cache_oldest(10000)
+            Accounts.cache_oldest(50000)
             Accounts.update_ranks()
 
 
@@ -350,14 +263,12 @@ def update_chain_state():
 
 
 def run():
-    if db_needs_setup():
-        print("[INIT] Initializing db...")
-        setup()
+    DbState.initialize()
 
     #TODO: if initial sync is interrupted, cache never rebuilt
     #TODO: do not build partial feed_cache during init_sync
     # if this is the initial sync, batch updates until very end
-    is_initial_sync = not query_one("SELECT 1 FROM hive_posts_cache LIMIT 1")
+    is_initial_sync = DbState.is_initial_sync()
 
     if is_initial_sync:
         print("[INIT] *** Initial sync. db_last_block: %d ***" % db_last_block())
@@ -376,6 +287,7 @@ def run():
         print("[INIT] *** Initial sync complete. Rebuilding cache. ***")
         cache_missing_posts()
         FeedCache.rebuild()
+        State.initial_sync_finished()
 
     # initialization complete. follow head blocks
     while True:
