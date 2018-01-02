@@ -13,8 +13,9 @@ from toolz import partition_all
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.cached_post import CachedPost
+from hive.indexer.feed_cache import FeedCache
 from hive.indexer.steem_client import get_adapter
-from hive.indexer.jobs import select_missing_posts, rebuild_feed_cache, select_paidout_posts
+from hive.indexer.jobs import select_missing_posts, select_paidout_posts
 from hive.indexer.community import process_json_community_op
 from hive.indexer.normalize import load_json_key
 
@@ -88,13 +89,11 @@ def process_json_follow_op(account, op_json, block_date):
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
             query("DELETE FROM hive_reblogs WHERE account = :a AND post_id = :pid LIMIT 1", a=blogger, pid=post_id)
-            sql = "DELETE FROM hive_feed_cache WHERE account_id = :account_id AND post_id = :id"
-            query(sql, account_id=Accounts.get_id(blogger), id=post_id)
+            FeedCache.delete(post_id, Accounts.get_id(blogger))
         else:
             sql = "INSERT INTO hive_reblogs (account, post_id, created_at) VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING"
             query(sql, a=blogger, pid=post_id, date=block_date)
-            sql = "INSERT INTO hive_feed_cache (account_id, post_id, created_at) VALUES (:account_id, :id, :created_at) ON CONFLICT (account_id, post_id) DO NOTHING"
-            query(sql, account_id=Accounts.get_id(blogger), id=post_id, created_at=block_date)
+            FeedCache.insert(post_id, Accounts.get_id(blogger), block_date)
 
 
 # process a single block. always wrap in a transaction!
@@ -372,7 +371,7 @@ def run():
     if is_initial_sync:
         print("[INIT] *** Initial sync complete. Rebuilding cache. ***")
         cache_missing_posts()
-        rebuild_feed_cache()
+        FeedCache.rebuild()
 
     # initialization complete. follow head blocks
     listen_steemd()

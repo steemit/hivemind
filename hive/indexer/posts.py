@@ -1,7 +1,8 @@
-from hive.db.methods import query, query_one, query_row, query_all
+from hive.db.methods import query, query_one, query_row
 from hive.indexer.normalize import load_json_key
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
+from hive.indexer.feed_cache import FeedCache
 
 class Posts:
     _post_ids = {}
@@ -66,7 +67,7 @@ class Posts:
             post_id, depth = cls.get_id_and_depth(op['author'], op['permlink'])
             query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=post_id)
             query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
-            query("DELETE FROM hive_feed_cache WHERE post_id = :id", id=post_id)
+            FeedCache.delete(post_id)
 
     # registers new posts (not edits), inserts into feed cache
     @classmethod
@@ -104,7 +105,6 @@ class Posts:
             if not Accounts.exists(community):
                 community = op['author']
 
-
             # validated community; will return None if invalid & defaults to author.
             is_valid = is_community_post_valid(community, op)
             if not is_valid:
@@ -127,10 +127,9 @@ class Posts:
                       category=category, community=community,
                       depth=depth, date=block_date)
 
-                pid = query_one("SELECT id FROM hive_posts WHERE author = :a AND "
-                                "permlink = :p", a=op['author'], p=op['permlink'])
-
             # add top-level posts to feed cache
             if not op['parent_author']:
-                sql = "INSERT INTO hive_feed_cache (account_id, post_id, created_at) VALUES (:account_id, :id, :created_at)"
-                query(sql, account_id=Accounts.get_id(op['author']), id=pid, created_at=block_date)
+                if not pid:
+                    pid = query_one("SELECT id FROM hive_posts WHERE author = :a AND "
+                                    "permlink = :p", a=op['author'], p=op['permlink'])
+                FeedCache.insert(pid, Accounts.get_id(op['author']), block_date)
