@@ -29,7 +29,7 @@ def db_last_block():
     return query_one("SELECT MAX(num) FROM hive_blocks") or 0
 
 # process a single block. always wrap in a transaction!
-def process_block(block, is_initial_sync=False):
+def process_block(block):
     date = block['timestamp']
     block_id = block['block_id']
     prev = block['previous']
@@ -76,10 +76,6 @@ def process_block(block, is_initial_sync=False):
     Posts.delete(deleted)  # mark hive_posts record as deleted
     CustomOp.process_ops(json_ops, num, date)  # take care of follows, reblogs, community actions
 
-    # on initial sync, don't bother returning touched posts
-    if is_initial_sync:
-        return set()
-
     # return all posts modified this block
     return dirty
 
@@ -89,7 +85,10 @@ def process_blocks(blocks, is_initial_sync=False):
     dirty = set()
     query("START TRANSACTION")
     for block in blocks:
-        dirty |= process_block(block, is_initial_sync)
+        if is_initial_sync:
+            process_block(block)
+        else:
+            dirty |= process_block(block)
     query("COMMIT")
     return dirty
 
@@ -98,7 +97,7 @@ def process_blocks(blocks, is_initial_sync=False):
 # sync routines
 # -------------
 
-def sync_from_checkpoints(is_initial_sync):
+def sync_from_checkpoints():
     last_block = db_last_block()
 
     fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
@@ -111,21 +110,22 @@ def sync_from_checkpoints(is_initial_sync):
         if last_block < num:
             print("[SYNC] Load {} -- last block: {}".format(path, last_block))
             skip_lines = last_block - last_read
-            sync_from_file(path, skip_lines, 250, is_initial_sync)
+            sync_from_file(path, skip_lines, 250)
             last_block = num
         last_read = num
 
 
-def sync_from_file(file_path, skip_lines, chunk_size=250, is_initial_sync=False):
+def sync_from_file(file_path, skip_lines, chunk_size=250):
     with open(file_path) as f:
         # each line in file represents one block
         # we can skip the blocks we already have
         remaining = drop(skip_lines, f)
         for batch in partition_all(chunk_size, remaining):
-            process_blocks(map(json.loads, batch), is_initial_sync)
+            process_blocks(map(json.loads, batch), True)
 
 
-def sync_from_steemd(is_initial_sync):
+def sync_from_steemd():
+    is_initial_sync = DbState.is_initial_sync()
     steemd = get_adapter()
     dirty = set()
 
@@ -154,7 +154,7 @@ def sync_from_steemd(is_initial_sync):
         lbound = to
 
     # batch update post cache after catching up to head block
-    if not DbState.is_initial_sync():
+    if not is_initial_sync:
 
         print("[PREP] Update {} edited posts".format(len(dirty)))
         CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd, None, True)
@@ -228,7 +228,7 @@ def listen_steemd(trail_blocks=2):
         # approx once per hour, update accounts
         if num % 1200 == 0:
             print("Performing account maintenance...")
-            Accounts.cache_oldest(50000)
+            Accounts.cache_oldest(10000)
             Accounts.update_ranks()
 
 
@@ -263,36 +263,30 @@ def update_chain_state():
 
 
 def run():
+
+    # make sure db schema is up to date, perform checks
     DbState.initialize()
-
-    #TODO: if initial sync is interrupted, cache never rebuilt
-    #TODO: do not build partial feed_cache during init_sync
-    # if this is the initial sync, batch updates until very end
-    is_initial_sync = DbState.is_initial_sync()
-
-    if is_initial_sync:
-        print("[INIT] *** Initial sync. db_last_block: %d ***" % db_last_block())
-    else:
-        # perform cleanup in case process did not exit cleanly
-        cache_missing_posts()
 
     # prefetch id->name memory map
     Accounts.load_ids()
 
-    # fast block sync strategies
-    sync_from_checkpoints(is_initial_sync)
-    sync_from_steemd(is_initial_sync)
+    if DbState.is_initial_sync():
+        print("[INIT] *** Initial sync ***")
+        sync_from_checkpoints()
+        sync_from_steemd()
 
-    if is_initial_sync:
-        print("[INIT] *** Initial sync complete. Rebuilding cache. ***")
+        print("[INIT] *** Rebuilding cache ***")
         cache_missing_posts()
         FeedCache.rebuild()
-        State.initial_sync_finished()
+        DbState.initial_sync_finished()
 
-    # initialization complete. follow head blocks
+    else:
+        # perform cleanup in case process did not exit cleanly
+        cache_missing_posts()
+
     while True:
+        sync_from_steemd()
         listen_steemd()
-        sync_from_steemd(False)
 
 
 def head_state(*args):
