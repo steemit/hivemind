@@ -5,48 +5,48 @@ from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 
 class Posts:
-    _post_ids = {}
-    _touched_posts = []
-    _dirty_posts = []
+    #_post_ids = {}
+    #_touched_posts = []
+    #_dirty_posts = []
 
-    @classmethod
-    def get_post_id(cls, post_url_or_author, permlink=None):
-        post_url = post_url_or_author
-        if permlink:
-            post_url = post_url + '/' + permlink
-        pid = cls._post_ids[post_url]
-        assert pid, "post was not registered"
-        return pid
+    #@classmethod
+    #def get_post_id(cls, post_url_or_author, permlink=None):
+    #    post_url = post_url_or_author
+    #    if permlink:
+    #        post_url = post_url + '/' + permlink
+    #    pid = cls._post_ids[post_url]
+    #    assert pid, "post was not registered"
+    #    return pid
 
-    @classmethod
-    def register_posts(cls, id_author_permlinks):
-        for (pid, author, permlink) in id_author_permlinks:
-            post_url = author + '/' + permlink
-            cls._post_ids[post_url] = pid
+    #@classmethod
+    #def register_posts(cls, id_author_permlinks):
+    #    for (pid, author, permlink) in id_author_permlinks:
+    #        post_url = author + '/' + permlink
+    #        cls._post_ids[post_url] = pid
 
-    @classmethod
-    def dirty_post(cls, post_url):
-        cls._dirty.append(post_url)
+    #@classmethod
+    #def dirty_post(cls, post_url):
+    #    cls._dirty.append(post_url)
 
-    @classmethod
-    def touch_post(cls, post_url):
-        cls._touched.add(post_url)
+    #@classmethod
+    #def touch_post(cls, post_url):
+    #    cls._touched.add(post_url)
 
     @classmethod
     def get_id_and_depth(cls, author, permlink):
         res = query_row("SELECT id, depth FROM hive_posts WHERE "
-                "author = :a AND permlink = :p", a=author, p=permlink)
+                        "author = :a AND permlink = :p", a=author, p=permlink)
         return res or (None, -1)
 
     @classmethod
     def urls_to_tuples(cls, urls):
         tuples = []
+        sql = "SELECT id,is_deleted FROM hive_posts WHERE author = :a AND permlink = :p"
         for url in urls:
             author, permlink = url.split('/')
-            pid, is_deleted = query_row("SELECT id,is_deleted FROM hive_posts "
-                    "WHERE author = :a AND permlink = :p", a=author, p=permlink)
+            pid, is_deleted = query_row(sql, a=author, p=permlink)
             if not pid:
-                raise Exception("Post not found! {}/{}".format(author, permlink))
+                raise Exception("Post not found {}/{}".format(author, permlink))
             if is_deleted:
                 continue
             tuples.append([pid, author, permlink])
@@ -56,7 +56,7 @@ class Posts:
     @classmethod
     def _get_op_community(cls, comment):
         md = load_json_key(comment, 'json_metadata')
-        if not md or type(md) is not dict or 'community' not in md:
+        if not md or not isinstance(md, dict) or 'community' not in md:
             return None
         return md['community']
 
@@ -76,7 +76,7 @@ class Posts:
 
         for op in ops:
             sql = ("SELECT id, is_deleted FROM hive_posts "
-                "WHERE author = :a AND permlink = :p")
+                   "WHERE author = :a AND permlink = :p")
             ret = query_row(sql, a=op['author'], p=op['permlink'])
             pid = None
             if not ret:
@@ -97,7 +97,7 @@ class Posts:
                 community = cls._get_op_community(op) or op['author']
             else:
                 parent_data = query_row("SELECT id, depth, category, community FROM hive_posts WHERE author = :a "
-                                          "AND permlink = :p", a=op['parent_author'], p=op['parent_permlink'])
+                                        "AND permlink = :p", a=op['parent_author'], p=op['parent_permlink'])
                 parent_id, parent_depth, category, community = parent_data
                 depth = parent_depth + 1
 
