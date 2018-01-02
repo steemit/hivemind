@@ -59,13 +59,14 @@ class Accounts:
         cls.cache_accounts(query_col("SELECT name FROM hive_accounts"))
 
     @classmethod
-    def cache_old(cls):
-        print("Caching old accounts...")
-        cls.cache_accounts(query_col("SELECT name FROM hive_accounts WHERE cached_at < (NOW() AT TIME ZONE 'utc') - INTERVAL '12 HOUR' ORDER BY cached_at LIMIT 50000"))
+    def cache_oldest(cls, limit=50000):
+        print("Caching oldest %d accounts..." % limit)
+        sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
+        cls.cache_accounts(query_col(sql, limit=limit))
 
     @classmethod
     def cache_dirty(cls):
-        cls.cache_accounts(list(cls._dirty))
+        cls.cache_accounts(list(cls._dirty), False)
         cls._dirty = set()
 
     @classmethod
@@ -76,7 +77,7 @@ class Accounts:
         cls._dirty_follows = set()
 
     @classmethod
-    def cache_accounts(cls, accounts):
+    def cache_accounts(cls, accounts, trx=True):
         processed = 0
         total = len(accounts)
 
@@ -86,7 +87,7 @@ class Accounts:
             lap_0 = time.perf_counter()
             sqls = cls._generate_cache_sqls(batch)
             lap_1 = time.perf_counter()
-            cls._batch_update(sqls)
+            cls._batch_update(sqls, trx)
             lap_2 = time.perf_counter()
 
             if len(batch) < 1000:
@@ -135,11 +136,13 @@ class Accounts:
         query(sql, ids=tuple(ids))
 
     @classmethod
-    def _batch_update(cls, sqls):
-        query("START TRANSACTION")
+    def _batch_update(cls, sqls, trx):
+        if trx:
+            query("START TRANSACTION")
         for (sql, params) in sqls:
             query(sql, **params)
-        query("COMMIT")
+        if trx:
+            query("COMMIT")
 
     @classmethod
     def _generate_cache_sqls(cls, accounts, block_date=None):

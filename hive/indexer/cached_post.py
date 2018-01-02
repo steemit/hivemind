@@ -26,7 +26,7 @@ class CachedPost:
         print("single post updated: %s/%s" % (author, permlink))
 
     @classmethod
-    def update_batch(cls, tuples, steemd, updated_at=None):
+    def update_batch(cls, tuples, steemd, updated_at=None, trx=True):
         # if calling function already has head_time, saves us a call
         if not updated_at:
             updated_at = steemd.head_time()
@@ -49,7 +49,7 @@ class CachedPost:
                 buffer.append(sql)
 
             lap_1 = time.perf_counter()
-            cls._batch_queries(buffer)
+            cls._batch_queries(buffer, trx)
             lap_2 = time.perf_counter()
 
             if total >= 500:
@@ -62,12 +62,14 @@ class CachedPost:
                     processed, total, round(rate, 1), rps, wps, round(rem / rate / 60, 2)))
 
     @classmethod
-    def _batch_queries(cls, batches):
-        query("START TRANSACTION")
+    def _batch_queries(cls, batches, trx):
+        if trx:
+            query("START TRANSACTION")
         for queries in batches:
             for (sql, params) in queries:
                 query(sql, **params)
-        query("COMMIT")
+        if trx:
+            query("COMMIT")
 
     @classmethod
     def _score(cls, rshares, created_timestamp, timescale=480000):

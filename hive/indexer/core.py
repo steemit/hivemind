@@ -244,12 +244,12 @@ def sync_from_steemd(is_initial_sync):
     if not is_initial_sync:
 
         print("[PREP] Update {} edited posts".format(len(dirty)))
-        CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd)
+        CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd, None, True)
 
         date = steemd.head_time()
         paidout = select_paidout_posts(date)
         print("[PREP] Process {} payouts since {}".format(len(paidout), date))
-        CachedPost.update_batch(paidout, steemd, date)
+        CachedPost.update_batch(paidout, steemd, date, True)
 
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
@@ -291,10 +291,10 @@ def listen_steemd(trail_blocks=2):
         query("START TRANSACTION")
 
         dirty = process_block(block)
-        CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd, block['timestamp'])
+        CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd, block['timestamp'], False)
 
         paidout = select_paidout_posts(block['timestamp'])
-        CachedPost.update_batch(paidout, steemd, block['timestamp'])
+        CachedPost.update_batch(paidout, steemd, block['timestamp'], False)
 
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
@@ -312,7 +312,7 @@ def listen_steemd(trail_blocks=2):
         # approx once per hour, update accounts
         if num % 1200 == 0:
             print("Performing account maintenance...")
-            Accounts.cache_old()
+            Accounts.cache_oldest(10000)
             Accounts.update_ranks()
 
 
@@ -368,9 +368,6 @@ def run():
     # fast block sync strategies
     sync_from_checkpoints(is_initial_sync)
     sync_from_steemd(is_initial_sync)
-
-    Accounts.cache_old()
-    Accounts.update_ranks()
 
     if is_initial_sync:
         print("[INIT] *** Initial sync complete. Rebuilding cache. ***")
