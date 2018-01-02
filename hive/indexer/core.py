@@ -264,7 +264,11 @@ def listen_steemd(trail_blocks=2):
 
         # if trailing too close, take a pause
         while trail_blocks > 0:
-            if curr_block <= steemd.head_block() - trail_blocks:
+            gap = steemd.head_block() - curr_block
+            if gap >= 25:
+                print("[HIVE] gap too large: %d -- switch to fast sync" % gap)
+                return
+            if gap >= trail_blocks:
                 break
             time.sleep(0.5)
 
@@ -374,7 +378,9 @@ def run():
         FeedCache.rebuild()
 
     # initialization complete. follow head blocks
-    listen_steemd()
+    while True:
+        listen_steemd()
+        sync_from_steemd(False)
 
 
 def head_state(*args):
