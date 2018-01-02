@@ -1,6 +1,7 @@
 from hive.db.methods import query, query_one, query_row, query_all
 from hive.indexer.normalize import load_json_key
 from hive.indexer.accounts import Accounts
+from hive.indexer.cached_post import CachedPost
 
 class Posts:
     _post_ids = {}
