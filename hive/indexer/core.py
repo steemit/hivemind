@@ -134,7 +134,7 @@ def sync_from_steemd(is_initial_sync):
     if ubound < lbound:
         return
 
-    print("[SYNC] from %d +%d blocks to sync" % (lbound, ubound - lbound + 1))
+    print("[SYNC] from block %d, +%d to sync" % (lbound, ubound - lbound + 1))
 
     while lbound < ubound:
         to = min(lbound + 1000, ubound)

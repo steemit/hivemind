@@ -1,4 +1,6 @@
 from hive.db.methods import query, query_one, query_row
+from hive.db.db_state import DbState
+
 from hive.indexer.normalize import load_json_key
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
@@ -67,7 +69,7 @@ class Posts:
             post_id, depth = cls.get_id_and_depth(op['author'], op['permlink'])
             query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=post_id)
             CachedPost.delete(post_id)
-            if depth == 0:
+            if depth == 0 and not DbState.is_initial_sync():
                 FeedCache.delete(post_id)
 
     # registers new posts (ignores edits), inserts into feed cache
@@ -119,8 +121,10 @@ class Posts:
                 query(sql, is_valid=is_valid, parent_id=parent_id,
                       category=category, community=community,
                       depth=depth, id=pid)
-                # ensure cache record is rebuilt. #48
-                CachedPost.update(pid, op['author'], op['permlink'], block_date)
+
+                if not DbState.is_initial_sync():
+                    # ensure cache record is rebuilt. #48
+                    CachedPost.update(pid, op['author'], op['permlink'], block_date)
             else:
                 sql = """
                 INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
@@ -134,7 +138,7 @@ class Posts:
                       depth=depth, date=block_date)
 
             # add top-level posts to feed cache
-            if not op['parent_author']:
+            if not op['parent_author'] and not DbState.is_initial_sync():
                 if not pid:
                     pid = query_one("SELECT id FROM hive_posts WHERE author = :a AND "
                                     "permlink = :p", a=op['author'], p=op['permlink'])

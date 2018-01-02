@@ -2,6 +2,7 @@ import logging
 
 from funcy.seqs import first, second
 from hive.db.methods import query
+from hive.db.db_state import DbState
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -80,14 +81,17 @@ class CustomOp:
             return  # invalid input
 
         sql = """
-        INSERT INTO hive_follows (follower, following, created_at, state)
-        VALUES (:fr, :fg, :at, :state) ON CONFLICT (follower, following) DO UPDATE SET state = :state
+          INSERT INTO hive_follows (follower, following, created_at, state)
+               VALUES (:fr, :fg, :at, :state) ON CONFLICT (follower, following)
+            DO UPDATE SET state = :state
         """
         state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
         query(sql, fr=Accounts.get_id(follower), fg=Accounts.get_id(following),
               at=block_date, state=state)
-        Accounts.dirty_follows(follower)
-        Accounts.dirty_follows(following)
+
+        if not DbState.is_initial_sync():
+            Accounts.dirty_follows(follower)
+            Accounts.dirty_follows(following)
 
     @classmethod
     def _reblog(cls, account, op_json, block_date):
@@ -111,8 +115,11 @@ class CustomOp:
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
             query("DELETE FROM hive_reblogs WHERE account = :a AND post_id = :pid LIMIT 1", a=blogger, pid=post_id)
-            FeedCache.delete(post_id, Accounts.get_id(blogger))
+            if not DbState.is_initial_sync():
+                FeedCache.delete(post_id, Accounts.get_id(blogger))
+
         else:
             sql = "INSERT INTO hive_reblogs (account, post_id, created_at) VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING"
             query(sql, a=blogger, pid=post_id, date=block_date)
-            FeedCache.insert(post_id, Accounts.get_id(blogger), block_date)
+            if not DbState.is_initial_sync():
+                FeedCache.insert(post_id, Accounts.get_id(blogger), block_date)

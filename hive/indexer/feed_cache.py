@@ -1,11 +1,13 @@
 import time
 from hive.db.methods import query
+from hive.db.db_state import DbState
 
 #TODO: ignore insert/delete on initial sync
 class FeedCache:
 
     @classmethod
     def insert(cls, post_id, account_id, created_at):
+        assert not DbState.is_initial_sync(), 'writing to feed cache in sync'
         sql = """INSERT INTO hive_feed_cache (account_id, post_id, created_at)
                       VALUES (:account_id, :id, :created_at)
                  ON CONFLICT (account_id, post_id) DO NOTHING"""
@@ -13,6 +15,7 @@ class FeedCache:
 
     @classmethod
     def delete(cls, post_id, account_id=None):
+        assert not DbState.is_initial_sync(), 'writing to feed cache in sync'
         sql = "DELETE FROM hive_feed_cache WHERE post_id = :id"
         if account_id:
             sql = sql + " AND account_id = :account_id"
