@@ -30,7 +30,7 @@ class QueryStats:
         for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
-            print("% 5.1f%% % 10.2fms % 7.2favg % 8dx -- %s"
+            print("% 5.1f%% % 10.2fms % 8.2favg % 8dx -- %s"
                   % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
         cls.stats = {}
         cls.ttltime = 0

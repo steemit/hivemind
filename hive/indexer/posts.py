@@ -66,10 +66,11 @@ class Posts:
         for op in ops:
             post_id, depth = cls.get_id_and_depth(op['author'], op['permlink'])
             query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=post_id)
-            query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
-            FeedCache.delete(post_id)
+            CachedPost.delete(post_id)
+            if depth == 0:
+                FeedCache.delete(post_id)
 
-    # registers new posts (not edits), inserts into feed cache
+    # registers new posts (ignores edits), inserts into feed cache
     @classmethod
     def register(cls, ops, block_date):
         from hive.indexer.community import is_community_post_valid
@@ -80,24 +81,22 @@ class Posts:
             ret = query_row(sql, a=op['author'], p=op['permlink'])
             pid = None
             if not ret:
-                # post does not exist, go ahead and process it
-                pass
+                pass         # post does not exist, go ahead and process it.
             elif not ret[1]:
-                # post exists and is not deleted, thus it's an edit. ignore.
-                continue
+                continue     # post exists, not deleted, thus an edit. ignore.
             else:
-                # post exists but was deleted. time to reinstate.
-                pid = ret[0]
+                pid = ret[0] # post exists but was deleted. time to reinstate.
 
             # set parent & inherited attributes
-            if op['parent_author'] == '':
+            if not op['parent_author']:
                 parent_id = None
                 depth = 0
                 category = op['parent_permlink']
                 community = cls._get_op_community(op) or op['author']
             else:
-                parent_data = query_row("SELECT id, depth, category, community FROM hive_posts WHERE author = :a "
-                                        "AND permlink = :p", a=op['parent_author'], p=op['parent_permlink'])
+                sql = """SELECT id, depth, category, community FROM hive_posts
+                         WHERE author = :a AND permlink = :p"""
+                parent_data = query_row(sql, a=op['parent_author'], p=op['parent_permlink'])
                 parent_id, parent_depth, category, community = parent_data
                 depth = parent_depth + 1
 
@@ -112,9 +111,16 @@ class Posts:
 
             # if we're reusing a previously-deleted post (rare!), update it
             if pid:
-                query("UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0', parent_id = :parent_id, category = :category, community = :community, depth = :depth WHERE id = :id",
-                      is_valid=is_valid, parent_id=parent_id, category=category, community=community, depth=depth, id=pid)
-                CachedPost.update(pid, op['author'], op['permlink'], block_date) # ensure cache record is rebuilt. #48
+                sql = """
+                UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0',
+                       parent_id = :parent_id, category = :category,
+                       community = :community, depth = :depth WHERE id = :id
+                """
+                query(sql, is_valid=is_valid, parent_id=parent_id,
+                      category=category, community=community,
+                      depth=depth, id=pid)
+                # ensure cache record is rebuilt. #48
+                CachedPost.update(pid, op['author'], op['permlink'], block_date)
             else:
                 sql = """
                 INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
