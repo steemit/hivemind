@@ -17,7 +17,6 @@ from hive.indexer.feed_cache import FeedCache
 from hive.indexer.custom_op import CustomOp
 
 from hive.indexer.steem_client import get_adapter
-from hive.indexer.jobs import select_missing_posts, select_paidout_posts
 
 log = logging.getLogger(__name__)
 
@@ -135,7 +134,7 @@ def sync_from_steemd():
     ubound = steemd.last_irreversible_block_num()
 
     if ubound > lbound:
-        print("[SYNC] from block %d, +%d to sync" % (lbound, ubound-lbound+1))
+        print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
 
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
@@ -223,27 +222,33 @@ def listen_steemd(trail_blocks=2):
             Accounts.update_ranks()
 
 
-def cache_missing_posts(fast_mode=True):
-    # cached posts inserted sequentially, so just compare MAX(id)'s
-    sql = """SELECT (SELECT COALESCE(MAX(id), 0) FROM hive_posts)
-                  - (SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache)"""
-    missing_count = query_one(sql)
-    print("[INIT] Found {} missing post cache entries".format(missing_count))
-    if fast_mode and not missing_count:
+def select_missing_tuples(start_id, limit=1000000):
+    sql = """SELECT id, author, permlink FROM hive_posts
+              WHERE is_deleted = '0' AND id > :id
+           ORDER BY id LIMIT :limit"""
+    missing = query_all(sql, id=start_id, limit=limit)
+
+def cache_missing_posts():
+    # cached posts inserted sequentially, so compare MAX(id)'s
+    last_cached_id = CachedPost.last_id()
+    last_post_id = Posts.last_id()
+    gap = last_post_id - last_cached_id
+    print("[INIT] {} missing post cache entries".format(gap))
+    if not gap:
         return
 
-    # process in batches of 1m posts
-    missing = select_missing_posts(1e6, fast_mode)
-    while missing:
-        CachedPost.update_batch(missing, get_adapter())
-        missing = select_missing_posts(1e6, fast_mode)
+    missing = select_missing_tuples(last_cached_id)
+    CachedPost.update_batch(missing, get_adapter())
+
+    # repeat until no gap
+    cache_missing_posts()
 
 
 def cache_paidout_posts(trx=True, date=None):
     steemd = get_adapter()
     if not date:
         date = db_last_block_date()
-    paidout = select_paidout_posts(date)
+    paidout = CachedPost.select_paidout_tuples(date)
     if trx or len(paidout) > 1000:
         print("[PREP] Process {} payouts since {}".format(len(paidout), date))
     CachedPost.update_batch(paidout, steemd, date, trx)

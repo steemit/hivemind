@@ -35,6 +35,10 @@ class Posts:
     #    cls._touched.add(post_url)
 
     @classmethod
+    def last_id(cls):
+        return query_one("SELECT COALESCE(MAX(id), 0) FROM hive_posts")
+
+    @classmethod
     def get_id_and_depth(cls, author, permlink):
         res = query_row("SELECT id, depth FROM hive_posts WHERE "
                         "author = :a AND permlink = :p", a=author, p=permlink)
@@ -43,13 +47,12 @@ class Posts:
     @classmethod
     def urls_to_tuples(cls, urls):
         tuples = []
-        sql = "SELECT id,is_deleted FROM hive_posts WHERE author = :a AND permlink = :p"
+        sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
         for url in urls:
             author, permlink = url.split('/')
-            pid, is_deleted = query_row(sql, a=author, p=permlink)
+            pid = query_one(sql, a=author, p=permlink)
             assert pid, "no pid for {}".format(url)
-            if is_deleted:
-                continue
+            # note: output includes is_deleted posts
             tuples.append([pid, author, permlink])
 
         # sort the results.. must insert cache records sequentially

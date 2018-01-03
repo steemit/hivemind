@@ -4,13 +4,20 @@ import math
 import collections
 
 from funcy.seqs import first
-from hive.db.methods import query, query_col, query_one
+from hive.db.methods import query, query_all, query_col, query_one
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.steem_client import get_adapter
 
 class CachedPost:
 
     _last_id = -1
+
+    @classmethod
+    def select_paidout_tuples(cls, block_date):
+        # retrieve all posts which have been paid out but not updated
+        sql = """SELECT post_id, author, permlink FROM hive_posts_cache
+                  WHERE is_paidout = '0' AND payout_at <= :date"""
+        return query_all(sql, date=block_date)
 
     @classmethod
     def delete(cls, post_id):
