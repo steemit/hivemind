@@ -19,7 +19,7 @@ class DbState:
             print("[INIT] Continue with initial sync...")
 
     @classmethod
-    def initial_sync_finished():
+    def finish_initial_sync(cls):
         print("[INIT] Initial sync complete!")
         cls._is_initial_sync = False
 

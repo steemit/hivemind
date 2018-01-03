@@ -2,7 +2,6 @@ import json
 import logging
 import glob
 import time
-import re
 import os
 
 from funcy.seqs import drop
@@ -27,6 +26,9 @@ log = logging.getLogger(__name__)
 
 def db_last_block():
     return query_one("SELECT MAX(num) FROM hive_blocks") or 0
+
+def db_last_block_date():
+    return query_one("SELECT created_at FROM hive_blocks ORDER BY num DESC LIMIT 1")
 
 # process a single block. always wrap in a transaction!
 def process_block(block):
@@ -100,9 +102,9 @@ def process_blocks(blocks, is_initial_sync=False):
 def sync_from_checkpoints():
     last_block = db_last_block()
 
-    fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
+    _fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
     mydir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
-    files = map(fn, glob.glob(mydir + "/checkpoints/*.json.lst"))
+    files = map(_fn, glob.glob(mydir + "/checkpoints/*.json.lst"))
     files = sorted(files, key=lambda f: f[0])
 
     last_read = 0
@@ -131,10 +133,9 @@ def sync_from_steemd():
 
     lbound = db_last_block() + 1
     ubound = steemd.last_irreversible_block_num()
-    if ubound < lbound:
-        return
 
-    print("[SYNC] from block %d, +%d to sync" % (lbound, ubound - lbound + 1))
+    if ubound > lbound:
+        print("[SYNC] from block %d, +%d to sync" % (lbound, ubound-lbound+1))
 
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
@@ -155,20 +156,14 @@ def sync_from_steemd():
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
-
-        print("[PREP] Update {} edited posts".format(len(dirty)))
-        CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd, None, True)
-
-        date = steemd.head_time()
-        paidout = select_paidout_posts(date)
-        print("[PREP] Process {} payouts since {}".format(len(paidout), date))
-        CachedPost.update_batch(paidout, steemd, date, True)
-
+        cache_dirty_posts(dirty, trx=True)
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
 
 
 def listen_steemd(trail_blocks=2):
+    assert trail_blocks >= 0
+    assert trail_blocks < 25
     steemd = get_adapter()
     curr_block = db_last_block()
     last_hash = False
@@ -177,10 +172,10 @@ def listen_steemd(trail_blocks=2):
         curr_block = curr_block + 1
 
         # if trailing too close, take a pause
-        while trail_blocks > 0:
+        while trail_blocks:
             gap = steemd.head_block() - curr_block
             if gap >= 25:
-                print("[HIVE] gap too large: %d -- switch to fast sync" % gap)
+                print("[HIVE] gap too large: %d -- abort listen mode" % gap)
                 return
             if gap >= trail_blocks:
                 break
@@ -204,49 +199,67 @@ def listen_steemd(trail_blocks=2):
         query("START TRANSACTION")
 
         dirty = process_block(block)
-        CachedPost.update_batch(Posts.urls_to_tuples(dirty), steemd, block['timestamp'], False)
-
-        paidout = select_paidout_posts(block['timestamp'])
-        CachedPost.update_batch(paidout, steemd, block['timestamp'], False)
+        edits = cache_dirty_posts(dirty, trx=False, date=block['timestamp'])
+        paids = cache_paidout_posts(trx=False, date=block['timestamp'])
 
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
 
         query("COMMIT")
-
-        num = int(block['block_id'][:8], base=16)
-        print("[LIVE] Got block {} at {} with {} txs -- ".format(
-            num, block['timestamp'], len(block['transactions'])), end='')
-        print("{} edits, {} payouts".format(len(dirty), len(paidout)), end='')
         secs = time.perf_counter() - start_time
-        print(" -- {}ms{}".format(int(secs * 1e3), ' SLOW' if secs > 1 else ''))
+
+        print("[LIVE] Got block %d at %s with %d txs -- %d edits, %d payouts -- %dms%s"
+              % (curr_block, block['timestamp'], len(block['transactions']),
+                 edits, paids, int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
         # once a minute, update chain props
-        if num % 20 == 0:
+        if curr_block % 20 == 0:
             update_chain_state()
 
         # approx once per hour, update accounts
-        if num % 1200 == 0:
-            print("Performing account maintenance...")
+        if curr_block % 1200 == 0:
+            print("[HIVE] Performing account maintenance...")
             Accounts.cache_oldest(10000)
             Accounts.update_ranks()
 
 
-def cache_missing_posts(slow_mode=False):
+def cache_missing_posts(fast_mode=True):
     # cached posts inserted sequentially, so just compare MAX(id)'s
-    sql = ("SELECT (SELECT COALESCE(MAX(id), 0) FROM hive_posts) - "
-           "(SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache)")
+    sql = """SELECT (SELECT COALESCE(MAX(id), 0) FROM hive_posts)
+                  - (SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache)"""
     missing_count = query_one(sql)
     print("[INIT] Found {} missing post cache entries".format(missing_count))
-
-    if not missing_count and not slow_mode:
+    if fast_mode and not missing_count:
         return
 
     # process in batches of 1m posts
-    missing = select_missing_posts(1e6, slow_mode)
+    missing = select_missing_posts(1e6, fast_mode)
     while missing:
         CachedPost.update_batch(missing, get_adapter())
-        missing = select_missing_posts(1e6)
+        missing = select_missing_posts(1e6, fast_mode)
+
+
+def cache_paidout_posts(trx=True, date=None):
+    return 0
+    steemd = get_adapter()
+    if not date:
+        date = db_last_block_date()
+    paidout = select_paidout_posts(date)
+    if trx or len(paidout) > 1000:
+        print("[PREP] Process {} payouts since {}".format(len(paidout), date))
+    CachedPost.update_batch(paidout, steemd, date, trx)
+    return len(paidout)
+
+
+def cache_dirty_posts(dirty, trx=True, date=None):
+    steemd = get_adapter()
+    if not date:
+        date = steemd.head_time()
+    tups = Posts.urls_to_tuples(dirty)
+    if trx or len(tups) > 1000:
+        print("[PREP] Update {} edited posts".format(len(dirty)))
+    CachedPost.update_batch(tups, steemd, date, trx)
+    return len(tups)
 
 
 # refetch dynamic_global_properties, feed price, etc
@@ -271,14 +284,16 @@ def run():
     Accounts.load_ids()
 
     if DbState.is_initial_sync():
-        print("[INIT] *** Initial sync ***")
+        print("[INIT] *** Initial fast sync ***")
         sync_from_checkpoints()
         sync_from_steemd()
 
-        print("[INIT] *** Rebuilding cache ***")
+        print("[INIT] *** Initial cache build ***")
+        # todo: disable indexes during this process
         cache_missing_posts()
         FeedCache.rebuild()
-        DbState.initial_sync_finished()
+
+        DbState.finish_initial_sync()
 
     else:
         # perform cleanup in case process did not exit cleanly
@@ -286,6 +301,7 @@ def run():
 
     while True:
         sync_from_steemd()
+        cache_paidout_posts()
         listen_steemd()
 
 
