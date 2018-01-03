@@ -4,7 +4,7 @@ import math
 import collections
 
 from funcy.seqs import first
-from hive.db.methods import query
+from hive.db.methods import query, query_col, query_one
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.steem_client import get_adapter
 
@@ -187,19 +187,34 @@ class CachedPost:
         sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON CONFLICT (post_id) DO UPDATE SET %s"
         sqls.append((sql % (cols, params, update), values))
 
+        #exists = query_one("SELECT 1 FROM hive_posts_cache WHERE post_id = (SELECT id FROM hive_posts WHERE author = :a AND permlink = :p)", a=post['author'], p=post['permlink'])
+        #if exists:
+        #    sql = "UPDATE hive_posts_cache SET %s WHERE post_id = :post_id"
+        #    sqls.append((sql % update, values))
+        #else:
+        #    sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s)"
+        #    sqls.append((sql % (cols, params), values))
+
         # update tag metadata only for top-level posts
         if not post['parent_author']:
-            sql = "DELETE FROM hive_post_tags WHERE post_id = :id"
-            sqls.append((sql, {'id': pid}))
+            sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
+            curr_tags = set(query_col(sql, id=pid))
 
-            if tags:
+            to_rem = (curr_tags - tags)
+            if to_rem:
+                sql = "DELETE FROM hive_post_tags WHERE post_id = :id AND tag IN :tags"
+                sqls.append((sql, dict(id=pid, tags=tuple(to_rem))))
+
+            to_add = (tags - curr_tags)
+            if to_add:
                 sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES "
                 params = {}
                 vals = []
-                for i, tag in enumerate(tags):
+                for i, tag in enumerate(to_add):
                     vals.append("(:id, :t%d)" % i)
                     params["t%d"%i] = tag
-                sqls.append((sql + ','.join(vals) + " ON CONFLICT DO NOTHING", {'id': pid, **params}))
+                sql = sql + ','.join(vals) + " ON CONFLICT DO NOTHING"
+                sqls.append((sql, {'id': pid, **params}))
 
         return sqls
 
