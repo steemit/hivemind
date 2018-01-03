@@ -240,7 +240,6 @@ def cache_missing_posts(fast_mode=True):
 
 
 def cache_paidout_posts(trx=True, date=None):
-    return 0
     steemd = get_adapter()
     if not date:
         date = db_last_block_date()
