@@ -65,6 +65,7 @@ class SteemClient:
         return posts
 
     def get_block(self, num):
+        #assert num == int(block['block_id'][:8], base=16)
         return self.__exec('get_block', num)
 
     def _gdgp(self):

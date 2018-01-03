@@ -1,7 +1,7 @@
 import logging
 import time
 
-from hive.db.methods import query, query_all, query_col
+from hive.db.methods import query_all, query_col
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def select_missing_posts(limit=None, fast_mode=True):
 
     sql = ("SELECT id, author, permlink FROM hive_posts "
            "WHERE is_deleted = '0' AND %s ORDER BY id %s" % (where, limit))
-    return list(query(sql))
+    return query_all(sql)
 
 
 # when a post gets paidout ensure we update its final state
@@ -33,7 +33,7 @@ def select_paidout_posts(block_date):
     SELECT post_id, author, permlink FROM hive_posts_cache
     WHERE is_paidout = '0' AND payout_at <= :date
     """
-    return list(query(sql, date=block_date))
+    return query_all(sql, date=block_date)
 
 # (debug) thorough scan for missing posts_cache records
 def audit_missing_posts():

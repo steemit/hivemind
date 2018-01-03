@@ -1,7 +1,7 @@
 import time
 
 from decimal import Decimal
-from hive.db.methods import query, query_one, query_col, query_row, query_all
+from hive.db.methods import query_one, query_col, query_row, query_all
 
 
 async def db_head_state():
@@ -35,8 +35,8 @@ async def get_following(account: str, skip: int, limit: int):
        WHERE hf.follower = :account_id AND state = 1
     ORDER BY hf.created_at DESC LIMIT :limit OFFSET :skip
     """
-    res = query(sql, account_id=account_id, skip=int(skip), limit=int(limit))
-    return [[r[0], str(r[1])] for r in res.fetchall()]
+    res = query_all(sql, account_id=account_id, skip=int(skip), limit=int(limit))
+    return [[r[0], str(r[1])] for r in res]
 
 
 async def get_follow_count(account: str):
@@ -109,7 +109,7 @@ async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context=None):
         where = ''
 
     sql = "SELECT post_id FROM hive_posts_cache %s ORDER BY %s LIMIT :limit OFFSET :skip" % (where, order)
-    ids = [r[0] for r in query(sql, tag=tag, limit=limit, skip=skip).fetchall()]
+    ids = query_col(sql, tag=tag, limit=limit, skip=skip)
     return _get_posts(ids, context)
 
 
@@ -184,7 +184,7 @@ def _get_posts(ids, context=None):
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
-    for row in query(sql, ids=tuple(ids)).fetchall():
+    for row in query_all(sql, ids=tuple(ids)):
         obj = dict(row)
 
         if context:
