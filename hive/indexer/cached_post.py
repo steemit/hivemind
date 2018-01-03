@@ -10,12 +10,15 @@ from hive.indexer.steem_client import get_adapter
 
 class CachedPost:
 
+    _last_id = -1
+
     @classmethod
     def delete(cls, post_id):
         query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
 
     @classmethod
     def update(cls, post_id, author, permlink, block_date):
+        assert post_id <= cls.last_id(), 'only used to update previous records'
         # TODO: replace with cache queue? otherwise, re-insert previously-deleted posts. see #48
         steemd = get_adapter()
         post = first(steemd.get_content_batch([[author, permlink]]))
@@ -46,6 +49,7 @@ class CachedPost:
                     continue # post has been deleted
                 url = post['author'] + '/' + post['permlink']
                 sql = cls._generate_cached_post_sql(ids[url], post, updated_at)
+                cls._bump_last_id(ids[url])
                 buffer.append(sql)
 
             lap_1 = time.perf_counter()
@@ -60,6 +64,34 @@ class CachedPost:
                 wps = int(len(buffer) / (lap_2 - lap_1))
                 print(" -- post {} of {} ({}/s, {}rps {}wps) -- {}m remaining".format(
                     processed, total, round(rate, 1), rps, wps, round(rem / rate / 60, 2)))
+
+    @classmethod
+    def last_id(cls):
+        if cls._last_id == -1:
+            sql = "SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache"
+            cls._last_id = query_one(sql)
+        return cls._last_id
+
+    @classmethod
+    def _bump_last_id(cls, next_id):
+        last_id = cls.last_id()
+        if next_id <= last_id:
+            return
+
+        if next_id - last_id > 2:
+            cls._ensure_safe_gap(last_id, next_id)
+            print("[WARN] skip post ids: %d -> %d" % (last_id, next_id))
+
+        cls._last_id = next_id
+
+    @classmethod
+    def _ensure_safe_gap(cls, last_id, next_id):
+        sql = "SELECT COUNT(*) FROM hive_posts WHERE id BETWEEN %d AND %d AND is_deleted = '0'"
+        missing_posts = query_one(sql % (last_id + 1, next_id - 1))
+        if not missing_posts:
+            return
+        raise Exception("found large cache gap: %d --> %d (%d)"
+                        % (last_id, next_id, missing_posts))
 
     @classmethod
     def _batch_queries(cls, batches, trx):

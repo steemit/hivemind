@@ -47,20 +47,13 @@ class Posts:
         for url in urls:
             author, permlink = url.split('/')
             pid, is_deleted = query_row(sql, a=author, p=permlink)
-            if not pid:
-                raise Exception("Post not found {}/{}".format(author, permlink))
+            assert pid, "no pid for {}".format(url)
             if is_deleted:
                 continue
             tuples.append([pid, author, permlink])
-        return tuples
 
-    # given a comment op, safely read 'community' field from json
-    @classmethod
-    def _get_op_community(cls, comment):
-        md = load_json_key(comment, 'json_metadata')
-        if not md or not isinstance(md, dict) or 'community' not in md:
-            return None
-        return md['community']
+        # sort the results.. must insert cache records sequentially
+        return sorted(tuples, key=lambda tup: tup[0])
 
     # marks posts as deleted and removes them from feed cache
     @classmethod
@@ -106,10 +99,11 @@ class Posts:
             if not Accounts.exists(community):
                 community = op['author']
 
-            # validated community; will return None if invalid & defaults to author.
+            # validated community; returns None if invalid & defaults to author.
             is_valid = is_community_post_valid(community, op)
             if not is_valid:
-                print("Invalid post @{}/{} in @{}".format(op['author'], op['permlink'], community))
+                url = "@{}/{}".format(op['author'], op['permlink'])
+                print("Invalid post {} in @{}".format(url, community))
 
             # if we're reusing a previously-deleted post (rare!), update it
             if pid:
@@ -122,7 +116,7 @@ class Posts:
                       category=category, community=community,
                       depth=depth, id=pid)
 
-                if not DbState.is_initial_sync():
+                if not DbState.is_initial_sync() and pid < CachedPost.last_id():
                     # ensure cache record is rebuilt. #48
                     CachedPost.update(pid, op['author'], op['permlink'], block_date)
             else:
@@ -143,3 +137,12 @@ class Posts:
                     pid = query_one("SELECT id FROM hive_posts WHERE author = :a AND "
                                     "permlink = :p", a=op['author'], p=op['permlink'])
                 FeedCache.insert(pid, Accounts.get_id(op['author']), block_date)
+
+
+    # given a comment op, safely read 'community' field from json
+    @classmethod
+    def _get_op_community(cls, comment):
+        md = load_json_key(comment, 'json_metadata')
+        if not md or not isinstance(md, dict) or 'community' not in md:
+            return None
+        return md['community']
