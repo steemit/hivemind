@@ -42,43 +42,45 @@ def process_block(block):
           "VALUES (:num, :hash, :prev, :txs, :ops, :date)",
           num=num, hash=block_id, prev=prev, txs=len(txs), ops=ops, date=date)
 
-    accounts = set()
-    comments = []
+    account_names = set()
+    comment_ops = []
     json_ops = []
-    deleted = []
-    dirty = set()
+    delete_ops = []
+    dirty_urls = set()
     for tx in txs:
         for operation in tx['operations']:
             op_type, op = operation
 
             if op_type == 'pow':
-                accounts.add(op['worker_account'])
+                account_names.add(op['worker_account'])
             elif op_type == 'pow2':
-                accounts.add(op['work'][1]['input']['worker_account'])
-            elif op_type in ['account_create', 'account_create_with_delegation']:
-                accounts.add(op['new_account_name'])
+                account_names.add(op['work'][1]['input']['worker_account'])
+            elif op_type == 'account_create':
+                account_names.add(op['new_account_name'])
+            elif op_type == 'account_create_with_delegation':
+                account_names.add(op['new_account_name'])
             elif op_type == 'comment':
-                comments.append(op)
-                dirty.add(op['author']+'/'+op['permlink'])
+                comment_ops.append(op)
+                dirty_urls.add(op['author']+'/'+op['permlink'])
                 Accounts.dirty(op['author'])
                 if op['parent_author']:
                     Accounts.dirty(op['parent_author'])
             elif op_type == 'delete_comment':
-                deleted.append(op)
+                delete_ops.append(op)
             elif op_type == 'custom_json':
                 json_ops.append(op)
             elif op_type == 'vote':
-                dirty.add(op['author']+'/'+op['permlink'])
+                dirty_urls.add(op['author']+'/'+op['permlink'])
                 Accounts.dirty(op['author'])
                 Accounts.dirty(op['voter'])
 
-    Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
-    Posts.register(comments, date)  # if this is a new post, add the entry and validate community param
-    Posts.delete(deleted)  # mark hive_posts record as deleted
-    CustomOp.process_ops(json_ops, num, date)  # take care of follows, reblogs, community actions
+    Accounts.register(account_names, date) # register potentially new names
+    Posts.register(comment_ops, date) # ignores edits; inserts, validates
+    Posts.delete(delete_ops)  # unallocates hive_posts record, delete cache
+    CustomOp.process_ops(json_ops, num, date) # follow, reblog, community ops
 
     # return all posts modified this block
-    return dirty
+    return dirty_urls
 
 
 # batch-process blocks, wrap in a transaction
