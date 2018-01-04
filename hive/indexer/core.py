@@ -29,6 +29,9 @@ def db_last_block():
 def db_last_block_date():
     return query_one("SELECT created_at FROM hive_blocks ORDER BY num DESC LIMIT 1")
 
+def db_last_block_hash():
+    return query_one("SELECT hash FROM hive_blocks ORDER BY num DESC LIMIT 1")
+
 # process a single block. always wrap in a transaction!
 def process_block(block):
     date = block['timestamp']
@@ -164,7 +167,7 @@ def listen_steemd(trail_blocks=2):
     assert trail_blocks < 25
     steemd = get_adapter()
     curr_block = db_last_block()
-    last_hash = False
+    last_hash = db_last_block_hash()
 
     while True:
         curr_block = curr_block + 1
@@ -186,7 +189,7 @@ def listen_steemd(trail_blocks=2):
             block = steemd.get_block(curr_block)
 
         # ensure the block we received links to our last
-        if last_hash and last_hash != block['previous']:
+        if last_hash != block['previous']:
             # this condition is very rare unless trail_blocks is 0 and fork is
             # encountered; to handle gracefully, implement a pop_block method
             raise Exception("Unlinkable block: have {}, got {} -> {})".format(
