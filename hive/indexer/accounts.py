@@ -56,28 +56,57 @@ class Accounts:
 
     @classmethod
     def cache_all(cls):
-        cls.cache_accounts(query_col("SELECT name FROM hive_accounts"), trx=True)
+        cls._cache_accounts(query_col("SELECT name FROM hive_accounts"), trx=True)
 
     @classmethod
     def cache_oldest(cls, limit=50000):
         print("Caching oldest %d accounts..." % limit)
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
-        cls.cache_accounts(query_col(sql, limit=limit), trx=True)
+        cls._cache_accounts(query_col(sql, limit=limit), trx=True)
 
     @classmethod
     def cache_dirty(cls):
-        cls.cache_accounts(list(cls._dirty), trx=False)
+        cls._cache_accounts(list(cls._dirty), trx=False)
         cls._dirty = set()
 
     @classmethod
     def cache_dirty_follows(cls):
         if not cls._dirty_follows:
             return
-        cls.update_follows(list(cls._dirty_follows))
+        todo = cls._rate_limited(cls._dirty_follows)
+        if todo:
+            cls._update_follows(todo)
         cls._dirty_follows = set()
 
     @classmethod
-    def cache_accounts(cls, accounts, trx=True):
+    def update_ranks(cls):
+        sql = """
+        UPDATE hive_accounts
+           SET rank = r.rnk
+          FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY vote_weight DESC) as rnk FROM hive_accounts) r
+         WHERE hive_accounts.id = r.id AND rank != r.rnk;
+        """
+        query(sql)
+
+    _follow_rates = dict()
+    @classmethod
+    def _rate_limited(cls, accounts):
+        for name, score in list(cls._follow_rates.items()):
+            if score:
+                cls._follow_rates[name] = min(max(score - 1, 0), 1200)
+            else:
+                cls._follow_rates.pop(name)
+
+        for name in accounts:
+            if name not in cls._follow_rates:
+                cls._follow_rates[name] = 0
+            cls._follow_rates[name] += 200
+
+        blocked = set(cls._follow_rates.keys())
+        return accounts - blocked
+
+    @classmethod
+    def _cache_accounts(cls, accounts, trx=True):
         processed = 0
         total = len(accounts)
 
@@ -101,31 +130,7 @@ class Accounts:
                 processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
 
     @classmethod
-    def update_ranks(cls):
-        sql = """
-        UPDATE hive_accounts
-           SET rank = r.rnk
-          FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY vote_weight DESC) as rnk FROM hive_accounts) r
-         WHERE hive_accounts.id = r.id AND rank != r.rnk;
-        """
-        query(sql)
-        return
-
-        # the following method is 10-20x slower
-        id_weight = query_all("SELECT id, vote_weight FROM hive_accounts")
-        id_weight = sorted(id_weight, key=lambda el: el[1], reverse=True)
-
-        print("Updating account ranks...")
-        lap_0 = time.perf_counter()
-        query("START TRANSACTION")
-        for (i, (_id, _)) in enumerate(id_weight):
-            query("UPDATE hive_accounts SET rank=%d WHERE id=%d" % (i+1, _id))
-        query("COMMIT")
-        lap_1 = time.perf_counter()
-        print("Updated %d ranks in %ds" % (len(id_weight), lap_1 - lap_0))
-
-    @classmethod
-    def update_follows(cls, accounts):
+    def _update_follows(cls, accounts):
         ids = map(cls.get_id, accounts)
         sql = """
             UPDATE hive_accounts
