@@ -6,7 +6,6 @@ import collections
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col, query_one
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
-from hive.indexer.steem_client import get_adapter
 
 class CachedPost:
 
@@ -19,21 +18,47 @@ class CachedPost:
                   WHERE is_paidout = '0' AND payout_at <= :date"""
         return query_all(sql, date=block_date)
 
+    # In steemd, posts can be 'deleted' or unallocated in certain conditions.
+    # This requires foregoing some convenient assumptions, such as:
+    #   - author/permlink is unique and always references the same post
+    #   - you can always get_content on any author/permlink you see in an op
     @classmethod
     def delete(cls, post_id):
         query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
 
+    # 'Undeletion' event occurs when hive detects that a previously deleted
+    #   author/permlink combination has been reused on a new post. Hive does
+    #   not delete hive_posts entries because they are currently irreplaceable
+    #   in case of a fork. Instead, we reuse the slot. It's important to
+    #   immediately insert a placeholder in the cache table, because hive only
+    #   scans forward. Here we create a dummy record whose properties push it
+    #   to the front of update-immediately queue.
+    #
+    # Alternate ways of handling undeletes:
+    #  - delete row from hive_posts so that it can be re-indexed (re-id'd)
+    #    - comes at a risk of losing expensive entry on fork (and no undo)
+    #  - create undo table for hive_posts, hive_follows, etc, & link to block
+    #  - rely on steemd's post.id instead of database autoincrement
+    #    - requires way to query steemd post objects by id to be useful
+    #      - batch get_content_by_ids in steemd would be /huge/ speedup
+    #  - create a consistent cache queue table or dirty flag col
     @classmethod
-    def update(cls, post_id, author, permlink, block_date):
-        assert post_id <= cls.last_id(), 'only used to update previous records'
-        # TODO: replace with cache queue? otherwise, re-insert previously-deleted posts. see #48
-        steemd = get_adapter()
-        post = first(steemd.get_content_batch([[author, permlink]]))
-        if not post['author']:
-            return # post has been deleted
-        sqls = cls._generate_cached_post_sql(post_id, post, block_date)
-        for (sql, params) in sqls:
-            query(sql, **params)
+    def undelete(cls, post_id, author, permlink):
+        # ignore unless cache spans this id. forward sweep will pick it up.
+        if post_id > cls.last_id():
+            return
+
+        # create dummy row to ensure cache is aware
+        cls._write({
+            'post_id': post_id,
+            'author': author,
+            'permlink': permlink,
+            'payout_at': '2000-01-01',
+            'is_paidout': '0',
+            **dict.fromkeys('created_at updated_at'.split(' '), '1999-01-01'),
+            **dict.fromkeys('title preview img_url'.split(' '), ''),
+            **dict.fromkeys('payout promoted rshares sc_trend sc_hot'.split(' '), '0')},
+                   mode='insert')
 
     @classmethod
     def update_batch(cls, tuples, steemd, updated_at=None, trx=True):
@@ -51,13 +76,19 @@ class CachedPost:
 
             lap_0 = time.perf_counter()
             buffer = []
-            for post in steemd.get_content_batch(posts[i:i+1000]):
-                if not post['author']:
-                    continue # post has been deleted
-                url = post['author'] + '/' + post['permlink']
-                sql = cls._generate_cached_post_sql(ids[url], post, updated_at)
+            for j, post in enumerate(steemd.get_content_batch(posts[i:i+1000])):
+                if post['author']:
+                    url = post['author'] + '/' + post['permlink']
+                    sql = cls._generate_cached_post_sql(ids[url], post, updated_at)
+                    buffer.append(sql)
+                else:
+                    # rare edge case when the latest hive_post entry has been
+                    # deleted "in the future" (ie, we haven't seen the delete
+                    # op yet). it's important to advance _last_id, because
+                    # it's used to deduce if we've missed anything.
+                    url = tuples[i+j][1] + '/' + tuples[i+j][2]
+
                 cls._bump_last_id(ids[url])
-                buffer.append(sql)
 
             lap_1 = time.perf_counter()
             cls._batch_queries(buffer, trx)
@@ -91,6 +122,7 @@ class CachedPost:
 
         cls._last_id = next_id
 
+    # paranoid check of important operating assumption
     @classmethod
     def _ensure_safe_gap(cls, last_id, next_id):
         sql = "SELECT COUNT(*) FROM hive_posts WHERE id BETWEEN %d AND %d AND is_deleted = '0'"
@@ -214,22 +246,12 @@ class CachedPost:
             ('is_declined', "%d" % int(payout_declined)),
             ('is_full_power', "%d" % int(full_power)),
         ])
-        fields = values.keys()
 
         # Multiple SQL statements are generated for each post
         sqls = []
 
-        # Update main metadata in the hive_posts_cache table
-        if pid <= cls.last_id():
-            update = ', '.join([k+" = :"+k for k in fields][1:])
-            sql = "UPDATE hive_posts_cache SET %s WHERE post_id = :post_id"
-            sqls.append((sql % update, values))
-            # assert: affected rows == 1
-        else:
-            cols = ', '.join(fields)
-            params = ', '.join([':'+k for k in fields])
-            sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s)"
-            sqls.append((sql % (cols, params), values))
+        mode = 'insert' if pid > cls.last_id() else 'update'
+        sqls.append((cls._write_sql(values, mode), values))
 
         # update tag metadata only for top-level posts
         if not post['parent_author']:
@@ -308,3 +330,27 @@ class CachedPost:
             'total_votes': total_votes,
             'up_votes': up_votes
         }
+
+    @classmethod
+    def _write(cls, values, mode='insert'):
+        return query(cls._write_sql(values, mode), **values)
+
+    # sql builder for writing to hive_posts_cache table
+    @classmethod
+    def _write_sql(cls, values, mode='insert'):
+        values = collections.OrderedDict(values)
+        fields = values.keys()
+
+        if mode == 'insert':
+            cols = ', '.join(fields)
+            params = ', '.join([':'+k for k in fields])
+            sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s)"
+            sql = sql % (cols, params)
+        elif mode == 'update':
+            update = ', '.join([k+" = :"+k for k in fields][1:])
+            sql = "UPDATE hive_posts_cache SET %s WHERE post_id = :post_id"
+            sql = sql % (update)
+        else:
+            raise Exception("unknown write mode %s" % mode)
+
+        return sql

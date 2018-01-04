@@ -8,7 +8,7 @@ from funcy.seqs import drop
 from toolz import partition_all
 
 from hive.db.db_state import DbState
-from hive.db.methods import query_one, query
+from hive.db.methods import query_one, query_all, query
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -226,7 +226,7 @@ def select_missing_tuples(start_id, limit=1000000):
     sql = """SELECT id, author, permlink FROM hive_posts
               WHERE is_deleted = '0' AND id > :id
            ORDER BY id LIMIT :limit"""
-    missing = query_all(sql, id=start_id, limit=limit)
+    return query_all(sql, id=start_id, limit=limit)
 
 def cache_missing_posts():
     # cached posts inserted sequentially, so compare MAX(id)'s

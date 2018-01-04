@@ -36,7 +36,7 @@ class Posts:
 
     @classmethod
     def last_id(cls):
-        return query_one("SELECT COALESCE(MAX(id), 0) FROM hive_posts")
+        return query_one("SELECT COALESCE(MAX(id), 0) FROM hive_posts WHERE is_deleted = '0'")
 
     @classmethod
     def get_id_and_depth(cls, author, permlink):
@@ -47,13 +47,13 @@ class Posts:
     @classmethod
     def urls_to_tuples(cls, urls):
         tuples = []
-        sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
+        sql = "SELECT id, is_deleted FROM hive_posts WHERE author = :a AND permlink = :p"
         for url in urls:
             author, permlink = url.split('/')
-            pid = query_one(sql, a=author, p=permlink)
+            pid, is_deleted = query_row(sql, a=author, p=permlink)
             assert pid, "no pid for {}".format(url)
-            # note: output includes is_deleted posts
-            tuples.append([pid, author, permlink])
+            if not is_deleted:
+                tuples.append([pid, author, permlink])
 
         # sort the results.. must insert cache records sequentially
         return sorted(tuples, key=lambda tup: tup[0])
@@ -108,7 +108,7 @@ class Posts:
                 url = "@{}/{}".format(op['author'], op['permlink'])
                 print("Invalid post {} in @{}".format(url, community))
 
-            # if we're reusing a previously-deleted post (rare!), update it
+            # if we're undeleting a previously-deleted post, overwrite it
             if pid:
                 sql = """
                 UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0',
@@ -119,9 +119,8 @@ class Posts:
                       category=category, community=community,
                       depth=depth, id=pid)
 
-                if not DbState.is_initial_sync() and pid < CachedPost.last_id():
-                    # ensure cache record is rebuilt. #48
-                    CachedPost.update(pid, op['author'], op['permlink'], block_date)
+                if not DbState.is_initial_sync():
+                    CachedPost.undelete(pid, op['author'], op['permlink'])
             else:
                 sql = """
                 INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
