@@ -8,7 +8,7 @@ from funcy.seqs import drop
 from toolz import partition_all
 
 from hive.db.db_state import DbState
-from hive.db.methods import query_one, query
+from hive.db.methods import query_one, query_all, query
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -29,6 +29,9 @@ def db_last_block():
 def db_last_block_date():
     return query_one("SELECT created_at FROM hive_blocks ORDER BY num DESC LIMIT 1")
 
+def db_last_block_hash():
+    return query_one("SELECT hash FROM hive_blocks ORDER BY num DESC LIMIT 1")
+
 # process a single block. always wrap in a transaction!
 def process_block(block):
     date = block['timestamp']
@@ -42,43 +45,42 @@ def process_block(block):
           "VALUES (:num, :hash, :prev, :txs, :ops, :date)",
           num=num, hash=block_id, prev=prev, txs=len(txs), ops=ops, date=date)
 
-    accounts = set()
-    comments = []
+    account_names = set()
+    comment_ops = []
     json_ops = []
-    deleted = []
-    dirty = set()
+    delete_ops = []
+    dirty_urls = set()
     for tx in txs:
         for operation in tx['operations']:
             op_type, op = operation
 
             if op_type == 'pow':
-                accounts.add(op['worker_account'])
+                account_names.add(op['worker_account'])
             elif op_type == 'pow2':
-                accounts.add(op['work'][1]['input']['worker_account'])
-            elif op_type in ['account_create', 'account_create_with_delegation']:
-                accounts.add(op['new_account_name'])
+                account_names.add(op['work'][1]['input']['worker_account'])
+            elif op_type == 'account_create':
+                account_names.add(op['new_account_name'])
+            elif op_type == 'account_create_with_delegation':
+                account_names.add(op['new_account_name'])
             elif op_type == 'comment':
-                comments.append(op)
-                dirty.add(op['author']+'/'+op['permlink'])
+                comment_ops.append(op)
+                dirty_urls.add(op['author']+'/'+op['permlink'])
                 Accounts.dirty(op['author'])
-                if op['parent_author']:
-                    Accounts.dirty(op['parent_author'])
             elif op_type == 'delete_comment':
-                deleted.append(op)
+                delete_ops.append(op)
             elif op_type == 'custom_json':
                 json_ops.append(op)
             elif op_type == 'vote':
-                dirty.add(op['author']+'/'+op['permlink'])
+                dirty_urls.add(op['author']+'/'+op['permlink'])
                 Accounts.dirty(op['author'])
-                Accounts.dirty(op['voter'])
 
-    Accounts.register(accounts, date)  # if an account does not exist, mark it as created in this block
-    Posts.register(comments, date)  # if this is a new post, add the entry and validate community param
-    Posts.delete(deleted)  # mark hive_posts record as deleted
-    CustomOp.process_ops(json_ops, num, date)  # take care of follows, reblogs, community actions
+    Accounts.register(account_names, date) # register potentially new names
+    Posts.register(comment_ops, date) # ignores edits; inserts, validates
+    Posts.delete(delete_ops)  # unallocates hive_posts record, delete cache
+    CustomOp.process_ops(json_ops, num, date) # follow, reblog, community ops
 
     # return all posts modified this block
-    return dirty
+    return dirty_urls
 
 
 # batch-process blocks, wrap in a transaction
@@ -165,7 +167,7 @@ def listen_steemd(trail_blocks=2):
     assert trail_blocks < 25
     steemd = get_adapter()
     curr_block = db_last_block()
-    last_hash = False
+    last_hash = db_last_block_hash()
 
     while True:
         curr_block = curr_block + 1
@@ -187,7 +189,7 @@ def listen_steemd(trail_blocks=2):
             block = steemd.get_block(curr_block)
 
         # ensure the block we received links to our last
-        if last_hash and last_hash != block['previous']:
+        if last_hash != block['previous']:
             # this condition is very rare unless trail_blocks is 0 and fork is
             # encountered; to handle gracefully, implement a pop_block method
             raise Exception("Unlinkable block: have {}, got {} -> {})".format(
@@ -200,16 +202,15 @@ def listen_steemd(trail_blocks=2):
         dirty = process_block(block)
         edits = cache_dirty_posts(dirty, trx=False, date=block['timestamp'])
         paids = cache_paidout_posts(trx=False, date=block['timestamp'])
-
-        Accounts.cache_dirty()
-        Accounts.cache_dirty_follows()
+        accts = Accounts.cache_dirty()
+        follows = Accounts.cache_dirty_follows()
 
         query("COMMIT")
         secs = time.perf_counter() - start_time
 
-        print("[LIVE] Got block %d at %s with %d txs -- %d edits, %d payouts -- %dms%s"
+        print("[LIVE] Got block %d at %s with %d txs -- %d posts, %d payouts, %d accounts, %d follows -- %dms%s"
               % (curr_block, block['timestamp'], len(block['transactions']),
-                 edits, paids, int(secs * 1e3), ' SLOW' if secs > 1 else ''))
+                 edits, paids, accts, follows, int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
         # once a minute, update chain props
         if curr_block % 20 == 0:
@@ -226,7 +227,7 @@ def select_missing_tuples(start_id, limit=1000000):
     sql = """SELECT id, author, permlink FROM hive_posts
               WHERE is_deleted = '0' AND id > :id
            ORDER BY id LIMIT :limit"""
-    missing = query_all(sql, id=start_id, limit=limit)
+    return query_all(sql, id=start_id, limit=limit)
 
 def cache_missing_posts():
     # cached posts inserted sequentially, so compare MAX(id)'s
@@ -249,6 +250,8 @@ def cache_paidout_posts(trx=True, date=None):
     if not date:
         date = db_last_block_date()
     paidout = CachedPost.select_paidout_tuples(date)
+    for (_id, author, permlink) in paidout:
+        Accounts.dirty(author)
     if trx or len(paidout) > 1000:
         print("[PREP] Process {} payouts since {}".format(len(paidout), date))
     CachedPost.update_batch(paidout, steemd, date, trx)

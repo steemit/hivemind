@@ -6,6 +6,8 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 
+from hive.community.roles import is_community_post_valid
+
 class Posts:
     #_post_ids = {}
     #_touched_posts = []
@@ -36,7 +38,7 @@ class Posts:
 
     @classmethod
     def last_id(cls):
-        return query_one("SELECT COALESCE(MAX(id), 0) FROM hive_posts")
+        return query_one("SELECT COALESCE(MAX(id), 0) FROM hive_posts WHERE is_deleted = '0'")
 
     @classmethod
     def get_id_and_depth(cls, author, permlink):
@@ -47,13 +49,13 @@ class Posts:
     @classmethod
     def urls_to_tuples(cls, urls):
         tuples = []
-        sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
+        sql = "SELECT id, is_deleted FROM hive_posts WHERE author = :a AND permlink = :p"
         for url in urls:
             author, permlink = url.split('/')
-            pid = query_one(sql, a=author, p=permlink)
+            pid, is_deleted = query_row(sql, a=author, p=permlink)
             assert pid, "no pid for {}".format(url)
-            # note: output includes is_deleted posts
-            tuples.append([pid, author, permlink])
+            if not is_deleted:
+                tuples.append([pid, author, permlink])
 
         # sort the results.. must insert cache records sequentially
         return sorted(tuples, key=lambda tup: tup[0])
@@ -71,8 +73,6 @@ class Posts:
     # registers new posts (ignores edits), inserts into feed cache
     @classmethod
     def register(cls, ops, block_date):
-        from hive.indexer.community import is_community_post_valid
-
         for op in ops:
             sql = ("SELECT id, is_deleted FROM hive_posts "
                    "WHERE author = :a AND permlink = :p")
@@ -98,36 +98,32 @@ class Posts:
                 parent_id, parent_depth, category, community = parent_data
                 depth = parent_depth + 1
 
-            # community must be an existing account
-            if not Accounts.exists(community):
-                community = op['author']
-
-            # validated community; returns None if invalid & defaults to author.
+            # check post validity in specified context
             is_valid = is_community_post_valid(community, op)
             if not is_valid:
                 url = "@{}/{}".format(op['author'], op['permlink'])
                 print("Invalid post {} in @{}".format(url, community))
 
-            # if we're reusing a previously-deleted post (rare!), update it
+            # if we're undeleting a previously-deleted post, overwrite it
             if pid:
                 sql = """
-                UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0',
-                       parent_id = :parent_id, category = :category,
-                       community = :community, depth = :depth WHERE id = :id
+                  UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0',
+                         parent_id = :parent_id, category = :category,
+                         community = :community, depth = :depth
+                   WHERE id = :id
                 """
                 query(sql, is_valid=is_valid, parent_id=parent_id,
                       category=category, community=community,
                       depth=depth, id=pid)
 
-                if not DbState.is_initial_sync() and pid < CachedPost.last_id():
-                    # ensure cache record is rebuilt. #48
-                    CachedPost.update(pid, op['author'], op['permlink'], block_date)
+                if not DbState.is_initial_sync():
+                    CachedPost.undelete(pid, op['author'], op['permlink'])
             else:
                 sql = """
                 INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
                                         category, community, depth, created_at)
-                VALUES (:is_valid, :parent_id, :author, :permlink,
-                        :category, :community, :depth, :date)
+                     VALUES (:is_valid, :parent_id, :author, :permlink,
+                             :category, :community, :depth, :date)
                 """
                 query(sql, is_valid=is_valid, parent_id=parent_id,
                       author=op['author'], permlink=op['permlink'],
@@ -148,4 +144,9 @@ class Posts:
         md = load_json_key(comment, 'json_metadata')
         if not md or not isinstance(md, dict) or 'community' not in md:
             return None
-        return md['community']
+        community = md['community']
+        if not isinstance(community, str):
+            return None
+        if not Accounts.exists(community):
+            return None
+        return community
