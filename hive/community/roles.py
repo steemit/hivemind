@@ -1,13 +1,14 @@
 from collections import OrderedDict
 from typing import List
 
-from hive.db.methods import query_one
+from hive.db.methods import query_one, query_row
 
 privacy_types = ('open', 'restricted', 'closed')
 privacy_map = dict(enumerate(privacy_types))
 
 # each group inherits permissions from groups below it
 # hence we use OrderedDict to ensure order
+# TODO: implement support for non-json-op actions: post, comment
 permissions = OrderedDict([
     ('muted', []),
     ('guest', []),
@@ -77,3 +78,51 @@ def get_user_role(account: str, community: str) -> str:
 def get_community_privacy(community: str) -> str:
     type_id = query_one('SELECT type_id from hive_communities WHERE name = "%s"' % community)
     return privacy_map.get(type_id)
+
+
+def is_community_post_valid(community, comment_op: dict) -> str:
+    """ Given a new Steem post/comment, check if valid as per community rules
+    
+    For a comment to be valid, these conditions apply:
+        - Post must be new (edits don't count)
+        - Author is allowed to post in this community (membership & privacy)
+        - Author is not muted in this community
+        
+    
+    Args:
+        community (str): Community intended for this post op
+        comment_op (dict): Raw post operation
+        
+    Returns:
+        is_valid (bool): If all checks pass, true
+    """
+
+    if not community:
+        raise Exception("no community specified")
+
+    author = comment_op['author']
+    if author == community:
+        return True
+
+    sql = "SELECT * FROM hive_communities WHERE name = :name LIMIT 1"
+    community_props = query_row(sql, name=community)
+    if not community_props:
+        # if this is not a defined community, it's free to post in.
+        return True
+
+    if get_user_role(author, community) == 'muted':
+        return False
+
+    privacy = privacy_map[community_props['privacy']]
+    if privacy == 'open':
+        pass
+    elif privacy == 'restricted':
+        # guests cannot create top-level posts in restricted communities
+        if comment_op['parent_author'] == "" and get_user_role(author, community) == 'guest':
+            return False
+    elif privacy == 'closed':
+        # we need at least member permissions to post or comment
+        if get_user_role(author, community) == 'guest':
+            return False
+
+    return True

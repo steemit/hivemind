@@ -1,6 +1,6 @@
-from funcy.seqs import first, flatten
-from hive.db.methods import query_row
-from hive.community.roles import get_user_role, privacy_map, permissions, is_permitted
+from funcy.seqs import flatten
+#from hive.db.methods import query_row
+from hive.community.roles import permissions, is_permitted
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 
@@ -118,57 +118,3 @@ def process_json_community_op(account, op_json, date):
     # track success (TODO: failures as well?)
     # INSERT INTO hive_modlog (account, community, action, created_at) VALUES  (account, community, json.inspect, block_date)
     return True
-
-
-def is_community_post_valid(community, comment: dict) -> str:
-    """ Given a new Steem post/comment, check if valid as per community rules
-    
-    For a comment to be valid, these conditions apply:
-        - Post must be new (edits don't count)
-        - Author is allowed to post in this community (membership & privacy)
-        - Author is not muted in this community
-        
-    
-    Args:
-        community (str): Community intended for this post op
-        comment (dict): Raw post operation
-        
-    Returns:
-        is_valid (bool): If all checks pass, true
-    """
-
-    if not community:
-        raise Exception("no community specified")
-
-    author = comment['author']
-    if author == community:
-        return True
-
-    community_props = get_community(community)
-    if not community_props:
-        # if this is not a defined community, it's free to post in.
-        return True
-
-    if is_author_muted(author, community):
-        return False
-
-    privacy = privacy_map[community_props['privacy']]
-    if privacy == 'open':
-        pass
-    elif privacy == 'restricted':
-        # guests cannot create top-level posts in restricted communities
-        if comment['parent_author'] == "" and get_user_role(author, community) == 'guest':
-            return False
-    elif privacy == 'closed':
-        # we need at least member permissions to post or comment
-        if get_user_role(author, community) == 'guest':
-            return False
-
-    return True
-
-
-def get_community(community_name):
-    return query_row("SELECT * FROM hive_communities WHERE name = :n LIMIT 1", n=community_name)
-
-def is_author_muted(author_name: str, community_name: str) -> bool:
-    return get_user_role(author_name, community_name) is 'muted'
