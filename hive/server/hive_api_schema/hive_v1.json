@@ -1,6 +1,7 @@
 {
     "$schema": "http://json-schema.org/draft-06/schema#",
     "type":"object",
+    "$comment":"`method:` values are for use with a jussi frontend configured to route based on `hive_api.` & strip it from the call.",
     "additionalProperties": false,
     "allOf": [
         {"$ref":"#/definitions/request"},
