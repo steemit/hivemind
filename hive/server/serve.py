@@ -67,6 +67,7 @@ for m in condenser_methods:
 non_appbase_methods = AsyncMethods()
 for m in condenser_methods:
     non_appbase_methods.add(m)
+    non_appbase_methods.add(m, 'hive_api.' + m.__name__) # TODO: temp, for testing jussi-style path without jussi
 
 
 app = web.Application()
