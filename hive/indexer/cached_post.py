@@ -220,19 +220,16 @@ class CachedPost:
         sqls = []
 
         # Update main metadata in the hive_posts_cache table
-        cols = ', '.join(fields)
-        params = ', '.join([':'+k for k in fields])
-        update = ', '.join([k+" = :"+k for k in fields][1:])
-        sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s) ON CONFLICT (post_id) DO UPDATE SET %s"
-        sqls.append((sql % (cols, params, update), values))
-
-        #exists = query_one("SELECT 1 FROM hive_posts_cache WHERE post_id = (SELECT id FROM hive_posts WHERE author = :a AND permlink = :p)", a=post['author'], p=post['permlink'])
-        #if exists:
-        #    sql = "UPDATE hive_posts_cache SET %s WHERE post_id = :post_id"
-        #    sqls.append((sql % update, values))
-        #else:
-        #    sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s)"
-        #    sqls.append((sql % (cols, params), values))
+        if pid <= cls.last_id():
+            update = ', '.join([k+" = :"+k for k in fields][1:])
+            sql = "UPDATE hive_posts_cache SET %s WHERE post_id = :post_id"
+            sqls.append((sql % update, values))
+            # assert: affected rows == 1
+        else:
+            cols = ', '.join(fields)
+            params = ', '.join([':'+k for k in fields])
+            sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s)"
+            sqls.append((sql % (cols, params), values))
 
         # update tag metadata only for top-level posts
         if not post['parent_author']:
@@ -246,18 +243,19 @@ class CachedPost:
 
             to_add = (tags - curr_tags)
             if to_add:
-                sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES "
                 params = {}
                 vals = []
                 for i, tag in enumerate(to_add):
                     vals.append("(:id, :t%d)" % i)
                     params["t%d"%i] = tag
-                sql = sql + ','.join(vals) + " ON CONFLICT DO NOTHING"
-                sqls.append((sql, {'id': pid, **params}))
+                sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES %s"
+                sql += " ON CONFLICT DO NOTHING" # (conflicts due to collation)
+                sqls.append((sql % ','.join(vals), {'id': pid, **params}))
 
         return sqls
 
     @classmethod
+    # see: calculate_score - https://github.com/steemit/steem/blob/8cd5f688d75092298bcffaa48a543ed9b01447a6/libraries/plugins/tags/tags_plugin.cpp#L239
     def _score(cls, rshares, created_timestamp, timescale=480000):
         mod_score = rshares / 10000000.0
         order = math.log10(max((abs(mod_score), 1)))
@@ -269,6 +267,7 @@ class CachedPost:
         return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']),
                          str(rep_log10(vote['reputation']))))
 
+    # see: contentStats - https://github.com/steemit/condenser/blob/master/src/app/utils/StateFunctions.js#L109
     @classmethod
     def _post_stats(cls, post):
         net_rshares_adj = 0
