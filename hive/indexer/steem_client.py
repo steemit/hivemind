@@ -21,6 +21,8 @@ class ClientStats:
 
     @classmethod
     def print(cls):
+        if not cls.stats:
+            return
         ttl = cls.ttltime
         print("[DEBUG] total STEEM time: {}s".format(int(ttl / 1000)))
         for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:

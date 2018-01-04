@@ -1,0 +1,59 @@
+import time
+
+class Timer:
+    # Name of entity, lap units (e.g. rps, wps), total items in job
+    _entity = []
+    _lap_units = []
+    _total = None
+
+    # Lap checkpoints, # processed, last # processed
+    _laps = []
+    _processed = 0
+    _last_items = 0
+
+    def __init__(self, total=None, entity='', laps=[]):
+        self._entity = entity
+        self._lap_units = laps
+        self._total = total
+
+    def batch_start(self):
+        self._laps = []
+        self.batch_lap()
+
+    def batch_lap(self):
+        self._laps.append(time.perf_counter())
+
+    def batch_finish(self, ops=None):
+        self.batch_lap()
+        self._last_items = ops
+        self._processed += ops
+
+    def batch_status(self):
+        # " -- post 1 of 10 "
+        out = " -- %s %d of %d " % (self._entity, self._processed, self._total)
+
+        # "(3/s, 4rps, 5wps) -- "
+        rates = []
+        for i, unit in enumerate(['/s', *self._lap_units]):
+            rates.append('%d%s' % (self._rate(i), unit))
+        out += "(%s) -- "  % ', '.join(rates)
+
+        # "eta 01:22"
+        out += "eta %s" % self._eta()
+
+        return out
+
+
+    def _rate(self, lap_idx=None):
+        secs = self._elapsed(lap_idx)
+        return (self._last_items / secs)
+
+    def _eta(self):
+        items = self._total - self._processed
+        secs = (items / self._rate())
+        return "%02d:%02d" % (secs / 60, secs % 60)
+
+    def _elapsed(self, lap_idx=None):
+        if not lap_idx:
+            return self._laps[-1] - self._laps[0]
+        return self._laps[lap_idx] - self._laps[lap_idx-1]
