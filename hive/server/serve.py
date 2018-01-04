@@ -59,15 +59,17 @@ condenser_methods = (
 methods = AsyncMethods()
 for m in hive_methods:
     methods.add(m)
+    methods.add(m, 'hive_api.' + m.__name__)  # TODO: temp, for testing jussi-style path without jussi
 for m in condenser_methods:
     # note: unclear if appbase expects condenser_api.call or call.condenser_api
     methods.add(m, 'condenser_api.' + m.__name__)
+    methods.add(m, 'hive_api.condenser_api.' + m.__name__) # TODO: temp, for testing jussi-style path without jussi
 
 # Register non-appbase condenser_api endpoint (remove after appbase in prod)
 non_appbase_methods = AsyncMethods()
 for m in condenser_methods:
     non_appbase_methods.add(m)
-    non_appbase_methods.add(m, 'hive_api.' + m.__name__) # TODO: temp, for testing jussi-style path without jussi
+    non_appbase_methods.add(m, 'hive_api.condenser_api.non_appb' + m.__name__) # TODO: temp, for testing jussi-style path without jussi
 
 
 app = web.Application()

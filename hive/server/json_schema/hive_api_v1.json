@@ -1,0 +1,202 @@
+{
+    "$schema": "http://json-schema.org/draft-06/schema#",
+    "type":"object",
+    "$comment":"`method:` values are for use with a jussi frontend configured to route based on `hive_api.` & strip it from the call.",
+    "additionalProperties": false,
+    "allOf": [
+        {"$ref":"#/definitions/request"},
+        {
+            "oneOf":[
+                {
+                    "properties": {
+                        "method": {
+                            "enum": ["hive_api.db_head_state"]
+                        }
+                    }
+                },
+                {
+                    "properties": {
+                        "method": {
+                            "enum": ["hive_api.get_followers"]
+                        },
+                        "params": {
+                            "$ref":"#/definitions/getFollowParams"
+                        }
+                    },
+                    "required":["params"]
+                },
+                {
+
+                    "properties": {
+                        "method": {
+                            "enum": ["hive_api.get_following"]
+                        },
+                        "params": {
+                            "$ref":"#/definitions/getFollowParams"
+                        }
+                    },
+                    "required":["params"]
+                },
+                {
+                    "properties": {
+                        "method": {
+                            "enum":["hive_api.get_follow_count"]
+                        },
+                        "params": {
+                            "properties": {
+                                "account": {
+                                    "$ref": "#/definitions/accountName"
+                                }
+                            },
+                            "required":["account"]
+
+                        }
+                    },
+                    "required":["params"]
+                },
+                {
+                    "properties": {
+                        "method": {
+                            "enum": ["hive_api.get_user_feed"]
+                        },
+                        "params": {
+                            "$ref": "#/definitions/getFeedParams"
+                        }
+                    }
+                },
+                {
+                    "properties": {
+                        "method": {
+                            "enum": ["hive_api.get_blog_feed"]
+                        },
+                        "params": {
+                            "$ref": "#/definitions/getFeedParams"
+                        }
+                    }
+                },
+                {
+                    "properties": {
+                        "method": {
+                            "enum": ["hive_api.get_discussions_by_sort_and_tag"]
+                        },
+                        "params": {
+                            "type":"object",
+                            "properties": {
+                                "sort": {
+                                    "type": "string",
+                                    "enum":["trending","hot","new","promoted"]
+                                },
+                                "tag": {
+                                    "type":"string"
+                                },
+                                "skip": {
+                                    "type":"integer",
+                                    "minimum": 0
+                                },
+                                "limit": {
+                                    "type":"integer",
+                                    "minimum": 1
+                                },
+                                "context": {
+                                    "type": "string"
+                                }
+                            },
+                            "required":["sort","tag","skip","limit"]
+                        }
+                    }
+                },
+                {
+                    "properties": {
+                        "method": {
+                            "enum":["hive_api.get_related_posts"]
+                        },
+                        "params":{
+                            "properties":{
+                                "account": {
+                                    "type":"string"
+                                },
+                                "permlink": {
+                                    "type":"string"
+                                }
+                            },
+                            "required":["account","permlink"]
+                        }
+                    }
+                },
+                {
+                    "properties": {
+                        "method": {
+                            "enum":["hive_api.payouts_total"]
+                        }
+                    }
+                },
+                {
+                    "properties": {
+                        "method": {
+                            "enum":["hive_api.payouts_last_24h"]
+                        }
+                    }
+                }
+            ]
+        }
+    ],
+    "definitions": {
+        "request": {
+            "type": "object",
+            "required": [ "jsonrpc", "method" ],
+            "properties": {
+                "jsonrpc": { "enum": [ "2.0" ] },
+                "method": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": [ "string", "number" ],
+                    "note": [
+                        "While allowed, a number with a fractional part should be avoided: http://www.jsonrpc.org/specification#id2"
+                    ]
+                },
+                "params": {
+                    "type": "object"
+                }
+            }
+        },
+        "accountName": {
+            "type":"string",
+            "minLength": 3,
+            "maxLength": 16
+        },
+        "getFollowParams": {
+            "type":"object",
+            "properties": {
+                "account": {
+                    "$ref":"#/definitions/accountName"
+                },
+                "skip": {
+                    "type":"integer",
+                    "minimum": 0
+                },
+                "limit": {
+                    "type":"integer",
+                    "minimum": 1
+                }
+            },
+            "required":["account", "skip","limit"]
+        },
+        "getFeedParams": {
+            "type":"object",
+            "allOf":[
+                {
+                    "$ref":"#/definitions/getFollowParams"
+                },
+                {
+                    "properties": {
+                        "context": {
+                            "type": "string"
+                        }
+                    },
+                    "required":["context"]
+                }
+            ]
+        }
+    }
+}
