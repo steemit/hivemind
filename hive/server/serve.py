@@ -57,11 +57,13 @@ jrpc_condenser = (
 methods = AsyncMethods()
 legacy_methods = AsyncMethods()
 legacy_methods.add(condenser_api.call, 'call')
-methods.add(condenser_api.call, 'call')
+legacy_methods.add(condenser_api.call, 'hive_api.condenser_api.legacy.call')
+#methods.add(condenser_api.call, 'call')
 for m in jrpc_methods:
     methods.add(m)
 for m in jrpc_condenser:
-    methods.add(m, 'condenser_api.' + m.__name__)
+    methods.add(m, 'hive_api.condenser_api.' + m.__name__)
+    # legacy_methods.add(m, 'condenser_api.' + m.__name__)
     legacy_methods.add(m)
 
 
@@ -110,7 +112,7 @@ async def health(request):
 async def jsonrpc_handler(request):
     request = await request.text()
     response = await methods.dispatch(request)
-    return web.json_response(response, status=200)
+    return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
 
 async def legacy_handler(request):
     request = await request.text()
