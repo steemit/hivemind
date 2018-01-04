@@ -238,8 +238,10 @@ def cache_missing_posts():
     if not gap:
         return
 
+    steemd = get_adapter()
+    head_time = steemd.head_time()
     missing = select_missing_tuples(last_cached_id)
-    CachedPost.update_batch(missing, get_adapter())
+    CachedPost.update_batch(missing, steemd, head_time, trx=True)
 
     # repeat until no gap
     cache_missing_posts()

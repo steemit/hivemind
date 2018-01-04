@@ -60,23 +60,22 @@ class CachedPost:
             **dict.fromkeys('payout promoted rshares sc_trend sc_hot'.split(' '), '0')},
                    mode='insert')
 
+    # `tuples` are an array of (id, author, permlink) representing posts which
+    #   are to be fetched from steemd and updated in hive_posts_cache table.
     @classmethod
-    def update_batch(cls, tuples, steemd, updated_at=None, trx=True):
-        # if calling function already has head_time, saves us a call
-        if not updated_at:
-            updated_at = steemd.head_time()
+    def update_batch(cls, tuples, steemd, updated_at, trx=True):
 
         # build url->id map
-        ids = dict([[author+"/"+permlink, id] for (id, author, permlink) in tuples])
-        posts = [[author, permlink] for (id, author, permlink) in tuples]
+        ids = {author+"/"+permlink: pid for (pid, author, permlink) in tuples}
 
-        total = len(posts)
+        total = len(tuples)
         processed = 0
         for i in range(0, total, 1000):
 
             lap_0 = time.perf_counter()
             buffer = []
-            for j, post in enumerate(steemd.get_content_batch(posts[i:i+1000])):
+            batch_params = [tup[1:] for tup in tuples[i:i+1000]]
+            for j, post in enumerate(steemd.get_content_batch(batch_params)):
                 if post['author']:
                     url = post['author'] + '/' + post['permlink']
                     sql = cls._generate_cached_post_sql(ids[url], post, updated_at)

@@ -161,16 +161,7 @@ class SteemClient:
         result = None
 
         if self._jussi:
-            tries = 0
-            while True:
-                try:
-                    result = list(self._client.exec_batch(method, params, batch_size=500))
-                    break
-                except (AssertionError, RPCError) as e:
-                    tries += 1
-                    print("batch {} failure, retry in {}s -- {}".format(method, tries, e))
-                    time.sleep(tries)
-                    continue
+            result = self.__exec_jussi_batch_with_retry(method, params, 500)
         else:
             result = list(self._client.exec_multi_with_futures(
                 method, params, max_workers=10))
@@ -178,3 +169,15 @@ class SteemClient:
         total_time = int((time.perf_counter() - time_start) * 1000)
         ClientStats.log("%s()" % method, total_time, len(params))
         return result
+
+    # perform a jussi-style batch request, retrying on error
+    def __exec_jussi_batch_with_retry(self, method, params, batch_size=500):
+        tries = 0
+        while True:
+            try:
+                return list(self._client.exec_batch(method, params, batch_size))
+            except (AssertionError, RPCError) as e:
+                tries += 1
+                print("batch {} failure, retry in {}s -- {}".format(method, tries, e))
+                time.sleep(tries)
+                continue
