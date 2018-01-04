@@ -9,7 +9,7 @@ from aiopg.sa import create_engine
 from jsonrpcserver import config
 from jsonrpcserver.async_methods import AsyncMethods
 
-from hive.server import legacy_api as condenser_api
+from hive.server import condenser_api
 from hive.server import hive_api
 
 str_log_level = os.environ.get('LOG_LEVEL') or 'DEBUG'
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
 
 
-jrpc_methods = (
+hive_methods = (
     hive_api.db_head_state,
     hive_api.get_followers,
     hive_api.get_following,
@@ -37,7 +37,8 @@ jrpc_methods = (
     hive_api.payouts_last_24h
 )
 
-jrpc_condenser = (
+condenser_methods = (
+    condenser_api.call,
     condenser_api.get_followers,
     condenser_api.get_following,
     condenser_api.get_follow_count,
@@ -54,15 +55,18 @@ jrpc_condenser = (
     condenser_api.get_state
 )
 
+# Register hive_api methods and (appbase) condenser_api methods
 methods = AsyncMethods()
-legacy_methods = AsyncMethods()
-legacy_methods.add(condenser_api.call, 'call')
-methods.add(condenser_api.call, 'call')
-for m in jrpc_methods:
+for m in hive_methods:
     methods.add(m)
-for m in jrpc_condenser:
+for m in condenser_methods:
+    # note: unclear if appbase expects condenser_api.call or call.condenser_api
     methods.add(m, 'condenser_api.' + m.__name__)
-    legacy_methods.add(m)
+
+# Register non-appbase condenser_api endpoint (remove after appbase in prod)
+non_appbase_methods = AsyncMethods()
+for m in condenser_methods:
+    non_appbase_methods.add(m)
 
 
 app = web.Application()
@@ -110,11 +114,11 @@ async def health(request):
 async def jsonrpc_handler(request):
     request = await request.text()
     response = await methods.dispatch(request)
-    return web.json_response(response, status=200)
+    return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
 
-async def legacy_handler(request):
+async def non_appbase_handler(request):
     request = await request.text()
-    response = await legacy_methods.dispatch(request)
+    response = await non_appbase_methods.dispatch(request)
     return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
 
 
@@ -122,7 +126,7 @@ app.on_startup.append(init_db)
 app.on_cleanup.append(close_db)
 app.router.add_get('/health', health)
 app.router.add_post('/', jsonrpc_handler)
-app.router.add_post('/legacy', legacy_handler)
+app.router.add_post('/legacy', non_appbase_handler)
 
 
 if __name__ == '__main__':
