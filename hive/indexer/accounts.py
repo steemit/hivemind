@@ -60,23 +60,26 @@ class Accounts:
 
     @classmethod
     def cache_oldest(cls, limit=50000):
-        print("Caching oldest %d accounts..." % limit)
+        print("[SYNC] Caching oldest %d accounts..." % limit)
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
         cls._cache_accounts(query_col(sql, limit=limit), trx=True)
 
     @classmethod
     def cache_dirty(cls):
+        count = len(cls._dirty)
         cls._cache_accounts(list(cls._dirty), trx=False)
         cls._dirty = set()
+        return count
 
     @classmethod
     def cache_dirty_follows(cls):
         if not cls._dirty_follows:
-            return
+            return 0
         todo = cls._rate_limited(cls._dirty_follows)
         if todo:
             cls._update_follows(todo)
         cls._dirty_follows = set()
+        return len(todo)
 
     @classmethod
     def update_ranks(cls):
@@ -97,12 +100,12 @@ class Accounts:
             else:
                 cls._follow_rates.pop(name)
 
+        blocked = set(cls._follow_rates.keys())
         for name in accounts:
             if name not in cls._follow_rates:
                 cls._follow_rates[name] = 0
             cls._follow_rates[name] += 200
 
-        blocked = set(cls._follow_rates.keys())
         return accounts - blocked
 
     @classmethod

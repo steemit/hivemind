@@ -63,8 +63,6 @@ def process_block(block):
                 comment_ops.append(op)
                 dirty_urls.add(op['author']+'/'+op['permlink'])
                 Accounts.dirty(op['author'])
-                if op['parent_author']:
-                    Accounts.dirty(op['parent_author'])
             elif op_type == 'delete_comment':
                 delete_ops.append(op)
             elif op_type == 'custom_json':
@@ -72,7 +70,6 @@ def process_block(block):
             elif op_type == 'vote':
                 dirty_urls.add(op['author']+'/'+op['permlink'])
                 Accounts.dirty(op['author'])
-                Accounts.dirty(op['voter'])
 
     Accounts.register(account_names, date) # register potentially new names
     Posts.register(comment_ops, date) # ignores edits; inserts, validates
@@ -202,16 +199,15 @@ def listen_steemd(trail_blocks=2):
         dirty = process_block(block)
         edits = cache_dirty_posts(dirty, trx=False, date=block['timestamp'])
         paids = cache_paidout_posts(trx=False, date=block['timestamp'])
-
-        Accounts.cache_dirty()
-        Accounts.cache_dirty_follows()
+        accts = Accounts.cache_dirty()
+        follows = Accounts.cache_dirty_follows()
 
         query("COMMIT")
         secs = time.perf_counter() - start_time
 
-        print("[LIVE] Got block %d at %s with %d txs -- %d edits, %d payouts -- %dms%s"
+        print("[LIVE] Got block %d at %s with %d txs -- %d posts, %d payouts, %d accounts, %d follows -- %dms%s"
               % (curr_block, block['timestamp'], len(block['transactions']),
-                 edits, paids, int(secs * 1e3), ' SLOW' if secs > 1 else ''))
+                 edits, paids, accts, follows, int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
         # once a minute, update chain props
         if curr_block % 20 == 0:
@@ -251,6 +247,8 @@ def cache_paidout_posts(trx=True, date=None):
     if not date:
         date = db_last_block_date()
     paidout = CachedPost.select_paidout_tuples(date)
+    for (_id, author, permlink) in paidout:
+        Accounts.dirty(author)
     if trx or len(paidout) > 1000:
         print("[PREP] Process {} payouts since {}".format(len(paidout), date))
     CachedPost.update_batch(paidout, steemd, date, trx)
