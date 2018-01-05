@@ -4,8 +4,10 @@ from aiocache import cached
 from hive.db.methods import query, query_one, query_col, query_row, query_all
 from hive.indexer.steem_client import get_adapter
 
-# e.g. {"id":0,"jsonrpc":"2.0","method":"call","params":["database_api","get_state",["trending"]]}
+# e.g. {"id":0,"jsonrpc":"2.0","method":"call",
+#       "params":["database_api","get_state",["trending"]]}
 async def call(api, method, params):
+    # pylint: disable=line-too-long, protected-access, too-many-return-statements, too-many-branches
     if method == 'get_followers':
         return await get_followers(params[0], params[1], params[2], params[3])
     elif method == 'get_following':
@@ -132,7 +134,8 @@ async def get_discussions_by_created(start_author: str, start_permlink: str = ''
 
 
 # author blog
-async def get_discussions_by_blog(tag: str, start_author: str = '', start_permlink: str = '', limit: int = 20):
+async def get_discussions_by_blog(tag: str, start_author: str = '',
+                                  start_permlink: str = '', limit: int = 20):
     limit = _validate_limit(limit, 20)
     account_id = _get_account_id(tag)
     seek = ''
@@ -154,7 +157,8 @@ async def get_discussions_by_blog(tag: str, start_author: str = '', start_permli
 
 
 # author feed
-async def get_discussions_by_feed(tag: str, start_author: str = '', start_permlink: str = '', limit: int = 20):
+async def get_discussions_by_feed(tag: str, start_author: str = '',
+                                  start_permlink: str = '', limit: int = 20):
     limit = _validate_limit(limit, 20)
     account_id = _get_account_id(tag)
     seek = ''
@@ -237,6 +241,7 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
 
 # https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
 async def get_state(path: str):
+    # pylint: disable=too-many-locals, too-many-branches, too-many-statements
     if path[0] == '/':
         path = path[1:]
     if not path:
@@ -328,9 +333,9 @@ async def get_state(path: str):
     elif part[0] == "tags":
         state['tag_idx']['trending'] = []
         tags = await _get_trending_tags()
-        for t in tags:
-            state['tag_idx']['trending'].append(t['name'])
-            state['tags'][t['name']] = t
+        for tag in tags:
+            state['tag_idx']['trending'].append(tag['name'])
+            state['tags'][tag['name']] = tag
 
     else:
         raise Exception("unknown path {}".format(path))
@@ -413,7 +418,7 @@ def _load_posts_recursive(post_ids):
     return out
 
 # sort can be trending, hot, new, promoted
-def _get_discussions(sort, start_author, start_permlink, limit, tag, context=None):
+def _get_discussions(sort, start_author, start_permlink, limit, tag):
     limit = _validate_limit(limit, 20)
 
     col = ''
@@ -446,19 +451,20 @@ def _get_discussions(sort, start_author, start_permlink, limit, tag, context=Non
     sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s DESC LIMIT :limit"
            % (_where(where), col))
     ids = query_col(sql, tag=tag, start_id=start_id, limit=limit)
-    return _get_posts(ids, context)
+    return _get_posts(ids)
 
 def _load_accounts(names):
-    sql = "SELECT id,name,display_name,about,reputation FROM hive_accounts WHERE name IN :names"
-    accounts = []
-    for row in query_all(sql, names=tuple(names)):
-        account = {}
-        account['name'] = row['name']
-        account['reputation'] = _rep_to_raw(row['reputation'])
-        account['json_metadata'] = json.dumps({'profile': {'name': row['display_name'], 'about': row['about']}})
-        accounts.append(account)
+    sql = """SELECT id, name, display_name, about, reputation
+               FROM hive_accounts WHERE name IN :names"""
+    rows = query_all(sql, names=tuple(names))
+    return [_condenser_account(row) for row in rows]
 
-    return accounts
+def _condenser_account(row):
+    return {
+        'name': row['name'],
+        'reputation': _rep_to_raw(row['reputation']),
+        'json_metadata': json.dumps({
+            'profile': {'name': row['display_name'], 'about': row['about']}})}
 
 def _where(conditions):
     if not conditions:
@@ -492,7 +498,7 @@ def _get_account_id(name):
     return _id
 
 # given an array of post ids, returns full metadata in the same order
-def _get_posts(ids, context=None):
+def _get_posts(ids):
     if not ids:
         raise Exception("no ids provided")
 
@@ -509,59 +515,7 @@ def _get_posts(ids, context=None):
     posts_by_id = {}
     for row in query(sql, ids=tuple(ids)).fetchall():
         row = dict(row)
-        post = {}
-
-        post['post_id'] = row['post_id']
-        post['author'] = row['author']
-        post['permlink'] = row['permlink']
-        post['category'] = row['category']
-        post['parent_permlink'] = ''
-        post['parent_author'] = ''
-
-        post['title'] = row['title']
-        post['body'] = row['body']
-        post['json_metadata'] = row['json']
-
-        post['created'] = _json_date(row['created_at'])
-        post['depth'] = row['depth']
-        post['children'] = row['children']
-        post['net_rshares'] = row['rshares']
-
-        post['cashout_time'] = '1969-12-31T23:59:59' if row['is_paidout'] else _json_date(row['payout_at'])
-        post['total_payout_value'] = ("%.3f SBD" % row['payout']) if row['is_paidout'] else '0.000 SBD'
-        post['curator_payout_value'] = '0.000 SBD'
-        post['pending_payout_value'] = '0.000 SBD' if row['is_paidout'] else ("%.3f SBD" % row['payout'])
-        post['promoted'] = "%.3f SBD" % row['promoted']
-
-        post['replies'] = []
-        post['body_length'] = len(row['body'])
-        post['active_votes'] = _hydrate_active_votes(row['votes'])
-        post['author_reputation'] = _rep_to_raw(row['author_rep'])
-
-        raw_json = {} if not row['raw_json'] else json.loads(row['raw_json'])
-        if row['depth'] > 0:
-            if raw_json:
-                post['parent_permlink'] = raw_json['parent_permlink']
-                post['parent_author'] = raw_json['parent_author']
-            else:
-                sql = "SELECT author, permlink FROM hive_posts WHERE id = (SELECT parent_id FROM hive_posts WHERE id = %d)"
-                row2 = query_row(sql % row['post_id'])
-                post['parent_permlink'] = row2['permlink']
-                post['parent_author'] = row2['author']
-
-        if raw_json:
-            post['root_title'] = raw_json['root_title']
-            post['max_accepted_payout'] = raw_json['max_accepted_payout']
-            post['percent_steem_dollars'] = raw_json['percent_steem_dollars']
-            post['url'] = raw_json['url']
-            #post['net_votes']
-            #post['allow_replies']
-            #post['allow_votes']
-            #post['allow_curation_rewards']
-            #post['beneficiaries']
-        else:
-            post['root_title'] = 'RE: ' + post['title']
-
+        post = _condenser_post_object(row)
         posts_by_id[row['post_id']] = post
 
     # in rare cases of cache inconsistency, recover and warn
@@ -574,18 +528,76 @@ def _get_posts(ids, context=None):
     return [posts_by_id[_id] for _id in ids]
 
 
+# given a hive_posts_cache row, create a condenser-api style post object
+def _condenser_post_object(row):
+    paid = row['is_paidout']
+
+    post = {}
+    post['post_id'] = row['post_id']
+    post['author'] = row['author']
+    post['permlink'] = row['permlink']
+    post['category'] = row['category']
+    post['parent_permlink'] = ''
+    post['parent_author'] = ''
+
+    post['title'] = row['title']
+    post['body'] = row['body']
+    post['json_metadata'] = row['json']
+
+    post['created'] = _json_date(row['created_at'])
+    post['depth'] = row['depth']
+    post['children'] = row['children']
+    post['net_rshares'] = row['rshares']
+
+    post['cashout_time'] = _json_date(None if paid else row['payout_at'])
+    post['total_payout_value'] = _amount(row['payout'] if paid else 0)
+    post['curator_payout_value'] = _amount(0)
+    post['pending_payout_value'] = _amount(0 if paid else row['payout'])
+    post['promoted'] = "%.3f SBD" % row['promoted']
+
+    post['replies'] = []
+    post['body_length'] = len(row['body'])
+    post['active_votes'] = _hydrate_active_votes(row['votes'])
+    post['author_reputation'] = _rep_to_raw(row['author_rep'])
+
+    # import fields from legacy object
+    assert row['raw_json']
+    assert len(row['raw_json']) > 32
+    raw_json = json.loads(row['raw_json'])
+
+    if row['depth'] > 0:
+        post['parent_permlink'] = raw_json['parent_permlink']
+        post['parent_author'] = raw_json['parent_author']
+
+    post['root_title'] = raw_json['root_title']
+    post['max_accepted_payout'] = raw_json['max_accepted_payout']
+    post['percent_steem_dollars'] = raw_json['percent_steem_dollars']
+    post['url'] = raw_json['url']
+
+    # not used by condenser, but may be useful
+    #post['net_votes'] = raw_json['net_votes']
+    #post['allow_replies'] = raw_json['allow_replies']
+    #post['allow_votes'] = raw_json['allow_votes']
+    #post['allow_curation_rewards'] = raw_json['allow_curation_rewards']
+    #post['beneficiaries'] = raw_json['benificiaries']
+
+    return post
+
+def _amount(amount, asset='SBD'):
+    if asset == 'SBD':
+        return "%.3f SBD" % amount
+    raise Exception("unexpected %s" % asset)
+
 def _hydrate_active_votes(vote_csv):
     if not vote_csv:
         return []
+    cols = 'voter,rshares,percent,reputation'.split(',')
+    votes = vote_csv.split("\n")
+    return [dict(zip(cols, line.split(','))) for line in votes]
 
-    votes = []
-    for line in vote_csv.split("\n"):
-        voter, rshares, percent, reputation = line.split(',')
-        votes.append(dict(voter=voter, rshares=rshares, percent=percent, reputation=_rep_to_raw(reputation)))
-
-    return votes
-
-def _json_date(date):
+def _json_date(date=None):
+    if not date:
+        return '1969-12-31T23:59:59'
     return 'T'.join(str(date).split(' '))
 
 def _rep_to_raw(rep):
