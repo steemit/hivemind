@@ -34,6 +34,10 @@ class QueryStats:
             ms, calls = vals
             print("% 5.1f%% % 10.2fms % 8.2favg % 8dx -- %s"
                   % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+        cls.clear()
+
+    @classmethod
+    def clear(cls):
         cls.stats = {}
         cls.ttltime = 0
 

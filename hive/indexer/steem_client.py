@@ -6,18 +6,47 @@ from decimal import Decimal
 from .http_client import HttpClient, RPCError
 
 class ClientStats:
+    # Warn when critical calls take too long
+    PAR = {
+        'get_dynamic_global_properties': 120,
+        'get_block': 100,
+        'get_accounts': 5,
+        'get_content': 15,
+        'get_order_book': 100,
+        'get_current_median_history_price': 80,
+    }
+
     stats = {}
     ttltime = 0.0
 
     @classmethod
-    def log(cls, nsql, ms, batch_size=1):
-        if nsql not in cls.stats:
-            cls.stats[nsql] = [0, 0]
-        cls.stats[nsql][0] += ms
-        cls.stats[nsql][1] += batch_size
+    def log(cls, method, ms, batch_size=1):
+        if method not in cls.stats:
+            cls.stats[method] = [0, 0]
+        cls.stats[method][0] += ms
+        cls.stats[method][1] += batch_size
         cls.ttltime += ms
+        cls.check_timing(method, ms, batch_size)
         if cls.ttltime > 30 * 60 * 1000:
             cls.print()
+
+    @classmethod
+    def check_timing(cls, method, ms, batch_size):
+        per = ms / batch_size
+        par = cls.PAR[method]
+        over = 100 * (per / par - 1)
+        if ms < 600 and over < 25:
+            return
+
+        out = ("[STEEM][%dms] %s[%d] -- "
+               % (ms, method, batch_size))
+
+        if over > 0:
+            out += "%d%% over par (%d/%d)" % (over, per, par)
+        else:
+            out += "par ok (%d/%d)" % (per, par)
+
+        print("\033[93m" + out + "\033[0m")
 
     @classmethod
     def print(cls):
@@ -30,6 +59,10 @@ class ClientStats:
             ms, calls = vals
             print("% 5.1f%% % 10.2fms % 7.2favg % 8dx -- %s"
                   % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+        cls.clear()
+
+    @classmethod
+    def clear(cls):
         cls.stats = {}
         cls.ttltime = 0
 
@@ -154,7 +187,7 @@ class SteemClient:
 
         batch_size = len(params[0]) if method == 'get_accounts' else 1
         total_time = int((time.perf_counter() - time_start) * 1000)
-        ClientStats.log("%s()" % method, total_time, batch_size)
+        ClientStats.log(method, total_time, batch_size)
         return result
 
     # perform batch call (if jussi is enabled, use batches; otherwise, multi)
@@ -169,7 +202,7 @@ class SteemClient:
                 method, params, max_workers=10))
 
         total_time = int((time.perf_counter() - time_start) * 1000)
-        ClientStats.log("%s()" % method, total_time, len(params))
+        ClientStats.log(method, total_time, len(params))
         return result
 
     # perform a jussi-style batch request, retrying on error

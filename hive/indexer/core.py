@@ -207,7 +207,7 @@ def listen_steemd(trail_blocks=2):
         query("COMMIT")
         secs = time.perf_counter() - start_time
 
-        print("[LIVE] Got block %d at %s with %d txs -- %d posts, %d payouts, %d accounts, %d follows -- %dms%s"
+        print("[LIVE] Got block %d at %s with% 3d txs --% 3d posts,% 3d payouts,% 3d accounts,% 3d follows --% 5dms%s"
               % (curr_block, block['timestamp'], len(block['transactions']),
                  edits, paids, accts, follows, int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
@@ -219,7 +219,7 @@ def listen_steemd(trail_blocks=2):
         if curr_block % 1200 == 0:
             print("[HIVE] Performing account maintenance...")
             Accounts.cache_oldest(10000)
-            Accounts.update_ranks()
+            #Accounts.update_ranks()
 
 
 def select_missing_tuples(start_id, limit=1000000):
@@ -284,6 +284,8 @@ def update_chain_state():
 
 def run():
 
+    print("[HIVE] Welcome to hivemind")
+
     # make sure db schema is up to date, perform checks
     DbState.initialize()
 
@@ -306,9 +308,13 @@ def run():
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()
 
-    while True:
-        sync_from_steemd()
-        listen_steemd()
+    try:
+        while True:
+            sync_from_steemd()
+            listen_steemd()
+    except KeyboardInterrupt as e:
+        # TODO: cleanup/flush
+        print("\nCTRL-C detected, goodbye.")
 
 
 def head_state(*args):
