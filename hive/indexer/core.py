@@ -174,7 +174,7 @@ def listen_steemd(trail_blocks=2):
         # if trailing too close, take a pause
         while trail_blocks:
             gap = steemd.head_block() - curr_block
-            if gap >= 25:
+            if gap >= 50:
                 print("[HIVE] gap too large: %d -- abort listen mode" % gap)
                 return
             if gap >= trail_blocks:

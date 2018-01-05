@@ -39,8 +39,9 @@ class Posts:
             if not is_deleted:
                 tuples.append([pid, author, permlink])
             else:
-                print("Deleting cached post %d" % pid)
-                query("DELETE FROM hive_posts_cache WHERE post_id = %d" % pid)
+                # TODO: paranoid check -- remove after testing, before merge
+                exists = query_one("SELECT 1 FROM hive_posts_cache WHERE post_id = %d LIMIT 1" % pid)
+                assert not exists, "invalid cache entry"
 
         # sort the results.. must insert cache records sequentially
         return sorted(tuples, key=lambda tup: tup[0])
