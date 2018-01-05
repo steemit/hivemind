@@ -41,9 +41,18 @@ atexit.register(QueryStats.print)
 
 logger = logging.getLogger(__name__)
 
+_trx_active = False
+
 # generic
 # -------
 def query(sql, **kwargs):
+    global _trx_active
+    if sql == 'START TRANSACTION':
+        assert not _trx_active
+        _trx_active = True
+    elif sql == 'COMMIT':
+        assert _trx_active
+        _trx_active = False
     ti = time.perf_counter()
     _query = text(sql).execution_options(autocommit=False)
     try:
