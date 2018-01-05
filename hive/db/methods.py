@@ -50,6 +50,12 @@ _trx_active = False
 # generic
 # -------
 def query(sql, **kwargs):
+    action = sql.strip()[0:6].strip()
+    if action not in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START']:
+        raise Exception("query() only for writes. {}".format(sql))
+    __query(sql, **kwargs)
+
+def __query(sql, **kwargs):
     global _trx_active
     if sql == 'START TRANSACTION':
         assert not _trx_active
@@ -66,7 +72,6 @@ def query(sql, **kwargs):
         if ms > 100:
             disp = re.sub('\s+', ' ', sql).strip()[:250]
             print("\033[93m[SQL][{}ms] {}\033[0m".format(ms, disp))
-        logger.debug(res)
         return res
     except Exception as e:
         print("[SQL] Error in query {} ({})".format(sql, kwargs))
@@ -76,17 +81,17 @@ def query(sql, **kwargs):
 
 # n*m
 def query_all(sql, **kwargs):
-    res = query(sql, **kwargs)
+    res = __query(sql, **kwargs)
     return res.fetchall()
 
 # 1*m
 def query_row(sql, **kwargs):
-    res = query(sql, **kwargs)
+    res = __query(sql, **kwargs)
     return first(res)
 
 # n*1
 def query_col(sql, **kwargs):
-    res = query(sql, **kwargs).fetchall()
+    res = __query(sql, **kwargs).fetchall()
     return [r[0] for r in res]
 
 # 1*1
