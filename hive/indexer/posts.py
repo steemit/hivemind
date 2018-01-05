@@ -19,7 +19,7 @@ class Posts:
     def get_id(cls, author, permlink):
         sql = """SELECT id FROM hive_posts WHERE
                  author = :a AND permlink = :p"""
-        return query_row(sql, a=author, p=permlink)
+        return query_one(sql, a=author, p=permlink)
 
     @classmethod
     def get_id_and_depth(cls, author, permlink):
@@ -140,9 +140,9 @@ class Posts:
             url = "@{}/{}".format(op['author'], op['permlink'])
             print("Invalid post {} in @{}".format(url, community))
 
-        return dict(author=op['author'], permlink=op['permlink'],
-                    is_valid=is_valid, id=pid, parent_id=parent_id,
-                    category=category, depth=depth, date=date)
+        return dict(author=op['author'], permlink=op['permlink'], id=pid,
+                    is_valid=is_valid, parent_id=parent_id, depth=depth,
+                    category=category, community=community, date=date)
 
     # given a comment op, safely read 'community' field from json
     @classmethod
