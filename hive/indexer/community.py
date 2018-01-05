@@ -1,5 +1,5 @@
 from funcy.seqs import flatten
-#from hive.db.methods import query_row
+from hive.db.methods import query_one
 from hive.community.roles import permissions, is_permitted
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -118,3 +118,6 @@ def process_json_community_op(account, op_json, date):
     # track success (TODO: failures as well?)
     # INSERT INTO hive_modlog (account, community, action, created_at) VALUES  (account, community, json.inspect, block_date)
     return True
+
+def is_community(name):
+    return bool(query_one("SELECT 1 FROM hive_communities WHERE name = :name", name=name))

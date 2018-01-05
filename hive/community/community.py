@@ -2,10 +2,8 @@ import json
 from typing import Union
 
 from hive.community.roles import permissions, is_permitted
-from hive.indexer.core import is_community
-from steem import Steem
-from steem.account import Account
-from steembase.operations import CustomJson
+from hive.indexer.community import is_community
+#from steem.account import Account
 
 
 class Community:
@@ -15,24 +13,13 @@ class Community:
     Args:
         community_name (str): Community to operate in.
         account_name (str): Account to perform actions with.
-        steem_instance (Steem): steem.Steem instance. If empty, a default Steem instance will be created on the fly.
-        All arguments passed to Community will be inherited by this new Steem instance as well. (ie. `no_broadcast`).
-
-    Example:
-        You can pass arguments to Steem instance trough Community initializer:
-
-        .. code-block:: python
-
-            community = Community('my_community_name', no_broadcast=True)  # simulation mode
-
     """
 
     _id = 'com.steemit.community'
     _roles = permissions.keys()
     _valid_settings = ['title', 'about', 'description', 'language', 'is_nsfw']
 
-    def __init__(self, community_name: str, account_name: str, steem_instance: Steem = None, **kwargs):
-        self.steem = steem_instance or Steem(**kwargs)
+    def __init__(self, community_name: str, account_name: str):
         self.community = community_name
         self.account = account_name
 
@@ -47,7 +34,7 @@ class Community:
              If left empty, the community owner will be assigned as a single admin. Can be modified later.
         """
         # validate account and community name
-        Account(self.account)
+        #Account(self.account)
         assert self.community == self.account, 'Account name and community name need to be the same'
 
         if is_community(self.community):
@@ -153,12 +140,11 @@ class Community:
         if type(community_op) == str:
             community_op = json.loads(community_op)
 
-        op = CustomJson(
-            **{'json': community_op,
+        op = {'json': community_op,
                'required_auths': [],
                'required_posting_auths': [self.account],
-               'id': Community._id})
-        return self.steem.commit.finalizeOp(op, self.account, 'posting')
+               'id': Community._id}
+        return op
 
     def _op(self, action: str, **params):
         """ Generate a standard data structure for community *custom_json* operations. """
