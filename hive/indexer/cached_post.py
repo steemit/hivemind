@@ -3,12 +3,15 @@ import time
 import math
 import collections
 
+from toolz import partition_all
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col, query_one
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
+from hive.indexer.timer import Timer
 
 class CachedPost:
 
+    # cursor signifying upper bound of cached post span
     _last_id = -1
 
     @classmethod
@@ -60,48 +63,36 @@ class CachedPost:
             **dict.fromkeys('payout promoted rshares sc_trend sc_hot'.split(' '), '0')},
                    mode='insert')
 
+    # `tuples` are an array of (id, author, permlink) representing posts which
+    #   are to be fetched from steemd and updated in hive_posts_cache table.
+    #
+    # Regarding _bump_last_id: there's a rare edge case when the last hive_post
+    # entry has been deleted "in the future" (ie, we haven't seen the delete op
+    # yet). So even when the post is not found (i.e. `not post['author']`), it's
+    # important to advance _last_id, because this cursor is used to deduce if
+    # there's any missing cache entries.
     @classmethod
-    def update_batch(cls, tuples, steemd, updated_at=None, trx=True):
-        # if calling function already has head_time, saves us a call
-        if not updated_at:
-            updated_at = steemd.head_time()
+    def update_batch(cls, tuples, steemd, trx=True):
+        timer = Timer(total=len(tuples), entity='post', laps=['rps','wps'])
 
-        # build url->id map
-        ids = dict([[author+"/"+permlink, id] for (id, author, permlink) in tuples])
-        posts = [[author, permlink] for (id, author, permlink) in tuples]
-
-        total = len(posts)
-        processed = 0
-        for i in range(0, total, 1000):
-
-            lap_0 = time.perf_counter()
+        for tups in partition_all(1000, tuples):
+            timer.batch_start()
             buffer = []
-            for j, post in enumerate(steemd.get_content_batch(posts[i:i+1000])):
+
+            post_ids = [tup[0] for tup in tups]
+            post_args = [tup[1:] for tup in tups]
+            posts = steemd.get_content_batch(post_args)
+            for pid, post in zip(post_ids, posts):
                 if post['author']:
-                    url = post['author'] + '/' + post['permlink']
-                    sql = cls._generate_cached_post_sql(ids[url], post, updated_at)
-                    buffer.append(sql)
-                else:
-                    # rare edge case when the latest hive_post entry has been
-                    # deleted "in the future" (ie, we haven't seen the delete
-                    # op yet). it's important to advance _last_id, because
-                    # it's used to deduce if we've missed anything.
-                    url = tuples[i+j][1] + '/' + tuples[i+j][2]
+                    buffer.append(cls._sql(pid, post))
+                cls._bump_last_id(pid)
 
-                cls._bump_last_id(ids[url])
-
-            lap_1 = time.perf_counter()
+            timer.batch_lap()
             cls._batch_queries(buffer, trx)
-            lap_2 = time.perf_counter()
 
-            if total >= 500:
-                processed += len(buffer)
-                rem = total - processed
-                rate = len(buffer) / (lap_2 - lap_0)
-                rps = int(len(buffer) / (lap_1 - lap_0))
-                wps = int(len(buffer) / (lap_2 - lap_1))
-                print(" -- post {} of {} ({}/s, {}rps {}wps) -- {}m remaining".format(
-                    processed, total, round(rate, 1), rps, wps, round(rem / rate / 60, 2)))
+            timer.batch_finish(len(buffer))
+            if len(tuples) >= 100:
+                print(timer.batch_status())
 
     @classmethod
     def last_id(cls):
@@ -143,7 +134,7 @@ class CachedPost:
             query("COMMIT")
 
     @classmethod
-    def _generate_cached_post_sql(cls, pid, post, updated_at):
+    def _sql(cls, pid, post):
         if not post['author']:
             raise Exception("ERROR: post id {} has no chain state.".format(pid))
 
@@ -226,7 +217,7 @@ class CachedPost:
             ('payout', "%f" % payout),
             ('promoted', "%f" % promoted),
             ('payout_at', "%s" % payout_at),
-            ('updated_at', "%s" % updated_at),
+            ('updated_at', "%s" % post['last_update']),
             ('created_at', "%s" % post['created']),
             ('rshares', "%d" % rshares),
             ('votes', "%s" % csvotes),

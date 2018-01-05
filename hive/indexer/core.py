@@ -158,6 +158,7 @@ def sync_from_steemd():
     # batch update post cache after catching up to head block
     if not is_initial_sync:
         cache_dirty_posts(dirty, trx=True)
+        cache_paidout_posts(trx=True)
         Accounts.cache_dirty()
         Accounts.cache_dirty_follows()
 
@@ -200,7 +201,7 @@ def listen_steemd(trail_blocks=2):
         query("START TRANSACTION")
 
         dirty = process_block(block)
-        edits = cache_dirty_posts(dirty, trx=False, date=block['timestamp'])
+        edits = cache_dirty_posts(dirty, trx=False)
         paids = cache_paidout_posts(trx=False, date=block['timestamp'])
         accts = Accounts.cache_dirty()
         follows = Accounts.cache_dirty_follows()
@@ -239,14 +240,13 @@ def cache_missing_posts():
         return
 
     missing = select_missing_tuples(last_cached_id)
-    CachedPost.update_batch(missing, get_adapter())
+    CachedPost.update_batch(missing, get_adapter(), trx=True)
 
     # repeat until no gap
     cache_missing_posts()
 
 
 def cache_paidout_posts(trx=True, date=None):
-    steemd = get_adapter()
     if not date:
         date = db_last_block_date()
     paidout = CachedPost.select_paidout_tuples(date)
@@ -254,18 +254,15 @@ def cache_paidout_posts(trx=True, date=None):
         Accounts.dirty(author)
     if trx or len(paidout) > 1000:
         print("[PREP] Process {} payouts since {}".format(len(paidout), date))
-    CachedPost.update_batch(paidout, steemd, date, trx)
+    CachedPost.update_batch(paidout, get_adapter(), trx)
     return len(paidout)
 
 
-def cache_dirty_posts(dirty, trx=True, date=None):
-    steemd = get_adapter()
-    if not date:
-        date = steemd.head_time()
+def cache_dirty_posts(dirty, trx=True):
     tups = Posts.urls_to_tuples(dirty)
     if trx or len(tups) > 1000:
         print("[PREP] Update {} edited posts".format(len(dirty)))
-    CachedPost.update_batch(tups, steemd, date, trx)
+    CachedPost.update_batch(tups, get_adapter(), trx)
     return len(tups)
 
 
@@ -308,7 +305,6 @@ def run():
 
     while True:
         sync_from_steemd()
-        cache_paidout_posts()
         listen_steemd()
 
 
