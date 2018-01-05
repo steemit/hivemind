@@ -147,7 +147,7 @@ def sync_from_steemd():
         timer.batch_start()
         blocks = steemd.get_blocks_range(lbound, to)
         timer.batch_lap()
-        process_blocks(blocks, is_initial_sync)
+        dirty |= process_blocks(blocks, is_initial_sync)
         timer.batch_finish(len(blocks))
         print(timer.batch_status("[SYNC] Got block {}".format(to-1)))
 

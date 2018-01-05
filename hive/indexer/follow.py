@@ -97,7 +97,7 @@ class Follow:
                 sqls.append((sql % (col, col), dict(mag=delta, id=name)))
 
         if trx:
-            query("BEGIN TRANSACTION")
+            query("START TRANSACTION")
         for (sql, params) in sqls:
             query(sql, **params)
         if trx:
