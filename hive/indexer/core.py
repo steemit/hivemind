@@ -34,8 +34,22 @@ def db_last_block_date():
 def db_last_block_hash():
     return query_one("SELECT hash FROM hive_blocks ORDER BY num DESC LIMIT 1")
 
+def push_block(block):
+    txs = block['transactions']
+    query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
+          "VALUES (:num, :hash, :prev, :txs, :ops, :date)", **{
+              'num': int(block['block_id'][:8], base=16),
+              'hash': block['block_id'],
+              'prev': block['previous'],
+              'txs': len(txs),
+              'ops': sum([len(tx['operations']) for tx in txs]),
+              'date': block['timestamp']})
+
+def pop_block():
+    pass
+
 # process a single block. always wrap in a transaction!
-def process_block(block):
+def process_block(block, is_initial_sync=False):
     date = block['timestamp']
     block_id = block['block_id']
     prev = block['previous']
@@ -51,7 +65,6 @@ def process_block(block):
     comment_ops = []
     json_ops = []
     delete_ops = []
-    dirty_urls = set()
     for tx in txs:
         for operation in tx['operations']:
             op_type, op = operation
@@ -66,23 +79,22 @@ def process_block(block):
                 account_names.add(op['new_account_name'])
             elif op_type == 'comment':
                 comment_ops.append(op)
-                dirty_urls.add(op['author']+'/'+op['permlink'])
-                Accounts.dirty(op['author'])
+                if not is_initial_sync:
+                    CachedPost.dirty(op['author'], op['permlink'])
+                    Accounts.dirty(op['author'])
             elif op_type == 'delete_comment':
                 delete_ops.append(op)
             elif op_type == 'custom_json':
                 json_ops.append(op)
             elif op_type == 'vote':
-                dirty_urls.add(op['author']+'/'+op['permlink'])
-                Accounts.dirty(op['author'])
+                if not is_initial_sync:
+                    CachedPost.dirty(op['author'], op['permlink'])
+                    Accounts.dirty(op['author'])
 
     Accounts.register(account_names, date) # register potentially new names
     Posts.comment_ops(comment_ops, date) # ignores edits; inserts, validates
     Posts.delete_ops(delete_ops)  # unallocates hive_posts record, delete cache
     CustomOp.process_ops(json_ops, num, date) # follow, reblog, community ops
-
-    # return all posts modified this block
-    return dirty_urls
 
 
 # batch-process blocks, wrap in a transaction
@@ -90,10 +102,7 @@ def process_blocks(blocks, is_initial_sync=False):
     dirty = set()
     query("START TRANSACTION")
     for block in blocks:
-        if is_initial_sync:
-            process_block(block)
-        else:
-            dirty |= process_block(block)
+        process_block(block, is_initial_sync)
     query("COMMIT")
     return dirty
 
@@ -132,7 +141,6 @@ def sync_from_file(file_path, skip_lines, chunk_size=250):
 def sync_from_steemd():
     is_initial_sync = DbState.is_initial_sync()
     steemd = get_adapter()
-    dirty = set()
 
     lbound = db_last_block() + 1
     ubound = steemd.last_irreversible_block_num()
@@ -155,8 +163,8 @@ def sync_from_steemd():
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
-        cache_dirty_posts(dirty, trx=True)
-        cache_paidout_posts(trx=True)
+        dirty_paidout_posts()
+        flush_cache(trx=True)
         Accounts.cache_dirty(trx=True)
         Follow.flush(trx=True)
 
@@ -197,9 +205,11 @@ def listen_steemd(trail_blocks=2):
 
         start_time = time.perf_counter()
         query("START TRANSACTION")
-        dirty = process_block(block)
-        edits = cache_dirty_posts(dirty, trx=False)
-        paids = cache_paidout_posts(trx=False, date=block['timestamp'])
+        process_block(block)
+        dirty_missing_posts()
+
+        paids = dirty_paidout_posts(block['timestamp'])
+        edits = flush_cache(trx=False)
         accts = Accounts.cache_dirty(trx=False)
         follows = Follow.flush(trx=False)
         query("COMMIT")
@@ -226,40 +236,45 @@ def select_missing_tuples(start_id, limit=1000000):
            ORDER BY id LIMIT :limit"""
     return query_all(sql, id=start_id, limit=limit)
 
-def cache_missing_posts():
+def dirty_missing_posts():
     # cached posts inserted sequentially, so compare MAX(id)'s
     last_cached_id = CachedPost.last_id()
     last_post_id = Posts.last_id()
     gap = last_post_id - last_cached_id
+
+    if gap:
+        missing = select_missing_tuples(last_cached_id)
+        for pid, author, permlink in missing:
+            CachedPost.dirty(author, permlink, pid)
+
+    return gap
+
+def cache_missing_posts():
+    gap = dirty_missing_posts()
     print("[INIT] {} missing post cache entries".format(gap))
-    if not gap:
-        return
+    if gap:
+        flush_cache()
+        cache_missing_posts()
 
-    missing = select_missing_tuples(last_cached_id)
-    CachedPost.update_batch(missing, get_adapter(), trx=True)
+def flush_cache(trx=True):
+    noids = CachedPost.dirty_noids()
+    tuples = Posts.urls_to_tuples(noids)
+    CachedPost.dirty_noids_load(tuples)
+    return CachedPost.flush(get_adapter(), trx)
 
-    # repeat until no gap
-    cache_missing_posts()
 
-
-def cache_paidout_posts(trx=True, date=None):
+def dirty_paidout_posts(date=None):
     if not date:
         date = db_last_block_date()
     paidout = CachedPost.select_paidout_tuples(date)
-    for (_id, author, permlink) in paidout:
+    for (pid, author, permlink) in paidout:
         Accounts.dirty(author)
-    if trx or len(paidout) > 1000:
-        print("[PREP] Process {} payouts since {}".format(len(paidout), date))
-    CachedPost.update_batch(paidout, get_adapter(), trx)
+        CachedPost.dirty(author, permlink, pid)
+
+    if len(paidout) > 1000:
+        print("[PREP] Found {} payouts since {}".format(len(paidout), date))
     return len(paidout)
 
-
-def cache_dirty_posts(dirty, trx=True):
-    tups = Posts.urls_to_tuples(dirty)
-    if trx or len(tups) > 1000:
-        print("[PREP] Update {} edited posts".format(len(dirty)))
-    CachedPost.update_batch(tups, get_adapter(), trx)
-    return len(tups)
 
 
 # refetch dynamic_global_properties, feed price, etc
