@@ -9,32 +9,6 @@ from hive.indexer.feed_cache import FeedCache
 from hive.community.roles import is_community_post_valid
 
 class Posts:
-    #_post_ids = {}
-    #_touched_posts = []
-    #_dirty_posts = []
-
-    #@classmethod
-    #def get_post_id(cls, post_url_or_author, permlink=None):
-    #    post_url = post_url_or_author
-    #    if permlink:
-    #        post_url = post_url + '/' + permlink
-    #    pid = cls._post_ids[post_url]
-    #    assert pid, "post was not registered"
-    #    return pid
-
-    #@classmethod
-    #def register_posts(cls, id_author_permlinks):
-    #    for (pid, author, permlink) in id_author_permlinks:
-    #        post_url = author + '/' + permlink
-    #        cls._post_ids[post_url] = pid
-
-    #@classmethod
-    #def dirty_post(cls, post_url):
-    #    cls._dirty.append(post_url)
-
-    #@classmethod
-    #def touch_post(cls, post_url):
-    #    cls._touched.add(post_url)
 
     @classmethod
     def last_id(cls):
@@ -62,7 +36,7 @@ class Posts:
 
     # marks posts as deleted and removes them from feed cache
     @classmethod
-    def delete(cls, ops):
+    def delete_ops(cls, ops):
         for op in ops:
             post_id, depth = cls.get_id_and_depth(op['author'], op['permlink'])
             query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=post_id)
@@ -72,7 +46,7 @@ class Posts:
 
     # registers new posts (ignores edits), inserts into feed cache
     @classmethod
-    def register(cls, ops, block_date):
+    def comment_ops(cls, ops, block_date):
         for op in ops:
             sql = ("SELECT id, is_deleted FROM hive_posts "
                    "WHERE author = :a AND permlink = :p")

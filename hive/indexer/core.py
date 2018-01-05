@@ -75,8 +75,8 @@ def process_block(block):
                 Accounts.dirty(op['author'])
 
     Accounts.register(account_names, date) # register potentially new names
-    Posts.register(comment_ops, date) # ignores edits; inserts, validates
-    Posts.delete(delete_ops)  # unallocates hive_posts record, delete cache
+    Posts.comment_ops(comment_ops, date) # ignores edits; inserts, validates
+    Posts.delete_ops(delete_ops)  # unallocates hive_posts record, delete cache
     CustomOp.process_ops(json_ops, num, date) # follow, reblog, community ops
 
     # return all posts modified this block
