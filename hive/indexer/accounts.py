@@ -2,9 +2,12 @@ import time
 import json
 import re
 
+from toolz import partition_all
+
 from hive.db.methods import query_col, query, query_all
 from hive.indexer.steem_client import get_adapter
 from hive.indexer.normalize import rep_log10, amount, trunc
+from hive.indexer.timer import Timer
 
 class Accounts:
     _ids = {}
@@ -80,27 +83,17 @@ class Accounts:
 
     @classmethod
     def _cache_accounts(cls, accounts, trx=True):
-        processed = 0
-        total = len(accounts)
+        timer = Timer(len(accounts), 'account', ['rps', 'wps'])
+        for batch in partition_all(1000, accounts):
 
-        for i in range(0, total, 1000):
-            batch = accounts[i:i+1000]
-
-            lap_0 = time.perf_counter()
+            timer.batch_start()
             sqls = cls._generate_cache_sqls(batch)
-            lap_1 = time.perf_counter()
+            timer.batch_lap()
             cls._batch_update(sqls, trx)
-            lap_2 = time.perf_counter()
 
-            if len(batch) < 1000:
-                continue
-
-            processed += len(batch)
-            rem = total - processed
-            rate = len(batch) / (lap_2 - lap_0)
-            pct_db = int(100 * (lap_2 - lap_1) / (lap_2 - lap_0))
-            print(" -- account {} of {} ({}/s, {}% db) -- {}m remaining".format(
-                processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
+            timer.batch_finish(len(batch))
+            if len(accounts) > 1000:
+                print(timer.batch_status())
 
     @classmethod
     def _batch_update(cls, sqls, trx):

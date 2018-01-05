@@ -91,7 +91,7 @@ class CachedPost:
             cls._batch_queries(buffer, trx)
 
             timer.batch_finish(len(buffer))
-            if len(tuples) >= 100:
+            if len(tuples) >= 1000:
                 print(timer.batch_status())
 
     @classmethod

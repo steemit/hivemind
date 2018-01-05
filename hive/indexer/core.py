@@ -16,6 +16,7 @@ from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.custom_op import CustomOp
 from hive.indexer.follow import Follow
+from hive.indexer.timer import Timer
 
 from hive.indexer.steem_client import get_adapter
 
@@ -139,20 +140,16 @@ def sync_from_steemd():
     if ubound > lbound:
         print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
 
+    timer = Timer(ubound-lbound+1, entity='block', laps=['rps', 'wps'])
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
 
-        lap_0 = time.perf_counter()
+        timer.batch_start()
         blocks = steemd.get_blocks_range(lbound, to)
-        lap_1 = time.perf_counter()
-        dirty |= process_blocks(blocks, is_initial_sync)
-        lap_2 = time.perf_counter()
-
-        rate = (to - lbound) / (lap_2 - lap_0)
-        rps = int((to - lbound) / (lap_1 - lap_0))
-        wps = int((to - lbound) / (lap_2 - lap_1))
-        print("[SYNC] Got block {} ({}/s, {}rps {}wps) -- {}m remaining".format(
-            to-1, round(rate, 1), rps, wps, round((ubound-to) / rate / 60, 2)))
+        timer.batch_lap()
+        process_blocks(blocks, is_initial_sync)
+        timer.batch_finish(len(blocks))
+        print(timer.batch_status("[SYNC] Got block {}".format(to-1)))
 
         lbound = to
 

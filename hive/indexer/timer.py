@@ -28,15 +28,21 @@ class Timer:
         self._last_items = ops
         self._processed += ops
 
-    def batch_status(self):
-        # " -- post 1 of 10 "
-        out = " -- %s %d of %d " % (self._entity, self._processed, self._total)
+    def batch_status(self, prefix=None):
 
-        # "(3/s, 4rps, 5wps) -- "
+        if prefix:
+            out = prefix
+        else:
+            # " -- post 1 of 10"
+            out = " -- %s %d of %d" % (self._entity,
+                                        self._processed,
+                                        self._total)
+
+        # " (3/s, 4rps, 5wps) -- "
         rates = []
         for i, unit in enumerate(['/s', *self._lap_units]):
             rates.append('%d%s' % (self._rate(i), unit))
-        out += "(%s) -- "  % ', '.join(rates)
+        out += " (%s) -- "  % ', '.join(rates)
 
         # "eta 01:22"
         out += "eta %s" % self._eta()
