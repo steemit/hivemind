@@ -7,6 +7,7 @@ from hive.db.db_state import DbState
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.feed_cache import FeedCache
+from hive.indexer.follow import Follow
 
 from hive.indexer.community import process_json_community_op
 from hive.indexer.normalize import load_json_key
@@ -55,46 +56,12 @@ class CustomOp:
 
         cmd, op_json = op_json  # ['follow', {data...}]
         if cmd == 'follow':
-            cls._follow(account, op_json, block_date)
+            Follow.follow_op(account, op_json, block_date)
         elif cmd == 'reblog':
-            cls._reblog(account, op_json, block_date)
+            cls.reblog(account, op_json, block_date)
 
     @classmethod
-    def _follow(cls, account, op_json, block_date):
-        if not isinstance(op_json['what'], list):
-            return
-        what = first(op_json['what']) or 'clear'
-        if what not in ['blog', 'clear', 'ignore']:
-            return
-        if not all([key in op_json for key in ['follower', 'following']]):
-            print("bad follow op: {} {}".format(block_date, op_json))
-            return
-
-        follower = op_json['follower']
-        following = op_json['following']
-
-        if follower == following:
-            return  # can't follow self
-        if follower != account:
-            return  # impersonation
-        if not all(map(Accounts.exists, [follower, following])):
-            return  # invalid input
-
-        sql = """
-          INSERT INTO hive_follows (follower, following, created_at, state)
-               VALUES (:fr, :fg, :at, :state) ON CONFLICT (follower, following)
-            DO UPDATE SET state = :state
-        """
-        state = {'clear': 0, 'blog': 1, 'ignore': 2}[what]
-        query(sql, fr=Accounts.get_id(follower), fg=Accounts.get_id(following),
-              at=block_date, state=state)
-
-        if not DbState.is_initial_sync():
-            Accounts.dirty_follows(follower)
-            Accounts.dirty_follows(following)
-
-    @classmethod
-    def _reblog(cls, account, op_json, block_date):
+    def reblog(cls, account, op_json, block_date):
         blogger = op_json['account']
         author = op_json['author']
         permlink = op_json['permlink']
@@ -114,12 +81,14 @@ class CustomOp:
             return
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
-            query("DELETE FROM hive_reblogs WHERE account = :a AND post_id = :pid LIMIT 1", a=blogger, pid=post_id)
+            query("DELETE FROM hive_reblogs WHERE account = :a AND "
+                  "post_id = :pid LIMIT 1", a=blogger, pid=post_id)
             if not DbState.is_initial_sync():
                 FeedCache.delete(post_id, Accounts.get_id(blogger))
 
         else:
-            sql = "INSERT INTO hive_reblogs (account, post_id, created_at) VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING"
+            sql = ("INSERT INTO hive_reblogs (account, post_id, created_at) "
+                   "VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING")
             query(sql, a=blogger, pid=post_id, date=block_date)
             if not DbState.is_initial_sync():
                 FeedCache.insert(post_id, Accounts.get_id(blogger), block_date)

@@ -15,6 +15,7 @@ from hive.indexer.posts import Posts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.custom_op import CustomOp
+from hive.indexer.follow import Follow
 
 from hive.indexer.steem_client import get_adapter
 
@@ -159,8 +160,8 @@ def sync_from_steemd():
     if not is_initial_sync:
         cache_dirty_posts(dirty, trx=True)
         cache_paidout_posts(trx=True)
-        Accounts.cache_dirty()
-        Accounts.cache_dirty_follows()
+        Accounts.cache_dirty(trx=True)
+        Follow.flush(trx=True)
 
 
 def listen_steemd(trail_blocks=2):
@@ -199,13 +200,11 @@ def listen_steemd(trail_blocks=2):
 
         start_time = time.perf_counter()
         query("START TRANSACTION")
-
         dirty = process_block(block)
         edits = cache_dirty_posts(dirty, trx=False)
         paids = cache_paidout_posts(trx=False, date=block['timestamp'])
-        accts = Accounts.cache_dirty()
-        follows = Accounts.cache_dirty_follows()
-
+        accts = Accounts.cache_dirty(trx=False)
+        follows = Follow.flush(trx=False)
         query("COMMIT")
         secs = time.perf_counter() - start_time
 

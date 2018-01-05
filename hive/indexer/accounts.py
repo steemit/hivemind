@@ -2,14 +2,13 @@ import time
 import json
 import re
 
-from hive.db.methods import query_one, query_col, query, query_row, query_all
+from hive.db.methods import query_col, query, query_all
 from hive.indexer.steem_client import get_adapter
 from hive.indexer.normalize import rep_log10, amount, trunc
 
 class Accounts:
     _ids = {}
     _dirty = set()
-    _dirty_follows = set()
 
     # account core methods
     # --------------------
@@ -26,7 +25,7 @@ class Accounts:
 
     @classmethod
     def exists(cls, name):
-        return (name in cls._ids)
+        return name in cls._ids
 
     @classmethod
     def register(cls, names, block_date):
@@ -37,7 +36,7 @@ class Accounts:
         # insert new names and add the new ids to our mem map
         for name in new_names:
             query("INSERT INTO hive_accounts (name, created_at) "
-                    "VALUES (:name, :date)", name=name, date=block_date)
+                  "VALUES (:name, :date)", name=name, date=block_date)
 
         sql = "SELECT name, id FROM hive_accounts WHERE name IN :names"
         cls._ids = {**dict(query_all(sql, names=tuple(new_names))), **cls._ids}
@@ -51,10 +50,6 @@ class Accounts:
         cls._dirty.add(account)
 
     @classmethod
-    def dirty_follows(cls, account):
-        cls._dirty_follows.add(account)
-
-    @classmethod
     def cache_all(cls):
         cls._cache_accounts(query_col("SELECT name FROM hive_accounts"), trx=True)
 
@@ -65,21 +60,13 @@ class Accounts:
         cls._cache_accounts(query_col(sql, limit=limit), trx=True)
 
     @classmethod
-    def cache_dirty(cls):
+    def cache_dirty(cls, trx=False):
         count = len(cls._dirty)
-        cls._cache_accounts(list(cls._dirty), trx=False)
+        if trx:
+            print("[SYNC] update %d accounts" % count)
+        cls._cache_accounts(list(cls._dirty), trx=trx)
         cls._dirty = set()
         return count
-
-    @classmethod
-    def cache_dirty_follows(cls):
-        if not cls._dirty_follows:
-            return 0
-        todo = cls._rate_limited(cls._dirty_follows)
-        if todo:
-            cls._update_follows(todo)
-        cls._dirty_follows = set()
-        return len(todo)
 
     @classmethod
     def update_ranks(cls):
@@ -90,23 +77,6 @@ class Accounts:
          WHERE hive_accounts.id = r.id AND rank != r.rnk;
         """
         query(sql)
-
-    _follow_rates = dict()
-    @classmethod
-    def _rate_limited(cls, accounts):
-        for name, score in list(cls._follow_rates.items()):
-            if score:
-                cls._follow_rates[name] = min(max(score - 1, 0), 1200)
-            else:
-                cls._follow_rates.pop(name)
-
-        blocked = set(cls._follow_rates.keys())
-        for name in accounts:
-            if name not in cls._follow_rates:
-                cls._follow_rates[name] = 0
-            cls._follow_rates[name] += 200
-
-        return accounts - blocked
 
     @classmethod
     def _cache_accounts(cls, accounts, trx=True):
@@ -133,17 +103,6 @@ class Accounts:
                 processed, total, round(rate, 1), pct_db, round(rem / rate / 60, 2)))
 
     @classmethod
-    def _update_follows(cls, accounts):
-        ids = map(cls.get_id, accounts)
-        sql = """
-            UPDATE hive_accounts
-               SET followers = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND following = hive_accounts.id),
-                   following = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND follower  = hive_accounts.id)
-             WHERE id IN :ids
-        """
-        query(sql, ids=tuple(ids))
-
-    @classmethod
     def _batch_update(cls, sqls, trx):
         if trx:
             query("START TRANSACTION")
@@ -159,13 +118,17 @@ class Accounts:
 
         sqls = []
         for account in get_adapter().get_accounts(accounts):
+            vote_weight = (amount(account['vesting_shares'])
+                           + amount(account['received_vesting_shares'])
+                           - amount(account['delegated_vesting_shares']))
+
             values = {
                 'name': account['name'],
                 'proxy': account['proxy'],
                 'post_count': account['post_count'],
                 'reputation': rep_log10(account['reputation']),
                 'proxy_weight': amount(account['vesting_shares']),
-                'vote_weight': amount(account['vesting_shares']) + amount(account['received_vesting_shares']) - amount(account['delegated_vesting_shares']),
+                'vote_weight': vote_weight,
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
                 'active_at': account['last_bandwidth_update'],
                 'cached_at': block_date,
@@ -185,7 +148,7 @@ class Accounts:
             prof = json.loads(account['json_metadata'])['profile']
             if not isinstance(prof, dict):
                 prof = {}
-        except:
+        except Exception:
             pass
 
         name = str(prof['name']) if 'name' in prof else None
@@ -241,5 +204,4 @@ class Accounts:
 
 if __name__ == '__main__':
     Accounts.update_ranks()
-    print(Accounts._generate_cache_sqls(['roadscape', 'ned', 'sneak', 'test-safari']))
     #Accounts.cache_all()
