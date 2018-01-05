@@ -35,37 +35,31 @@ def db_last_block_hash():
     return query_one("SELECT hash FROM hive_blocks ORDER BY num DESC LIMIT 1")
 
 def push_block(block):
+    num = int(block['block_id'][:8], base=16)
     txs = block['transactions']
     query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
           "VALUES (:num, :hash, :prev, :txs, :ops, :date)", **{
-              'num': int(block['block_id'][:8], base=16),
+              'num': num,
               'hash': block['block_id'],
               'prev': block['previous'],
               'txs': len(txs),
               'ops': sum([len(tx['operations']) for tx in txs]),
               'date': block['timestamp']})
+    return num
 
 def pop_block():
     pass
 
 # process a single block. always wrap in a transaction!
 def process_block(block, is_initial_sync=False):
+    num = push_block(block)
     date = block['timestamp']
-    block_id = block['block_id']
-    prev = block['previous']
-    num = int(block_id[:8], base=16)
-    txs = block['transactions']
-    ops = sum([len(tx['operations']) for tx in txs])
-
-    query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
-          "VALUES (:num, :hash, :prev, :txs, :ops, :date)",
-          num=num, hash=block_id, prev=prev, txs=len(txs), ops=ops, date=date)
 
     account_names = set()
     comment_ops = []
     json_ops = []
     delete_ops = []
-    for tx in txs:
+    for tx in block['transactions']:
         for operation in tx['operations']:
             op_type, op = operation
 
@@ -99,12 +93,10 @@ def process_block(block, is_initial_sync=False):
 
 # batch-process blocks, wrap in a transaction
 def process_blocks(blocks, is_initial_sync=False):
-    dirty = set()
     query("START TRANSACTION")
     for block in blocks:
         process_block(block, is_initial_sync)
     query("COMMIT")
-    return dirty
 
 
 
@@ -155,7 +147,7 @@ def sync_from_steemd():
         timer.batch_start()
         blocks = steemd.get_blocks_range(lbound, to)
         timer.batch_lap()
-        dirty |= process_blocks(blocks, is_initial_sync)
+        process_blocks(blocks, is_initial_sync)
         timer.batch_finish(len(blocks))
         print(timer.batch_status("[SYNC] Got block {}".format(to-1)))
 
