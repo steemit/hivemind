@@ -303,7 +303,7 @@ def setup(connection_url=_url):
     ])
 
     # Insert hive_state data
-    insert = hive_state.insert().values(block_num=0, db_version=0, steem_per_mvest=0, usd_per_steem=0, sbd_per_steem=0, dgpo='')
+    insert = hive_state.insert().values(block_num=0, db_version=2, steem_per_mvest=0, usd_per_steem=0, sbd_per_steem=0, dgpo='')
     conn.execute(insert)
 
 
