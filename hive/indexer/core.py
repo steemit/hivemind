@@ -3,6 +3,7 @@ import logging
 import glob
 import time
 import os
+import traceback
 
 from funcy.seqs import drop
 from toolz import partition_all
@@ -182,8 +183,13 @@ def listen_steemd(trail_blocks=2):
             time.sleep(0.5)
 
         # get the target block; if DNE, pause and retry
+        tries = 0
         block = steemd.get_block(curr_block)
         while not block:
+            tries += 1
+            if tries > 25:
+                # todo: detect if the node we're querying is behind
+                raise Exception("could not fetch block %d" % curr_block)
             time.sleep(0.5)
             block = steemd.get_block(curr_block)
 
@@ -313,6 +319,7 @@ def run():
             sync_from_steemd()
             listen_steemd()
     except KeyboardInterrupt as e:
+        traceback.print_exc()
         # TODO: cleanup/flush
         print("\nCTRL-C detected, goodbye.")
 
