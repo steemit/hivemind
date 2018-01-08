@@ -32,7 +32,7 @@ class CachedPost:
     def flush(cls, adapter, trx=False):
         for url in list(cls._dirty.keys()):
             if not cls._dirty[url]:
-                #print("no pid for {}".format(url))
+                print("no pid for {}".format(url))
                 del cls._dirty[url]
 
         tuples = [(pid, *url.split('/')) for url, pid in cls._dirty.items()]

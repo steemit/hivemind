@@ -39,7 +39,7 @@ class Posts:
             if not is_deleted:
                 tuples.append([pid, author, permlink])
             else:
-                # TODO: paranoid check -- remove after testing, before merge
+                # TODO: paranoid check -- remove after testing
                 exists = query_one("SELECT 1 FROM hive_posts_cache WHERE post_id = %d LIMIT 1" % pid)
                 assert not exists, "invalid cache entry"
 
