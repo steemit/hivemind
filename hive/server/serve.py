@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from sqlalchemy.engine.url import make_url
 from aiohttp import web
+import aiohttp_cors
 from aiopg.sa import create_engine
 from jsonrpcserver import config
 from jsonrpcserver.async_methods import AsyncMethods
@@ -128,9 +129,17 @@ async def non_appbase_handler(request):
 app.on_startup.append(init_db)
 app.on_cleanup.append(close_db)
 app.router.add_get('/health', health)
-app.router.add_post('/', jsonrpc_handler)
-app.router.add_post('/legacy', non_appbase_handler)
+cors_routes = [
+    app.router.add_post('/', jsonrpc_handler),
+    app.router.add_post('/legacy', non_appbase_handler)
+]
 
+# CORS config
+cors = aiohttp_cors.setup(app)
+for route in cors_routes:
+    cors.add(route, {
+        "*": aiohttp_cors.ResourceOptions(allow_credentials=False)
+    })
 
 if __name__ == '__main__':
     import argparse

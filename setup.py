@@ -28,6 +28,7 @@ setup(
         'aiopg',
         'jsonrpcserver',
         'aiohttp',
+        'aiohttp_cors',
         'certifi',
         'sqlalchemy',
         'click',
