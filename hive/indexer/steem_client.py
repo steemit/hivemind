@@ -34,15 +34,15 @@ class ClientStats:
     def check_timing(cls, method, ms, batch_size):
         per = ms / batch_size
         par = cls.PAR[method]
-        over = 100 * (per / par - 1)
-        if ms < 600 and over < 25:
+        over = per / par
+        if (ms < 600 or over < 0.25) and over < 1.25:
             return
 
         out = ("[STEEM][%dms] %s[%d] -- "
                % (ms, method, batch_size))
 
-        if over > 0:
-            out += "%d%% over par (%d/%d)" % (over, per, par)
+        if over > 1:
+            out += "%.2fx par (%d/%d)" % (over, per, par)
         else:
             out += "par ok (%d/%d)" % (per, par)
 

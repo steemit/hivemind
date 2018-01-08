@@ -44,8 +44,11 @@ class Timer:
             rates.append('%d%s' % (self._rate(i), unit))
         out += " (%s) -- "  % ', '.join(rates)
 
-        # "eta 01:22"
-        out += "eta %s" % self._eta()
+        if self._processed < self._total:
+            # "eta 01:22"
+            out += "eta %s" % self._eta()
+        else:
+            out += "done in %s" % self._time(self._elapsed())
 
         return out
 
@@ -55,8 +58,11 @@ class Timer:
         return (self._last_items / secs)
 
     def _eta(self):
-        items = self._total - self._processed
-        secs = (items / self._rate())
+        left = self._total - self._processed
+        secs = (left / self._rate(-1))
+        return self._time(secs)
+
+    def _time(self, secs):
         return "%02d:%02d" % (secs / 60, secs % 60)
 
     def _elapsed(self, lap_idx=None):
