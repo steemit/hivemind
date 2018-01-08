@@ -9,10 +9,50 @@ from hive.db.methods import query, query_all, query_col, query_one
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.timer import Timer
 
+from collections import OrderedDict
+
 class CachedPost:
 
     # cursor signifying upper bound of cached post span
     _last_id = -1
+
+    # cache entries to update
+    _dirty = collections.OrderedDict()
+
+    @classmethod
+    def dirty(cls, author, permlink, pid=None):
+        url = author + '/' + permlink
+        if url in cls._dirty:
+            if pid and not cls._dirty[url]:
+                cls._dirty[url] = pid
+        else:
+            cls._dirty[url] = None
+
+    @classmethod
+    def flush(cls, adapter, trx=False):
+        for url in list(cls._dirty.keys()):
+            if not cls._dirty[url]:
+                print("no pid for {}".format(url))
+                del cls._dirty[url]
+
+        tuples = [(pid, *url.split('/')) for url, pid in cls._dirty.items()]
+        if trx or len(tuples) > 1000:
+            print("[PREP] update {} cached posts".format(len(tuples)))
+        cls.update_batch(tuples, adapter, trx)
+        cls._dirty = collections.OrderedDict()
+        return len(tuples)
+
+    @classmethod
+    def dirty_noids(cls):
+        #_dirty = len(cls._dirty)
+        #_noids = len([k.split('/') for k, v in cls._dirty.items() if not v])
+        #print("%d dirty, %d noids = %d%%" % (_dirty, _noids, 100*_noids/_dirty))
+        return [k.split('/') for k, v in cls._dirty.items() if not v]
+
+    @classmethod
+    def dirty_noids_load(cls, tuples):
+        for pid, author, permlink in tuples:
+            cls._dirty[author+'/'+permlink] = pid
 
     @classmethod
     def select_paidout_tuples(cls, block_date):

@@ -33,12 +33,15 @@ class Posts:
         tuples = []
         sql = """SELECT id, is_deleted FROM hive_posts
                   WHERE author = :a AND permlink = :p"""
-        for url in urls:
-            author, permlink = url.split('/')
+        for author, permlink in urls:
             pid, is_deleted = query_row(sql, a=author, p=permlink)
-            assert pid, "no pid for {}".format(url)
+            assert pid, "no pid for {}/{}".format(author, permlink)
             if not is_deleted:
                 tuples.append([pid, author, permlink])
+            else:
+                # TODO: paranoid check -- remove after testing
+                exists = query_one("SELECT 1 FROM hive_posts_cache WHERE post_id = %d LIMIT 1" % pid)
+                assert not exists, "invalid cache entry"
 
         # sort the results.. must insert cache records sequentially
         return sorted(tuples, key=lambda tup: tup[0])
