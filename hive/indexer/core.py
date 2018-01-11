@@ -141,7 +141,7 @@ def sync_from_steemd():
     if ubound > lbound:
         print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
 
-    timer = Timer(ubound-lbound+1, entity='block', laps=['rps', 'wps'])
+    timer = Timer(ubound - lbound, entity='block', laps=['rps', 'wps'])
     while lbound < ubound:
         to = min(lbound + 1000, ubound)
 

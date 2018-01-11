@@ -6,12 +6,15 @@ from decimal import Decimal
 from .http_client import HttpClient, RPCError
 
 class ClientStats:
-    # Warn when critical calls take too long
+    # Thresholds for critical call timing warnings
+    #   int = flat threshold
+    #   tuple[0] = timing for single request
+    #   tuple[1] = timing for batch of 1000
     PAR = {
         'get_dynamic_global_properties': 120,
-        'get_block': 100,
-        'get_accounts': 5,
-        'get_content': 15,
+        'get_block': (100, 5),
+        'get_accounts': (10, 2),
+        'get_content': (15, 5),
         'get_order_book': 100,
         'get_current_median_history_price': 80,
     }
@@ -33,9 +36,10 @@ class ClientStats:
     @classmethod
     def check_timing(cls, method, ms, batch_size):
         per = ms / batch_size
-        par = cls.PAR[method]
+        par = cls._par(method, batch_size)
+
         over = per / par
-        if (ms < 600 or over < 0.25) and over < 1.25:
+        if over < 1.25:
             return
 
         out = ("[STEEM][%dms] %s[%d] -- "
@@ -65,6 +69,14 @@ class ClientStats:
     def clear(cls):
         cls.stats = {}
         cls.ttltime = 0
+
+    @classmethod
+    def _par(cls, method, batch_size):
+        par = cls.PAR[method]
+        if isinstance(par, tuple):
+            x = (batch_size - 1) / (1000 - 1)
+            par = round(par[0] + x * (par[1] - par[0]))
+        return par
 
 atexit.register(ClientStats.print)
 

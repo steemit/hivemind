@@ -11,9 +11,9 @@ class Timer:
     _processed = 0
     _last_items = 0
 
-    def __init__(self, total=None, entity='', laps=[]):
+    def __init__(self, total=None, entity='', laps=None):
         self._entity = entity
-        self._lap_units = laps
+        self._lap_units = laps or []
         self._total = total
 
     def batch_start(self):
@@ -35,8 +35,8 @@ class Timer:
         else:
             # " -- post 1 of 10"
             out = " -- %s %d of %d" % (self._entity,
-                                        self._processed,
-                                        self._total)
+                                       self._processed,
+                                       self._total)
 
         # " (3/s, 4rps, 5wps) -- "
         rates = []
@@ -48,18 +48,19 @@ class Timer:
             # "eta 01:22"
             out += "eta %s" % self._eta()
         else:
-            out += "done in %s" % self._time(self._elapsed())
+            out += "done in %s, avg rate: %.1f/s" % (
+                self._time(self._elapsed()),
+                self._total / self._elapsed())
 
         return out
 
-
     def _rate(self, lap_idx=None):
         secs = self._elapsed(lap_idx)
-        return (self._last_items / secs)
+        return self._last_items / secs
 
     def _eta(self):
         left = self._total - self._processed
-        secs = (left / self._rate(-1))
+        secs = (left / self._rate())
         return self._time(secs)
 
     def _time(self, secs):
