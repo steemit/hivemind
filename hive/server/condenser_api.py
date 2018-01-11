@@ -1,7 +1,7 @@
 import json
 
 from aiocache import cached
-from hive.db.methods import query, query_one, query_col, query_row, query_all
+from hive.db.methods import query_one, query_col, query_row, query_all
 from hive.indexer.steem_client import get_adapter
 
 # e.g. {"id":0,"jsonrpc":"2.0","method":"call",
@@ -513,7 +513,7 @@ def _get_posts(ids):
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
-    for row in query(sql, ids=tuple(ids)).fetchall():
+    for row in query_all(sql, ids=tuple(ids)):
         row = dict(row)
         post = _condenser_post_object(row)
         posts_by_id[row['post_id']] = post
