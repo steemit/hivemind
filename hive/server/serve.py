@@ -109,6 +109,7 @@ async def health(request):
     return web.json_response(data=dict(
         status='OK',
         source_commit=os.environ.get('SOURCE_COMMIT'),
+        schema_hash=os.environ.get('SCHEMA_HASH'),
         docker_tag=os.environ.get('DOCKER_TAG'),
         state=state,
         timestamp=datetime.utcnow().isoformat()))
