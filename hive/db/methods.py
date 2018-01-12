@@ -11,6 +11,18 @@ class QueryStats:
     stats = {}
     ttl_time = 0.0
 
+    def __init__(self):
+        atexit.register(QueryStats.print)
+
+    def __call__(self, fn):
+        def wrap(*args, **kwargs):
+            time_start = time.perf_counter()
+            result = fn(*args, **kwargs)
+            time_end = time.perf_counter()
+            QueryStats.log(args[0], (time_end - time_start) * 1000)
+            return result
+        return wrap
+
     @classmethod
     def log(cls, sql, ms):
         nsql = cls.normalize_sql(sql)
@@ -57,22 +69,11 @@ class QueryStats:
         cls.stats = {}
         cls.ttl_time = 0
 
-def query_stats(fn):
-    def wrap(*args, **kwargs):
-        time_start = time.perf_counter()
-        result = fn(*args, **kwargs)
-        time_end = time.perf_counter()
-        QueryStats.log(args[0], (time_end - time_start) * 1000)
-        return result
-    return wrap
-
-atexit.register(QueryStats.print)
-
 logger = logging.getLogger(__name__)
 
 _trx_active = False
 
-@query_stats
+@QueryStats()
 def __query(sql, **kwargs):
     global _trx_active
     if sql == 'START TRANSACTION':
