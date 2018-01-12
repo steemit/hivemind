@@ -57,10 +57,11 @@ class Accounts:
         cls._cache_accounts(query_col("SELECT name FROM hive_accounts"), trx=True)
 
     @classmethod
-    def cache_oldest(cls, limit=50000):
-        print("[SYNC] Caching oldest %d accounts..." % limit)
+    def dirty_oldest(cls, limit=50000):
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
-        cls._cache_accounts(query_col(sql, limit=limit), trx=True)
+        oldest = set(query_col(sql, limit=limit))
+        cls._dirty |= oldest
+        return len(oldest)
 
     @classmethod
     def cache_dirty(cls, trx=False):

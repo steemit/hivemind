@@ -224,7 +224,8 @@ def listen_steemd(trail_blocks=2):
         # approx once per hour, update accounts
         if curr_block % 1200 == 0:
             print("[HIVE] Performing account maintenance...")
-            Accounts.cache_oldest(10000)
+            Accounts.dirty_oldest(10000)
+            Accounts.cache_dirty(trx=True)
             #Accounts.update_ranks()
 
 
@@ -321,6 +322,7 @@ def run():
     except KeyboardInterrupt as e:
         traceback.print_exc()
         # TODO: cleanup/flush
+        # e.g. CachedPost.flush_edits()
         print("\nCTRL-C detected, goodbye.")
 
 
