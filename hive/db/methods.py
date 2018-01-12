@@ -9,37 +9,62 @@ from sqlalchemy import text
 
 class QueryStats:
     stats = {}
-    ttltime = 0.0
+    ttl_time = 0.0
 
     @classmethod
     def log(cls, sql, ms):
-        nsql = re.sub('\s+', ' ', sql).strip()[0:256] #normalize
-        nsql = re.sub('VALUES (\s*\([^\)]+\),?)+', 'VALUES (...)', nsql)
-        if nsql not in cls.stats:
-            cls.stats[nsql] = [0, 0]
-        cls.stats[nsql][0] += ms
-        cls.stats[nsql][1] += 1
-        cls.ttltime += ms
-        if cls.ttltime > 30 * 60 * 1000:
+        nsql = cls.normalize_sql(sql)
+        cls.add_nsql_ms(nsql, ms)
+        cls.check_timing(nsql, ms)
+        if cls.ttl_time > 30 * 60 * 1000:
             cls.print()
+
+    @classmethod
+    def add_nsql_ms(cls, nsql, ms):
+        if nsql not in cls.stats:
+            cls.stats[nsql] = [ms, 1]
+        else:
+            cls.stats[nsql][0] += ms
+            cls.stats[nsql][1] += 1
+        cls.ttl_time += ms
+
+    @classmethod
+    def normalize_sql(cls, sql):
+        nsql = re.sub('\s+', ' ', sql).strip()[0:256]
+        nsql = re.sub('VALUES (\s*\([^\)]+\),?)+', 'VALUES (...)', nsql)
+        return nsql
+
+    @classmethod
+    def check_timing(cls, nsql, ms):
+        if ms > 100:
+            print("\033[93m[SQL][%dms] %s\033[0m" % (ms, nsql[:250]))
 
     @classmethod
     def print(cls):
         if not cls.stats:
             return
-        ttl = cls.ttltime
+        ttl = cls.ttl_time
         print("[DEBUG] total SQL time: {}s".format(int(ttl / 1000)))
         for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
-            print("% 5.1f%% % 10.2fms % 8.2favg % 8dx -- %s"
+            print("% 5.1f%% % 7dms % 9.2favg % 8dx -- %s"
                   % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
         cls.clear()
 
     @classmethod
     def clear(cls):
         cls.stats = {}
-        cls.ttltime = 0
+        cls.ttl_time = 0
+
+def query_stats(fn):
+    def wrap(*args, **kwargs):
+        time_start = time.perf_counter()
+        result = fn(*args, **kwargs)
+        time_end = time.perf_counter()
+        QueryStats.log(args[0], (time_end - time_start) * 1000)
+        return result
+    return wrap
 
 atexit.register(QueryStats.print)
 
@@ -47,14 +72,7 @@ logger = logging.getLogger(__name__)
 
 _trx_active = False
 
-# generic
-# -------
-def query(sql, **kwargs):
-    action = sql.strip()[0:6].strip()
-    if action not in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START']:
-        raise Exception("query() only for writes. {}".format(sql))
-    __query(sql, **kwargs)
-
+@query_stats
 def __query(sql, **kwargs):
     global _trx_active
     if sql == 'START TRANSACTION':
@@ -63,21 +81,21 @@ def __query(sql, **kwargs):
     elif sql == 'COMMIT':
         assert _trx_active
         _trx_active = False
-    ti = time.perf_counter()
+
     _query = text(sql).execution_options(autocommit=False)
     try:
-        res = conn.execute(_query, **kwargs)
-        ms = int((time.perf_counter() - ti) * 1000)
-        QueryStats.log(sql, ms)
-        if ms > 100:
-            disp = re.sub('\s+', ' ', sql).strip()[:250]
-            print("\033[93m[SQL][{}ms] {}\033[0m".format(ms, disp))
-        return res
+        return conn.execute(_query, **kwargs)
     except Exception as e:
         print("[SQL] Error in query {} ({})".format(sql, kwargs))
-        conn.close()
+        #conn.close() # TODO: check if needed
         logger.exception(e)
         raise e
+
+def query(sql, **kwargs):
+    action = sql.strip()[0:6].strip()
+    if action not in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START']:
+        raise Exception("query() only for writes. {}".format(sql))
+    __query(sql, **kwargs)
 
 # n*m
 def query_all(sql, **kwargs):
@@ -100,12 +118,8 @@ def query_one(sql, **kwargs):
     if row:
         return first(row)
 
-def db_needs_setup():
-    db = conn.dialect.name
-    if db == 'postgresql':
-        return not query_row("""
-            SELECT * FROM pg_catalog.pg_tables WHERE schemaname = 'public'
-        """)
-    elif db == 'mysql':
-        return not query_row('SHOW TABLES')
-    raise Exception("db engine %s not supported" % db)
+def db_engine():
+    engine = conn.dialect.name
+    if engine not in ['postgresql', 'mysql']:
+        raise Exception("db engine %s not supported" % engine)
+    return engine

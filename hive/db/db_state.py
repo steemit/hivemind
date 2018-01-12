@@ -1,5 +1,5 @@
 from hive.db.schema import setup, teardown
-from hive.db.methods import db_needs_setup, query_one, query
+from hive.db.methods import db_engine, query_one, query
 
 class DbState:
 
@@ -12,7 +12,7 @@ class DbState:
     @classmethod
     def initialize(cls):
         # create db schema if needed
-        if db_needs_setup():
+        if not cls._is_schema_loaded():
             print("[INIT] Initializing db...")
             setup()
 
@@ -34,9 +34,20 @@ class DbState:
         return cls._is_initial_sync
 
     @classmethod
+    def _is_schema_loaded(cls):
+        # check if database has been initialized (i.e. schema loaded)
+        engine = db_engine()
+        if engine == 'postgresql':
+            return bool(query_one("""
+                SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'public'
+            """))
+        elif engine == 'mysql':
+            return bool(query_one('SHOW TABLES'))
+        raise Exception("unknown db engine %s" % engine)
+
+    @classmethod
     def _is_feed_cache_empty(cls):
         return not query_one("SELECT 1 FROM hive_feed_cache LIMIT 1")
-
 
     @classmethod
     def _check_migrations(cls):
@@ -51,14 +62,14 @@ class DbState:
             cls._ver = 1
 
         if cls._ver == 0:
-            cls._set_ver(1)
+            cls._set_schema_ver(1)
 
         if cls._ver == 1:
             query("ALTER TABLE hive_posts ALTER COLUMN category SET DEFAULT ''")
-            cls._set_ver(2)
+            cls._set_schema_ver(2)
 
     @classmethod
-    def _set_ver(cls, ver):
+    def _set_schema_ver(cls, ver):
         assert cls._ver, 'version needs to be read before updating'
         assert ver == cls._ver + 1, 'version must follow previous'
         query("UPDATE hive_state SET db_version = %d" % ver)
