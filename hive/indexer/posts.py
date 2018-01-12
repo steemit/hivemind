@@ -103,7 +103,7 @@ class Posts:
         query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=pid)
 
         if not DbState.is_initial_sync():
-            CachedPost.delete(pid)
+            CachedPost.delete(pid, op['author'], op['permlink'])
             if depth == 0:
                 FeedCache.delete(pid)
 

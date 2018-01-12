@@ -66,8 +66,13 @@ class CachedPost:
     #   - author/permlink is unique and always references the same post
     #   - you can always get_content on any author/permlink you see in an op
     @classmethod
-    def delete(cls, post_id):
+    def delete(cls, post_id, author, permlink):
         query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
+
+        # if it was queued for a write, remove it
+        url = author+'/'+permlink
+        if url in cls._dirty:
+            del cls._dirty[url]
 
     # 'Undeletion' event occurs when hive detects that a previously deleted
     #   author/permlink combination has been reused on a new post. Hive does
