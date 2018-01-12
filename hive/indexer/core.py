@@ -9,7 +9,7 @@ from funcy.seqs import drop
 from toolz import partition_all
 
 from hive.db.db_state import DbState
-from hive.db.methods import query_one, query_all, query
+from hive.db.methods import query_one, query_row, query_all, query
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -27,13 +27,8 @@ log = logging.getLogger(__name__)
 # --------------------
 
 def db_last_block():
-    return query_one("SELECT MAX(num) FROM hive_blocks") or 0
-
-def db_last_block_date():
-    return query_one("SELECT created_at FROM hive_blocks ORDER BY num DESC LIMIT 1")
-
-def db_last_block_hash():
-    return query_one("SELECT hash FROM hive_blocks ORDER BY num DESC LIMIT 1")
+    return query_row("SELECT num, created_at date, hash "
+                     "FROM hive_blocks ORDER BY num DESC LIMIT 1")
 
 def push_block(block):
     num = int(block['block_id'][:8], base=16)
@@ -105,7 +100,7 @@ def process_blocks(blocks, is_initial_sync=False):
 # -------------
 
 def sync_from_checkpoints():
-    last_block = db_last_block()
+    last_block = db_last_block()['num']
 
     _fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
     mydir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
@@ -135,7 +130,7 @@ def sync_from_steemd():
     is_initial_sync = DbState.is_initial_sync()
     steemd = get_adapter()
 
-    lbound = db_last_block() + 1
+    lbound = db_last_block()['num'] + 1
     ubound = steemd.last_irreversible_block_num()
 
     if ubound > lbound:
@@ -156,7 +151,7 @@ def sync_from_steemd():
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
-        dirty_paidout_posts()
+        dirty_paidout_posts(db_last_block()['date'])
         flush_cache(trx=True)
         Accounts.cache_dirty(trx=True)
         Follow.flush(trx=True)
@@ -166,8 +161,9 @@ def listen_steemd(trail_blocks=2):
     assert trail_blocks >= 0
     assert trail_blocks < 25
     steemd = get_adapter()
-    curr_block = db_last_block()
-    last_hash = db_last_block_hash()
+    last_block = db_last_block()
+    curr_block = last_block['num']
+    last_hash = last_block['hash']
 
     while True:
         curr_block = curr_block + 1
@@ -262,9 +258,7 @@ def flush_cache(trx=True):
     return CachedPost.flush(get_adapter(), trx)
 
 
-def dirty_paidout_posts(date=None):
-    if not date:
-        date = db_last_block_date()
+def dirty_paidout_posts(date):
     paidout = CachedPost.select_paidout_tuples(date)
     for (pid, author, permlink) in paidout:
         Accounts.dirty(author)
@@ -329,7 +323,7 @@ def run():
 def head_state(*args):
     _ = args  # JSONRPC injects 4 arguments here
     steemd_head = get_adapter().head_block()
-    hive_head = db_last_block()
+    hive_head = db_last_block()['num']
     diff = steemd_head - hive_head
     return dict(steemd=steemd_head, hive=hive_head, diff=diff)
 
