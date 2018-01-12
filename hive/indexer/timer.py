@@ -6,6 +6,9 @@ class Timer:
     _lap_units = []
     _total = None
 
+    _start_time = None
+    _end_time = None
+
     # Lap checkpoints, # processed, last # processed
     _laps = []
     _processed = 0
@@ -17,14 +20,17 @@ class Timer:
         self._total = total
 
     def batch_start(self):
+        self._batches = []
         self._laps = []
         self.batch_lap()
+        self._start_time = time.perf_counter()
 
     def batch_lap(self):
         self._laps.append(time.perf_counter())
 
     def batch_finish(self, ops=None):
         self.batch_lap()
+        self._end_time = time.perf_counter()
         self._last_items = ops
         self._processed += ops
 
@@ -48,9 +54,10 @@ class Timer:
             # "eta 01:22"
             out += "eta %s" % self._eta()
         else:
+            total_time = self._end_time - self._start_time
             out += "done in %s, avg rate: %.1f/s" % (
-                self._time(self._elapsed()),
-                self._total / self._elapsed())
+                self._time(total_time),
+                self._total / total_time)
 
         return out
 

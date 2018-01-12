@@ -24,14 +24,19 @@ class ClientStats:
 
     @classmethod
     def log(cls, method, ms, batch_size=1):
-        if method not in cls.stats:
-            cls.stats[method] = [0, 0]
-        cls.stats[method][0] += ms
-        cls.stats[method][1] += batch_size
-        cls.ttltime += ms
+        cls.add_to_stats(method, ms, batch_size)
         cls.check_timing(method, ms, batch_size)
         if cls.ttltime > 30 * 60 * 1000:
             cls.print()
+
+    @classmethod
+    def add_to_stats(cls, method, ms, batch_size):
+        if method not in cls.stats:
+            cls.stats[method] = [ms, batch_size]
+        else:
+            cls.stats[method][0] += ms
+            cls.stats[method][1] += batch_size
+        cls.ttltime += ms
 
     @classmethod
     def check_timing(cls, method, ms, batch_size):
@@ -61,7 +66,7 @@ class ClientStats:
         for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
-            print("% 5.1f%% % 10.2fms % 7.2favg % 8dx -- %s"
+            print("% 5.1f%% % 8dms % 7.2favg % 8dx -- %s"
                   % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
         cls.clear()
 
@@ -198,7 +203,7 @@ class SteemClient:
             break
 
         batch_size = len(params[0]) if method == 'get_accounts' else 1
-        total_time = int((time.perf_counter() - time_start) * 1000)
+        total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, batch_size)
         return result
 
@@ -213,7 +218,7 @@ class SteemClient:
             result = list(self._client.exec_multi_with_futures(
                 method, params, max_workers=10))
 
-        total_time = int((time.perf_counter() - time_start) * 1000)
+        total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, len(params))
         return result
 
