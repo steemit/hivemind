@@ -248,6 +248,16 @@ class CachedPost:
 
         stats = cls._post_stats(post)
 
+        # these fields are always empty
+        useless = ['body_length', 'reblogged_by', 'replies']
+        for key in useless:
+            del post[key]
+
+        # we've already pulled these fields out
+        del post['active_votes']
+        del post['body']
+        del post['json_metadata']
+
         values = collections.OrderedDict([
             ('post_id', '%d' % pid),
             ('author', "%s" % post['author']),
@@ -279,7 +289,7 @@ class CachedPost:
             ('is_hidden', "%d" % stats['hide']),
             ('is_grayed', "%d" % stats['gray']),
             ('author_rep', "%f" % stats['author_rep']),
-            ('raw_json', "%s" % json.dumps(post)), # TODO: remove body, json_md, active_votes(?)
+            ('raw_json', "%s" % json.dumps(post)),
             ('is_declined', "%d" % int(payout_declined)),
             ('is_full_power', "%d" % int(full_power)),
         ])
