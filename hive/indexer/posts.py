@@ -1,3 +1,5 @@
+import collections
+
 from hive.db.methods import query, query_one, query_row
 from hive.db.db_state import DbState
 
@@ -10,6 +12,11 @@ from hive.community.roles import is_community_post_valid
 
 class Posts:
 
+    # LRU cache for (author-permlink -> id) lookup
+    _ids = collections.OrderedDict()
+    _hits = 0
+    _miss = 0
+
     @classmethod
     def last_id(cls):
         sql = "SELECT MAX(id) FROM hive_posts WHERE is_deleted = '0'"
@@ -17,24 +24,50 @@ class Posts:
 
     @classmethod
     def get_id(cls, author, permlink):
-        sql = """SELECT id FROM hive_posts WHERE
-                 author = :a AND permlink = :p"""
-        return query_one(sql, a=author, p=permlink)
+        url = author+'/'+permlink
+        if url in cls._ids:
+            cls._hits += 1
+            _id = cls._ids.pop(url)
+            cls._ids[url] = _id
+        else:
+            cls._miss += 1
+            sql = """SELECT id FROM hive_posts WHERE
+                     author = :a AND permlink = :p"""
+            _id = query_one(sql, a=author, p=permlink)
+            if _id:
+                if len(cls._ids) > 1000000:
+                    cls._ids.popitem(last=False)
+                cls._ids[url] = _id
+
+        # cache stats
+        total = cls._hits + cls._miss
+        if total % 1000 == 0:
+            print("post.id lookups: %d, hits: %d (%.1f%%), entries: %d"
+                  % (total, cls._hits, 100.0*cls._hits/total, len(cls._ids)))
+
+        return _id
 
     @classmethod
     def get_id_and_depth(cls, author, permlink):
-        res = query_row("SELECT id, depth FROM hive_posts WHERE "
-                        "author = :a AND permlink = :p",
-                        a=author, p=permlink)
-        return res or (None, -1)
+        _id = cls.get_id(author, permlink)
+        if not _id:
+            return (None, -1)
+        depth = query_one("SELECT depth FROM hive_posts WHERE id = :id", id=_id)
+        return (_id, depth)
+
+    @classmethod
+    def get_id_and_is_deleted(cls, author, permlink):
+        _id = cls.get_id(author, permlink)
+        if not _id:
+            return (None, None)
+        sql = "SELECT is_deleted FROM hive_posts WHERE id = :id"
+        return (_id, query_one(sql, id=_id))
 
     @classmethod
     def urls_to_tuples(cls, urls):
         tuples = []
-        sql = """SELECT id, is_deleted FROM hive_posts
-                  WHERE author = :a AND permlink = :p"""
         for author, permlink in urls:
-            pid, is_deleted = query_row(sql, a=author, p=permlink)
+            pid, is_deleted = cls.get_id_and_is_deleted(author, permlink)
             assert pid, "no pid for {}/{}".format(author, permlink)
             if not is_deleted:
                 tuples.append([pid, author, permlink])
@@ -56,18 +89,16 @@ class Posts:
     @classmethod
     def comment_ops(cls, ops, block_date):
         for op in ops:
-            sql = ("SELECT id, is_deleted FROM hive_posts "
-                   "WHERE author = :a AND permlink = :p")
-            ret = query_row(sql, a=op['author'], p=op['permlink'])
-            if not ret:
+            pid, is_deleted = cls.get_id_and_is_deleted(op['author'], op['permlink'])
+            if not pid:
                 # post does not exist, go ahead and process it.
                 cls.insert(op, block_date)
-            elif not ret[1]:
+            elif not is_deleted:
                 # post exists, not deleted, thus an edit. ignore.
-                cls.update(op, block_date, ret[1])
+                cls.update(op, block_date, pid)
             else:
                 # post exists but was deleted. time to reinstate.
-                cls.undelete(op, block_date, ret[0])
+                cls.undelete(op, block_date, pid)
 
     # inserts new post records
     @classmethod
@@ -115,10 +146,9 @@ class Posts:
     @classmethod
     def _insert_feed_cache(cls, post):
         if post['depth'] == 0:
-            if not post['id']:
-                post['id'] = cls.get_id(post['author'], post['permlink'])
+            post_id = post['id'] or cls.get_id(post['author'], post['permlink'])
             account_id = Accounts.get_id(post['author'])
-            FeedCache.insert(post['id'], account_id, post['date'])
+            FeedCache.insert(post_id, account_id, post['date'])
 
     @classmethod
     def _build_post(cls, op, date, pid=None):
@@ -129,12 +159,9 @@ class Posts:
             category = op['parent_permlink']
             community = cls._get_op_community(op) or op['author']
         else:
-            sql = """SELECT id, depth, category, community FROM hive_posts
-                     WHERE author = :author AND permlink = :permlink"""
-            parent_data = query_row(sql,
-                                    author=op['parent_author'],
-                                    permlink=op['parent_permlink'])
-            parent_id, parent_depth, category, community = parent_data
+            parent_id = cls.get_id(op['parent_author'], op['parent_permlink'])
+            sql = "SELECT depth,category,community FROM hive_posts WHERE id=:id"
+            parent_depth, category, community = query_row(sql, id=parent_id)
             depth = parent_depth + 1
 
         # check post validity in specified context

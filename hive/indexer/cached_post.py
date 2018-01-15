@@ -26,7 +26,7 @@ class CachedPost:
             if pid and not cls._dirty[url]:
                 cls._dirty[url] = pid
         else:
-            cls._dirty[url] = None
+            cls._dirty[url] = pid
 
     @classmethod
     def flush(cls, adapter, trx=False):
@@ -136,7 +136,7 @@ class CachedPost:
             timer.batch_lap()
             cls._batch_queries(buffer, trx)
 
-            timer.batch_finish(len(buffer))
+            timer.batch_finish(len(posts))
             if len(tuples) >= 1000:
                 print(timer.batch_status())
 
