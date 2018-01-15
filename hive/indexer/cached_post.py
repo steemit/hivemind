@@ -1,5 +1,4 @@
 import json
-import time
 import math
 import collections
 
@@ -8,8 +7,6 @@ from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col, query_one
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.timer import Timer
-
-from collections import OrderedDict
 
 class CachedPost:
 
@@ -119,7 +116,7 @@ class CachedPost:
     # there's any missing cache entries.
     @classmethod
     def update_batch(cls, tuples, steemd, trx=True):
-        timer = Timer(total=len(tuples), entity='post', laps=['rps','wps'])
+        timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
 
         for tups in partition_all(1000, tuples):
             timer.batch_start()
@@ -247,9 +244,14 @@ class CachedPost:
             children = 32767
 
         stats = cls._post_stats(post)
+        body = post['body']
 
-        # these fields are always empty
-        useless = ['body_length', 'reblogged_by', 'replies']
+        # empty/deprecated fields
+        useless = [
+            'body_length', 'reblogged_by', 'replies', 'children_abs_rshares',
+            'total_pending_payout_value', 'author_rewards', 'reward_weight',
+            'total_vote_weight', 'vote_rshares', 'abs_rshares',
+            'max_cashout_time']
         for key in useless:
             del post[key]
 
@@ -267,8 +269,8 @@ class CachedPost:
             ('children', "%d" % children),
 
             ('title', "%s" % post['title']),
-            ('preview', "%s" % post['body'][0:1024]),
-            ('body', "%s" % post['body']),
+            ('preview', "%s" % body[0:1024]),
+            ('body', "%s" % body),
             ('img_url', "%s" % thumb_url),
             ('payout', "%f" % payout),
             ('promoted', "%f" % promoted),

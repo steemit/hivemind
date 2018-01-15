@@ -121,7 +121,7 @@ class Accounts:
                        'vote_history', 'other_history', 'tags_usage',
                        'guest_bloggers']
             for key in useless:
-                del account['useless']
+                del account[key]
 
             # pull out valid profile md and delete the key
             profile = cls._safe_account_metadata(account)
