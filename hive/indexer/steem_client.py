@@ -12,9 +12,9 @@ class ClientStats:
     #   tuple[1] = timing for batch of 1000
     PAR = {
         'get_dynamic_global_properties': 120,
-        'get_block': (100, 5),
-        'get_accounts': (10, 2),
-        'get_content': (15, 5),
+        'get_block': (80, 5),
+        'get_accounts': (5, 1),
+        'get_content': (10, 2),
         'get_order_book': 100,
         'get_current_median_history_price': 80,
     }
@@ -44,14 +44,14 @@ class ClientStats:
         par = cls._par(method, batch_size)
 
         over = per / par
-        if over < 1.25:
+        if over < 1.1:
             return
 
         out = ("[STEEM][%dms] %s[%d] -- "
                % (ms, method, batch_size))
 
-        if over > 1:
-            out += "%.2fx par (%d/%d)" % (over, per, par)
+        if over > 1.1:
+            out += "%.1fx par (%d/%d)" % (over, per, par)
         else:
             out += "par ok (%d/%d)" % (per, par)
 

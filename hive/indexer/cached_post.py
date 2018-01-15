@@ -32,12 +32,13 @@ class CachedPost:
     def flush(cls, adapter, trx=False):
         for url in list(cls._dirty.keys()):
             if not cls._dirty[url]:
-                print("no pid for {}".format(url))
+                print("post %s deleted before .delete()" % url)
                 del cls._dirty[url]
 
         tuples = [(pid, *url.split('/')) for url, pid in cls._dirty.items()]
         if trx or len(tuples) > 1000:
-            print("[PREP] update {} cached posts".format(len(tuples)))
+            edits = sum([1 for pid, _, _ in tuples if pid <= cls.last_id()])
+            print("[PREP] cache %d posts (%d edits)" % (len(tuples), edits))
         cls.update_batch(tuples, adapter, trx)
         cls._dirty = collections.OrderedDict()
         return len(tuples)
