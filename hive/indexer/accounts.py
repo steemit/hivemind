@@ -116,6 +116,17 @@ class Accounts:
                            + amount(account['received_vesting_shares'])
                            - amount(account['delegated_vesting_shares']))
 
+            # remove empty keys
+            useless = ['transfer_history', 'market_history', 'post_history',
+                       'vote_history', 'other_history', 'tags_usage',
+                       'guest_bloggers']
+            for key in useless:
+                del account['useless']
+
+            # pull out valid profile md and delete the key
+            profile = cls._safe_account_metadata(account)
+            del account['json_metadata']
+
             values = {
                 'name': account['name'],
                 'proxy': account['proxy'],
@@ -126,7 +137,12 @@ class Accounts:
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
                 'active_at': account['last_bandwidth_update'],
                 'cached_at': block_date,
-                **cls._safe_account_metadata(account),
+                'display_name': profile['name'],
+                'about': profile['about'],
+                'location': profile['location'],
+                'website': profile['website'],
+                'profile_image': profile['profile_image'],
+                'cover_image': profile['cover_image'],
                 'raw_json': json.dumps(account)
             }
 
@@ -164,9 +180,8 @@ class Accounts:
             name = None
         if website and len(website) > 100:
             website = None
-        if website and website[0:4] != 'http':
+        if website and not re.match('^https?://', website):
             website = 'http://' + website
-        # TODO: regex validate `website`
 
         if profile_image and not re.match('^https?://', profile_image):
             profile_image = None
@@ -178,7 +193,7 @@ class Accounts:
             cover_image = None
 
         return dict(
-            display_name=name or '',
+            name=name or '',
             about=about or '',
             location=location or '',
             website=website or '',
