@@ -78,9 +78,10 @@ def sync_from_steemd():
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
-        dirty_paidout_posts(Blocks.last()['date'])
-        flush_cache(trx=True)
-        Accounts.cache_dirty(trx=True)
+        CachedPost.dirty_paidouts(Blocks.last()['date'])
+        CachedPost.load_dirty_noids(Posts.get_id) # fill in missing id's
+        CachedPost.flush(trx=True)
+        Accounts.flush(trx=True)
         Follow.flush(trx=True)
 
 
@@ -129,9 +130,10 @@ def listen_steemd(trail_blocks=2):
         Blocks.process(block)
         dirty_missing_posts()
 
-        paids = dirty_paidout_posts(block['timestamp'])
-        edits = flush_cache(trx=False)
-        accts = Accounts.cache_dirty(trx=False)
+        paids = CachedPost.dirty_paidouts(block['timestamp'])
+        CachedPost.load_dirty_noids(Posts.get_id) # fill in missing id's
+        edits = CachedPost.flush(trx=False)
+        accts = Accounts.flush(trx=False)
         follows = Follow.flush(trx=False)
         query("COMMIT")
         secs = time.perf_counter() - start_time
@@ -148,15 +150,15 @@ def listen_steemd(trail_blocks=2):
         if curr_block % 1200 == 0:
             print("[HIVE] Performing account maintenance...")
             Accounts.dirty_oldest(10000)
-            Accounts.cache_dirty(trx=True)
+            Accounts.flush(trx=True)
             #Accounts.update_ranks()
 
 
-def select_missing_tuples(start_id, limit=1000000):
+def select_missing_tuples(last_cached_id, limit=1000000):
     sql = """SELECT id, author, permlink FROM hive_posts
               WHERE is_deleted = '0' AND id > :id
            ORDER BY id LIMIT :limit"""
-    return query_all(sql, id=start_id, limit=limit)
+    return query_all(sql, id=last_cached_id, limit=limit)
 
 def dirty_missing_posts():
     # cached posts inserted sequentially, so compare MAX(id)'s
@@ -174,26 +176,9 @@ def dirty_missing_posts():
 def cache_missing_posts():
     gap = dirty_missing_posts()
     print("[INIT] {} missing post cache entries".format(gap))
-    if gap:
-        flush_cache()
-        cache_missing_posts()
-
-def flush_cache(trx=True):
-    CachedPost.dirty_noids_load(Posts.get_id) # fill in missing id's
-    return CachedPost.flush(get_adapter(), trx)
-
-
-def dirty_paidout_posts(date):
-    paidout = CachedPost.select_paidout_tuples(date)
-    for (pid, author, permlink) in paidout:
-        Accounts.dirty(author)
-        CachedPost.dirty(author, permlink, pid)
-
-    if len(paidout) > 1000:
-        print("[PREP] Found {} payouts since {}".format(len(paidout), date))
-    return len(paidout)
-
-
+    while gap:
+        CachedPost.flush(trx=True)
+        gap = dirty_missing_posts()
 
 # refetch dynamic_global_properties, feed price, etc
 def update_chain_state():

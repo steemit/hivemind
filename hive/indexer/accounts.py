@@ -64,7 +64,7 @@ class Accounts:
         return len(oldest)
 
     @classmethod
-    def cache_dirty(cls, trx=False):
+    def flush(cls, trx=False):
         count = len(cls._dirty)
         if trx:
             print("[SYNC] update %d accounts" % count)

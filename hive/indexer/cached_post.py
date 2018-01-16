@@ -7,6 +7,8 @@ from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col, query_one
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.timer import Timer
+from hive.indexer.accounts import Accounts
+from hive.indexer.steem_client import get_adapter
 
 class CachedPost:
 
@@ -27,8 +29,8 @@ class CachedPost:
 
     # Process all posts which have been marked as dirty.
     @classmethod
-    def flush(cls, adapter, trx=False):
-        # Ensure all dirty posts have an id (see dirty_noids_load below).
+    def flush(cls, trx=False):
+        # Ensure all dirty posts have an id (see load_dirty_noids below).
         for url in list(cls._dirty.keys()):
             if not cls._dirty[url]:
                 print("WARNING: missing id for %s" % url)
@@ -39,7 +41,7 @@ class CachedPost:
             edits = sum([1 for pid, _, _ in tuples if pid <= cls.last_id()])
             print("[PREP] cache %d posts (%d edits)" % (len(tuples), edits))
 
-        cls._update_batch(tuples, adapter, trx)
+        cls._update_batch(tuples, get_adapter(), trx)
         cls._dirty = collections.OrderedDict()
         return len(tuples)
 
@@ -47,7 +49,7 @@ class CachedPost:
     # a successive call might be able to provide it "for free". Before
     # flushing changes this method should be called to fill in any gaps.
     @classmethod
-    def dirty_noids_load(cls, get_id_method):
+    def load_dirty_noids(cls, get_id_method):
         #_dirty = len(cls._dirty)
         #_noids = len([k.split('/') for k, v in cls._dirty.items() if not v])
         #print("%d dirty, %d noids = %d%%" % (_dirty, _noids, 100*_noids/_dirty))
@@ -61,11 +63,23 @@ class CachedPost:
     # have the `is_paidout` flag set. We perform this sweep to ensure that we
     # always have accurate final payout state.
     @classmethod
-    def select_paidout_tuples(cls, date):
+    def _select_paidout_tuples(cls, date):
         # retrieve all posts which have been paid out but not updated
         sql = """SELECT post_id, author, permlink FROM hive_posts_cache
                   WHERE is_paidout = '0' AND payout_at <= :date"""
         return query_all(sql, date=date)
+
+    @classmethod
+    def dirty_paidouts(cls, date):
+        paidout = cls._select_paidout_tuples(date)
+        for (pid, author, permlink) in paidout:
+            Accounts.dirty(author) # force-update accounts when posts pay out
+            cls.dirty(author, permlink, pid)
+
+        if len(paidout) > 1000:
+            print("[PREP] Found {} payouts since {}".format(len(paidout), date))
+        return len(paidout)
+
 
     # In steemd, posts can be 'deleted' or unallocated in certain conditions.
     # This requires foregoing some convenient assumptions, such as:
