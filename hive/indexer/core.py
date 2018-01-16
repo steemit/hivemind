@@ -9,13 +9,13 @@ from funcy.seqs import drop
 from toolz import partition_all
 
 from hive.db.db_state import DbState
-from hive.db.methods import query_row, query_all, query
+from hive.db.methods import query_all, query
 
+from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
-from hive.indexer.custom_op import CustomOp
 from hive.indexer.follow import Follow
 from hive.indexer.timer import Timer
 
@@ -23,84 +23,11 @@ from hive.indexer.steem_client import get_adapter
 
 log = logging.getLogger(__name__)
 
-# block-level routines
-# --------------------
-
-def db_last_block():
-    return query_row("SELECT num, created_at date, hash "
-                     "FROM hive_blocks ORDER BY num DESC LIMIT 1")
-
-def push_block(block):
-    num = int(block['block_id'][:8], base=16)
-    txs = block['transactions']
-    query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
-          "VALUES (:num, :hash, :prev, :txs, :ops, :date)", **{
-              'num': num,
-              'hash': block['block_id'],
-              'prev': block['previous'],
-              'txs': len(txs),
-              'ops': sum([len(tx['operations']) for tx in txs]),
-              'date': block['timestamp']})
-    return num
-
-def pop_block():
-    pass
-
-# process a single block. always wrap in a transaction!
-def process_block(block, is_initial_sync=False):
-    num = push_block(block)
-    date = block['timestamp']
-
-    account_names = set()
-    comment_ops = []
-    json_ops = []
-    delete_ops = []
-    for tx in block['transactions']:
-        for operation in tx['operations']:
-            op_type, op = operation
-
-            if op_type == 'pow':
-                account_names.add(op['worker_account'])
-            elif op_type == 'pow2':
-                account_names.add(op['work'][1]['input']['worker_account'])
-            elif op_type == 'account_create':
-                account_names.add(op['new_account_name'])
-            elif op_type == 'account_create_with_delegation':
-                account_names.add(op['new_account_name'])
-            elif op_type == 'comment':
-                comment_ops.append(op)
-                if not is_initial_sync:
-                    CachedPost.dirty(op['author'], op['permlink'])
-                    Accounts.dirty(op['author'])
-            elif op_type == 'delete_comment':
-                delete_ops.append(op)
-            elif op_type == 'custom_json':
-                json_ops.append(op)
-            elif op_type == 'vote':
-                if not is_initial_sync:
-                    CachedPost.dirty(op['author'], op['permlink'])
-                    Accounts.dirty(op['author'])
-
-    Accounts.register(account_names, date) # register potentially new names
-    Posts.comment_ops(comment_ops, date) # ignores edits; inserts, validates
-    Posts.delete_ops(delete_ops)  # unallocates hive_posts record, delete cache
-    CustomOp.process_ops(json_ops, num, date) # follow, reblog, community ops
-
-
-# batch-process blocks, wrap in a transaction
-def process_blocks(blocks, is_initial_sync=False):
-    query("START TRANSACTION")
-    for block in blocks:
-        process_block(block, is_initial_sync)
-    query("COMMIT")
-
-
-
 # sync routines
 # -------------
 
 def sync_from_checkpoints():
-    last_block = db_last_block()['num']
+    last_block = Blocks.last()['num']
 
     _fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
     mydir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
@@ -123,14 +50,14 @@ def sync_from_file(file_path, skip_lines, chunk_size=250):
         # we can skip the blocks we already have
         remaining = drop(skip_lines, f)
         for batch in partition_all(chunk_size, remaining):
-            process_blocks(map(json.loads, batch), True)
+            Blocks.process_multi(map(json.loads, batch), True)
 
 
 def sync_from_steemd():
     is_initial_sync = DbState.is_initial_sync()
     steemd = get_adapter()
 
-    lbound = db_last_block()['num'] + 1
+    lbound = Blocks.last()['num'] + 1
     ubound = steemd.last_irreversible_block_num()
 
     if ubound > lbound:
@@ -143,7 +70,7 @@ def sync_from_steemd():
         timer.batch_start()
         blocks = steemd.get_blocks_range(lbound, to)
         timer.batch_lap()
-        process_blocks(blocks, is_initial_sync)
+        Blocks.process_multi(blocks, is_initial_sync)
         timer.batch_finish(len(blocks))
         print(timer.batch_status("[SYNC] Got block {}".format(to-1)))
 
@@ -151,7 +78,7 @@ def sync_from_steemd():
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
-        dirty_paidout_posts(db_last_block()['date'])
+        dirty_paidout_posts(Blocks.last()['date'])
         flush_cache(trx=True)
         Accounts.cache_dirty(trx=True)
         Follow.flush(trx=True)
@@ -161,7 +88,7 @@ def listen_steemd(trail_blocks=2):
     assert trail_blocks >= 0
     assert trail_blocks < 25
     steemd = get_adapter()
-    last_block = db_last_block()
+    last_block = Blocks.last()
     curr_block = last_block['num']
     last_hash = last_block['hash']
 
@@ -199,7 +126,7 @@ def listen_steemd(trail_blocks=2):
 
         start_time = time.perf_counter()
         query("START TRANSACTION")
-        process_block(block)
+        Blocks.process(block)
         dirty_missing_posts()
 
         paids = dirty_paidout_posts(block['timestamp'])
@@ -321,7 +248,7 @@ def run():
 def head_state(*args):
     _ = args  # JSONRPC injects 4 arguments here
     steemd_head = get_adapter().head_block()
-    hive_head = db_last_block()['num']
+    hive_head = Blocks.last()['num']
     diff = steemd_head - hive_head
     return dict(steemd=steemd_head, hive=hive_head, diff=diff)
 
