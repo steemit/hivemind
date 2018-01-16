@@ -2,7 +2,6 @@ import time
 from hive.db.methods import query
 from hive.db.db_state import DbState
 
-#TODO: ignore insert/delete on initial sync
 class FeedCache:
 
     @classmethod

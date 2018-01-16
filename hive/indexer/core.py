@@ -9,7 +9,7 @@ from funcy.seqs import drop
 from toolz import partition_all
 
 from hive.db.db_state import DbState
-from hive.db.methods import query_one, query_row, query_all, query
+from hive.db.methods import query_row, query_all, query
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -311,7 +311,7 @@ def run():
         while True:
             sync_from_steemd()
             listen_steemd()
-    except KeyboardInterrupt as e:
+    except KeyboardInterrupt:
         traceback.print_exc()
         # TODO: cleanup/flush
         # e.g. CachedPost.flush_edits()

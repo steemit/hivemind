@@ -20,7 +20,6 @@ class Timer:
         self._total = total
 
     def batch_start(self):
-        self._batches = []
         self._laps = []
         self.batch_lap()
         if not self._start_time:
