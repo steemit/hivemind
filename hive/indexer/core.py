@@ -8,17 +8,17 @@ import traceback
 from funcy.seqs import drop
 from toolz import partition_all
 
-from hive.db.db_state import DbState
 from hive.db.methods import query
+from hive.db.db_state import DbState
+
+from hive.indexer.timer import Timer
+from hive.indexer.steem_client import get_adapter
 
 from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
-from hive.indexer.timer import Timer
-
-from hive.indexer.steem_client import get_adapter
 
 log = logging.getLogger(__name__)
 

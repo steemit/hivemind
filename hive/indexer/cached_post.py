@@ -67,10 +67,12 @@ class CachedPost:
     # always have accurate final payout state.
     @classmethod
     def _select_paidout_tuples(cls, date):
+        from hive.indexer.posts import Posts
         # retrieve all posts which have been paid out but not updated
         sql = """SELECT post_id, author, permlink FROM hive_posts_cache
                   WHERE is_paidout = '0' AND payout_at <= :date"""
-        return query_all(sql, date=date)
+        results = query_all(sql, date=date)
+        return Posts.save_ids_from_tuples(results)
 
     @classmethod
     def dirty_paidouts(cls, date):
@@ -85,10 +87,12 @@ class CachedPost:
 
     @classmethod
     def _select_missing_tuples(cls, last_cached_id, limit=1_000_000):
+        from hive.indexer.posts import Posts
         sql = """SELECT id, author, permlink FROM hive_posts
                   WHERE is_deleted = '0' AND id > :id
                ORDER BY id LIMIT :limit"""
-        return query_all(sql, id=last_cached_id, limit=limit)
+        results = query_all(sql, id=last_cached_id, limit=limit)
+        return Posts.save_ids_from_tuples(results)
 
     @classmethod
     def dirty_missing(cls, limit=1_000_000):

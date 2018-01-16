@@ -35,9 +35,7 @@ class Posts:
                      author = :a AND permlink = :p"""
             _id = query_one(sql, a=author, p=permlink)
             if _id:
-                if len(cls._ids) > 1000000:
-                    cls._ids.popitem(last=False)
-                cls._ids[url] = _id
+                cls._set_id(url, _id)
 
         # cache stats
         total = cls._hits + cls._miss
@@ -46,6 +44,20 @@ class Posts:
                   % (total, cls._hits, 100.0*cls._hits/total, len(cls._ids)))
 
         return _id
+
+    @classmethod
+    def _set_id(cls, url, pid):
+        if len(cls._ids) > 1000000:
+            cls._ids.popitem(last=False)
+        cls._ids[url] = pid
+
+    @classmethod
+    def save_ids_from_tuples(cls, tuples):
+        for pid, author, permlink in tuples:
+            url = author+'/'+permlink
+            if not url in cls._ids:
+                cls._set_id(url, pid)
+        return tuples
 
     @classmethod
     def get_id_and_depth(cls, author, permlink):
