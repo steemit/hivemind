@@ -68,6 +68,13 @@ class DbState:
             query("ALTER TABLE hive_posts ALTER COLUMN category SET DEFAULT ''")
             cls._set_schema_ver(2)
 
+        if cls._ver == 2:
+            cols = ['steem_per_mvest', 'usd_per_steem', 'sbd_per_steem']
+            for col in cols:
+                query("ALTER TABLE hive_state ALTER COLUMN %s TYPE numeric(8,3)"
+                      % col)
+            cls._set_schema_ver(3)
+
     @classmethod
     def _set_schema_ver(cls, ver):
         assert cls._ver, 'version needs to be read before updating'

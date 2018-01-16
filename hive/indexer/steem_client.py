@@ -16,7 +16,7 @@ class ClientStats:
         'get_accounts': (5, 1),
         'get_content': (10, 2),
         'get_order_book': 100,
-        'get_current_median_history_price': 80,
+        'get_feed_history': 80,
     }
 
     stats = {}
@@ -136,7 +136,14 @@ class SteemClient:
 
     def gdgp_extended(self):
         dgpo = self._gdgp()
-        # TODO: fetch latest feed price in addition to median
+
+        # remove unused/deprecated keys
+        unused = ['total_pow', 'num_pow_witnesses', 'confidential_supply',
+                  'confidential_sbd_supply', 'total_reward_fund_steem',
+                  'total_reward_shares2']
+        for key in unused:
+            del dgpo[key]
+
         return {
             'dgpo': dgpo,
             'usd_per_steem': self._get_feed_price(),
@@ -146,11 +153,11 @@ class SteemClient:
     def _get_steem_per_mvest(self, dgpo):
         steem = Decimal(dgpo['total_vesting_fund_steem'].split(' ')[0])
         mvests = Decimal(dgpo['total_vesting_shares'].split(' ')[0]) / Decimal(1e6)
-        return "0.000" # TODO: fix dumb column type
         return "%.6f" % (steem / mvests)
 
     def _get_feed_price(self):
-        feed = self.__exec('get_current_median_history_price')
+        # TODO: add latest feed price: get_feed_history.price_history[0]
+        feed = self.__exec('get_feed_history')['current_median_history']
         units = dict([feed[k].split(' ')[::-1] for k in ['base', 'quote']])
         price = Decimal(units['SBD']) / Decimal(units['STEEM'])
         return "%.6f" % price

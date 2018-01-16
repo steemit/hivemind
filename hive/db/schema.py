@@ -264,9 +264,9 @@ hive_state = sa.Table(
     'hive_state', metadata,
     sa.Column('block_num', sa.Integer, primary_key=True, autoincrement=False),
     sa.Column('db_version', sa.Integer, nullable=False),
-    sa.Column('steem_per_mvest', sa.types.DECIMAL(6, 3), nullable=False),
-    sa.Column('usd_per_steem', sa.types.DECIMAL(6, 3), nullable=False),
-    sa.Column('sbd_per_steem', sa.types.DECIMAL(6, 3), nullable=False),
+    sa.Column('steem_per_mvest', sa.types.DECIMAL(8, 3), nullable=False),
+    sa.Column('usd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
+    sa.Column('sbd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
     sa.Column('dgpo', sa.Text, nullable=False),
 
     mysql_engine='InnoDB',
@@ -303,7 +303,7 @@ def setup(connection_url=_url):
     ])
 
     # Insert hive_state data
-    insert = hive_state.insert().values(block_num=0, db_version=2, steem_per_mvest=0, usd_per_steem=0, sbd_per_steem=0, dgpo='')
+    insert = hive_state.insert().values(block_num=0, db_version=3, steem_per_mvest=0, usd_per_steem=0, sbd_per_steem=0, dgpo='')
     conn.execute(insert)
 
 
