@@ -25,39 +25,47 @@ class CachedPost:
         else:
             cls._dirty[url] = pid
 
+    # Process all posts which have been marked as dirty.
     @classmethod
     def flush(cls, adapter, trx=False):
+        # Ensure all dirty posts have an id (see dirty_noids_load below).
         for url in list(cls._dirty.keys()):
             if not cls._dirty[url]:
-                print("post %s deleted before .delete()" % url)
+                print("WARNING: missing id for %s" % url)
                 del cls._dirty[url]
 
         tuples = [(pid, *url.split('/')) for url, pid in cls._dirty.items()]
         if trx or len(tuples) > 1000:
             edits = sum([1 for pid, _, _ in tuples if pid <= cls.last_id()])
             print("[PREP] cache %d posts (%d edits)" % (len(tuples), edits))
-        cls.update_batch(tuples, adapter, trx)
+
+        cls._update_batch(tuples, adapter, trx)
         cls._dirty = collections.OrderedDict()
         return len(tuples)
 
+    # When posts are marked dirty, specifying the id is optional because
+    # a successive call might be able to provide it "for free". Before
+    # flushing changes this method should be called to fill in any gaps.
     @classmethod
-    def dirty_noids(cls):
+    def dirty_noids_load(cls, get_id_method):
         #_dirty = len(cls._dirty)
         #_noids = len([k.split('/') for k, v in cls._dirty.items() if not v])
         #print("%d dirty, %d noids = %d%%" % (_dirty, _noids, 100*_noids/_dirty))
-        return [k.split('/') for k, v in cls._dirty.items() if not v]
-
-    @classmethod
-    def dirty_noids_load(cls, tuples):
+        noids = [k.split('/') for k, v in cls._dirty.items() if not v]
+        tuples = [[get_id_method(*tup), *tup] for tup in noids]
         for pid, author, permlink in tuples:
             cls._dirty[author+'/'+permlink] = pid
+        return len(tuples)
 
+    # Select all posts which should have been paid out before `date` yet do not
+    # have the `is_paidout` flag set. We perform this sweep to ensure that we
+    # always have accurate final payout state.
     @classmethod
-    def select_paidout_tuples(cls, block_date):
+    def select_paidout_tuples(cls, date):
         # retrieve all posts which have been paid out but not updated
         sql = """SELECT post_id, author, permlink FROM hive_posts_cache
                   WHERE is_paidout = '0' AND payout_at <= :date"""
-        return query_all(sql, date=block_date)
+        return query_all(sql, date=date)
 
     # In steemd, posts can be 'deleted' or unallocated in certain conditions.
     # This requires foregoing some convenient assumptions, such as:
@@ -106,6 +114,7 @@ class CachedPost:
             **dict.fromkeys('payout promoted rshares sc_trend sc_hot'.split(' '), '0')},
                    mode='insert')
 
+    # Given a set of posts, fetch them from steemd and write them to the db.
     # `tuples` are an array of (id, author, permlink) representing posts which
     #   are to be fetched from steemd and updated in hive_posts_cache table.
     #
@@ -115,7 +124,7 @@ class CachedPost:
     # important to advance _last_id, because this cursor is used to deduce if
     # there's any missing cache entries.
     @classmethod
-    def update_batch(cls, tuples, steemd, trx=True):
+    def _update_batch(cls, tuples, steemd, trx=True):
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
 
         for tups in partition_all(1000, tuples):
@@ -159,8 +168,8 @@ class CachedPost:
     # paranoid check of important operating assumption
     @classmethod
     def _ensure_safe_gap(cls, last_id, next_id):
-        sql = "SELECT COUNT(*) FROM hive_posts WHERE id BETWEEN %d AND %d AND is_deleted = '0'"
-        missing_posts = query_one(sql % (last_id + 1, next_id - 1))
+        sql = "SELECT COUNT(*) FROM hive_posts WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'"
+        missing_posts = query_one(sql, x1=(last_id + 1), x2=(next_id - 1))
         if not missing_posts:
             return
         raise Exception("found large cache gap: %d --> %d (%d)"

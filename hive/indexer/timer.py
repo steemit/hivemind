@@ -23,7 +23,8 @@ class Timer:
         self._batches = []
         self._laps = []
         self.batch_lap()
-        self._start_time = time.perf_counter()
+        if not self._start_time:
+            self._start_time = time.perf_counter()
 
     def batch_lap(self):
         self._laps.append(time.perf_counter())

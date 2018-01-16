@@ -252,9 +252,7 @@ def cache_missing_posts():
         cache_missing_posts()
 
 def flush_cache(trx=True):
-    noids = CachedPost.dirty_noids()
-    tuples = Posts.urls_to_tuples(noids)
-    CachedPost.dirty_noids_load(tuples)
+    CachedPost.dirty_noids_load(Posts.get_id) # fill in missing id's
     return CachedPost.flush(get_adapter(), trx)
 
 

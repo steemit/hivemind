@@ -56,28 +56,9 @@ class Posts:
         return (_id, depth)
 
     @classmethod
-    def get_id_and_is_deleted(cls, author, permlink):
-        _id = cls.get_id(author, permlink)
-        if not _id:
-            return (None, None)
+    def is_pid_deleted(cls, pid):
         sql = "SELECT is_deleted FROM hive_posts WHERE id = :id"
-        return (_id, query_one(sql, id=_id))
-
-    @classmethod
-    def urls_to_tuples(cls, urls):
-        tuples = []
-        for author, permlink in urls:
-            pid, is_deleted = cls.get_id_and_is_deleted(author, permlink)
-            assert pid, "no pid for {}/{}".format(author, permlink)
-            if not is_deleted:
-                tuples.append([pid, author, permlink])
-            else:
-                # TODO: paranoid check -- remove after testing
-                exists = query_one("SELECT 1 FROM hive_posts_cache WHERE post_id = %d LIMIT 1" % pid)
-                assert not exists, "invalid cache entry"
-
-        # sort the results.. must insert cache records sequentially
-        return sorted(tuples, key=lambda tup: tup[0])
+        return query_one(sql, id=pid)
 
     # marks posts as deleted and removes them from feed cache
     @classmethod
@@ -89,11 +70,11 @@ class Posts:
     @classmethod
     def comment_ops(cls, ops, block_date):
         for op in ops:
-            pid, is_deleted = cls.get_id_and_is_deleted(op['author'], op['permlink'])
+            pid = cls.get_id(op['author'], op['permlink'])
             if not pid:
                 # post does not exist, go ahead and process it.
                 cls.insert(op, block_date)
-            elif not is_deleted:
+            elif not cls.is_pid_deleted(pid):
                 # post exists, not deleted, thus an edit. ignore.
                 cls.update(op, block_date, pid)
             else:
