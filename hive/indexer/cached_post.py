@@ -31,6 +31,7 @@ class CachedPost:
     @classmethod
     def flush(cls, trx=False):
         # Ensure all dirty posts have an id (see load_dirty_noids below).
+        cls._load_dirty_noids()
         for url in list(cls._dirty.keys()):
             if not cls._dirty[url]:
                 print("WARNING: missing id for %s" % url)
@@ -49,12 +50,14 @@ class CachedPost:
     # a successive call might be able to provide it "for free". Before
     # flushing changes this method should be called to fill in any gaps.
     @classmethod
-    def load_dirty_noids(cls, get_id_method):
+    def _load_dirty_noids(cls):
+        from hive.indexer.posts import Posts
+
         #_dirty = len(cls._dirty)
         #_noids = len([k.split('/') for k, v in cls._dirty.items() if not v])
         #print("%d dirty, %d noids = %d%%" % (_dirty, _noids, 100*_noids/_dirty))
         noids = [k.split('/') for k, v in cls._dirty.items() if not v]
-        tuples = [[get_id_method(*tup), *tup] for tup in noids]
+        tuples = [[Posts.get_id(*tup), *tup] for tup in noids]
         for pid, author, permlink in tuples:
             cls._dirty[author+'/'+permlink] = pid
         return len(tuples)
@@ -79,6 +82,29 @@ class CachedPost:
         if len(paidout) > 1000:
             print("[PREP] Found {} payouts since {}".format(len(paidout), date))
         return len(paidout)
+
+    @classmethod
+    def _select_missing_tuples(cls, last_cached_id, limit=1_000_000):
+        sql = """SELECT id, author, permlink FROM hive_posts
+                  WHERE is_deleted = '0' AND id > :id
+               ORDER BY id LIMIT :limit"""
+        return query_all(sql, id=last_cached_id, limit=limit)
+
+    @classmethod
+    def dirty_missing(cls, limit=1_000_000):
+        from hive.indexer.posts import Posts
+
+        # cached posts inserted sequentially, so compare MAX(id)'s
+        last_cached_id = cls.last_id()
+        last_post_id = Posts.last_id()
+        gap = last_post_id - last_cached_id
+
+        if gap:
+            missing = cls._select_missing_tuples(last_cached_id, limit)
+            for pid, author, permlink in missing:
+                cls.dirty(author, permlink, pid)
+
+        return gap
 
 
     # In steemd, posts can be 'deleted' or unallocated in certain conditions.

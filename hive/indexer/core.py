@@ -9,11 +9,10 @@ from funcy.seqs import drop
 from toolz import partition_all
 
 from hive.db.db_state import DbState
-from hive.db.methods import query_all, query
+from hive.db.methods import query
 
 from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts
-from hive.indexer.posts import Posts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
@@ -78,8 +77,8 @@ def sync_from_steemd():
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
+        CachedPost.dirty_missing()
         CachedPost.dirty_paidouts(Blocks.last()['date'])
-        CachedPost.load_dirty_noids(Posts.get_id) # fill in missing id's
         CachedPost.flush(trx=True)
         Accounts.flush(trx=True)
         Follow.flush(trx=True)
@@ -128,19 +127,19 @@ def listen_steemd(trail_blocks=2):
         start_time = time.perf_counter()
         query("START TRANSACTION")
         Blocks.process(block)
-        dirty_missing_posts()
-
+        posts = CachedPost.dirty_missing()
         paids = CachedPost.dirty_paidouts(block['timestamp'])
-        CachedPost.load_dirty_noids(Posts.get_id) # fill in missing id's
         edits = CachedPost.flush(trx=False)
         accts = Accounts.flush(trx=False)
         follows = Follow.flush(trx=False)
         query("COMMIT")
         secs = time.perf_counter() - start_time
 
-        print("[LIVE] Got block %d at %s with% 3d txs --% 3d posts,% 3d payouts,% 3d accounts,% 3d follows --% 5dms%s"
+        print("[LIVE] Got block %d at %s with% 3d txs --% 3d posts,% 3d edits,"
+              "% 3d payouts,% 3d accounts,% 3d follows --% 5dms%s"
               % (curr_block, block['timestamp'], len(block['transactions']),
-                 edits, paids, accts, follows, int(secs * 1e3), ' SLOW' if secs > 1 else ''))
+                 posts, edits - posts - paids, paids, accts, follows,
+                 int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
         # once a minute, update chain props
         if curr_block % 20 == 0:
@@ -154,31 +153,11 @@ def listen_steemd(trail_blocks=2):
             #Accounts.update_ranks()
 
 
-def select_missing_tuples(last_cached_id, limit=1000000):
-    sql = """SELECT id, author, permlink FROM hive_posts
-              WHERE is_deleted = '0' AND id > :id
-           ORDER BY id LIMIT :limit"""
-    return query_all(sql, id=last_cached_id, limit=limit)
-
-def dirty_missing_posts():
-    # cached posts inserted sequentially, so compare MAX(id)'s
-    last_cached_id = CachedPost.last_id()
-    last_post_id = Posts.last_id()
-    gap = last_post_id - last_cached_id
-
-    if gap:
-        missing = select_missing_tuples(last_cached_id)
-        for pid, author, permlink in missing:
-            CachedPost.dirty(author, permlink, pid)
-
-    return gap
-
 def cache_missing_posts():
-    gap = dirty_missing_posts()
+    gap = CachedPost.dirty_missing()
     print("[INIT] {} missing post cache entries".format(gap))
-    while gap:
-        CachedPost.flush(trx=True)
-        gap = dirty_missing_posts()
+    while CachedPost.flush(trx=True):
+        CachedPost.dirty_missing()
 
 # refetch dynamic_global_properties, feed price, etc
 def update_chain_state():
