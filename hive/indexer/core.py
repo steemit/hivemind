@@ -84,7 +84,7 @@ def sync_from_steemd():
         Follow.flush(trx=True)
 
 
-def listen_steemd(trail_blocks=2):
+def listen_steemd(trail_blocks=0):
     assert trail_blocks >= 0
     assert trail_blocks < 25
     steemd = get_adapter()
@@ -92,28 +92,46 @@ def listen_steemd(trail_blocks=2):
     curr_block = last_block['num']
     last_hash = last_block['hash']
 
+    head_block = steemd.head_block()
+    next_expected = time.time() + 3
+
     while True:
         curr_block = curr_block + 1
 
-        # if trailing too close, take a pause
-        while trail_blocks:
-            gap = steemd.head_block() - curr_block
-            if gap >= 50:
-                print("[HIVE] gap too large: %d -- abort listen mode" % gap)
-                return
-            if gap >= trail_blocks:
-                break
-            time.sleep(0.5)
+        # if caught up, sleep until expected arrival time
+        if curr_block >= head_block - trail_blocks:
+            pause = next_expected - time.time()
+            if pause > 0:
+                time.sleep(pause)
+
+        # if we're past ETA, increment head+ETA
+        while time.time() > next_expected:
+            head_block += 1
+            next_expected += 3
+
+        gap = head_block - curr_block - trail_blocks
+
+        # if too far behind head block, abort
+        if gap >= 50:
+            print("[HIVE] gap too large: %d -- abort listen mode" % gap)
+            return
+
+        # if too close to head_block, skip 1 interval
+        if gap < 0:
+            print("ERROR: gap too small: %d, target: %d" % (gap, trail_blocks))
+            time.sleep(3)
+            next_expected += 3
 
         # get the target block; if DNE, pause and retry
         tries = 0
-        block = steemd.get_block(curr_block)
+        block = steemd.get_block(curr_block) #TODO: skip built-in retry
         while not block:
             tries += 1
             if tries > 25:
                 # todo: detect if the node we're querying is behind
                 raise Exception("could not fetch block %d" % curr_block)
             time.sleep(0.5)
+            print("SLEEPING...")
             block = steemd.get_block(curr_block)
 
         # ensure the block we received links to our last
@@ -143,7 +161,9 @@ def listen_steemd(trail_blocks=2):
 
         # once a minute, update chain props
         if curr_block % 20 == 0:
-            update_chain_state()
+            old_head_block = head_block
+            head_block = update_chain_state()
+            print("UPDATE HEAD.. drift=%d" % (old_head_block - head_block))
 
         # approx once per hour, update accounts
         if curr_block % 1200 == 0:
@@ -170,6 +190,7 @@ def update_chain_state():
           ups=state['usd_per_steem'],
           sps=state['sbd_per_steem'],
           dgpo=json.dumps(state['dgpo']))
+    return state['dgpo']['head_block_number']
 
 
 def run():
