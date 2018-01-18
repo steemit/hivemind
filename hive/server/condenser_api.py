@@ -575,11 +575,13 @@ def _condenser_post_object(row):
     post['url'] = raw_json['url']
 
     # not used by condenser, but may be useful
-    #post['net_votes'] = raw_json['net_votes']
+    #post['net_votes'] = len(post['active_votes']) - row['up_votes'] #raw_json['net_votes']
     #post['allow_replies'] = raw_json['allow_replies']
     #post['allow_votes'] = raw_json['allow_votes']
     #post['allow_curation_rewards'] = raw_json['allow_curation_rewards']
     #post['beneficiaries'] = raw_json['benificiaries']
+    #post['curator_payout_value'] = raw_json['curator_payout_value']
+    #post['total_payout_value'] = post['total_payout_value'] - post['curator_payout_value']
 
     return post
 

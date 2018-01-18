@@ -1,7 +1,7 @@
-import time
 import json
 import re
 
+from datetime import datetime
 from toolz import partition_all
 
 from hive.db.methods import query_col, query, query_all
@@ -53,8 +53,8 @@ class Accounts:
         cls._dirty.add(account)
 
     @classmethod
-    def cache_all(cls):
-        cls._cache_accounts(query_col("SELECT name FROM hive_accounts"), trx=True)
+    def dirty_all(cls):
+        cls._dirty |= set(query_col("SELECT name FROM hive_accounts"))
 
     @classmethod
     def dirty_oldest(cls, limit=50000):
@@ -93,7 +93,7 @@ class Accounts:
             cls._batch_update(sqls, trx)
 
             timer.batch_finish(len(batch))
-            if len(accounts) > 1000:
+            if trx or len(accounts) > 1000:
                 print(timer.batch_status())
 
     @classmethod
@@ -106,10 +106,8 @@ class Accounts:
             query("COMMIT")
 
     @classmethod
-    def _generate_cache_sqls(cls, accounts, block_date=None):
-        if not block_date:
-            block_date = get_adapter().head_time()
-
+    def _generate_cache_sqls(cls, accounts):
+        cached_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
         sqls = []
         for account in get_adapter().get_accounts(accounts):
             vote_weight = (amount(account['vesting_shares'])
@@ -136,7 +134,7 @@ class Accounts:
                 'vote_weight': vote_weight,
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
                 'active_at': account['last_bandwidth_update'],
-                'cached_at': block_date,
+                'cached_at': cached_at,
                 'display_name': profile['name'],
                 'about': profile['about'],
                 'location': profile['location'],
@@ -146,7 +144,7 @@ class Accounts:
                 'raw_json': json.dumps(account)
             }
 
-            update = ', '.join([k+" = :"+k for k in values.keys()][1:])
+            update = ', '.join([k+" = :"+k for k in list(values.keys())][1:])
             sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
             sqls.append((sql, values))
         return sqls
@@ -213,4 +211,5 @@ class Accounts:
 
 if __name__ == '__main__':
     Accounts.update_ranks()
-    #Accounts.cache_all()
+    #Accounts.dirty_all()
+    #Accounts.flush()

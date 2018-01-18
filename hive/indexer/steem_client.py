@@ -85,17 +85,21 @@ class ClientStats:
 
 atexit.register(ClientStats.print)
 
-_shared_adapter = None
 def get_adapter():
-    global _shared_adapter
-    if not _shared_adapter:
-        steem = os.environ.get('STEEMD_URL')
-        jussi = os.environ.get('JUSSI_URL')
-        _shared_adapter = SteemClient(steem, jussi)
-    return _shared_adapter
-
+    return SteemClient.instance()
 
 class SteemClient:
+
+    _instance = None
+
+    @classmethod
+    def instance(cls):
+        if not cls._instance:
+            steem = os.environ.get('STEEMD_URL')
+            jussi = os.environ.get('JUSSI_URL')
+            print("SETTING STEEMCLIENT INSTANCE")
+            cls._instance = SteemClient(steem, jussi)
+        return cls._instance
 
     def __init__(self, api_endpoint, jussi=None):
         self._jussi = bool(jussi)
@@ -201,7 +205,8 @@ class SteemClient:
         while True:
             try:
                 result = self._client.exec(method, *params)
-                assert result, "empty response {}".format(result)
+                if method != 'get_block':
+                    assert result, "empty response {}".format(result)
             except (AssertionError, RPCError) as e:
                 tries += 1
                 print("{} failure, retry in {}s -- {}".format(method, tries, e))
