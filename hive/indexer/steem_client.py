@@ -10,22 +10,26 @@ class ClientStats:
     #   int = flat threshold
     #   tuple[0] = timing for single request
     #   tuple[1] = timing for batch of 1000
-    PAR = {
-        'get_dynamic_global_properties': 120,
-        'get_block': (80, 5),
-        'get_accounts': (5, 1),
-        'get_content': (10, 2),
-        'get_order_book': 100,
-        'get_feed_history': 80,
+    PAR_HTTP_OVERHEAD = 60
+    PAR_STEEMD = {
+        'get_dynamic_global_properties': 50,
+        'get_block': 5,
+        'get_accounts': 5,
+        'get_content': 5,
+        'get_order_book': 20,
+        'get_feed_history': 20,
     }
 
     stats = {}
     ttltime = 0.0
+    fastest = None
 
     @classmethod
     def log(cls, method, ms, batch_size=1):
         cls.add_to_stats(method, ms, batch_size)
         cls.check_timing(method, ms, batch_size)
+        if cls.fastest is None or ms < cls.fastest:
+            cls.fastest = ms
         if cls.ttltime > 30 * 60 * 1000:
             cls.print()
 
@@ -68,6 +72,7 @@ class ClientStats:
             ms, calls = vals
             print("% 5.1f%% % 8dms % 7.2favg % 8dx -- %s"
                   % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+        print("Fastest call was %.3fms" % cls.fastest)
         cls.clear()
 
     @classmethod
@@ -77,11 +82,8 @@ class ClientStats:
 
     @classmethod
     def _par(cls, method, batch_size):
-        par = cls.PAR[method]
-        if isinstance(par, tuple):
-            x = (batch_size - 1) / (1000 - 1)
-            par = round(par[0] + x * (par[1] - par[0]))
-        return par
+        par = cls.PAR_STEEMD[method] * batch_size
+        return (cls.PAR_HTTP_OVERHEAD + par) / batch_size
 
 atexit.register(ClientStats.print)
 

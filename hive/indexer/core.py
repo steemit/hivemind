@@ -57,7 +57,7 @@ def sync_from_steemd():
     steemd = get_adapter()
 
     lbound = Blocks.last()['num'] + 1
-    ubound = steemd.last_irreversible_block_num()
+    ubound = 0 #steemd.last_irreversible_block_num()
 
     if ubound > lbound:
         print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
@@ -89,14 +89,14 @@ def listen_steemd(trail_blocks=0):
     assert trail_blocks < 25
     steemd = get_adapter()
     last_block = Blocks.last()
-    curr_block = last_block['num']
+    curr_block = last_block['num'] + 1
     last_hash = last_block['hash']
 
     head_block = steemd.head_block()
     next_expected = time.time() + 3
+    tries = 0
 
     while True:
-        curr_block = curr_block + 1
 
         # if caught up, sleep until expected arrival time
         if curr_block >= head_block - trail_blocks:
@@ -112,27 +112,26 @@ def listen_steemd(trail_blocks=0):
         gap = head_block - curr_block - trail_blocks
 
         # if too far behind head block, abort
-        if gap >= 50:
+        if trail_blocks and gap >= 50:
             print("[HIVE] gap too large: %d -- abort listen mode" % gap)
             return
 
         # if too close to head_block, skip 1 interval
         if gap < 0:
             print("ERROR: gap too small: %d, target: %d" % (gap, trail_blocks))
-            time.sleep(3)
             next_expected += 3
+            continue
 
         # get the target block; if DNE, pause and retry
-        tries = 0
-        block = steemd.get_block(curr_block) #TODO: skip built-in retry
-        while not block:
-            tries += 1
-            if tries > 25:
-                # todo: detect if the node we're querying is behind
+        block = steemd.get_block(curr_block)
+        if not block:
+            # todo: detect if the node we're querying is behind
+            print("WARNING: expected block not available; try %d" % tries)
+            if tries > 3:
                 raise Exception("could not fetch block %d" % curr_block)
-            time.sleep(0.5)
-            print("SLEEPING...")
-            block = steemd.get_block(curr_block)
+            tries += 1
+            continue
+        tries = 0
 
         # ensure the block we received links to our last
         if last_hash != block['previous']:
@@ -172,6 +171,7 @@ def listen_steemd(trail_blocks=0):
             Accounts.flush(trx=True)
             #Accounts.update_ranks()
 
+        curr_block = curr_block + 1
 
 def cache_missing_posts():
     gap = CachedPost.dirty_missing()
