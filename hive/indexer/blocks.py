@@ -54,6 +54,7 @@ class Blocks:
         Posts.comment_ops(comment_ops, date) # ignores edits; inserts, validates
         Posts.delete_ops(delete_ops)  # unallocates hive_posts record, delete cache
         CustomOp.process_ops(json_ops, num, date) # follow, reblog, community ops
+        return num
 
     # batch-process blocks, wrap in a transaction
     @classmethod

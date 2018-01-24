@@ -84,79 +84,82 @@ def sync_from_steemd():
         CachedPost.flush(trx=True)
 
 
-def listen_steemd(trail_blocks=2):
+def listen_steemd(trail_blocks=0, max_gap=50):
     assert trail_blocks >= 0
     assert trail_blocks < 25
-    steemd = get_adapter()
-    last_block = Blocks.last()
-    curr_block = last_block['num'] + 1
-    last_hash = last_block['hash']
 
+    # db state
+    db_last = Blocks.last()
+    last_block = db_last['num']
+    last_hash = db_last['hash']
+
+    # chain state
+    steemd = get_adapter()
     head_block = steemd.head_block()
     next_expected = time.time()
+
+    # loop state
     tries = 0
+    queue = []
 
     while True:
+        assert not last_block > head_block
 
-        # measure diff to our ideal following distance
-        gap = (head_block - trail_blocks) - curr_block
+        # fast fwd head block if slots missed
+        curr_time = time.time()
+        while curr_time >= next_expected:
+            head_block += 1
+            next_expected += 3
 
-        # if too far behind, abort.
-        if gap > 50:
+        # if gap too large, abort. if caught up, wait.
+        gap = head_block - last_block
+        if gap > max_gap:
             print("[LIVE] gap too large: %d -- abort listen mode" % gap)
             return
-
-        # if behind, process asap.
-        elif gap >= 0:
-            print("[LIVE] %d blocks behind" % (gap + 1))
-
-        # we're 1 block ahead. perfect; sleep until ETA.
-        elif gap == -1:
-            tta = next_expected - time.time()
-            if tta > 0:
-                time.sleep(tta)
-                head_block += 1
-                next_expected += 3
-                gap = head_block - curr_block - trail_blocks
-            else:
-                print("[LIVE] no-pause should not happen here")
-
-        # we're 2 or more blocks ahead of target. it's possible e.g. we were
-        # trying to trail by 2 blocks, but we've managed to catch up to the
-        # head block. todo: prevent by keeping a fifo block queue w/ a min len.
-        else:
-            print("[LIVE] too far ahead. current: %d, target: %d. Pausing."
-                  % (curr_block - head_block + 1, trail_blocks))
-            time.sleep(3)
-            next_expected += 3
+        elif gap > 0:
+            print("[LIVE] %d blocks behind..." % gap)
+        elif gap == 0:
+            time.sleep(next_expected - curr_time)
             head_block += 1
-            continue
+            next_expected += 3
 
         # get the target block; if DNE, pause and retry
-        block = steemd.get_block(curr_block)
+        block_num = last_block + 1
+        block = steemd.get_block(block_num)
         if not block:
             tries += 1
-            print("[LIVE] block %d not available (try %d). delay 1s. gap is %d."
-                  % (curr_block, tries, gap))
-            if tries > 12:
-                # todo: detect if the node we're querying is behind
-                raise Exception("could not fetch block %d" % curr_block)
-            time.sleep(1)      # pause 1s; and,
+            print("[LIVE] block %d not available (try %d). delay 1s. head: %d."
+                  % (block_num, tries, head_block))
+            assert tries < 12, "could not fetch block %s" % block_num
+            time.sleep(1)      # pause for 1s; and,
             next_expected += 1 # delay schedule 1s
             continue
+        last_block = block_num
         tries = 0
 
-        # ensure the block we received links to our last
+        # ensure this block links to our last; otherwise, blow up. see #59
         if last_hash != block['previous']:
-            # this condition is very rare unless trail_blocks is 0 and fork is
-            # encountered; to handle gracefully, implement a pop_block method
-            raise Exception("Unlinkable block: have {}, got {} -> {})".format(
-                last_hash, block['previous'], block['block_id']))
+            if queue:
+                print("[FORK] Fork encountered. Emptying queue to retry!")
+                return
+            raise Exception("Unlinkable block: have %s, got %s -> %s)"
+                            % (last_hash, block['previous'], block['block_id']))
         last_hash = block['block_id']
+
+        # buffer until queue full
+        queue.append(block)
+        if len(queue) <= trail_blocks:
+            continue
+
+
+        # buffer primed; process head of queue
+        # ------------------------------------
+
+        block = queue.pop(0)
 
         start_time = time.perf_counter()
         query("START TRANSACTION")
-        Blocks.process(block)
+        num = Blocks.process(block)
         follows = Follow.flush(trx=False)
         accts = Accounts.flush(trx=False)
         posts = CachedPost.dirty_missing()
@@ -167,32 +170,20 @@ def listen_steemd(trail_blocks=2):
 
         print("[LIVE] Got block %d at %s -- % 3d txs,% 3d posts,% 3d edits,"
               "% 3d payouts,% 3d accounts,% 3d follows --% 5dms%s"
-              % (curr_block, block['timestamp'], len(block['transactions']),
+              % (num, block['timestamp'], len(block['transactions']),
                  posts, edits - posts - paids, paids, accts, follows,
                  int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
-        # approx once per hour, update accounts
-        if curr_block % 1200 == 0:
-            print("[HIVE] Performing account maintenance...")
+        # once per hour, update accounts
+        if num % 1200 == 0:
             Accounts.dirty_oldest(10000)
             Accounts.flush(trx=True)
             #Accounts.update_ranks()
 
-        # fast fwd head block if we missed any slots during processing
-        while time.time() > next_expected:
-            head_block += 1
-            next_expected += 3
-            print("[LIVE] FF 1 block.. head: %d" % head_block)
+        # once a minute, update chain props
+        if num % 20 == 0:
+            update_chain_state()
 
-        # once a minute, update chain props (plus, correct any drift)
-        if curr_block % 20 == 0:
-            old_head = head_block
-            head_block = update_chain_state()
-            if old_head != head_block:
-                print("[LIVE] head correction was %d (%d -> %d)"
-                      % (head_block - old_head, old_head, head_block))
-
-        curr_block = curr_block + 1
 
 def cache_missing_posts():
     gap = CachedPost.dirty_missing()

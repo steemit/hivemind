@@ -58,6 +58,7 @@ class Accounts:
 
     @classmethod
     def dirty_oldest(cls, limit=50000):
+        print("[HIVE] flagging %d oldest accounts for update" % limit)
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
         oldest = set(query_col(sql, limit=limit))
         cls._dirty |= oldest
