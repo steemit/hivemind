@@ -57,7 +57,7 @@ def sync_from_steemd():
     steemd = get_adapter()
 
     lbound = Blocks.last()['num'] + 1
-    ubound = 0 #steemd.last_irreversible_block_num()
+    ubound = steemd.last_irreversible_block_num()
 
     if ubound > lbound:
         print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
@@ -84,7 +84,7 @@ def sync_from_steemd():
         CachedPost.flush(trx=True)
 
 
-def listen_steemd(trail_blocks=0):
+def listen_steemd(trail_blocks=2):
     assert trail_blocks >= 0
     assert trail_blocks < 25
     steemd = get_adapter()
@@ -93,55 +93,56 @@ def listen_steemd(trail_blocks=0):
     last_hash = last_block['hash']
 
     head_block = steemd.head_block()
-    next_expected = time.time() + 3
+    next_expected = time.time()
     tries = 0
 
     while True:
 
-        gap = head_block - curr_block - trail_blocks
+        # measure diff to our ideal following distance
+        gap = (head_block - trail_blocks) - curr_block
 
         # if too far behind, abort.
         if gap > 50:
             print("[LIVE] gap too large: %d -- abort listen mode" % gap)
             return
 
-        # if too close to head, skip 1 interval
-        elif gap < -1:
-            print("[LIVE] gap too small: %d, target: %d. Pausing."
-                  % (gap, trail_blocks))
-            time.sleep(3)
-            next_expected += 3
-            continue
+        # if behind, process asap.
+        elif gap >= 0:
+            print("[LIVE] %d blocks behind" % (gap + 1))
 
-        # if caught up, sleep until expected arrival time
+        # we're 1 block ahead. perfect; sleep until ETA.
         elif gap == -1:
-            pause = next_expected - time.time()
-            if pause > 0:
-                head_block += 1 # now, gap is 0. we can fetch the exact block.
+            tta = next_expected - time.time()
+            if tta > 0:
+                time.sleep(tta)
+                head_block += 1
                 next_expected += 3
-                time.sleep(pause)
                 gap = head_block - curr_block - trail_blocks
             else:
-                print("[LIVE] no-pause should not happen @ gap == -1")
+                print("[LIVE] no-pause should not happen here")
 
-        elif gap == 0:
-            print("[LIVE] ")
-            pass
-
+        # we're 2 or more blocks ahead of target. it's possible e.g. we were
+        # trying to trail by 2 blocks, but we've managed to catch up to the
+        # head block. todo: prevent by keeping a fifo block queue w/ a min len.
         else:
-            print("gap is %d... catching up!" % gap)
+            print("[LIVE] too far ahead. current: %d, target: %d. Pausing."
+                  % (curr_block - head_block + 1, trail_blocks))
+            time.sleep(3)
+            next_expected += 3
+            head_block += 1
+            continue
 
         # get the target block; if DNE, pause and retry
         block = steemd.get_block(curr_block)
         if not block:
-            # todo: detect if the node we're querying is behind
             tries += 1
             print("[LIVE] block %d not available (try %d). delay 1s. gap is %d."
                   % (curr_block, tries, gap))
             if tries > 12:
+                # todo: detect if the node we're querying is behind
                 raise Exception("could not fetch block %d" % curr_block)
-            time.sleep(1)
-            next_expected += 1
+            time.sleep(1)      # pause 1s; and,
+            next_expected += 1 # delay schedule 1s
             continue
         tries = 0
 
@@ -188,8 +189,8 @@ def listen_steemd(trail_blocks=0):
             old_head = head_block
             head_block = update_chain_state()
             if old_head != head_block:
-                print("[LIVE] UPDATE HEAD... drift was %d (%d -> %d)"
-                      % (old_head - head_block, old_head, head_block))
+                print("[LIVE] head correction was %d (%d -> %d)"
+                      % (head_block - old_head, old_head, head_block))
 
         curr_block = curr_block + 1
 
