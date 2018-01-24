@@ -6,11 +6,13 @@ from decimal import Decimal
 from .http_client import HttpClient, RPCError
 
 class ClientStats:
-    # Thresholds for critical call timing warnings
-    #   int = flat threshold
-    #   tuple[0] = timing for single request
-    #   tuple[1] = timing for batch of 1000
+    # Assumed HTTP overhead (ms); subtract prior to par check
     PAR_HTTP_OVERHEAD = 60
+
+    # Reporting threshold (x * par)
+    PAR_THRESHOLD = 1.1
+
+    # Thresholds for critical call timing (ms)
     PAR_STEEMD = {
         'get_dynamic_global_properties': 50,
         'get_block': 5,
@@ -44,22 +46,13 @@ class ClientStats:
 
     @classmethod
     def check_timing(cls, method, ms, batch_size):
-        per = ms / batch_size
-        par = cls._par(method, batch_size)
-
+        per = (ms - cls.PAR_HTTP_OVERHEAD) / batch_size
+        par = cls.PAR_STEEMD[method]
         over = per / par
-        if over < 1.1:
-            return
-
-        out = ("[STEEM][%dms] %s[%d] -- "
-               % (ms, method, batch_size))
-
-        if over > 1.1:
-            out += "%.1fx par (%d/%d)" % (over, per, par)
-        else:
-            out += "par ok (%d/%d)" % (per, par)
-
-        print("\033[93m" + out + "\033[0m")
+        if over >= cls.PAR_THRESHOLD:
+            out = ("[STEEM][%dms] %s[%d] -- %.1fx par (%d/%d)"
+                   % (ms, method, batch_size, over, per, par))
+            print("\033[93m" + out + "\033[0m")
 
     @classmethod
     def print(cls):
@@ -70,8 +63,9 @@ class ClientStats:
         for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
-            print("% 5.1f%% % 8dms % 7.2favg % 8dx -- %s"
-                  % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+            print("% 5.1f%% % 9sms % 7.2favg % 8dx -- %s"
+                  % (100 * ms/ttl, "{:,}".format(int(ms)),
+                     ms/calls, calls, sql[0:180]))
         print("Fastest call was %.3fms" % cls.fastest)
         cls.clear()
 
@@ -79,11 +73,6 @@ class ClientStats:
     def clear(cls):
         cls.stats = {}
         cls.ttltime = 0
-
-    @classmethod
-    def _par(cls, method, batch_size):
-        par = cls.PAR_STEEMD[method] * batch_size
-        return (cls.PAR_HTTP_OVERHEAD + par) / batch_size
 
 atexit.register(ClientStats.print)
 
@@ -99,7 +88,6 @@ class SteemClient:
         if not cls._instance:
             steem = os.environ.get('STEEMD_URL')
             jussi = os.environ.get('JUSSI_URL')
-            print("SETTING STEEMCLIENT INSTANCE")
             cls._instance = SteemClient(steem, jussi)
         return cls._instance
 
@@ -107,7 +95,7 @@ class SteemClient:
         self._jussi = bool(jussi)
         url = jussi or api_endpoint
         assert url, 'steem-API endpoint undefined'
-        self._client = HttpClient(nodes=[url])
+        self._client = HttpClient(nodes=[url], maxsize=50, num_pools=50)
 
     def get_accounts(self, accounts):
         assert accounts, "no accounts passed to get_accounts"
@@ -230,7 +218,7 @@ class SteemClient:
             result = self.__exec_jussi_batch_with_retry(method, params, 500)
         else:
             result = list(self._client.exec_multi_with_futures(
-                method, params, max_workers=10))
+                method, params, max_workers=50))
 
         total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, len(params))
@@ -244,6 +232,6 @@ class SteemClient:
                 return list(self._client.exec_batch(method, params, batch_size))
             except (AssertionError, RPCError) as e:
                 tries += 1
-                print("batch {} failure, retry in {}s -- {}".format(method, tries, e))
-                time.sleep(tries)
+                print("batch {} failure, retry in {}s -- {}".format(method, tries / 10, e))
+                time.sleep(tries / 10)
                 continue

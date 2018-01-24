@@ -77,11 +77,11 @@ def sync_from_steemd():
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
+        Follow.flush(trx=True)
+        Accounts.flush(trx=True)
         CachedPost.dirty_missing()
         CachedPost.dirty_paidouts(Blocks.last()['date'])
         CachedPost.flush(trx=True)
-        Accounts.flush(trx=True)
-        Follow.flush(trx=True)
 
 
 def listen_steemd(trail_blocks=0):
@@ -98,38 +98,50 @@ def listen_steemd(trail_blocks=0):
 
     while True:
 
-        # if caught up, sleep until expected arrival time
-        if curr_block >= head_block - trail_blocks:
-            pause = next_expected - time.time()
-            if pause > 0:
-                time.sleep(pause)
-
-        # if we're past ETA, increment head+ETA
-        while time.time() > next_expected:
-            head_block += 1
-            next_expected += 3
-
         gap = head_block - curr_block - trail_blocks
 
-        # if too far behind head block, abort
-        if trail_blocks and gap >= 50:
-            print("[HIVE] gap too large: %d -- abort listen mode" % gap)
+        # if too far behind, abort.
+        if gap > 50:
+            print("[LIVE] gap too large: %d -- abort listen mode" % gap)
             return
 
-        # if too close to head_block, skip 1 interval
-        if gap < 0:
-            print("ERROR: gap too small: %d, target: %d" % (gap, trail_blocks))
+        # if too close to head, skip 1 interval
+        elif gap < -1:
+            print("[LIVE] gap too small: %d, target: %d. Pausing."
+                  % (gap, trail_blocks))
+            time.sleep(3)
             next_expected += 3
             continue
+
+        # if caught up, sleep until expected arrival time
+        elif gap == -1:
+            pause = next_expected - time.time()
+            if pause > 0:
+                head_block += 1 # now, gap is 0. we can fetch the exact block.
+                next_expected += 3
+                time.sleep(pause)
+                gap = head_block - curr_block - trail_blocks
+            else:
+                print("[LIVE] no-pause should not happen @ gap == -1")
+
+        elif gap == 0:
+            print("[LIVE] ")
+            pass
+
+        else:
+            print("gap is %d... catching up!" % gap)
 
         # get the target block; if DNE, pause and retry
         block = steemd.get_block(curr_block)
         if not block:
             # todo: detect if the node we're querying is behind
-            print("WARNING: expected block not available; try %d" % tries)
-            if tries > 3:
-                raise Exception("could not fetch block %d" % curr_block)
             tries += 1
+            print("[LIVE] block %d not available (try %d). delay 1s. gap is %d."
+                  % (curr_block, tries, gap))
+            if tries > 12:
+                raise Exception("could not fetch block %d" % curr_block)
+            time.sleep(1)
+            next_expected += 1
             continue
         tries = 0
 
@@ -144,25 +156,19 @@ def listen_steemd(trail_blocks=0):
         start_time = time.perf_counter()
         query("START TRANSACTION")
         Blocks.process(block)
+        follows = Follow.flush(trx=False)
+        accts = Accounts.flush(trx=False)
         posts = CachedPost.dirty_missing()
         paids = CachedPost.dirty_paidouts(block['timestamp'])
         edits = CachedPost.flush(trx=False)
-        accts = Accounts.flush(trx=False)
-        follows = Follow.flush(trx=False)
         query("COMMIT")
         secs = time.perf_counter() - start_time
 
-        print("[LIVE] Got block %d at %s with% 3d txs --% 3d posts,% 3d edits,"
+        print("[LIVE] Got block %d at %s -- % 3d txs,% 3d posts,% 3d edits,"
               "% 3d payouts,% 3d accounts,% 3d follows --% 5dms%s"
               % (curr_block, block['timestamp'], len(block['transactions']),
                  posts, edits - posts - paids, paids, accts, follows,
                  int(secs * 1e3), ' SLOW' if secs > 1 else ''))
-
-        # once a minute, update chain props
-        if curr_block % 20 == 0:
-            old_head_block = head_block
-            head_block = update_chain_state()
-            print("UPDATE HEAD.. drift=%d" % (old_head_block - head_block))
 
         # approx once per hour, update accounts
         if curr_block % 1200 == 0:
@@ -170,6 +176,20 @@ def listen_steemd(trail_blocks=0):
             Accounts.dirty_oldest(10000)
             Accounts.flush(trx=True)
             #Accounts.update_ranks()
+
+        # fast fwd head block if we missed any slots during processing
+        while time.time() > next_expected:
+            head_block += 1
+            next_expected += 3
+            print("[LIVE] FF 1 block.. head: %d" % head_block)
+
+        # once a minute, update chain props (plus, correct any drift)
+        if curr_block % 20 == 0:
+            old_head = head_block
+            head_block = update_chain_state()
+            if old_head != head_block:
+                print("[LIVE] UPDATE HEAD... drift was %d (%d -> %d)"
+                      % (old_head - head_block, old_head, head_block))
 
         curr_block = curr_block + 1
 
