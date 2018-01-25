@@ -40,7 +40,7 @@ class Blocks:
                     comment_ops.append(op)
                     if not is_initial_sync:
                         CachedPost.dirty(op['author'], op['permlink'])
-                        Accounts.dirty(op['author'])
+                        #Accounts.dirty(op['author'])
                 elif op_type == 'delete_comment':
                     delete_ops.append(op)
                 elif op_type == 'custom_json':
@@ -48,12 +48,13 @@ class Blocks:
                 elif op_type == 'vote':
                     if not is_initial_sync:
                         CachedPost.dirty(op['author'], op['permlink'])
-                        Accounts.dirty(op['author'])
+                        #Accounts.dirty(op['author'])
 
         Accounts.register(account_names, date) # register potentially new names
         Posts.comment_ops(comment_ops, date) # ignores edits; inserts, validates
         Posts.delete_ops(delete_ops)  # unallocates hive_posts record, delete cache
         CustomOp.process_ops(json_ops, num, date) # follow, reblog, community ops
+        return num
 
     # batch-process blocks, wrap in a transaction
     @classmethod

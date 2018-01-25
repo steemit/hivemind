@@ -77,80 +77,112 @@ def sync_from_steemd():
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
+        Follow.flush(trx=True)
+        Accounts.flush(trx=True)
         CachedPost.dirty_missing()
         CachedPost.dirty_paidouts(Blocks.last()['date'])
         CachedPost.flush(trx=True)
-        Accounts.flush(trx=True)
-        Follow.flush(trx=True)
 
 
-def listen_steemd(trail_blocks=2):
+def listen_steemd(trail_blocks=0, max_gap=50):
     assert trail_blocks >= 0
     assert trail_blocks < 25
+
+    # db state
+    db_last = Blocks.last()
+    last_block = db_last['num']
+    last_hash = db_last['hash']
+
+    # chain state
     steemd = get_adapter()
-    last_block = Blocks.last()
-    curr_block = last_block['num']
-    last_hash = last_block['hash']
+    head_block = steemd.head_block()
+    next_expected = time.time()
+
+    # loop state
+    tries = 0
+    queue = []
 
     while True:
-        curr_block = curr_block + 1
+        assert not last_block > head_block
 
-        # if trailing too close, take a pause
-        while trail_blocks:
-            gap = steemd.head_block() - curr_block
-            if gap >= 50:
-                print("[HIVE] gap too large: %d -- abort listen mode" % gap)
-                return
-            if gap >= trail_blocks:
-                break
-            time.sleep(0.5)
+        # fast fwd head block if slots missed
+        curr_time = time.time()
+        while curr_time >= next_expected:
+            head_block += 1
+            next_expected += 3
+
+        # if gap too large, abort. if caught up, wait.
+        gap = head_block - last_block
+        if gap > max_gap:
+            print("[LIVE] gap too large: %d -- abort listen mode" % gap)
+            return
+        elif gap > 0:
+            print("[LIVE] %d blocks behind..." % gap)
+        elif gap == 0:
+            time.sleep(next_expected - curr_time)
+            head_block += 1
+            next_expected += 3
 
         # get the target block; if DNE, pause and retry
-        tries = 0
-        block = steemd.get_block(curr_block)
-        while not block:
+        block_num = last_block + 1
+        block = steemd.get_block(block_num)
+        if not block:
             tries += 1
-            if tries > 25:
-                # todo: detect if the node we're querying is behind
-                raise Exception("could not fetch block %d" % curr_block)
-            time.sleep(0.5)
-            block = steemd.get_block(curr_block)
+            print("[LIVE] block %d not available (try %d). delay 1s. head: %d."
+                  % (block_num, tries, head_block))
+            assert tries < 12, "could not fetch block %s" % block_num
+            time.sleep(1)      # pause for 1s; and,
+            next_expected += 1 # delay schedule 1s
+            continue
+        last_block = block_num
+        tries = 0
 
-        # ensure the block we received links to our last
+        # ensure this block links to our last; otherwise, blow up. see #59
         if last_hash != block['previous']:
-            # this condition is very rare unless trail_blocks is 0 and fork is
-            # encountered; to handle gracefully, implement a pop_block method
-            raise Exception("Unlinkable block: have {}, got {} -> {})".format(
-                last_hash, block['previous'], block['block_id']))
+            if queue:
+                print("[FORK] Fork encountered. Emptying queue to retry!")
+                return
+            raise Exception("Unlinkable block: have %s, got %s -> %s)"
+                            % (last_hash, block['previous'], block['block_id']))
         last_hash = block['block_id']
+
+        # buffer until queue full
+        queue.append(block)
+        if len(queue) <= trail_blocks:
+            continue
+
+
+        # buffer primed; process head of queue
+        # ------------------------------------
+
+        block = queue.pop(0)
 
         start_time = time.perf_counter()
         query("START TRANSACTION")
-        Blocks.process(block)
+        num = Blocks.process(block)
+        follows = Follow.flush(trx=False)
+        accts = Accounts.flush(trx=False)
         posts = CachedPost.dirty_missing()
         paids = CachedPost.dirty_paidouts(block['timestamp'])
         edits = CachedPost.flush(trx=False)
-        accts = Accounts.flush(trx=False)
-        follows = Follow.flush(trx=False)
         query("COMMIT")
         secs = time.perf_counter() - start_time
 
-        print("[LIVE] Got block %d at %s with% 3d txs --% 3d posts,% 3d edits,"
+        print("[LIVE] Got block %d at %s -- % 3d txs,% 3d posts,% 3d edits,"
               "% 3d payouts,% 3d accounts,% 3d follows --% 5dms%s"
-              % (curr_block, block['timestamp'], len(block['transactions']),
+              % (num, block['timestamp'], len(block['transactions']),
                  posts, edits - posts - paids, paids, accts, follows,
                  int(secs * 1e3), ' SLOW' if secs > 1 else ''))
 
-        # once a minute, update chain props
-        if curr_block % 20 == 0:
-            update_chain_state()
-
-        # approx once per hour, update accounts
-        if curr_block % 1200 == 0:
-            print("[HIVE] Performing account maintenance...")
+        # once per hour, update accounts
+        if num % 1200 == 0:
             Accounts.dirty_oldest(10000)
             Accounts.flush(trx=True)
             #Accounts.update_ranks()
+
+        # once a minute, update chain props
+        if num % 20 == 0:
+            update_chain_state()
 
 
 def cache_missing_posts():
@@ -170,6 +202,7 @@ def update_chain_state():
           ups=state['usd_per_steem'],
           sps=state['sbd_per_steem'],
           dgpo=json.dumps(state['dgpo']))
+    return state['dgpo']['head_block_number']
 
 
 def run():
