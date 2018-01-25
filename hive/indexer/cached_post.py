@@ -181,6 +181,8 @@ class CachedPost:
             for pid, post in zip(post_ids, posts):
                 if post['author']:
                     buffer.append(cls._sql(pid, post))
+                else:
+                    print("WARNING: ignoring deleted post {}".format(pid))
                 cls._bump_last_id(pid)
 
             timer.batch_lap()
