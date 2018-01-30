@@ -275,7 +275,7 @@ class HttpClient(object):
         batch_size = batch_size or self.batch_size
 
         batch_requests = ({
-                "method": name,
+                "method": "condenser_api." + name if USE_APPBASE else name,
                 "params": i,
                 "jsonrpc": "2.0",
                 "id": 0
@@ -288,6 +288,7 @@ class HttpClient(object):
             assert batch_response, "batch_response was empty"
             assert len(batch_response) == len(batch), "batch_response len did not match params ({} vs {})".format(len(batch_response), len(batch))
             for response in batch_response:
+                assert 'result' in response, "batch response missing `result`: {}".format(response) # TODO: appbase different err response fmt?
                 yield response['result']
 
 
