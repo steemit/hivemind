@@ -209,38 +209,39 @@ class HttpClient(object):
                     [*response.REDIRECT_STATUSES, 200]):
                 logger.info('non 200 response:%s', response.status)
 
-            # //---
-            # (debug) retry on appbase random lock error
-            #try:
-            #    response_json = json.loads(response.data.decode('utf-8'))
-            #except Exception as e:
-            #    extra = dict(response=response, request_args=args, err=e)
-            #    logger.error('failed to load response', extra=extra)
-            #if response_json and 'error' in response_json:
-            #    print("RPC Error Response, retrying. {} -- {} {}".format(response_json, name, args))
-            #    return self.exec(name, *args,
-            #                     return_with_args=return_with_args,
-            #                     _ret_cnt=_ret_cnt + 1)
-            # //---
+            # TODO: remove. retry on random lock error; new in appbase. #73
+            if USE_APPBASE:
+                response_json = self._parse_response(response)
+                if response_json and 'error' in response_json:
+                    print("RPC Error Response, retrying. {} -- {} {}".format(
+                          response_json, name, args))
+                    return self.exec(name, *args,
+                                     return_with_args=return_with_args,
+                                     _ret_cnt=_ret_cnt + 1)
 
             return self._return(
                 response=response,
                 args=args,
                 return_with_args=return_with_args)
 
+    # TODO: re-raise any response parsing exception
+    def _parse_response(self, response):
+        try:
+            response_json = json.loads(response.data.decode('utf-8'))
+            logger.debug(response_json)
+        except Exception as e:
+            extra = dict(response=response, request_args=args, err=e)
+            logger.error('failed to load response', extra=extra)
+            response_json = None
+        return response_json
+
     def _return(self, response=None, args=None, return_with_args=None):
         return_with_args = return_with_args or self.return_with_args
         result = None
 
         if response:
-            try:
-                response_json = json.loads(response.data.decode('utf-8'))
-                logger.debug(response_json)
-            except Exception as e:
-                extra = dict(response=response, request_args=args, err=e)
-                logger.info('failed to load response', extra=extra)
-                result = None
-            else:
+            response_json = self._parse_response(response)
+            if response_json:
                 if 'error' in response_json:
                     error = response_json['error']
 
@@ -249,6 +250,7 @@ class HttpClient(object):
                             'detail', response_json['error']['message'])
                         raise RPCError("{}: {}".format(error_message, response_json))
 
+                    # TODO: invalid behavior. log the error and retry request. [appbase #73]
                     result = response_json['error']
                 elif isinstance(response_json, dict):
                     result = response_json.get('result', None)
@@ -260,13 +262,13 @@ class HttpClient(object):
             return result
 
     def exec_multi_with_futures(self, name, params, api=None, max_workers=None):
+        for param in params:
+            assert type(param) in (list, tuple, set)
+
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=max_workers) as executor:
             # Start the load operations and mark each future with its URL
-            def ensure_list(parameter):
-                return parameter if type(parameter) in (list, tuple, set) else [parameter]
-
-            futures = (executor.submit(self.exec, name, *ensure_list(param), api=api)
+            futures = (executor.submit(self.exec, name, *param, api=api)
                        for param in params)
             for future in concurrent.futures.as_completed(futures):
                 yield future.result()
