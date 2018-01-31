@@ -1,6 +1,8 @@
+import math
 import json
 import re
 
+from collections import deque
 from datetime import datetime
 from toolz import partition_all
 
@@ -11,7 +13,7 @@ from hive.indexer.timer import Timer
 
 class Accounts:
     _ids = {}
-    _dirty = set()
+    _dirty = deque()
 
     # account core methods
     # --------------------
@@ -49,28 +51,33 @@ class Accounts:
     # ---------------------
 
     @classmethod
-    def dirty(cls, account):
-        cls._dirty.add(account)
+    def dirty(cls, accounts):
+        if isinstance(accounts, str):
+            accounts = [accounts]
+        accounts = set(accounts) - set(cls._dirty)
+        cls._dirty.extend(accounts)
+        return len(accounts)
 
     @classmethod
     def dirty_all(cls):
-        cls._dirty |= set(query_col("SELECT name FROM hive_accounts"))
+        cls.dirty(query_col("SELECT name FROM hive_accounts"))
 
     @classmethod
     def dirty_oldest(cls, limit=50000):
         print("[HIVE] flagging %d oldest accounts for update" % limit)
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
-        oldest = set(query_col(sql, limit=limit))
-        cls._dirty |= oldest
-        return len(oldest)
+        return cls.dirty(query_col(sql, limit=limit))
 
     @classmethod
-    def flush(cls, trx=False):
+    def flush(cls, trx=False, period=1):
+        assert period >= 1
         count = len(cls._dirty)
+        if period > 1:
+            count = math.ceil(count / period)
+        accounts = [cls._dirty.popleft() for _ in range(count)]
         if trx:
             print("[SYNC] update %d accounts" % count)
-        cls._cache_accounts(list(cls._dirty), trx=trx)
-        cls._dirty = set()
+        cls._cache_accounts(accounts, trx=trx)
         return count
 
     @classmethod

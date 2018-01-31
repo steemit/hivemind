@@ -71,7 +71,8 @@ def sync_from_steemd():
         timer.batch_lap()
         Blocks.process_multi(blocks, is_initial_sync)
         timer.batch_finish(len(blocks))
-        print(timer.batch_status("[SYNC] Got block {}".format(to-1)))
+        date = blocks[-1]['timestamp']
+        print(timer.batch_status("[SYNC] Got block %d @ %s" % (to - 1, date)))
 
         lbound = to
 
@@ -161,7 +162,7 @@ def listen_steemd(trail_blocks=0, max_gap=50):
         query("START TRANSACTION")
         num = Blocks.process(block)
         follows = Follow.flush(trx=False)
-        accts = Accounts.flush(trx=False)
+        accts = Accounts.flush(trx=False, period=8)
         posts = CachedPost.dirty_missing()
         paids = CachedPost.dirty_paidouts(block['timestamp'])
         edits = CachedPost.flush(trx=False)
@@ -236,9 +237,14 @@ def run():
             sync_from_steemd()
             listen_steemd()
     except KeyboardInterrupt:
+
+        # cleanup/flush
+        print("Aborted.. cleaning up..")
+        Follow.flush(trx=True)
+        Accounts.flush(trx=True)
+        CachedPost.flush(trx=True)
+
         traceback.print_exc()
-        # TODO: cleanup/flush
-        # e.g. CachedPost.flush_edits()
         print("\nCTRL-C detected, goodbye.")
 
 
