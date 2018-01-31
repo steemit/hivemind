@@ -131,7 +131,9 @@ def listen_steemd(trail_blocks=0, max_gap=50):
             tries += 1
             print("[LIVE] block %d not available (try %d). delay 1s. head: %d."
                   % (block_num, tries, head_block))
-            assert tries < 12, "could not fetch block %s" % block_num
+            assert tries < 120, "could not fetch block %s" % block_num
+            if tries > 1: # TODO: bug #74
+                print("dgp: {}".format(steemd.gdgp_extended()))
             time.sleep(1)      # pause for 1s; and,
             next_expected += 1 # delay schedule 1s
             continue
