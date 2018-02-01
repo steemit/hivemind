@@ -48,7 +48,6 @@ class HttpClient(object):
 
     .. code-block:: python
 
-       from steem.http_client import HttpClient
        rpc = HttpClient(['https://steemd-node1.com', 'https://steemd-node2.com'])
 
     any call available to that port can be issued using the instance
@@ -148,18 +147,17 @@ class HttpClient(object):
             (dict,str): If `as_json` is set to `True`, we get json formatted as a string.
             Otherwise, a Python dictionary is returned.
         """
-        headers = {"jsonrpc": "2.0", "id": _id}
+
+        if USE_APPBASE:
+            name = "condenser_api."+name
         if api:
-            body_dict = {**headers, "method": "call", "params": [api, name, args]}
-        else:
-            if USE_APPBASE:
-                body_dict = {**headers, "method": "condenser_api."+name, "params": args}
-            else:
-                body_dict = {**headers, "method": name, "params": args}
-        if as_json:
-            return json.dumps(body_dict, ensure_ascii=False).encode('utf8')
-        else:
+            args = [api, name, args]
+            name = "call"
+        body_dict = {"jsonrpc": "2.0", "id": _id, "method": name, "params": args}
+
+        if not as_json:
             return body_dict
+        return json.dumps(body_dict, ensure_ascii=False).encode('utf8')
 
     def exec(self, name, *args, api=None, return_with_args=None, _ret_cnt=0, body=None):
         """ Execute a method against steemd RPC.
@@ -207,11 +205,11 @@ class HttpClient(object):
         else:
             if response.status not in tuple(
                     [*response.REDIRECT_STATUSES, 200]):
-                logger.info('non 200 response:%s', response.status)
+                logger.error('non 200 response:%s', response.status)
 
             # TODO: remove. retry on random lock error; new in appbase. #73
             if USE_APPBASE:
-                response_json = self._parse_response(response)
+                response_json = self._parse_response(response, args)
                 if response_json and 'error' in response_json:
                     print("RPC Error Response, retrying. {} -- {} {}".format(
                           response_json, name, args))
@@ -225,13 +223,13 @@ class HttpClient(object):
                 return_with_args=return_with_args)
 
     # TODO: re-raise any response parsing exception
-    def _parse_response(self, response):
+    def _parse_response(self, response, args):
         try:
             response_json = json.loads(response.data.decode('utf-8'))
             logger.debug(response_json)
         except Exception as e:
             extra = dict(response=response, request_args=args, err=e)
-            logger.error('failed to load response', extra=extra)
+            logger.error('failed to load response {}'.format(response.data), extra=extra)
             response_json = None
         return response_json
 
@@ -240,7 +238,7 @@ class HttpClient(object):
         result = None
 
         if response:
-            response_json = self._parse_response(response)
+            response_json = self._parse_response(response, args)
             if response_json:
                 if 'error' in response_json:
                     error = response_json['error']
@@ -276,19 +274,16 @@ class HttpClient(object):
     def exec_batch(self, name, params, batch_size=None):
         batch_size = batch_size or self.batch_size
 
-        batch_requests = ({
-                "method": "condenser_api." + name if USE_APPBASE else name,
-                "params": i,
-                "jsonrpc": "2.0",
-                "id": 0
-            } for i in params)
-
+        batch_requests = (self.json_rpc_body(name, *args, as_json=False, _id=0)
+                for args in params)
 
         for batch in chunkify(batch_requests, batch_size):
             body = json.dumps(batch).encode()
-            batch_response = self.exec('ignore',[], body=body)
+
+            batch_response = self.exec('ignore', [], body=body) # Issue #75
             assert batch_response, "batch_response was empty"
             assert len(batch_response) == len(batch), "batch_response len did not match params ({} vs {})".format(len(batch_response), len(batch))
+
             for response in batch_response:
                 assert 'result' in response, "batch response missing `result`: {}".format(response) # TODO: appbase different err response fmt?
                 yield response['result']
