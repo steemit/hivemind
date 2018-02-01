@@ -89,13 +89,13 @@ class SteemClient:
             api_endpoint = os.environ.get('STEEMD_URL')
             max_batch = int(os.environ.get('MAX_BATCH', 500))
             max_workers = int(os.environ.get('MAX_WORKERS', 1))
-            use_appbase = os.environ.get('USE_APPBASE') in ('true', 'yes', '1')
 
+            # TODO: remove after updating docs/orchestration
             if os.environ.get('JUSSI_URL'):
                 print("JUSSI_URL deprecated; use STEEMD_URL")
                 api_endpoint = os.environ.get('JUSSI_URL')
 
-            cls._instance = SteemClient(api_endpoint, max_batch, max_workers, use_appbase)
+            cls._instance = SteemClient(api_endpoint, max_batch, max_workers)
         return cls._instance
 
     def __init__(self, url, max_batch=500, max_workers=1, use_appbase=False):
@@ -103,14 +103,17 @@ class SteemClient:
         assert max_batch > 0 and max_batch <= 5000
         assert max_workers > 0 and max_workers <= 500
 
+        use_appbase = False # until deployed, assume False
+        if url[-8:] == '#appbase':
+            use_appbase = True
+            url = url[:-8]
+
+        self._max_batch = max_batch
+        self._max_workers = max_workers
         self._client = HttpClient(nodes=[url],
                                   maxsize=50,
                                   num_pools=50,
                                   use_appbase=use_appbase)
-
-        self._max_batch = max_batch
-        self._max_workers = max_workers
-        self._use_appbase = use_appbase
 
         print("[STEEM] init url:%s batch:%s workers:%d appbase:%s"
               % (url, max_batch, max_workers, use_appbase))
@@ -160,9 +163,10 @@ class SteemClient:
             'dgpo': dgpo,
             'usd_per_steem': self._get_feed_price(),
             'sbd_per_steem': self._get_steem_price(),
-            'steem_per_mvest': self._get_steem_per_mvest(dgpo)}
+            'steem_per_mvest': SteemClient._get_steem_per_mvest(dgpo)}
 
-    def _get_steem_per_mvest(self, dgpo):
+    @staticmethod
+    def _get_steem_per_mvest(dgpo):
         steem = Decimal(dgpo['total_vesting_fund_steem'].split(' ')[0])
         mvests = Decimal(dgpo['total_vesting_shares'].split(' ')[0]) / Decimal(1e6)
         return "%.6f" % (steem / mvests)
