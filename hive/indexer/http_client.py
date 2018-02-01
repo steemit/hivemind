@@ -4,12 +4,10 @@ import json
 import logging
 import socket
 import time
-import os
 from functools import partial
 from http.client import RemoteDisconnected
 from itertools import cycle
 from urllib.parse import urlparse
-import gzip
 
 import certifi
 import urllib3
@@ -17,12 +15,13 @@ import urllib3
 from urllib3.connection import HTTPConnection
 from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError
 
-USE_APPBASE = (os.environ.get('USE_APPBASE') in ('true', 'yes', '1'))
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 class RPCError(Exception):
+    pass
+
+class RPCInvalidStatus(Exception):
     pass
 
 def chunkify(iterable, chunksize=3000):
@@ -66,9 +65,8 @@ class HttpClient(object):
     """
 
     def __init__(self, nodes, **kwargs):
-        self.return_with_args = kwargs.get('return_with_args', False)
-        self.re_raise = kwargs.get('re_raise', True)
         self.max_workers = kwargs.get('max_workers', None)
+        self.use_appbase = kwargs.get('use_appbase', True)
 
         num_pools = kwargs.get('num_pools', 10)
         maxsize = kwargs.get('maxsize', 10)
@@ -82,8 +80,6 @@ class HttpClient(object):
                              [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1), ]
         else:
             socket_options = HTTPConnection.default_socket_options
-
-        self.batch_size = kwargs.get('batch_size', 50)
 
         self.http = urllib3.poolmanager.PoolManager(
             num_pools=num_pools,
@@ -123,186 +119,114 @@ class HttpClient(object):
 
     def set_node(self, node_url):
         """ Change current node to provided node URL. """
+        if self.url == node_url:
+            return
+        logger.info("HttpClient using node: {}".format(node_url))
         self.url = node_url
         self.request = partial(self.http.urlopen, 'POST', self.url)
 
-    @property
-    def hostname(self):
-        return urlparse(self.url).hostname
+    def rpc_body(self, method, args, api=None, jsonrpc_id=0):
+        """ Build request body for steemd RPC requests."""
+        assert isinstance(args, (list, tuple, set)), "args must be list"
 
-    @staticmethod
-    def json_rpc_body(name, *args, api=None, as_json=True, _id=0):
-        """ Build request body for steemd RPC requests.
+        if self.use_appbase:
+            method = "condenser_api."+method
 
-        Args:
-            name (str): Name of a method we are trying to call. (ie: `get_accounts`)
-            args: A list of arguments belonging to the calling method.
-            api (None, str): If api is provided (ie: `follow_api`),
-             we generate a body that uses `call` method appropriately.
-            as_json (bool): Should this function return json as dictionary or string.
-            _id (int): This is an arbitrary number that can be used for request/response tracking in multi-threaded
-             scenarios.
+        if api: # TODO: does this xform need to happen before condenser_api?
+            args = [api, method, args]
+            method = "call"
 
-        Returns:
-            (dict,str): If `as_json` is set to `True`, we get json formatted as a string.
-            Otherwise, a Python dictionary is returned.
-        """
+        return {"jsonrpc": "2.0",
+                "id": jsonrpc_id,
+                "method": method,
+                "params": args}
 
-        if USE_APPBASE:
-            name = "condenser_api."+name
-        if api:
-            args = [api, name, args]
-            name = "call"
-        body_dict = {"jsonrpc": "2.0", "id": _id, "method": name, "params": args}
-
-        if not as_json:
-            return body_dict
-        return json.dumps(body_dict, ensure_ascii=False).encode('utf8')
-
-    def exec(self, name, *args, api=None, return_with_args=None, _ret_cnt=0, body=None):
+    def _exec(self, body, _ret_cnt=0):
         """ Execute a method against steemd RPC.
 
-        Warnings:
-            This command will auto-retry in case of node failure, as well as handle
-            node fail-over, unless we are broadcasting a transaction.
-            In latter case, the exception is **re-raised**.
+            Warning: Auto-retry on failure, including broadcasting a tx.
         """
-        body = body or HttpClient.json_rpc_body(name, *args, api=api)
-        response = None
+
+        assert isinstance(body, (dict, list)), "body must be dict or list"
+        is_batch = isinstance(body, list)
+
         try:
-            response = self.request(body=body)
+            encoded_body = json.dumps(body, ensure_ascii=False).encode('utf8')
+            response = self.request(body=encoded_body)
+
+            # check response status
+            if response.status not in tuple(
+                    [*response.REDIRECT_STATUSES, 200]):
+                raise RPCInvalidStatus("non-200 response:%s" % response.status)
+
+            # check response format/success
+            result = json.loads(response.data.decode('utf-8'))
+            if not result:
+                raise Exception("result entirely blank")
+            if 'error' in result:
+                raise RPCError("result['error'] -- {}".format(result))
+
+            # final sanity checks and trimming
+            if is_batch:
+                assert isinstance(result, list), "batch result must be list"
+                assert len(body) == len(result), "batch result len mismatch"
+                return [item['result'] for item in result]
+            else:
+                assert isinstance(result, dict), "non-batch result must be dict"
+                return result['result']
+
         except (MaxRetryError,
                 ConnectionResetError,
                 ReadTimeoutError,
                 RemoteDisconnected,
-                ProtocolError) as e:
-            # if we broadcasted a transaction, always raise
-            # this is to prevent potential for double spend scenario
-            if api == 'network_broadcast_api':
-                raise e
+                ProtocolError,
+                RPCInvalidStatus) as e:
 
-            # try switching nodes before giving up
-            if _ret_cnt > 2:
-                time.sleep(_ret_cnt) # we should wait only a short period before trying the next node, but still slowly increase backoff
-            elif _ret_cnt > 10:
+            if _ret_cnt > 10:
                 raise e
+            elif _ret_cnt > 2:
+                time.sleep(_ret_cnt)
+
             self.next_node()
-            logging.debug('Switched node to %s due to exception: %s' %
-                          (self.hostname, e.__class__.__name__))
-            return self.exec(name, *args,
-                             return_with_args=return_with_args,
-                             _ret_cnt=_ret_cnt + 1)
+            logging.error("call failed, retry {}. {}".format(_ret_cnt, repr(e)))
+            return self._exec(body, _ret_cnt=_ret_cnt + 1)
+
         except Exception as e:
-            if self.re_raise:
-                raise e
-            else:
-                extra = dict(err=e, request=self.request)
-                logger.info('Request error', extra=extra)
-                return self._return(
-                    response=response,
-                    args=args,
-                    return_with_args=return_with_args)
-        else:
-            if response.status not in tuple(
-                    [*response.REDIRECT_STATUSES, 200]):
-                logger.error('non 200 response:%s', response.status)
+            raise e
 
-            # TODO: remove. retry on random lock error; new in appbase. #73
-            if USE_APPBASE:
-                response_json = self._parse_response(response, args)
-                if response_json and 'error' in response_json:
-                    print("RPC Error Response, retrying. {} -- {} {}".format(
-                          response_json, name, args))
-                    return self.exec(name, *args,
-                                     return_with_args=return_with_args,
-                                     _ret_cnt=_ret_cnt + 1)
-
-            return self._return(
-                response=response,
-                args=args,
-                return_with_args=return_with_args)
-
-    # TODO: re-raise any response parsing exception
-    def _parse_response(self, response, args):
-        try:
-            response_json = json.loads(response.data.decode('utf-8'))
-            logger.debug(response_json)
-        except Exception as e:
-            extra = dict(response=response, request_args=args, err=e)
-            logger.error('failed to load response {}'.format(response.data), extra=extra)
-            response_json = None
-        return response_json
-
-    def _return(self, response=None, args=None, return_with_args=None):
-        return_with_args = return_with_args or self.return_with_args
-        result = None
-
-        if response:
-            response_json = self._parse_response(response, args)
-            if response_json:
-                if 'error' in response_json:
-                    error = response_json['error']
-
-                    if self.re_raise:
-                        error_message = error.get(
-                            'detail', response_json['error']['message'])
-                        raise RPCError("{}: {}".format(error_message, response_json))
-
-                    # TODO: invalid behavior. log the error and retry request. [appbase #73]
-                    result = response_json['error']
-                elif isinstance(response_json, dict):
-                    result = response_json.get('result', None)
-                else:
-                    result = response_json
-        if return_with_args:
-            return result, args
-        else:
-            return result
+    def exec(self, name, *args, api=None):
+        body = self.rpc_body(name, args, api=api)
+        return self._exec(body)
 
     def exec_multi_with_futures(self, name, params, api=None, max_workers=None):
-        for param in params:
-            assert type(param) in (list, tuple, set)
-
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=max_workers) as executor:
-            # Start the load operations and mark each future with its URL
-            futures = (executor.submit(self.exec, name, *param, api=api)
-                       for param in params)
+            max_workers=max_workers) as executor:
+            futures = (executor.submit(self.exec, name, *args, api=api)
+                       for args in params)
             for future in concurrent.futures.as_completed(futures):
                 yield future.result()
 
-    def exec_batch(self, name, params, batch_size=None):
-        batch_size = batch_size or self.batch_size
+    def exec_batch(self, name, params, batch_size):
+        for batch in chunkify(params, batch_size):
+            calls = [self.rpc_body(name, args) for args in batch]
+            response = self._exec(body=calls)
+            for item in response:
+                yield item
 
-        batch_requests = (self.json_rpc_body(name, *args, as_json=False, _id=0)
-                for args in params)
-
-        for batch in chunkify(batch_requests, batch_size):
-            body = json.dumps(batch).encode()
-
-            batch_response = self.exec('ignore', [], body=body) # Issue #75
-            assert batch_response, "batch_response was empty"
-            assert len(batch_response) == len(batch), "batch_response len did not match params ({} vs {})".format(len(batch_response), len(batch))
-
-            for response in batch_response:
-                assert 'result' in response, "batch response missing `result`: {}".format(response) # TODO: appbase different err response fmt?
-                yield response['result']
-
-
-if __name__ == '__main__':
+def run():
     import argparse
     parser = argparse.ArgumentParser('jussi client')
-
     parser.add_argument('--url', type=str, default='https://api.steemitdev.com')
     parser.add_argument('--start_block', type=int, default=1)
     parser.add_argument('--end_block', type=int, default=15000000)
     parser.add_argument('--batch_request_size', type=int, default=20)
     parser.add_argument('--log_level', type=str, default='DEBUG')
-
     args = parser.parse_args()
 
-    c = HttpClient(nodes=[args.url], batch_size=args.batch_request_size, re_raise=False)
-
+    client = HttpClient(nodes=[args.url], batch_size=args.batch_request_size)
     block_nums = range(args.start_block, args.end_block)
-    for response in c.exec_batch('get_block', block_nums):
+    for response in client.exec_batch('get_block', block_nums, 50):
         print(json.dumps(response))
+
+if __name__ == '__main__':
+    run()

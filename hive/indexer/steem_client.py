@@ -86,16 +86,34 @@ class SteemClient:
     @classmethod
     def instance(cls):
         if not cls._instance:
-            steem = os.environ.get('STEEMD_URL')
-            jussi = os.environ.get('JUSSI_URL')
-            cls._instance = SteemClient(steem, jussi)
+            api_endpoint = os.environ.get('STEEMD_URL')
+            max_batch = int(os.environ.get('MAX_BATCH', 500))
+            max_workers = int(os.environ.get('MAX_WORKERS', 1))
+            use_appbase = os.environ.get('USE_APPBASE') in ('true', 'yes', '1')
+
+            if os.environ.get('JUSSI_URL'):
+                print("JUSSI_URL deprecated; use STEEMD_URL")
+                api_endpoint = os.environ.get('JUSSI_URL')
+
+            cls._instance = SteemClient(api_endpoint, max_batch, max_workers, use_appbase)
         return cls._instance
 
-    def __init__(self, api_endpoint, jussi=None):
-        self._jussi = bool(jussi)
-        url = jussi or api_endpoint
+    def __init__(self, url, max_batch=500, max_workers=1, use_appbase=False):
         assert url, 'steem-API endpoint undefined'
-        self._client = HttpClient(nodes=[url], maxsize=50, num_pools=50)
+        assert max_batch > 0 and max_batch <= 5000
+        assert max_workers > 0 and max_workers <= 500
+
+        self._client = HttpClient(nodes=[url],
+                                  maxsize=50,
+                                  num_pools=50,
+                                  use_appbase=use_appbase)
+
+        self._max_batch = max_batch
+        self._max_workers = max_workers
+        self._use_appbase = use_appbase
+
+        print("[STEEM] init url:%s batch:%s workers:%d appbase:%s"
+              % (url, max_batch, max_workers, use_appbase))
 
     def get_accounts(self, accounts):
         assert accounts, "no accounts passed to get_accounts"
@@ -199,8 +217,8 @@ class SteemClient:
                     assert result, "empty response {}".format(result)
             except (AssertionError, RPCError) as e:
                 tries += 1
-                print("{} failure, retry in {}s -- {}".format(method, tries, e))
-                time.sleep(tries)
+                print("{} failure, retry in {}s -- {}".format(method, tries / 10, e))
+                time.sleep(tries / 10)
                 continue
             break
 
@@ -209,29 +227,29 @@ class SteemClient:
         ClientStats.log(method, total_time, batch_size)
         return result
 
-    # perform batch call (if jussi is enabled, use batches; otherwise, multi)
+    # perform batch call
     def __exec_batch(self, method, params):
         time_start = time.perf_counter()
         result = None
 
-        if self._jussi:
-            result = self.__exec_jussi_batch_with_retry(method, params, 500)
+        if self._max_workers == 1:
+            result = self.__exec_batch_with_retry(method, params, self._max_batch)
         else:
             result = list(self._client.exec_multi_with_futures(
-                method, params, max_workers=50))
+                method, params, max_workers=self._max_workers))
 
         total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, len(params))
         return result
 
-    # perform a jussi-style batch request, retrying on error
-    def __exec_jussi_batch_with_retry(self, method, params, batch_size=500):
+    # perform a json-rpc batch request, retrying on error
+    def __exec_batch_with_retry(self, method, params, batch_size):
         tries = 0
         while True:
             try:
                 return list(self._client.exec_batch(method, params, batch_size))
             except (AssertionError, RPCError) as e:
                 tries += 1
-                print("batch {} failure, retry in {}s -- {}".format(method, tries / 10, e))
+                print("batch {} failure, retry in {}s -- {}".format(method, tries / 10, repr(e)))
                 time.sleep(tries / 10)
                 continue
