@@ -96,7 +96,7 @@ def query(sql, **kwargs):
     action = sql.strip()[0:6].strip()
     if action not in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START', 'ALTER']:
         raise Exception("query() only for writes. {}".format(sql))
-    __query(sql, **kwargs)
+    return __query(sql, **kwargs)
 
 # n*m
 def query_all(sql, **kwargs):

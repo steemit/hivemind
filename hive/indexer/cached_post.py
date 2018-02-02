@@ -19,7 +19,24 @@ class CachedPost:
     _dirty = collections.OrderedDict()
 
     @classmethod
-    def dirty(cls, author, permlink, pid=None):
+    def vote(cls, author, permlink):
+        # incoming vote. todo: only update relevant payout fields for this post #16
+        cls._dirty_full(author, permlink)
+
+    @classmethod
+    def insert(cls, author, permlink, pid):
+        assert pid
+        # new post. insert all fields.
+        cls._dirty_full(author, permlink, pid)
+
+    @classmethod
+    def update(cls, author, permlink, pid):
+        assert pid
+        # post was edited. todo: only update relevant subset of fields #16
+        cls._dirty_full(author, permlink, pid)
+
+    @classmethod
+    def _dirty_full(cls, author, permlink, pid=None):
         url = author + '/' + permlink
         if url in cls._dirty:
             if pid and not cls._dirty[url]:
@@ -81,7 +98,7 @@ class CachedPost:
         paidout = cls._select_paidout_tuples(date)
         for (pid, author, permlink) in paidout:
             Accounts.dirty(author) # force-update accounts when posts pay out
-            cls.dirty(author, permlink, pid)
+            cls._dirty_full(author, permlink, pid)
 
         if len(paidout) > 1000:
             print("[PREP] Found {} payouts since {}".format(len(paidout), date))
@@ -97,6 +114,7 @@ class CachedPost:
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
+    # TODO: with cached_post.insert, we may not need to call this every block anymore
     def dirty_missing(cls, limit=1_000_000):
         from hive.indexer.posts import Posts
 
@@ -108,7 +126,7 @@ class CachedPost:
         if gap:
             missing = cls._select_missing_tuples(last_cached_id, limit)
             for pid, author, permlink in missing:
-                cls.dirty(author, permlink, pid)
+                cls._dirty_full(author, permlink, pid)
 
         return gap
 

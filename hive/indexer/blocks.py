@@ -38,17 +38,14 @@ class Blocks:
                     account_names.add(op['new_account_name'])
                 elif op_type == 'comment':
                     comment_ops.append(op)
-                    if not is_initial_sync:
-                        CachedPost.dirty(op['author'], op['permlink'])
-                        #Accounts.dirty(op['author'])
                 elif op_type == 'delete_comment':
                     delete_ops.append(op)
                 elif op_type == 'custom_json':
                     json_ops.append(op)
                 elif op_type == 'vote':
                     if not is_initial_sync:
-                        CachedPost.dirty(op['author'], op['permlink'])
-                        #Accounts.dirty(op['author'])
+                        CachedPost.vote(op['author'], op['permlink'])
+                        Accounts.dirty(op['author'])
 
         Accounts.register(account_names, date) # register potentially new names
         Posts.comment_ops(comment_ops, date) # ignores edits; inserts, validates

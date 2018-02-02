@@ -47,6 +47,7 @@ class Posts:
 
     @classmethod
     def _set_id(cls, url, pid):
+        assert pid, "no pid provided for %s" % url
         if len(cls._ids) > 1000000:
             cls._ids.popitem(last=False)
         cls._ids[url] = pid
@@ -100,10 +101,14 @@ class Posts:
                                         category, community, depth, created_at)
                       VALUES (:is_valid, :parent_id, :author, :permlink,
                               :category, :community, :depth, :date)"""
+        sql += ";SELECT currval(pg_get_serial_sequence('hive_posts','id'))"
         post = cls._build_post(op, date)
-        query(sql, **post)
+        result = query(sql, **post)
+        post['id'] = int(list(result)[0][0])
+        cls._set_id(op['author']+'/'+op['permlink'], post['id'])
 
         if not DbState.is_initial_sync():
+            CachedPost.insert(op['author'], op['permlink'], post['id'])
             cls._insert_feed_cache(post)
 
     # re-allocates an existing record flagged as deleted
@@ -133,15 +138,15 @@ class Posts:
 
     @classmethod
     def update(cls, op, date, pid):
-        # here you could trigger post_cache.dirty or build content diffs...
-        pass
+        # here we could also build content diffs...
+        if not DbState.is_initial_sync():
+            CachedPost.update(op['author'], op['permlink'], pid)
 
     @classmethod
     def _insert_feed_cache(cls, post):
-        if post['depth'] == 0:
-            post_id = post['id'] or cls.get_id(post['author'], post['permlink'])
+        if not post['depth']:
             account_id = Accounts.get_id(post['author'])
-            FeedCache.insert(post_id, account_id, post['date'])
+            FeedCache.insert(post['id'], account_id, post['date'])
 
     @classmethod
     def _build_post(cls, op, date, pid=None):
