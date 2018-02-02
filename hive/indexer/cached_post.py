@@ -43,7 +43,7 @@ class CachedPost:
 
         batch = inserts + updates
         cls._update_batch(batch, trx)
-        for url, pid in batch:
+        for url, _ in batch:
             del cls._dirty[url]
         return len(batch)
 
@@ -59,8 +59,8 @@ class CachedPost:
             if pid:
                 cls._dirty[url] = pid
             else:
-                print("WARNING: missing id for %s" % k)
-                del cls._dirty[k] # extremely rare but important. add assert?
+                print("WARNING: missing id for %s" % url)
+                del cls._dirty[url] # extremely rare but important. add assert?
 
         return len(tuples)
 
@@ -173,7 +173,7 @@ class CachedPost:
     def _update_batch(cls, tuples, trx=True):
         steemd = get_adapter()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
-        tuples = sorted(tuples, key=lambda x:x[1]) # enforce ASC id's
+        tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
 
         for tups in partition_all(1000, tuples):
             timer.batch_start()
