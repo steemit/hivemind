@@ -30,21 +30,22 @@ class CachedPost:
     # Process all posts which have been marked as dirty.
     @classmethod
     def flush(cls, trx=False):
-        # Ensure all dirty posts have an id (see load_dirty_noids below).
-        cls._load_dirty_noids()
-        for url in list(cls._dirty.keys()):
-            if not cls._dirty[url]:
-                print("WARNING: missing id for %s" % url)
-                del cls._dirty[url]
+        cls._load_dirty_noids() # load missing ids
+        tuples = cls._dirty.items()
+        last_id = cls.last_id()
 
-        tuples = [(pid, *url.split('/')) for url, pid in cls._dirty.items()]
+        inserts = [(url, pid) for url, pid in tuples if pid <= last_id]
+        updates = [(url, pid) for url, pid in tuples if pid > last_id]
+
         if trx or len(tuples) > 1000:
-            edits = sum([1 for pid, _, _ in tuples if pid <= cls.last_id()])
-            print("[PREP] cache %d posts (%d edits)" % (len(tuples), edits))
+            print("[PREP] cache %d posts (%d new, %d edits)"
+                  % (len(tuples), len(inserts), len(updates)))
 
-        cls._update_batch(tuples, get_adapter(), trx)
-        cls._dirty = collections.OrderedDict()
-        return len(tuples)
+        batch = inserts + updates
+        cls._update_batch(batch, trx)
+        for url, pid in batch:
+            del cls._dirty[url]
+        return len(batch)
 
     # When posts are marked dirty, specifying the id is optional because
     # a successive call might be able to provide it "for free". Before
@@ -52,14 +53,15 @@ class CachedPost:
     @classmethod
     def _load_dirty_noids(cls):
         from hive.indexer.posts import Posts
+        noids = [k for k, v in cls._dirty.items() if not v]
+        tuples = [(Posts.get_id(*url.split('/')), url) for url in noids]
+        for pid, url in tuples:
+            if pid:
+                cls._dirty[url] = pid
+            else:
+                print("WARNING: missing id for %s" % k)
+                del cls._dirty[k] # extremely rare but important. add assert?
 
-        #_dirty = len(cls._dirty)
-        #_noids = len([k.split('/') for k, v in cls._dirty.items() if not v])
-        #print("%d dirty, %d noids = %d%%" % (_dirty, _noids, 100*_noids/_dirty))
-        noids = [k.split('/') for k, v in cls._dirty.items() if not v]
-        tuples = [[Posts.get_id(*tup), *tup] for tup in noids]
-        for pid, author, permlink in tuples:
-            cls._dirty[author+'/'+permlink] = pid
         return len(tuples)
 
     # Select all posts which should have been paid out before `date` yet do not
@@ -159,8 +161,8 @@ class CachedPost:
                    mode='insert')
 
     # Given a set of posts, fetch them from steemd and write them to the db.
-    # `tuples` are an array of (id, author, permlink) representing posts which
-    #   are to be fetched from steemd and updated in hive_posts_cache table.
+    # The `tuples` arg is a list of (url, id) representing posts which are to be
+    # fetched from steemd and updated in hive_posts_cache table.
     #
     # Regarding _bump_last_id: there's a rare edge case when the last hive_post
     # entry has been deleted "in the future" (ie, we haven't seen the delete op
@@ -168,15 +170,17 @@ class CachedPost:
     # important to advance _last_id, because this cursor is used to deduce if
     # there's any missing cache entries.
     @classmethod
-    def _update_batch(cls, tuples, steemd, trx=True):
+    def _update_batch(cls, tuples, trx=True):
+        steemd = get_adapter()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
+        tuples = sorted(tuples, key=lambda x:x[1]) # enforce ASC id's
 
         for tups in partition_all(1000, tuples):
             timer.batch_start()
             buffer = []
 
-            post_ids = [tup[0] for tup in tups]
-            post_args = [tup[1:] for tup in tups]
+            post_ids = [tup[1] for tup in tups]
+            post_args = [tup[0].split('/') for tup in tups]
             posts = steemd.get_content_batch(post_args)
             for pid, post in zip(post_ids, posts):
                 if post['author']:
