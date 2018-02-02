@@ -273,7 +273,8 @@ hive_state = sa.Table(
     mysql_default_charset='utf8mb4'
 )
 
-_url = os.environ.get('DATABASE_URL', 'missing ENV DATABASE_URL')
+_url = os.environ.get('DATABASE_URL')
+assert _url, 'missing ENV DATABASE_URL'
 logging.basicConfig()
 #if os.environ.get('LOG_LEVEL') == 'INFO': # ultra-verbose
 #    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)

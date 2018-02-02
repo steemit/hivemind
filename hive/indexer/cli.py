@@ -2,14 +2,13 @@
 import click
 from click import echo
 from hive.indexer.core import run, head_state
-from hive.db.schema import setup
 from prettytable import PrettyTable
 
 
 @click.group()
 def indexer():
     """Parse the blockchain and index the MySQL Database.
-    
+
     Source of blocks can be a .json.lst file, steemd, or both.
     """
     pass

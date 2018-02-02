@@ -28,7 +28,7 @@ class CustomOp:
             # if op['required_active_auths']:
             #    log.warning("unexpected active auths: %s" % op)
             if len(op['required_posting_auths']) != 1:
-                log.warning("unexpected auths: %s" % op)
+                log.warning("unexpected auths: %s", op)
                 continue
 
             account = op['required_posting_auths'][0]

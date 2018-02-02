@@ -7,7 +7,6 @@ import time
 from functools import partial
 from http.client import RemoteDisconnected
 from itertools import cycle
-from urllib.parse import urlparse
 
 import certifi
 import urllib3
@@ -121,7 +120,7 @@ class HttpClient(object):
         """ Change current node to provided node URL. """
         if self.url == node_url:
             return
-        logger.info("HttpClient using node: {}".format(node_url))
+        logger.info("HttpClient using node: %s", node_url)
         self.url = node_url
         self.request = partial(self.http.urlopen, 'POST', self.url)
 
@@ -166,6 +165,7 @@ class HttpClient(object):
             if 'error' in result:
                 raise RPCError("result['error'] -- {}".format(result))
 
+            # pylint: disable=no-else-return
             # final sanity checks and trimming
             if is_batch:
                 assert isinstance(result, list), "batch result must be list"
@@ -188,7 +188,7 @@ class HttpClient(object):
                 time.sleep(_ret_cnt)
 
             self.next_node()
-            logging.error("call failed, retry {}. {}".format(_ret_cnt, repr(e)))
+            logging.error("call failed, retry %d. %s", _ret_cnt, repr(e))
             return self._exec(body, _ret_cnt=_ret_cnt + 1)
 
         except Exception as e:
