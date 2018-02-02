@@ -4,6 +4,7 @@ import glob
 import time
 import os
 import traceback
+import resource
 
 from funcy.seqs import drop
 from toolz import partition_all
@@ -24,6 +25,10 @@ log = logging.getLogger(__name__)
 
 # sync routines
 # -------------
+
+def mem_stats(): #72
+    max_mem = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) / (1024 * 1024)
+    print("max memory used is %.2fMB" % max_mem)
 
 def sync_from_checkpoints():
     last_block = Blocks.last()['num']
@@ -236,12 +241,15 @@ def run():
 
     try:
         while True:
+            mem_stats()
             sync_from_steemd()
             listen_steemd()
     except KeyboardInterrupt:
+        mem_stats()
 
         # cleanup/flush
         print("Aborted.. cleaning up..")
+        # TODO: ensure any open trx is rolled back
         Follow.flush(trx=True)
         Accounts.flush(trx=True)
         CachedPost.flush(trx=True)
