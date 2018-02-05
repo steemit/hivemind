@@ -6,6 +6,9 @@ class DbState:
     # prop is true until initial sync complete
     _is_initial_sync = True
 
+    # prop is true when following head block
+    _is_live = False
+
     # db schema version
     _ver = None
 
@@ -28,6 +31,18 @@ class DbState:
     def finish_initial_sync(cls):
         print("[INIT] Initial sync complete!")
         cls._is_initial_sync = False
+
+    @classmethod
+    def start_listen(cls):
+        cls._is_live = True
+
+    @classmethod
+    def stop_listen(cls):
+        cls._is_live = False
+
+    @classmethod
+    def is_listen_mode(cls):
+        return cls._is_live
 
     @classmethod
     def is_initial_sync(cls):

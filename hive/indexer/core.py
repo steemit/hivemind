@@ -108,6 +108,8 @@ def listen_steemd(trail_blocks=0, max_gap=50):
     tries = 0
     queue = []
 
+    # TODO: detect missed blocks by looking at block timestamps.
+    #       this would be an even more efficient way to track slots.
     while True:
         assert not last_block > head_block
 
@@ -169,7 +171,7 @@ def listen_steemd(trail_blocks=0, max_gap=50):
         num = Blocks.process(block)
         follows = Follow.flush(trx=False)
         accts = Accounts.flush(trx=False, period=8)
-        posts = CachedPost.dirty_missing()
+        posts = CachedPost.dirty_missing() # no longer needed?
         paids = CachedPost.dirty_paidouts(block['timestamp'])
         edits = CachedPost.flush(trx=False)
         query("COMMIT")
@@ -242,7 +244,10 @@ def run():
         while True:
             mem_stats()
             sync_from_steemd()
+            DbState.start_listen()
             listen_steemd()
+            DbState.stop_listen()
+
     except KeyboardInterrupt:
         mem_stats()
 
