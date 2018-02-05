@@ -5,6 +5,8 @@ import collections
 from toolz import partition_all
 from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col, query_one
+from hive.db.db_state import DbState
+
 from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
 from hive.indexer.timer import Timer
 from hive.indexer.accounts import Accounts
@@ -133,9 +135,22 @@ class CachedPost:
     def _select_paidout_tuples(cls, date):
         from hive.indexer.posts import Posts
         # retrieve all posts which have been paid out but not updated
-        sql = """SELECT post_id, author, permlink FROM hive_posts_cache
+
+        # The following cannot be used until #78 is resolved.
+        #sql = """SELECT post_id, author, permlink FROM hive_posts_cache
+        #          WHERE is_paidout = '0' AND payout_at <= :date"""
+        #results = query_all(sql, date=date)
+
+        # Check if this method is faster anyway. (#76)
+        sql = """SELECT post_id FROM hive_posts_cache
                   WHERE is_paidout = '0' AND payout_at <= :date"""
-        results = query_all(sql, date=date)
+        ids = query_col(sql, date=date)
+        if not ids:
+            return []
+
+        sql = """SELECT id, author, permlink
+                 FROM hive_posts WHERE id IN :ids"""
+        results = query_all(sql, ids=tuple(ids))
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
@@ -173,6 +188,14 @@ class CachedPost:
         if gap:
             missing = cls._select_missing_tuples(last_cached_id, limit)
             for pid, author, permlink in missing:
+                # temporary sanity check -- if we're loading ids ON insert,
+                # they should always be available at this point during listen.
+                if DbState.is_listen_mode():
+                    url = author+'/'+permlink
+                    if url not in cls._dirty:
+                        print("url not registered at all: %s" % url)
+                    elif not cls._dirty[url]:
+                        print("url registered but no id: %s" % url)
                 cls._dirty_full(author, permlink, pid)
 
         return gap
