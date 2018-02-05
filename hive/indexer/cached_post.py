@@ -18,29 +18,74 @@ class CachedPost:
     # cache entries to update
     _dirty = collections.OrderedDict()
 
+    # Called when a post is voted on.
+    # TODO: only update relevant payout fields for this post. #16
     @classmethod
     def vote(cls, author, permlink):
-        # incoming vote. todo: only update relevant payout fields for this post #16
         cls._dirty_full(author, permlink)
 
+    # Called when a post record is created.
     @classmethod
     def insert(cls, author, permlink, pid):
-        assert pid
-        # new post. insert all fields.
         cls._dirty_full(author, permlink, pid)
 
+    # Called when a post's content is edited.
     @classmethod
     def update(cls, author, permlink, pid):
-        assert pid
-        # post was edited. todo: only update relevant subset of fields #16
         cls._dirty_full(author, permlink, pid)
+
+    # In steemd, posts can be 'deleted' or unallocated in certain conditions.
+    # This requires foregoing some convenient assumptions, such as:
+    #   - author/permlink is unique and always references the same post
+    #   - you can always get_content on any author/permlink you see in an op
+    @classmethod
+    def delete(cls, post_id, author, permlink):
+        query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
+
+        # if it was queued for a write, remove it
+        url = author+'/'+permlink
+        if url in cls._dirty:
+            del cls._dirty[url]
+
+    # 'Undeletion' event occurs when hive detects that a previously deleted
+    #   author/permlink combination has been reused on a new post. Hive does
+    #   not delete hive_posts entries because they are currently irreplaceable
+    #   in case of a fork. Instead, we reuse the slot. It's important to
+    #   immediately insert a placeholder in the cache table, because hive only
+    #   scans forward. Here we create a dummy record whose properties push it
+    #   to the front of update-immediately queue.
+    #
+    # Alternate ways of handling undeletes:
+    #  - delete row from hive_posts so that it can be re-indexed (re-id'd)
+    #    - comes at a risk of losing expensive entry on fork (and no undo)
+    #  - create undo table for hive_posts, hive_follows, etc, & link to block
+    #  - rely on steemd's post.id instead of database autoincrement
+    #    - requires way to query steemd post objects by id to be useful
+    #      - batch get_content_by_ids in steemd would be /huge/ speedup
+    #  - create a consistent cache queue table or dirty flag col
+    @classmethod
+    def undelete(cls, post_id, author, permlink):
+        # ignore unless cache spans this id. forward sweep will pick it up.
+        if post_id > cls.last_id():
+            return
+
+        # create dummy row to ensure cache is aware
+        print("undelete @%s/%s id %d" % (author, permlink, post_id))
+        cls._write({
+            'post_id': post_id,
+            'author': author,
+            'permlink': permlink},
+                   mode='insert')
 
     @classmethod
     def _dirty_full(cls, author, permlink, pid=None):
         url = author + '/' + permlink
         if url in cls._dirty:
-            if pid and not cls._dirty[url]:
-                cls._dirty[url] = pid
+            if pid:
+                if not cls._dirty[url]:
+                    cls._dirty[url] = pid
+                else:
+                    assert pid == cls._dirty[url], "pid map conflict" #78
         else:
             cls._dirty[url] = pid
 
@@ -132,55 +177,6 @@ class CachedPost:
 
         return gap
 
-
-    # In steemd, posts can be 'deleted' or unallocated in certain conditions.
-    # This requires foregoing some convenient assumptions, such as:
-    #   - author/permlink is unique and always references the same post
-    #   - you can always get_content on any author/permlink you see in an op
-    @classmethod
-    def delete(cls, post_id, author, permlink):
-        query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
-
-        # if it was queued for a write, remove it
-        url = author+'/'+permlink
-        if url in cls._dirty:
-            del cls._dirty[url]
-
-    # 'Undeletion' event occurs when hive detects that a previously deleted
-    #   author/permlink combination has been reused on a new post. Hive does
-    #   not delete hive_posts entries because they are currently irreplaceable
-    #   in case of a fork. Instead, we reuse the slot. It's important to
-    #   immediately insert a placeholder in the cache table, because hive only
-    #   scans forward. Here we create a dummy record whose properties push it
-    #   to the front of update-immediately queue.
-    #
-    # Alternate ways of handling undeletes:
-    #  - delete row from hive_posts so that it can be re-indexed (re-id'd)
-    #    - comes at a risk of losing expensive entry on fork (and no undo)
-    #  - create undo table for hive_posts, hive_follows, etc, & link to block
-    #  - rely on steemd's post.id instead of database autoincrement
-    #    - requires way to query steemd post objects by id to be useful
-    #      - batch get_content_by_ids in steemd would be /huge/ speedup
-    #  - create a consistent cache queue table or dirty flag col
-    @classmethod
-    def undelete(cls, post_id, author, permlink):
-        print("undelete @%s/%s id %d" % (author, permlink, post_id))
-        # ignore unless cache spans this id. forward sweep will pick it up.
-        if post_id > cls.last_id():
-            return
-
-        # create dummy row to ensure cache is aware
-        cls._write({
-            'post_id': post_id,
-            'author': author,
-            'permlink': permlink,
-            # TODO: remove following keys when schema is reloaded
-            'payout_at': '2000-01-01',
-            'is_paidout': '0',
-            **dict.fromkeys('created_at updated_at'.split(' '), '1999-01-01'),
-            **dict.fromkeys('title preview img_url'.split(' '), ''),
-            **dict.fromkeys('payout promoted rshares sc_trend sc_hot'.split(' '), '0')},
-                   mode='insert')
 
     # Given a set of posts, fetch them from steemd and write them to the db.
     # The `tuples` arg is a list of (url, id) representing posts which are to be
