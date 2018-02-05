@@ -96,9 +96,11 @@ class CachedPost:
     @classmethod
     def dirty_paidouts(cls, date):
         paidout = cls._select_paidout_tuples(date)
+        authors = set()
         for (pid, author, permlink) in paidout:
-            Accounts.dirty(author) # force-update accounts when posts pay out
+            authors.add(author)
             cls._dirty_full(author, permlink, pid)
+        Accounts.dirty(authors) # force-update accounts when posts pay out
 
         if len(paidout) > 1000:
             print("[PREP] Found {} payouts since {}".format(len(paidout), date))
@@ -162,6 +164,7 @@ class CachedPost:
     #  - create a consistent cache queue table or dirty flag col
     @classmethod
     def undelete(cls, post_id, author, permlink):
+        print("undelete @%s/%s id %d" % (author, permlink, post_id))
         # ignore unless cache spans this id. forward sweep will pick it up.
         if post_id > cls.last_id():
             return
@@ -171,6 +174,7 @@ class CachedPost:
             'post_id': post_id,
             'author': author,
             'permlink': permlink,
+            # TODO: remove following keys when schema is reloaded
             'payout_at': '2000-01-01',
             'is_paidout': '0',
             **dict.fromkeys('created_at updated_at'.split(' '), '1999-01-01'),

@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 def mem_stats(): #72
     max_mem = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) / (1024 * 1024)
-    print("max memory used is %.2fMB" % max_mem)
+    print("[MEM] peak memory usage: %.2fMB" % max_mem)
 
 def sync_from_checkpoints():
     last_block = Blocks.last()['num']
@@ -248,7 +248,8 @@ def run():
 
         # cleanup/flush
         print("Aborted.. cleaning up..")
-        # TODO: ensure any open trx is rolled back
+        # TODO: currently, this only works if a trx is not open, otherwise
+        #       an Assertion error is thrown (which is good but not ideal)
         Follow.flush(trx=True)
         Accounts.flush(trx=True)
         CachedPost.flush(trx=True)
