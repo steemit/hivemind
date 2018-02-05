@@ -72,7 +72,6 @@ class CachedPost:
             return
 
         # create dummy row to ensure cache is aware
-        print("undelete @%s/%s id %d" % (author, permlink, post_id))
         cls._write({
             'post_id': post_id,
             'author': author,
@@ -212,6 +211,7 @@ class CachedPost:
     # there's any missing cache entries.
     @classmethod
     def _update_batch(cls, tuples, trx=True):
+        from hive.indexer.posts import Posts
         steemd = get_adapter()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
         tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
@@ -225,6 +225,10 @@ class CachedPost:
             posts = steemd.get_content_batch(post_args)
             for pid, post in zip(post_ids, posts):
                 if post['author']:
+                    # -- temp: paranoid enforcement for #78
+                    pid2 = Posts.get_id(post['author'], post['permlink'])
+                    assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
+                    # --
                     buffer.append(cls._sql(pid, post))
                 else:
                     print("WARNING: ignoring deleted post {}".format(pid))

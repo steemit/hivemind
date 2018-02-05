@@ -17,7 +17,7 @@ class Follow:
         # perform delta check
         new_state = op['state']
         old_state = cls._get_follow_db_state(op['flr'], op['flg'])
-        if new_state == old_state:
+        if new_state == (old_state or 0):
             return
 
         # insert or update state
