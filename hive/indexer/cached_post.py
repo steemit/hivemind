@@ -15,8 +15,11 @@ class CachedPost:
     # cursor signifying upper bound of cached post span
     _last_id = -1
 
-    # cache entries to update
+    # post entries to update (full)
     _dirty = collections.OrderedDict()
+
+    # post entries to update (light)
+    _voted = collections.OrderedDict()
 
     # Called when a post is voted on.
     # TODO: only update relevant payout fields for this post. #16
@@ -88,6 +91,15 @@ class CachedPost:
         else:
             cls._dirty[url] = pid
 
+    @classmethod
+    def _dirty_vote(cls, author, permlink, pid=None):
+        url = author + '/' + permlink
+        if url in cls._voted:
+            if pid and not cls._voted[url]:
+                cls._voted[url] = pid
+        else:
+            cls._voted[url] = pid
+
     # Process all posts which have been marked as dirty.
     @classmethod
     def flush(cls, trx=False):
@@ -95,8 +107,8 @@ class CachedPost:
         tuples = cls._dirty.items()
         last_id = cls.last_id()
 
-        inserts = [(url, pid) for url, pid in tuples if pid <= last_id]
-        updates = [(url, pid) for url, pid in tuples if pid > last_id]
+        inserts = [(url, pid) for url, pid in tuples if pid > last_id]
+        updates = [(url, pid) for url, pid in tuples if pid <= last_id]
 
         if trx or len(tuples) > 1000:
             print("[PREP] cache %d posts (%d new, %d edits)"
@@ -104,8 +116,18 @@ class CachedPost:
 
         batch = inserts + updates
         cls._update_batch(batch, trx)
+
         for url, _ in batch:
             del cls._dirty[url]
+            if url in cls._voted:
+                del cls._voted[url]
+
+        #votes = [(url, pid) for url, pid in cls._voted.items() if pid <= cls.last_id()]
+        #cls._update_batch(votes, trx, only_payout=True)
+        #for url, _ in votes:
+        #    del cls._voted[url]
+
+        #return (len(inserts), len(updates), len(votes))
         return len(batch)
 
     # When posts are marked dirty, specifying the id is optional because
@@ -204,7 +226,7 @@ class CachedPost:
     # important to advance _last_id, because this cursor is used to deduce if
     # there's any missing cache entries.
     @classmethod
-    def _update_batch(cls, tuples, trx=True):
+    def _update_batch(cls, tuples, trx=True, only_payout=False):
         from hive.indexer.posts import Posts
         steemd = get_adapter()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
@@ -223,7 +245,7 @@ class CachedPost:
                     pid2 = Posts.get_id(post['author'], post['permlink'])
                     assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
                     # --
-                    buffer.append(cls._sql(pid, post))
+                    buffer.append(cls._sql(pid, post, only_payout=only_payout))
                 else:
                     print("WARNING: ignoring deleted post {}".format(pid))
                 cls._bump_last_id(pid)

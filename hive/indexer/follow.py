@@ -97,6 +97,7 @@ class Follow:
                 sqls.append((sql % (col, col), dict(mag=delta, id=name)))
 
         if trx:
+            print("[SYNC] flush %d follows updates" % len(sqls))
             query("START TRANSACTION")
         for (sql, params) in sqls:
             query(sql, **params)
