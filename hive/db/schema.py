@@ -253,7 +253,7 @@ hive_posts_cache = sa.Table(
     sa.Column('raw_json', sa.Text),
 
     sa.Index('hive_posts_cache_ix2', 'promoted', postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")),
-    sa.Index('hive_posts_cache_ix3', 'payout_at', postgresql_where=sql_text("is_paidout = '0'")),
+    sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id', postgresql_where=sql_text("is_paidout = '0'")),
     sa.Index('hive_posts_cache_ix6', 'sc_trend', 'post_id'),
     sa.Index('hive_posts_cache_ix7', 'sc_hot', 'post_id'),
     mysql_engine='InnoDB',

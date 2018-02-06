@@ -129,18 +129,13 @@ class CachedPost:
 
     # Select all posts which should have been paid out before `date` yet do not
     # have the `is_paidout` flag set. We perform this sweep to ensure that we
-    # always have accurate final payout state.
+    # always have accurate final payout state. Since payout values vary even
+    # between votes, we'd have stale data if we didn't sweep, and only waited
+    # for incoming votes before an update.
     @classmethod
     def _select_paidout_tuples(cls, date):
         from hive.indexer.posts import Posts
-        # retrieve all posts which have been paid out but not updated
 
-        # The following cannot be used until #78 is resolved.
-        #sql = """SELECT post_id, author, permlink FROM hive_posts_cache
-        #          WHERE is_paidout = '0' AND payout_at <= :date"""
-        #results = query_all(sql, date=date)
-
-        # Check if this method is faster anyway. (#76)
         sql = """SELECT post_id FROM hive_posts_cache
                   WHERE is_paidout = '0' AND payout_at <= :date"""
         ids = query_col(sql, date=date)
@@ -159,10 +154,11 @@ class CachedPost:
         for (pid, author, permlink) in paidout:
             authors.add(author)
             cls._dirty_full(author, permlink, pid)
-        Accounts.dirty(authors) # force-update accounts when posts pay out
+        Accounts.dirty(authors) # force-update accounts on payout
 
-        if len(paidout) > 1000:
-            print("[PREP] Found {} payouts since {}".format(len(paidout), date))
+        if len(paidout) > 200:
+            print("[PREP] Found {} payouts for {} authors since {}".format(
+                len(paidout), len(authors), date))
         return len(paidout)
 
     @classmethod
