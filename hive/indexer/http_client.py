@@ -20,9 +20,6 @@ logger.setLevel(logging.WARNING)
 class RPCError(Exception):
     pass
 
-class RPCInvalidStatus(Exception):
-    pass
-
 def chunkify(iterable, chunksize=3000):
     i = 0
     chunk = []
@@ -156,7 +153,7 @@ class HttpClient(object):
             # check response status
             if response.status not in tuple(
                     [*response.REDIRECT_STATUSES, 200]):
-                raise RPCInvalidStatus("non-200 response:%s" % response.status)
+                raise RPCError("non-200 response:%s" % response.status)
 
             # check response format/success
             result = json.loads(response.data.decode('utf-8'))
@@ -171,7 +168,7 @@ class HttpClient(object):
                 assert isinstance(result, list), "batch result must be list"
                 assert len(body) == len(result), "batch result len mismatch"
                 for item in result:
-                    assert item['result'], "batch response had empty item: {}".format(result)
+                    assert 'result' in item, "batch response had empty item: {}".format(result)
                 return [item['result'] for item in result]
             else:
                 assert isinstance(result, dict), "non-batch result must be dict"
@@ -181,8 +178,7 @@ class HttpClient(object):
                 ConnectionResetError,
                 ReadTimeoutError,
                 RemoteDisconnected,
-                ProtocolError,
-                RPCInvalidStatus) as e:
+                ProtocolError) as e:
 
             if _ret_cnt > 10:
                 raise e
