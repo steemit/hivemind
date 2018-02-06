@@ -3,7 +3,7 @@ import collections
 from hive.db.methods import query, query_one, query_row
 from hive.db.db_state import DbState
 
-from hive.indexer.normalize import load_json_key
+from hive.utils.normalize import load_json_key
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache

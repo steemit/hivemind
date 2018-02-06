@@ -10,7 +10,7 @@ from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
 
 from hive.indexer.community import process_json_community_op
-from hive.indexer.normalize import load_json_key
+from hive.utils.normalize import load_json_key
 
 log = logging.getLogger(__name__)
 

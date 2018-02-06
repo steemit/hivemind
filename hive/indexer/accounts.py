@@ -8,8 +8,8 @@ from toolz import partition_all
 
 from hive.db.methods import query_col, query, query_all
 from hive.indexer.steem_client import get_adapter
-from hive.indexer.normalize import rep_log10, amount, trunc
-from hive.indexer.timer import Timer
+from hive.utils.normalize import rep_log10, amount, trunc
+from hive.utils.timer import Timer
 
 class Accounts:
     _ids = {}
