@@ -56,7 +56,7 @@ hive_accounts = sa.Table(
     sa.Column('raw_json', sa.Text),
 
     sa.UniqueConstraint('name', name='hive_accounts_ux1'),
-    sa.Index('hive_accounts_ix1', 'vote_weight', 'id'),
+    sa.Index('hive_accounts_ix1', 'vote_weight', 'id'), # core: quick ranks
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -80,8 +80,8 @@ hive_posts = sa.Table(
     sa.ForeignKeyConstraint(['community'], ['hive_accounts.name'], name='hive_posts_fk2'),
     sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
     sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
-    sa.Index('hive_posts_ix1', 'parent_id'),
-    sa.Index('hive_posts_ix2', 'is_deleted', 'depth'),
+    sa.Index('hive_posts_ix1', 'parent_id'), # API
+    sa.Index('hive_posts_ix2', 'is_deleted', 'depth'), # API
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -99,8 +99,8 @@ hive_post_tags = sa.Table(
     'hive_post_tags', metadata,
     sa.Column('post_id', sa.Integer, nullable=False),
     sa.Column('tag', sa.String(32), nullable=False),
-    sa.UniqueConstraint('tag', 'post_id', name='hive_post_tags_ux1'),
-    sa.Index('hive_post_tags_ix1', 'post_id'),
+    sa.UniqueConstraint('tag', 'post_id', name='hive_post_tags_ux1'), # core
+    sa.Index('hive_post_tags_ix1', 'post_id'), # core
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -112,9 +112,9 @@ hive_follows = sa.Table(
     sa.Column('state', SMALLINT, nullable=False, server_default='1'),
     sa.Column('created_at', sa.DateTime, nullable=False),
 
-    sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'),
-    sa.Index('hive_follows_ix2', 'following', 'follower', postgresql_where=sql_text("state = 1")),
-    sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where=sql_text("state = 1")),
+    sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'), # core
+    sa.Index('hive_follows_ix2', 'following', 'follower', postgresql_where=sql_text("state = 1")), # API
+    sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where=sql_text("state = 1")), # API
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -127,8 +127,8 @@ hive_reblogs = sa.Table(
 
     sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_reblogs_fk1'),
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_reblogs_fk2'),
-    sa.UniqueConstraint('account', 'post_id', name='hive_reblogs_ux1'),
-    sa.Index('hive_reblogs_ix1', 'post_id', 'account', 'created_at'),
+    sa.UniqueConstraint('account', 'post_id', name='hive_reblogs_ux1'), # core
+    sa.Index('hive_reblogs_ix1', 'post_id', 'account', 'created_at'), # API -- TODO: seemingly unused
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -198,8 +198,8 @@ hive_feed_cache = sa.Table(
     sa.Column('post_id', sa.Integer, nullable=False),
     sa.Column('account_id', sa.Integer, nullable=False),
     sa.Column('created_at', sa.DateTime, nullable=False),
-    sa.UniqueConstraint('post_id', 'account_id', name='hive_feed_cache_ux1'),
-    sa.Index('hive_feed_cache_ix1', 'account_id', 'post_id', 'created_at'),
+    sa.UniqueConstraint('post_id', 'account_id', name='hive_feed_cache_ux1'), # core
+    sa.Index('hive_feed_cache_ix1', 'account_id', 'post_id', 'created_at'), # API (and rebuild?)
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
@@ -252,10 +252,10 @@ hive_posts_cache = sa.Table(
     sa.Column('json', sa.Text),
     sa.Column('raw_json', sa.Text),
 
-    sa.Index('hive_posts_cache_ix2', 'promoted', postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")),
-    sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id', postgresql_where=sql_text("is_paidout = '0'")),
-    sa.Index('hive_posts_cache_ix6', 'sc_trend', 'post_id'),
-    sa.Index('hive_posts_cache_ix7', 'sc_hot', 'post_id'),
+    sa.Index('hive_posts_cache_ix2', 'promoted', postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")), # API
+    sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # core
+    sa.Index('hive_posts_cache_ix6', 'sc_trend', 'post_id'), # API
+    sa.Index('hive_posts_cache_ix7', 'sc_hot', 'post_id'), # API
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )
