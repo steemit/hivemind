@@ -4,7 +4,6 @@ import glob
 import time
 import os
 import traceback
-import resource
 
 from funcy.seqs import drop
 from toolz import partition_all
@@ -25,10 +24,6 @@ log = logging.getLogger(__name__)
 
 # sync routines
 # -------------
-
-def mem_stats(): #72
-    max_mem = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) / (1024 * 1024)
-    print("[MEM] peak memory usage: %.2fMB" % max_mem)
 
 def sync_from_checkpoints():
     last_block = Blocks.last()['num']
@@ -67,27 +62,39 @@ def sync_from_steemd():
     if ubound > lbound:
         print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
 
-    timer = Timer(ubound - lbound, entity='block', laps=['rps', 'wps'])
-    while lbound < ubound:
-        to = min(lbound + 1000, ubound)
+    _abort = False
+    try:
+        timer = Timer(ubound - lbound, entity='block', laps=['rps', 'wps'])
+        while lbound < ubound:
+            to = min(lbound + 1000, ubound)
+            timer.batch_start()
+            blocks = steemd.get_blocks_range(lbound, to)
+            timer.batch_lap()
+            Blocks.process_multi(blocks, is_initial_sync)
+            timer.batch_finish(len(blocks))
+            date = blocks[-1]['timestamp']
+            print(timer.batch_status("[SYNC] Got block %d @ %s" % (to-1, date)))
+            lbound = to
 
-        timer.batch_start()
-        blocks = steemd.get_blocks_range(lbound, to)
-        timer.batch_lap()
-        Blocks.process_multi(blocks, is_initial_sync)
-        timer.batch_finish(len(blocks))
-        date = blocks[-1]['timestamp']
-        print(timer.batch_status("[SYNC] Got block %d @ %s" % (to - 1, date)))
-
-        lbound = to
+    except KeyboardInterrupt:
+        traceback.print_exc()
+        print("\n\n[SYNC] Aborted.. cleaning up..")
+        _abort = True
 
     # batch update post cache after catching up to head block
     if not is_initial_sync:
+        # TODO: currently, this only works if a trx is not open, otherwise
+        #       an Assertion error is thrown (which is good but not ideal)
         Follow.flush(trx=True)
-        Accounts.flush(trx=True)
-        CachedPost.dirty_missing()
-        CachedPost.dirty_paidouts(Blocks.last()['date'])
+        if not _abort:
+            Accounts.flush(trx=True)
+            CachedPost.dirty_missing() # no longer needed?
+            CachedPost.dirty_paidouts(Blocks.last()['date'])
         CachedPost.flush(trx=True)
+
+    if _abort:
+        print("[SYNC] Aborted")
+        exit()
 
 
 def listen_steemd(trail_blocks=0, max_gap=50):
@@ -233,34 +240,18 @@ def run():
         # todo: disable indexes during this process
         cache_missing_posts()
         FeedCache.rebuild()
-
         DbState.finish_initial_sync()
 
     else:
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()
 
-    try:
-        while True:
-            mem_stats()
-            sync_from_steemd()
-            DbState.start_listen()
-            listen_steemd()
-            DbState.stop_listen()
+    while True:
+        sync_from_steemd()
 
-    except KeyboardInterrupt:
-        mem_stats()
-
-        # cleanup/flush
-        print("Aborted.. cleaning up..")
-        # TODO: currently, this only works if a trx is not open, otherwise
-        #       an Assertion error is thrown (which is good but not ideal)
-        Follow.flush(trx=True)
-        Accounts.flush(trx=True)
-        CachedPost.flush(trx=True)
-
-        traceback.print_exc()
-        print("\nCTRL-C detected, goodbye.")
+        DbState.start_listen()
+        listen_steemd()
+        DbState.stop_listen()
 
 
 def head_state(*args):

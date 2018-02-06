@@ -1,6 +1,7 @@
 import os
 import time
 import atexit
+import resource
 from decimal import Decimal
 
 from .http_client import HttpClient, RPCError
@@ -66,7 +67,9 @@ class ClientStats:
             print("% 5.1f%% % 9sms % 7.2favg % 8dx -- %s"
                   % (100 * ms/ttl, "{:,}".format(int(ms)),
                      ms/calls, calls, sql[0:180]))
-        print("Fastest call was %.3fms" % cls.fastest)
+        print("[STEEM] Fastest call was %.3fms" % cls.fastest)
+        max_mem = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) / (1024 * 1024)
+        print("[MEM] peak memory usage: %.2fMB" % max_mem)
         cls.clear()
 
     @classmethod
