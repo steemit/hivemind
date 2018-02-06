@@ -42,8 +42,8 @@ class QueryStats:
 
     @classmethod
     def normalize_sql(cls, sql):
-        nsql = re.sub('\s+', ' ', sql).strip()[0:256]
-        nsql = re.sub('VALUES (\s*\([^\)]+\),?)+', 'VALUES (...)', nsql)
+        nsql = re.sub(r'\s+', ' ', sql).strip()[0:256]
+        nsql = re.sub(r'VALUES (\s*\([^\)]+\),?)+', 'VALUES (...)', nsql)
         return nsql
 
     @classmethod

@@ -69,7 +69,7 @@ class DbState:
         cls._ver = query_one("SELECT db_version FROM hive_state LIMIT 1")
 
         #assert cls._ver, 'could not load state record'
-        if cls._ver == None:
+        if cls._ver is None:
             query("""
               INSERT INTO hive_state (block_num, db_version, steem_per_mvest,
               usd_per_steem, sbd_per_steem, dgpo) VALUES (0, 1, 0, 0, 0, '')
