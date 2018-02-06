@@ -2,12 +2,10 @@ import json
 import collections
 
 from toolz import partition_all
-from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col, query_one
 from hive.db.db_state import DbState
 
-from hive.utils.post import post_stats, score
-from hive.utils.normalize import amount, parse_time, rep_log10, safe_img_url
+from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
 from hive.indexer.steem_client import get_adapter
@@ -277,162 +275,94 @@ class CachedPost:
             query("COMMIT")
 
     @classmethod
-    def _sql(cls, pid, post):
-        if not post['author']:
-            raise Exception("ERROR: post id {} has no chain state.".format(pid))
+    def _sql(cls, pid, post, only_payout=False):
+        #pylint: disable=bad-whitespace
+        assert post['author'], "post {} is blank".format(pid)
 
-        md = None
-        try:
-            md = json.loads(post['json_metadata'])
-            if not isinstance(md, dict):
-                md = {}
-        except json.decoder.JSONDecodeError:
-            pass
+        # modes: (1) insert, (2) update, (3) update[only_payout]
+        mode = 'insert' if pid > cls.last_id() else 'update'
+        assert not (only_payout and mode == 'insert'), "invalid state"
 
-        thumb_url = ''
-        if md and 'image' in md:
-            thumb_url = safe_img_url(first(md['image'])) or ''
-            md['image'] = [thumb_url]
+        values = [('post_id', pid)]
+        tag_sqls = []
 
-        # clean up tags, check if nsfw
-        tags = [post['category']]
-        if md and 'tags' in md and isinstance(md['tags'], list):
-            tags = tags + md['tags']
-        tags = set(list(map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags))[0:5])
-        tags.discard('')
-        is_nsfw = int('nsfw' in tags)
+        if not only_payout:
+            basic = post_basic(post)
+            if mode == 'insert':
+                # immutable; write once.
+                values.extend([
+                    ('author',     "%s" % post['author']),
+                    ('permlink',   "%s" % post['permlink']),
+                    ('category',   "%s" % post['category']),
+                    ('depth',      "%d" % post['depth']),
+                    ('created_at', "%s" % post['created']),
+                    ('payout_at',  "%s" % basic['payout_at'])])
 
-        # payout date is last_payout if paid, and cashout_time if pending.
-        is_paidout = (post['cashout_time'][0:4] == '1969')
-        payout_at = post['last_payout'] if is_paidout else post['cashout_time']
+            # editable post fields
+            legacy = post_legacy(post)
+            values.extend([
+                ('updated_at',    "%s" % post['last_update']),
+                ('title',         "%s" % post['title']),
+                ('preview',       "%s" % basic['preview']),
+                ('body',          "%s" % basic['body']),
+                ('img_url',       "%s" % basic['image']),
+                ('is_nsfw',       "%d" % basic['is_nsfw']),
+                ('is_declined',   "%d" % basic['payout_declined']),
+                ('is_full_power', "%d" % basic['full_power']),
+                ('is_paidout',    "%d" % basic['is_paidout']),
+                ('json',          "%s" % json.dumps(basic['json_metadata'])),
+                ('raw_json',      "%s" % json.dumps(legacy)),
+                ('children',      "%d" % min(post['children'], 32767))]) #FIXME
 
-        # get total rshares, and create comma-separated vote data blob
-        rshares = sum(int(v['rshares']) for v in post['active_votes'])
-        csvotes = "\n".join(map(cls._vote_csv_row, post['active_votes']))
+            # update tags for root posts
+            if not post['parent_author']:
+                tag_sqls.extend(cls._tag_sqls(pid, basic['tags']))
 
-        payout_declined = False
-        if amount(post['max_accepted_payout']) == 0:
-            payout_declined = True
-        elif len(post['beneficiaries']) == 1:
-            benny = first(post['beneficiaries'])
-            if benny['account'] == 'null' and int(benny['weight']) == 10000:
-                payout_declined = True
-
-        full_power = int(post['percent_steem_dollars']) == 0
-
-        # total payout (completed and/or pending)
-        payout = sum([
-            amount(post['total_payout_value']),
-            amount(post['curator_payout_value']),
-            amount(post['pending_payout_value']),
-        ])
-
-        # total promotion cost
-        promoted = amount(post['promoted'])
-
-        # trending scores
-        timestamp = parse_time(post['created']).timestamp()
-        hot_score = score(rshares, timestamp, 10000)
-        trend_score = score(rshares, timestamp, 480000)
-
-        if post['body'].find('\x00') > -1:
-            print("bad body: {}".format(post['body']))
-            post['body'] = "INVALID"
-
-        children = post['children']
-        if children > 32767:
-            children = 32767
-
+        # update unconditionally
+        payout = post_payout(post)
         stats = post_stats(post)
-        body = post['body']
-
-        # empty/deprecated fields
-        useless = [
-            'body_length', 'reblogged_by', 'replies', 'children_abs_rshares',
-            'total_pending_payout_value', 'author_rewards', 'reward_weight',
-            'total_vote_weight', 'vote_rshares', 'abs_rshares',
-            'max_cashout_time']
-        for key in useless:
-            del post[key]
-
-        # we've already pulled these fields out
-        del post['active_votes']
-        del post['body']
-        del post['json_metadata']
-
-        values = collections.OrderedDict([
-            ('post_id', '%d' % pid),
-            ('author', "%s" % post['author']),
-            ('permlink', "%s" % post['permlink']),
-            ('category', "%s" % post['category']),
-            ('depth', "%d" % post['depth']),
-            ('children', "%d" % children),
-
-            ('title', "%s" % post['title']),
-            ('preview', "%s" % body[0:1024]),
-            ('body', "%s" % body),
-            ('img_url', "%s" % thumb_url),
-            ('payout', "%f" % payout),
-            ('promoted', "%f" % promoted),
-            ('payout_at', "%s" % payout_at),
-            ('updated_at', "%s" % post['last_update']),
-            ('created_at', "%s" % post['created']),
-            ('rshares', "%d" % rshares),
-            ('votes', "%s" % csvotes),
-            ('json', "%s" % json.dumps(md)),
-            ('is_nsfw', "%d" % is_nsfw),
-            ('is_paidout', "%d" % is_paidout),
-            ('sc_trend', "%f" % trend_score),
-            ('sc_hot', "%f" % hot_score),
-
+        values.extend([
+            ('payout',      "%f" % payout['payout']),
+            ('promoted',    "%f" % payout['promoted']),
+            ('rshares',     "%d" % payout['rshares']),
+            ('votes',       "%s" % payout['csvotes']),
+            ('sc_trend',    "%f" % payout['sc_trend']),
+            ('sc_hot',      "%f" % payout['sc_hot']),
             ('flag_weight', "%f" % stats['flag_weight']),
             ('total_votes', "%d" % stats['total_votes']),
-            ('up_votes', "%d" % stats['up_votes']),
-            ('is_hidden', "%d" % stats['hide']),
-            ('is_grayed', "%d" % stats['gray']),
-            ('author_rep', "%f" % stats['author_rep']),
-            ('raw_json', "%s" % json.dumps(post)),
-            ('is_declined', "%d" % int(payout_declined)),
-            ('is_full_power', "%d" % int(full_power)),
-        ])
+            ('up_votes',    "%d" % stats['up_votes']),
+            ('is_hidden',   "%d" % stats['hide']),
+            ('is_grayed',   "%d" % stats['gray']),
+            ('author_rep',  "%f" % stats['author_rep'])])
 
-        # Multiple SQL statements are generated for each post
-        sqls = []
-
-        mode = 'insert' if pid > cls.last_id() else 'update'
-        sqls.append((cls._write_sql(values, mode), values))
-
-        # update tag metadata only for top-level posts
-        if not post['parent_author']:
-            sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
-            curr_tags = set(query_col(sql, id=pid))
-
-            to_rem = (curr_tags - tags)
-            if to_rem:
-                sql = "DELETE FROM hive_post_tags WHERE post_id = :id AND tag IN :tags"
-                sqls.append((sql, dict(id=pid, tags=tuple(to_rem))))
-
-            to_add = (tags - curr_tags)
-            if to_add:
-                params = {}
-                vals = []
-                for i, tag in enumerate(to_add):
-                    vals.append("(:id, :t%d)" % i)
-                    params["t%d"%i] = tag
-                sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES %s"
-                sql += " ON CONFLICT DO NOTHING" # (conflicts due to collation)
-                sqls.append((sql % ','.join(vals), {'id': pid, **params}))
-
-        return sqls
+        # build the post insert/update SQL, add tag SQLs
+        return [cls._write_sql(values, mode)] + tag_sqls
 
     @classmethod
-    def _vote_csv_row(cls, vote):
-        return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']),
-                         str(rep_log10(vote['reputation']))))
+    def _tag_sqls(cls, pid, tags):
+        sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
+        curr_tags = set(query_col(sql, id=pid))
+
+        to_rem = (curr_tags - tags)
+        if to_rem:
+            sql = "DELETE FROM hive_post_tags WHERE post_id = :id AND tag IN :tags"
+            yield (sql, dict(id=pid, tags=tuple(to_rem)))
+
+        to_add = (tags - curr_tags)
+        if to_add:
+            params = {}
+            vals = []
+            for i, tag in enumerate(to_add):
+                vals.append("(:id, :t%d)" % i)
+                params["t%d"%i] = tag
+            sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES %s"
+            sql += " ON CONFLICT DO NOTHING" # (conflicts due to collation)
+            yield (sql % ','.join(vals), {'id': pid, **params})
 
     @classmethod
     def _write(cls, values, mode='insert'):
-        return query(cls._write_sql(values, mode), **values)
+        tup = cls._write_sql(values, mode)
+        return query(tup[0], **tup[1])
 
     # sql builder for writing to hive_posts_cache table
     @classmethod
@@ -457,4 +387,4 @@ class CachedPost:
             sql = "UPDATE %s SET %s WHERE %s"
             sql = sql % (_table, update, where)
 
-        return sql
+        return (sql, values)

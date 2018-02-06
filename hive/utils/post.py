@@ -1,8 +1,113 @@
 #pylint: disable=line-too-long
 
 import math
+import json
 
-from hive.utils.normalize import amount, rep_log10
+from funcy.seqs import first
+
+from hive.utils.normalize import amount, rep_log10, safe_img_url, parse_time
+
+
+def post_basic(post):
+    md = {}
+    try:
+        md = json.loads(post['json_metadata'])
+        if not isinstance(md, dict):
+            md = {}
+    except json.decoder.JSONDecodeError:
+        pass
+
+    thumb_url = ''
+    if md and 'image' in md:
+        thumb_url = safe_img_url(first(md['image'])) or ''
+        if thumb_url:
+            md['image'] = [thumb_url]
+        else:
+            del md['image']
+
+    # clean up tags, check if nsfw
+    tags = [post['category']]
+    if md and 'tags' in md and isinstance(md['tags'], list):
+        tags = tags + md['tags']
+    tags = set(list(map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags))[0:5])
+    tags.discard('')
+
+    is_nsfw = 'nsfw' in tags
+
+    body = post['body']
+    if body.find('\x00') > -1:
+        print("bad body: {}".format(body))
+        body = "INVALID"
+
+    # payout date is last_payout if paid, and cashout_time if pending.
+    is_paidout = (post['cashout_time'][0:4] == '1969')
+    payout_at = post['last_payout'] if is_paidout else post['cashout_time']
+
+    payout_declined = False
+    if amount(post['max_accepted_payout']) == 0:
+        payout_declined = True
+    elif len(post['beneficiaries']) == 1:
+        benny = first(post['beneficiaries'])
+        if benny['account'] == 'null' and int(benny['weight']) == 10000:
+            payout_declined = True
+
+    full_power = int(post['percent_steem_dollars']) == 0
+
+    return {
+        'json_metadata': md,
+        'image': thumb_url,
+        'tags': tags,
+        'is_nsfw': is_nsfw,
+        'body': body,
+        'preview': body[0:1024],
+
+        'payout_at': payout_at,
+        'is_paidout': is_paidout,
+        'payout_declined': payout_declined,
+        'full_power': full_power,
+    }
+
+def post_legacy(post):
+    # extra steemd fields to save (some UIs need these, but no index req'd)
+    _legacy = ['id', 'url', 'root_comment', 'root_author', 'root_permlink',
+               'root_title', 'parent_author', 'parent_permlink',
+               'max_accepted_payout', 'percent_steem_dollars',
+               'curator_payout_value', 'allow_replies', 'allow_votes',
+               'allow_curation_rewards', 'beneficiaries']
+    return {k: v for k, v in post.items() if k in _legacy}
+
+def post_payout(post):
+    # total payout (completed and/or pending)
+    payout = sum([
+        amount(post['total_payout_value']),
+        amount(post['curator_payout_value']),
+        amount(post['pending_payout_value']),
+    ])
+
+    # total promotion cost
+    promoted = amount(post['promoted'])
+
+    # get total rshares, and create comma-separated vote data blob
+    rshares = sum(int(v['rshares']) for v in post['active_votes'])
+    csvotes = "\n".join(map(_vote_csv_row, post['active_votes']))
+
+    # trending scores
+    _timestamp = parse_time(post['created']).timestamp()
+    sc_trend = score(rshares, _timestamp, 480000)
+    sc_hot = score(rshares, _timestamp, 10000)
+
+    return {
+        'payout': payout,
+        'promoted': promoted,
+        'rshares': rshares,
+        'csvotes': csvotes,
+        'sc_trend': sc_trend,
+        'sc_hot': sc_hot
+    }
+
+def _vote_csv_row(vote):
+    return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']),
+                     str(rep_log10(vote['reputation']))))
 
 # see: calculate_score - https://github.com/steemit/steem/blob/8cd5f688d75092298bcffaa48a543ed9b01447a6/libraries/plugins/tags/tags_plugin.cpp#L239
 def score(rshares, created_timestamp, timescale=480000):
