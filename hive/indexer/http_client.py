@@ -160,6 +160,9 @@ class HttpClient(object):
             if not result:
                 raise Exception("result entirely blank")
             if 'error' in result:
+                error = result['error']
+                if error['code'] == -32002 and 'api.method' in error['message']:
+                    raise RPCError("missing appbase flag? {}".format(result))
                 raise RPCError("result['error'] -- {}".format(result))
 
             # pylint: disable=no-else-return

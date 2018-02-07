@@ -1,41 +1,68 @@
 import json
 import collections
+import math
 
 from toolz import partition_all
 from hive.db.methods import query, query_all, query_col, query_one
-from hive.db.db_state import DbState
 
 from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
 from hive.indexer.steem_client import get_adapter
 
+LEVELS = ['inserts', 'payouts', 'updates', 'upvotes']
+
 class CachedPost:
 
     # cursor signifying upper bound of cached post span
     _last_id = -1
 
-    # post entries to update (full)
-    _dirty = collections.OrderedDict()
+    _ids = {}
+    _noids = set()
+    _queue = collections.OrderedDict()
 
-    # post entries to update (light)
-    _voted = collections.OrderedDict()
+    @classmethod
+    def _dirty(cls, level, author, permlink, pid=None):
+        assert level in LEVELS, "invalid level {}".format(level)
+        mode = LEVELS.index(level)
+
+        url = author + '/' + permlink
+
+        # add to appropriate queue
+        if url not in cls._queue:
+            cls._queue[url] = mode
+        elif cls._queue[url] > mode:
+            cls._queue[url] = mode
+
+        # add to id map, or register missing
+        if pid:
+            if url not in cls._ids:
+                cls._ids[url] = pid
+            else:
+                assert pid == cls._ids[url], "pid map conflict #78"
+        elif url not in cls._noids:
+            cls._noids.add(url)
+
+    @classmethod
+    def _get_id(cls, url):
+        if url in cls._ids:
+            return cls._ids[url]
+        raise Exception("requested id for %s not in map" % url)
 
     # Called when a post is voted on.
-    # TODO: only update relevant payout fields for this post. #16
     @classmethod
     def vote(cls, author, permlink):
-        cls._dirty_full(author, permlink)
+        cls._dirty('upvotes', author, permlink)
 
     # Called when a post record is created.
     @classmethod
     def insert(cls, author, permlink, pid):
-        cls._dirty_full(author, permlink, pid)
+        cls._dirty('inserts', author, permlink, pid)
 
     # Called when a post's content is edited.
     @classmethod
     def update(cls, author, permlink, pid):
-        cls._dirty_full(author, permlink, pid)
+        cls._dirty('updates', author, permlink, pid)
 
     # In steemd, posts can be 'deleted' or unallocated in certain conditions.
     # This requires foregoing some convenient assumptions, such as:
@@ -47,8 +74,8 @@ class CachedPost:
 
         # if it was queued for a write, remove it
         url = author+'/'+permlink
-        if url in cls._dirty:
-            del cls._dirty[url]
+        if url in cls._queue:
+            del cls._queue[url]
 
     # 'Undeletion' event occurs when hive detects that a previously deleted
     #   author/permlink combination has been reused on a new post. Hive does
@@ -79,72 +106,61 @@ class CachedPost:
             'permlink': permlink},
                    mode='insert')
 
-    @classmethod
-    def _dirty_full(cls, author, permlink, pid=None):
-        url = author + '/' + permlink
-        if url in cls._dirty:
-            if pid:
-                if not cls._dirty[url]:
-                    cls._dirty[url] = pid
-                else:
-                    assert pid == cls._dirty[url], "pid map conflict" #78
-        else:
-            cls._dirty[url] = pid
-
-    @classmethod
-    def _dirty_vote(cls, author, permlink, pid=None):
-        url = author + '/' + permlink
-        if url in cls._voted:
-            if pid and not cls._voted[url]:
-                cls._voted[url] = pid
-        else:
-            cls._voted[url] = pid
-
     # Process all posts which have been marked as dirty.
     @classmethod
-    def flush(cls, trx=False):
-        cls._load_dirty_noids() # load missing ids
-        tuples = cls._dirty.items()
-        last_id = cls.last_id()
+    def flush(cls, level=None, trx=False, update_period=1):
+        cls._load_noids() # load missing ids
 
-        inserts = [(url, pid) for url, pid in tuples if pid > last_id]
-        updates = [(url, pid) for url, pid in tuples if pid <= last_id]
+        if level:
+            return cls._flush(level, trx, update_period)
 
-        if trx or len(tuples) > 1000:
-            print("[PREP] cache %d posts (%d new, %d edits)"
-                  % (len(tuples), len(inserts), len(updates)))
+        counts = {
+            'inserts': cls._flush('inserts', trx, 1),
+            'payouts': cls._flush('payouts', trx, update_period),
+            'updates': cls._flush('updates', trx, update_period),
+            'upvotes': cls._flush('upvotes', trx, update_period)}
 
-        batch = inserts + updates
-        cls._update_batch(batch, trx)
+        return counts
 
-        for url, _ in batch:
-            del cls._dirty[url]
-            if url in cls._voted:
-                del cls._voted[url]
+    @classmethod
+    def _flush(cls, level, trx=False, period=1):
+        mode = LEVELS.index(level)
+        urls = [url for url, _mode in cls._queue.items() if _mode == mode]
+        if not urls:
+            return 0
 
-        #votes = [(url, pid) for url, pid in cls._voted.items() if pid <= cls.last_id()]
-        #cls._update_batch(votes, trx, only_payout=True)
-        #for url, _ in votes:
-        #    del cls._voted[url]
+        # TODO: load content_batch before splitting (!)
 
-        #return (len(inserts), len(updates), len(votes))
-        return len(batch)
+        count = len(urls)
+        if period > 1:
+            count = math.ceil(count / period)
+            urls = urls[0:count]
+
+        if trx or count > 250:
+            print("[PREP] posts_cache: %d %s" % (count, level))
+
+        tuples = [(url, cls._get_id(url)) for url in urls]
+        only_payout = level == 'upvotes'
+        cls._update_batch(tuples, trx, only_payout)
+
+        for url in urls:
+            del cls._queue[url]
+
+        return count
+
 
     # When posts are marked dirty, specifying the id is optional because
     # a successive call might be able to provide it "for free". Before
     # flushing changes this method should be called to fill in any gaps.
     @classmethod
-    def _load_dirty_noids(cls):
+    def _load_noids(cls):
         from hive.indexer.posts import Posts
-        noids = [k for k, v in cls._dirty.items() if not v]
+        noids = cls._noids - set(cls._ids.keys())
         tuples = [(Posts.get_id(*url.split('/')), url) for url in noids]
         for pid, url in tuples:
-            if pid:
-                cls._dirty[url] = pid
-            else:
-                print("WARNING: missing id for %s" % url)
-                del cls._dirty[url] # extremely rare but important. add assert?
-
+            assert pid, "WARNING: missing id for %s" % url
+            cls._ids[url] = pid
+        cls._noids = set()
         return len(tuples)
 
     # Select all posts which should have been paid out before `date` yet do not
@@ -173,7 +189,7 @@ class CachedPost:
         authors = set()
         for (pid, author, permlink) in paidout:
             authors.add(author)
-            cls._dirty_full(author, permlink, pid)
+            cls._dirty('payouts', author, permlink, pid)
         Accounts.dirty(authors) # force-update accounts on payout
 
         if len(paidout) > 200:
@@ -191,7 +207,6 @@ class CachedPost:
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
-    # TODO: with cached_post.insert, we may not need to call this every block anymore
     def dirty_missing(cls, limit=1_000_000):
         from hive.indexer.posts import Posts
 
@@ -203,15 +218,7 @@ class CachedPost:
         if gap:
             missing = cls._select_missing_tuples(last_cached_id, limit)
             for pid, author, permlink in missing:
-                # temporary sanity check -- if we're loading ids ON insert,
-                # they should always be available at this point during listen.
-                if DbState.is_listen_mode():
-                    url = author+'/'+permlink
-                    if url not in cls._dirty:
-                        print("url not registered at all: %s" % url)
-                    elif not cls._dirty[url]:
-                        print("url registered but no id: %s" % url)
-                cls._dirty_full(author, permlink, pid)
+                cls._dirty('inserts', author, permlink, pid)
 
         return gap
 
@@ -227,7 +234,6 @@ class CachedPost:
     # there's any missing cache entries.
     @classmethod
     def _update_batch(cls, tuples, trx=True, only_payout=False):
-        from hive.indexer.posts import Posts
         steemd = get_adapter()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
         tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
@@ -241,10 +247,8 @@ class CachedPost:
             posts = steemd.get_content_batch(post_args)
             for pid, post in zip(post_ids, posts):
                 if post['author']:
-                    # -- temp: paranoid enforcement for #78
-                    pid2 = Posts.get_id(post['author'], post['permlink'])
-                    assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
-                    # --
+                    pid2 = cls._get_id(post['author']+'/'+post['permlink'])
+                    assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2) #78
                     buffer.append(cls._sql(pid, post, only_payout=only_payout))
                 else:
                     print("WARNING: ignoring deleted post {}".format(pid))
@@ -316,13 +320,13 @@ class CachedPost:
                     ('author',     "%s" % post['author']),
                     ('permlink',   "%s" % post['permlink']),
                     ('category',   "%s" % post['category']),
-                    ('depth',      "%d" % post['depth']),
-                    ('created_at', "%s" % post['created']),
-                    ('payout_at',  "%s" % basic['payout_at'])])
+                    ('depth',      "%d" % post['depth'])])
 
-            # editable post fields
+            # editable post fields *=theoretically.. except placeholder
             legacy = post_legacy(post)
             values.extend([
+                ('created_at',    "%s" % post['created']),    # immutable*
+                ('payout_at',     "%s" % basic['payout_at']), # immutable*
                 ('updated_at',    "%s" % post['last_update']),
                 ('title',         "%s" % post['title']),
                 ('preview',       "%s" % basic['preview']),
