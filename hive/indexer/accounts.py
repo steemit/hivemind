@@ -71,6 +71,8 @@ class Accounts:
     @classmethod
     def flush(cls, trx=False, period=1):
         assert period >= 1
+        if not cls._dirty:
+            return 0
         count = len(cls._dirty)
         if period > 1:
             count = math.ceil(count / period)

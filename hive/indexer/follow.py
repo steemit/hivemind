@@ -1,3 +1,5 @@
+import time
+
 from funcy.seqs import first
 from hive.db.methods import query, query_one
 from hive.db.db_state import DbState
@@ -95,14 +97,18 @@ class Follow:
             for name, delta in deltas.items():
                 sql = "UPDATE hive_accounts SET %s = %s + :mag WHERE id = :id"
                 sqls.append((sql % (col, col), dict(mag=delta, id=name)))
+        if not sqls:
+            return 0
 
         if trx:
-            print("[SYNC] flush %d follows updates" % len(sqls))
+            start = time.perf_counter()
             query("START TRANSACTION")
         for (sql, params) in sqls:
             query(sql, **params)
         if trx:
             query('COMMIT')
+            total = (time.perf_counter() - start)
+            print("[SYNC] flushed %d follow deltas in %ds" % (len(sqls), total))
 
         cls._delta = {FOLLOWERS: {}, FOLLOWING: {}}
         return len(sqls)
