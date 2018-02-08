@@ -1,4 +1,5 @@
 from hive.db.methods import query_row, query
+from hive.indexer.steem_client import get_adapter
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -13,6 +14,13 @@ class Blocks:
         sql = """SELECT num, created_at date, hash
                  FROM hive_blocks ORDER BY num DESC LIMIT 1"""
         return query_row(sql)
+
+    # Fetch specific block
+    @classmethod
+    def get(cls, num):
+        sql = """SELECT num, created_at date, hash
+                 FROM hive_blocks WHERE num = :num LIMIT 1"""
+        return query_row(sql, num=num)
 
     # Process a single block. always wrap in a transaction!
     @classmethod
@@ -64,6 +72,33 @@ class Blocks:
         query("COMMIT")
 
     @classmethod
+    def verify_head(cls):
+        hive_block = cls.last()
+        if not hive_block:
+            return
+        hive_head = hive_block['num']
+
+        cursor = hive_head
+        steemd = get_adapter()
+        while True:
+            assert hive_head - cursor < 25, "fork too deep"
+            steem_hash = steemd.get_block(cursor)['block_id']
+            match = hive_block['hash'] == steem_hash
+            print("[FORK] block %d: %s vs %s --- %s"
+                  % (hive_block['num'], hive_block['hash'],
+                     steem_hash, 'ok' if match else 'invalid'))
+            if match:
+                break
+            cursor -= 1
+            hive_block = cls.get(cursor)
+
+        print("[FORK] resolving.. pop blocks %d - %d" % (cursor + 1, hive_head))
+        print("not implemented")
+        exit()
+
+        raise Exception("Not able to resolve fork after %d" % lbound)
+
+    @classmethod
     def _push(cls, block):
         num = int(block['block_id'][:8], base=16)
         txs = block['transactions']
@@ -79,4 +114,21 @@ class Blocks:
 
     @classmethod
     def _pop(cls):
-        pass
+        block = cls.last()
+        print("[HIVE] popping block: {}".format(block))
+        raise Exception("pop_blocks untested")
+        for block in blocks:
+            # delete records from:
+            # - hive_feed_cache
+            # - hive_posts
+            # - hive_post_tags?
+            # - hive_posts_cache
+            # - hive_accounts
+            # - hive_reblogs
+            # - hive_communities
+            # - hive_members
+            # - hive_flags
+            # - hive_modlog
+            # is it safer to not delete and overwrite?
+            sql = "DELETE FROM hive_blocks WHERE num = %d" % block['num']
+            query(sql)

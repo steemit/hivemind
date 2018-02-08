@@ -251,6 +251,9 @@ def run():
         DbState.finish_initial_sync()
 
     else:
+        # recover from fork
+        Blocks.verify_head()
+
         # perform cleanup in case process did not exit cleanly
         cache_missing_posts()
 
