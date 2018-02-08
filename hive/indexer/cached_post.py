@@ -108,46 +108,36 @@ class CachedPost:
 
     # Process all posts which have been marked as dirty.
     @classmethod
-    def flush(cls, level=None, trx=False, update_period=1):
+    def flush(cls, trx=False, period=1):
         cls._load_noids() # load missing ids
+        assert period == 1, "period not tested"
 
-        if level:
-            return cls._flush(level, trx, update_period)
+        counts = {}
+        tuples = []
+        for level in LEVELS:
+            tups = cls._get_tuples_for_level(level, period)
+            counts[level] = len(tups)
+            tuples.extend(tups)
 
-        counts = {
-            'inserts': cls._flush('inserts', trx, 1),
-            'payouts': cls._flush('payouts', trx, update_period),
-            'updates': cls._flush('updates', trx, update_period),
-            'upvotes': cls._flush('upvotes', trx, update_period)}
+        if trx or len(tuples) > 250:
+            print("[PREP] posts_cache processing %s" % (repr(counts)))
+
+        cls._update_batch(tuples, trx)
+        for url, _, _ in tuples:
+            del cls._queue[url]
 
         return counts
 
+    # Given a specific flush level (inserts, payouts, updates, upvotes),
+    # return a list of tuples to be passed to _update_batch, in the form
+    # of: [(url, id, level)*]
     @classmethod
-    def _flush(cls, level, trx=False, period=1):
+    def _get_tuples_for_level(cls, level, fraction=1):
         mode = LEVELS.index(level)
-        urls = [url for url, _mode in cls._queue.items() if _mode == mode]
-        if not urls:
-            return 0
-
-        # TODO: load content_batch before splitting (!)
-
-        count = len(urls)
-        if period > 1:
-            count = math.ceil(count / period)
-            urls = urls[0:count]
-
-        if trx or count > 250:
-            print("[PREP] posts_cache: %d %s" % (count, level))
-
-        tuples = [(url, cls._get_id(url)) for url in urls]
-        only_payout = level == 'upvotes'
-        cls._update_batch(tuples, trx, only_payout)
-
-        for url in urls:
-            del cls._queue[url]
-
-        return count
-
+        urls = [url for url, i in cls._queue.items() if i == mode]
+        if fraction > 1 and level != 'inserts': # inserts must be full flush
+            urls = urls[0:math.ceil(len(urls) / fraction)]
+        return [(url, cls._get_id(url), level) for url in urls]
 
     # When posts are marked dirty, specifying the id is optional because
     # a successive call might be able to provide it "for free". Before
@@ -233,7 +223,7 @@ class CachedPost:
     # important to advance _last_id, because this cursor is used to deduce if
     # there's any missing cache entries.
     @classmethod
-    def _update_batch(cls, tuples, trx=True, only_payout=False):
+    def _update_batch(cls, tuples, trx=True):
         steemd = get_adapter()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
         tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
@@ -242,14 +232,13 @@ class CachedPost:
             timer.batch_start()
             buffer = []
 
-            post_ids = [tup[1] for tup in tups]
             post_args = [tup[0].split('/') for tup in tups]
             posts = steemd.get_content_batch(post_args)
-            for pid, post in zip(post_ids, posts):
+            post_ids = [tup[1] for tup in tups]
+            post_levels = [tup[2] for tup in tups]
+            for pid, post, level in zip(post_ids, posts, post_levels):
                 if post['author']:
-                    pid2 = cls._get_id(post['author']+'/'+post['permlink'])
-                    assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2) #78
-                    buffer.append(cls._sql(pid, post, only_payout=only_payout))
+                    buffer.append(cls._sql(pid, post, level=level))
                 else:
                     print("WARNING: ignoring deleted post {}".format(pid))
                 cls._bump_last_id(pid)
@@ -301,12 +290,25 @@ class CachedPost:
             query("COMMIT")
 
     @classmethod
-    def _sql(cls, pid, post, only_payout=False):
+    def _sql(cls, pid, post, level=None):
         #pylint: disable=bad-whitespace
         assert post['author'], "post {} is blank".format(pid)
 
+        # last-minute sanity check to ensure `pid` is correct #78
+        pid2 = cls._get_id(post['author']+'/'+post['permlink'])
+        assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
+
         # modes: (1) insert, (2) update, (3) update[only_payout]
         mode = 'insert' if pid > cls.last_id() else 'update'
+        only_payout = level == 'upvotes'
+
+        # TODO: the assert below was tripped once, unclear how it's possible.
+        if only_payout and mode == 'insert':
+            print("WARNING: only_payout=True and mode=insert {}, {}, {}".format(pid, level, post))
+            only_payout = False # continue as full insert
+
+        # this is a very invalid state. attempting to update payout,
+        # yet the record does not exist. should not be possible.
         assert not (only_payout and mode == 'insert'), "invalid state"
 
         values = [('post_id', pid)]
