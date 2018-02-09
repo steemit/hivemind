@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # -------------
 
 def sync_from_checkpoints():
-    last_block = Blocks.last()['num']
+    last_block = Blocks.head_num()
 
     _fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
     mydir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
@@ -56,14 +56,14 @@ def sync_from_steemd():
     is_initial_sync = DbState.is_initial_sync()
     steemd = get_adapter()
 
-    lbound = Blocks.last()['num'] + 1
-    ubound = steemd.last_irreversible_block_num()
-
-    if ubound > lbound:
-        print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
+    lbound = Blocks.head_num() + 1
+    ubound = steemd.last_irreversible()
+    if ubound <= lbound:
+        return
 
     _abort = False
     try:
+        print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
         timer = Timer(ubound - lbound, entity='block', laps=['rps', 'wps'])
         while lbound < ubound:
             to = min(lbound + 1000, ubound)
@@ -262,19 +262,17 @@ def run():
         sync_from_steemd()
 
         # take care of payout backlog
-        CachedPost.dirty_paidouts(Blocks.last()['date'])
+        CachedPost.dirty_paidouts(Blocks.head_date())
         CachedPost.flush(trx=True)
 
         # start listening
-        DbState.start_listen()
         listen_steemd()
-        DbState.stop_listen()
 
 
 def head_state(*args):
     _ = args  # JSONRPC injects 4 arguments here
     steemd_head = get_adapter().head_block()
-    hive_head = Blocks.last()['num']
+    hive_head = Blocks.head_num()
     diff = steemd_head - hive_head
     return dict(steemd=steemd_head, hive=hive_head, diff=diff)
 

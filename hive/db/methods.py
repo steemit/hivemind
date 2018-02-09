@@ -73,6 +73,10 @@ logger = logging.getLogger(__name__)
 
 _trx_active = False
 
+def is_trx_active():
+    global _trx_active
+    return _trx_active
+
 @QueryStats()
 def __query(sql, **kwargs):
     global _trx_active
