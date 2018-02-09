@@ -150,7 +150,7 @@ class SteemClient:
     def head_block(self):
         return self._gdgp()['head_block_number']
 
-    def last_irreversible_block_num(self):
+    def last_irreversible(self):
         return self._gdgp()['last_irreversible_block_num']
 
     def gdgp_extended(self):
