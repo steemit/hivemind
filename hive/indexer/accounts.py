@@ -52,6 +52,8 @@ class Accounts:
 
     @classmethod
     def dirty(cls, accounts):
+        if not accounts:
+            return 0
         if isinstance(accounts, str):
             accounts = [accounts]
         accounts = set(accounts) - set(cls._dirty)

@@ -13,6 +13,9 @@ from hive.indexer.steem_client import get_adapter
 # levels of post dirtiness, in order of decreasing priority
 LEVELS = ['insert', 'payout', 'update', 'upvote']
 
+def _keyify(items):
+    return dict(map(lambda x: ("val_%d" % x[0], x[1]), enumerate(items)))
+
 class CachedPost:
 
     # cursor signifying upper bound of cached post span
@@ -131,6 +134,10 @@ class CachedPost:
         cls._update_batch(tuples, trx)
         for url, _, _ in tuples:
             del cls._queue[url]
+
+        # TODO: ideal place to update reps of authors whos posts were modified.
+        # potentially could be triggered in vote(). remove the Accounts.dirty
+        # from hive.indexer.blocks which follows CachedPost.vote.
 
         return counts
 
@@ -387,11 +394,8 @@ class CachedPost:
 
         to_add = (tags - curr_tags)
         if to_add:
-            params = {}
-            vals = []
-            for i, tag in enumerate(to_add):
-                vals.append("(:id, :t%d)" % i)
-                params["t%d"%i] = tag
+            params = _keyify(to_add)
+            vals = ["(:id, :%s)" % key for key in params.keys()]
             sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES %s"
             sql += " ON CONFLICT DO NOTHING" # (conflicts due to collation)
             yield (sql % ','.join(vals), {'id': pid, **params})
