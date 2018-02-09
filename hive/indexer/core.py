@@ -182,21 +182,21 @@ def listen_steemd(trail_blocks=0, max_gap=50):
         block = queue.pop(0)
 
         start_time = time.perf_counter()
+
         query("START TRANSACTION")
         num = Blocks.process(block)
         follows = Follow.flush(trx=False)
         accts = Accounts.flush(trx=False, period=8)
         CachedPost.dirty_paidouts(block['timestamp'])
         cnt = CachedPost.flush(trx=False)
-
         query("COMMIT")
-        secs = time.perf_counter() - start_time
 
+        ms = (time.perf_counter() - start_time) * 1000
         print("[LIVE] Got block %d at %s --% 4d txs,% 3d posts,% 3d edits,"
               "% 3d payouts,% 3d votes,% 3d accounts,% 3d follows --% 5dms%s"
               % (num, block['timestamp'], len(block['transactions']),
-                 cnt['inserts'], cnt['updates'], cnt['payouts'], cnt['upvotes'],
-                 accts, follows, int(secs * 1e3), ' SLOW' if secs > 1 else ''))
+                 cnt['insert'], cnt['update'], cnt['payout'], cnt['upvote'],
+                 accts, follows, int(ms), ' SLOW' if ms > 1000 else ''))
 
         # once per hour, update accounts
         if num % 1200 == 0:
@@ -212,7 +212,7 @@ def listen_steemd(trail_blocks=0, max_gap=50):
 def cache_missing_posts():
     gap = CachedPost.dirty_missing()
     print("[INIT] {} missing post cache entries".format(gap))
-    while CachedPost.flush(trx=True)['inserts']:
+    while CachedPost.flush(trx=True)['insert']:
         CachedPost.dirty_missing()
 
 # refetch dynamic_global_properties, feed price, etc

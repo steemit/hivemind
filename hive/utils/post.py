@@ -31,9 +31,9 @@ def post_basic(post):
         tags = tags + md['tags']
     tags = set(list(map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags))[0:5])
     tags.discard('')
-
     is_nsfw = 'nsfw' in tags
 
+    # TODO: be strict with nulls, or let them pass?
     body = post['body']
     if body.find('\x00') > -1:
         print("bad body: {}".format(body))
@@ -43,15 +43,17 @@ def post_basic(post):
     is_paidout = (post['cashout_time'][0:4] == '1969')
     payout_at = post['last_payout'] if is_paidout else post['cashout_time']
 
-    payout_declined = False
+    # payout is declined if max_payout = 0, or if 100% is burned
+    is_payout_declined = False
     if amount(post['max_accepted_payout']) == 0:
-        payout_declined = True
+        is_payout_declined = True
     elif len(post['beneficiaries']) == 1:
         benny = first(post['beneficiaries'])
         if benny['account'] == 'null' and int(benny['weight']) == 10000:
-            payout_declined = True
+            is_payout_declined = True
 
-    full_power = int(post['percent_steem_dollars']) == 0
+    # payout entirely in SP
+    is_full_power = int(post['percent_steem_dollars']) == 0
 
     return {
         'json_metadata': md,
@@ -63,8 +65,8 @@ def post_basic(post):
 
         'payout_at': payout_at,
         'is_paidout': is_paidout,
-        'payout_declined': payout_declined,
-        'full_power': full_power,
+        'is_payout_declined': is_payout_declined,
+        'is_full_power': is_full_power,
     }
 
 def post_legacy(post):
@@ -106,8 +108,8 @@ def post_payout(post):
     }
 
 def _vote_csv_row(vote):
-    return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']),
-                     str(rep_log10(vote['reputation']))))
+    rep = rep_log10(vote['reputation'])
+    return "%s,%s,%s,%s" % (vote['voter'], vote['rshares'], vote['percent'], rep)
 
 # see: calculate_score - https://github.com/steemit/steem/blob/8cd5f688d75092298bcffaa48a543ed9b01447a6/libraries/plugins/tags/tags_plugin.cpp#L239
 def score(rshares, created_timestamp, timescale=480000):

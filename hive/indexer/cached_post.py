@@ -10,37 +10,43 @@ from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
 from hive.indexer.steem_client import get_adapter
 
-LEVELS = ['inserts', 'payouts', 'updates', 'upvotes']
+# levels of post dirtiness, in order of decreasing priority
+LEVELS = ['insert', 'payout', 'update', 'upvote']
 
 class CachedPost:
 
     # cursor signifying upper bound of cached post span
     _last_id = -1
 
+    # cached id map
     _ids = {}
+
+    # urls which are missing from id map
     _noids = set()
+
+    # dirty posts; {key: dirty_level}
     _queue = collections.OrderedDict()
 
+    # Mark a post as dirty.
     @classmethod
     def _dirty(cls, level, author, permlink, pid=None):
         assert level in LEVELS, "invalid level {}".format(level)
         mode = LEVELS.index(level)
-
         url = author + '/' + permlink
 
-        # add to appropriate queue
+        # add to appropriate queue.
         if url not in cls._queue:
             cls._queue[url] = mode
+        # upgrade priority if needed
         elif cls._queue[url] > mode:
             cls._queue[url] = mode
 
         # add to id map, or register missing
-        if pid:
-            if url not in cls._ids:
-                cls._ids[url] = pid
-            else:
-                assert pid == cls._ids[url], "pid map conflict #78"
-        elif url not in cls._noids:
+        if pid and url in cls._ids:
+            assert pid == cls._ids[url], "pid map conflict #78"
+        elif pid:
+            cls._ids[url] = pid
+        else:
             cls._noids.add(url)
 
     @classmethod
@@ -52,17 +58,17 @@ class CachedPost:
     # Called when a post is voted on.
     @classmethod
     def vote(cls, author, permlink):
-        cls._dirty('upvotes', author, permlink)
+        cls._dirty('upvote', author, permlink)
 
     # Called when a post record is created.
     @classmethod
     def insert(cls, author, permlink, pid):
-        cls._dirty('inserts', author, permlink, pid)
+        cls._dirty('insert', author, permlink, pid)
 
     # Called when a post's content is edited.
     @classmethod
     def update(cls, author, permlink, pid):
-        cls._dirty('updates', author, permlink, pid)
+        cls._dirty('update', author, permlink, pid)
 
     # In steemd, posts can be 'deleted' or unallocated in certain conditions.
     # This requires foregoing some convenient assumptions, such as:
@@ -128,14 +134,14 @@ class CachedPost:
 
         return counts
 
-    # Given a specific flush level (inserts, payouts, updates, upvotes),
+    # Given a specific flush level (insert, payout, update, upvote),
     # return a list of tuples to be passed to _update_batch, in the form
     # of: [(url, id, level)*]
     @classmethod
     def _get_tuples_for_level(cls, level, fraction=1):
         mode = LEVELS.index(level)
         urls = [url for url, i in cls._queue.items() if i == mode]
-        if fraction > 1 and level != 'inserts': # inserts must be full flush
+        if fraction > 1 and level != 'insert': # inserts must be full flush
             urls = urls[0:math.ceil(len(urls) / fraction)]
         return [(url, cls._get_id(url), level) for url in urls]
 
@@ -179,7 +185,7 @@ class CachedPost:
         authors = set()
         for (pid, author, permlink) in paidout:
             authors.add(author)
-            cls._dirty('payouts', author, permlink, pid)
+            cls._dirty('payout', author, permlink, pid)
         Accounts.dirty(authors) # force-update accounts on payout
 
         if len(paidout) > 200:
@@ -208,7 +214,7 @@ class CachedPost:
         if gap:
             missing = cls._select_missing_tuples(last_cached_id, limit)
             for pid, author, permlink in missing:
-                cls._dirty('inserts', author, permlink, pid)
+                cls._dirty('insert', author, permlink, pid)
 
         return gap
 
@@ -298,52 +304,54 @@ class CachedPost:
         pid2 = cls._get_id(post['author']+'/'+post['permlink'])
         assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
 
-        # modes: (1) insert, (2) update, (3) update[only_payout]
-        mode = 'insert' if pid > cls.last_id() else 'update'
-        only_payout = level == 'upvotes'
+        # inserts always sequential. if pid > last_id, this operation
+        # is guaranteed to have to be an insert.
+        must_be_insert = pid > cls.last_id()
 
-        # TODO: the assert below was tripped once, unclear how it's possible.
-        if only_payout and mode == 'insert':
-            print("WARNING: only_payout=True and mode=insert {}, {}, {}".format(pid, level, post))
-            only_payout = False # continue as full insert
+        # TODO: unclear how it's possible, but as an assert it was tripped once.
+        if must_be_insert and level != 'insert':
+            # attempted to update, yet the record does not exist.
+            # either the `level` arg is wrong, or `last_id` is broken.
+            print("WARNING: must_be_insert with level %s! #%d vs %d, %s"
+                  % (level, pid, cls.last_id(), repr(post)))
+            level = 'insert'
 
-        # this is a very invalid state. attempting to update payout,
-        # yet the record does not exist. should not be possible.
-        assert not (only_payout and mode == 'insert'), "invalid state"
+        # invalid state: attempting to update, yet post does not exist.
+        #assert not (must_be_insert and action != 'insert'), "invalid state"
 
-        values = [('post_id', pid)]
+        # start building the queries
         tag_sqls = []
+        values = [('post_id', pid)]
 
-        if not only_payout:
-            basic = post_basic(post)
-            if mode == 'insert':
-                # immutable; write once.
-                values.extend([
-                    ('author',     "%s" % post['author']),
-                    ('permlink',   "%s" % post['permlink']),
-                    ('category',   "%s" % post['category']),
-                    ('depth',      "%d" % post['depth'])])
-
-            # editable post fields *=theoretically.. except placeholder
-            legacy = post_legacy(post)
+        # immutable; write only once
+        if level == 'insert':
             values.extend([
-                ('created_at',    "%s" % post['created']),    # immutable*
-                ('payout_at',     "%s" % basic['payout_at']), # immutable*
-                ('updated_at',    "%s" % post['last_update']),
-                ('title',         "%s" % post['title']),
-                ('preview',       "%s" % basic['preview']),
-                ('body',          "%s" % basic['body']),
-                ('img_url',       "%s" % basic['image']),
-                ('is_nsfw',       "%d" % basic['is_nsfw']),
-                ('is_declined',   "%d" % basic['payout_declined']),
-                ('is_full_power', "%d" % basic['full_power']),
-                ('is_paidout',    "%d" % basic['is_paidout']),
-                ('json',          "%s" % json.dumps(basic['json_metadata'])),
-                ('raw_json',      "%s" % json.dumps(legacy)),
-                ('children',      "%d" % min(post['children'], 32767))]) #FIXME
+                ('author',   post['author']),
+                ('permlink', post['permlink']),
+                ('category', post['category']),
+                ('depth',    post['depth'])])
 
-            # update tags for root posts
-            if not post['parent_author']:
+        # always write, unless simple payout update
+        if level in ['payout', 'update']:
+            basic = post_basic(post)
+            values.extend([
+                ('created_at',    post['created']),    # immutable*
+                ('updated_at',    post['last_update']),
+                ('title',         post['title']),
+                ('payout_at',     basic['payout_at']), # immutable*
+                ('preview',       basic['preview']),
+                ('body',          basic['body']),
+                ('img_url',       basic['image']),
+                ('is_nsfw',       basic['is_nsfw']),
+                ('is_declined',   basic['is_payout_declined']),
+                ('is_full_power', basic['is_full_power']),
+                ('is_paidout',    basic['is_paidout']),
+                ('json',          json.dumps(basic['json_metadata'])),
+                ('raw_json',      json.dumps(post_legacy(post))),
+                ('children',      min(post['children'], 32767))])
+
+            # update tags if root post
+            if not post['depth']:
                 tag_sqls.extend(cls._tag_sqls(pid, basic['tags']))
 
         # update unconditionally
@@ -364,6 +372,7 @@ class CachedPost:
             ('author_rep',  "%f" % stats['author_rep'])])
 
         # build the post insert/update SQL, add tag SQLs
+        mode = 'insert' if level == 'insert' else 'update'
         return [cls._write_sql(values, mode)] + tag_sqls
 
     @classmethod
