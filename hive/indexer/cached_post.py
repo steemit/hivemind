@@ -104,16 +104,20 @@ class CachedPost:
     #  - create a consistent cache queue table or dirty flag col
     @classmethod
     def undelete(cls, post_id, author, permlink):
-        # ignore unless cache spans this id. forward sweep will pick it up.
+        # do not force-write unless cache spans this id.
         if post_id > cls.last_id():
+            cls.insert(author, permlink, post_id)
             return
 
-        # create dummy row to ensure cache is aware
+        # force-create dummy row to ensure cache is aware. only needed when
+        # cache already spans this id, in case in-mem buffer is lost. default
+        # value for payout_at ensures that it will get picked up for update.
         cls._write({
             'post_id': post_id,
             'author': author,
             'permlink': permlink},
                    mode='insert')
+        cls.update(author, permlink, post_id)
 
     # Process all posts which have been marked as dirty.
     @classmethod
@@ -312,19 +316,10 @@ class CachedPost:
         assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
 
         # inserts always sequential. if pid > last_id, this operation
-        # is guaranteed to have to be an insert.
-        must_be_insert = pid > cls.last_id()
-
-        # TODO: unclear how it's possible, but as an assert it was tripped once.
-        if must_be_insert and level != 'insert':
-            # attempted to update, yet the record does not exist.
-            # either the `level` arg is wrong, or `last_id` is broken.
-            print("WARNING: must_be_insert with level %s! #%d vs %d, %s"
-                  % (level, pid, cls.last_id(), repr(post)))
-            level = 'insert'
-
-        # invalid state: attempting to update, yet post does not exist.
-        #assert not (must_be_insert and action != 'insert'), "invalid state"
+        # *must* be an insert; so `level` must not be ay form of update.
+        if pid > cls.last_id() and level != 'insert':
+            raise Exception("WARNING: new pid, but level=%s. #%d vs %d, %s"
+                            % (level, pid, cls.last_id(), repr(post)))
 
         # start building the queries
         tag_sqls = []
