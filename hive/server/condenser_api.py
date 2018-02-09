@@ -549,6 +549,7 @@ def _condenser_post_object(row):
     post['children'] = row['children']
     post['net_rshares'] = row['rshares']
 
+    post['last_payout'] = _json_date(row['payout_at'] if paid else None)
     post['cashout_time'] = _json_date(None if paid else row['payout_at'])
     post['total_payout_value'] = _amount(row['payout'] if paid else 0)
     post['curator_payout_value'] = _amount(0)
@@ -575,13 +576,13 @@ def _condenser_post_object(row):
     post['url'] = raw_json['url']
 
     # not used by condenser, but may be useful
-    #post['net_votes'] = len(post['active_votes']) - row['up_votes'] #raw_json['net_votes']
+    #post['net_votes'] = post['total_votes'] - row['up_votes']
     #post['allow_replies'] = raw_json['allow_replies']
     #post['allow_votes'] = raw_json['allow_votes']
     #post['allow_curation_rewards'] = raw_json['allow_curation_rewards']
-    #post['beneficiaries'] = raw_json['benificiaries']
-    #post['curator_payout_value'] = raw_json['curator_payout_value']
-    #post['total_payout_value'] = post['total_payout_value'] - post['curator_payout_value']
+    #post['beneficiaries'] = raw_json['beneficiaries']
+    #post['curator_payout_value'] = raw_json['curator_payout_value'] if paid else _amount(0)
+    #post['total_payout_value'] = _amount(row['payout'] - float(raw_json['curator_payout_value'].split(' ')[0])) if paid else _amount(0)
 
     return post
 

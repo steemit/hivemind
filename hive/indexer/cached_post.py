@@ -1,40 +1,77 @@
 import json
-import math
 import collections
+import math
 
 from toolz import partition_all
-from funcy.seqs import first
 from hive.db.methods import query, query_all, query_col, query_one
-from hive.db.db_state import DbState
 
-from hive.indexer.normalize import amount, parse_time, rep_log10, safe_img_url
-from hive.indexer.timer import Timer
+from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
+from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
 from hive.indexer.steem_client import get_adapter
+
+# levels of post dirtiness, in order of decreasing priority
+LEVELS = ['insert', 'payout', 'update', 'upvote']
+
+def _keyify(items):
+    return dict(map(lambda x: ("val_%d" % x[0], x[1]), enumerate(items)))
 
 class CachedPost:
 
     # cursor signifying upper bound of cached post span
     _last_id = -1
 
-    # cache entries to update
-    _dirty = collections.OrderedDict()
+    # cached id map
+    _ids = {}
+
+    # urls which are missing from id map
+    _noids = set()
+
+    # dirty posts; {key: dirty_level}
+    _queue = collections.OrderedDict()
+
+    # Mark a post as dirty.
+    @classmethod
+    def _dirty(cls, level, author, permlink, pid=None):
+        assert level in LEVELS, "invalid level {}".format(level)
+        mode = LEVELS.index(level)
+        url = author + '/' + permlink
+
+        # add to appropriate queue.
+        if url not in cls._queue:
+            cls._queue[url] = mode
+        # upgrade priority if needed
+        elif cls._queue[url] > mode:
+            cls._queue[url] = mode
+
+        # add to id map, or register missing
+        if pid and url in cls._ids:
+            assert pid == cls._ids[url], "pid map conflict #78"
+        elif pid:
+            cls._ids[url] = pid
+        else:
+            cls._noids.add(url)
+
+    @classmethod
+    def _get_id(cls, url):
+        if url in cls._ids:
+            return cls._ids[url]
+        raise Exception("requested id for %s not in map" % url)
 
     # Called when a post is voted on.
-    # TODO: only update relevant payout fields for this post. #16
     @classmethod
     def vote(cls, author, permlink):
-        cls._dirty_full(author, permlink)
+        cls._dirty('upvote', author, permlink)
 
     # Called when a post record is created.
     @classmethod
     def insert(cls, author, permlink, pid):
-        cls._dirty_full(author, permlink, pid)
+        cls._dirty('insert', author, permlink, pid)
 
     # Called when a post's content is edited.
     @classmethod
     def update(cls, author, permlink, pid):
-        cls._dirty_full(author, permlink, pid)
+        cls._dirty('update', author, permlink, pid)
 
     # In steemd, posts can be 'deleted' or unallocated in certain conditions.
     # This requires foregoing some convenient assumptions, such as:
@@ -46,8 +83,8 @@ class CachedPost:
 
         # if it was queued for a write, remove it
         url = author+'/'+permlink
-        if url in cls._dirty:
-            del cls._dirty[url]
+        if url in cls._queue:
+            del cls._queue[url]
 
     # 'Undeletion' event occurs when hive detects that a previously deleted
     #   author/permlink combination has been reused on a new post. Hive does
@@ -67,64 +104,70 @@ class CachedPost:
     #  - create a consistent cache queue table or dirty flag col
     @classmethod
     def undelete(cls, post_id, author, permlink):
-        # ignore unless cache spans this id. forward sweep will pick it up.
+        # do not force-write unless cache spans this id.
         if post_id > cls.last_id():
+            cls.insert(author, permlink, post_id)
             return
 
-        # create dummy row to ensure cache is aware
+        # force-create dummy row to ensure cache is aware. only needed when
+        # cache already spans this id, in case in-mem buffer is lost. default
+        # value for payout_at ensures that it will get picked up for update.
         cls._write({
             'post_id': post_id,
             'author': author,
             'permlink': permlink},
                    mode='insert')
-
-    @classmethod
-    def _dirty_full(cls, author, permlink, pid=None):
-        url = author + '/' + permlink
-        if url in cls._dirty:
-            if pid:
-                if not cls._dirty[url]:
-                    cls._dirty[url] = pid
-                else:
-                    assert pid == cls._dirty[url], "pid map conflict" #78
-        else:
-            cls._dirty[url] = pid
+        cls.update(author, permlink, post_id)
 
     # Process all posts which have been marked as dirty.
     @classmethod
-    def flush(cls, trx=False):
-        cls._load_dirty_noids() # load missing ids
-        tuples = cls._dirty.items()
-        last_id = cls.last_id()
+    def flush(cls, trx=False, period=1):
+        cls._load_noids() # load missing ids
+        assert period == 1, "period not tested"
 
-        inserts = [(url, pid) for url, pid in tuples if pid <= last_id]
-        updates = [(url, pid) for url, pid in tuples if pid > last_id]
+        counts = {}
+        tuples = []
+        for level in LEVELS:
+            tups = cls._get_tuples_for_level(level, period)
+            counts[level] = len(tups)
+            tuples.extend(tups)
 
-        if trx or len(tuples) > 1000:
-            print("[PREP] cache %d posts (%d new, %d edits)"
-                  % (len(tuples), len(inserts), len(updates)))
+        if trx or len(tuples) > 250:
+            print("[PREP] posts_cache processing %s" % (repr(counts)))
 
-        batch = inserts + updates
-        cls._update_batch(batch, trx)
-        for url, _ in batch:
-            del cls._dirty[url]
-        return len(batch)
+        cls._update_batch(tuples, trx)
+        for url, _, _ in tuples:
+            del cls._queue[url]
+
+        # TODO: ideal place to update reps of authors whos posts were modified.
+        # potentially could be triggered in vote(). remove the Accounts.dirty
+        # from hive.indexer.blocks which follows CachedPost.vote.
+
+        return counts
+
+    # Given a specific flush level (insert, payout, update, upvote),
+    # return a list of tuples to be passed to _update_batch, in the form
+    # of: [(url, id, level)*]
+    @classmethod
+    def _get_tuples_for_level(cls, level, fraction=1):
+        mode = LEVELS.index(level)
+        urls = [url for url, i in cls._queue.items() if i == mode]
+        if fraction > 1 and level != 'insert': # inserts must be full flush
+            urls = urls[0:math.ceil(len(urls) / fraction)]
+        return [(url, cls._get_id(url), level) for url in urls]
 
     # When posts are marked dirty, specifying the id is optional because
     # a successive call might be able to provide it "for free". Before
     # flushing changes this method should be called to fill in any gaps.
     @classmethod
-    def _load_dirty_noids(cls):
+    def _load_noids(cls):
         from hive.indexer.posts import Posts
-        noids = [k for k, v in cls._dirty.items() if not v]
+        noids = cls._noids - set(cls._ids.keys())
         tuples = [(Posts.get_id(*url.split('/')), url) for url in noids]
         for pid, url in tuples:
-            if pid:
-                cls._dirty[url] = pid
-            else:
-                print("WARNING: missing id for %s" % url)
-                del cls._dirty[url] # extremely rare but important. add assert?
-
+            assert pid, "WARNING: missing id for %s" % url
+            cls._ids[url] = pid
+        cls._noids = set()
         return len(tuples)
 
     # Select all posts which should have been paid out before `date` yet do not
@@ -153,7 +196,7 @@ class CachedPost:
         authors = set()
         for (pid, author, permlink) in paidout:
             authors.add(author)
-            cls._dirty_full(author, permlink, pid)
+            cls._dirty('payout', author, permlink, pid)
         Accounts.dirty(authors) # force-update accounts on payout
 
         if len(paidout) > 200:
@@ -171,7 +214,6 @@ class CachedPost:
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
-    # TODO: with cached_post.insert, we may not need to call this every block anymore
     def dirty_missing(cls, limit=1_000_000):
         from hive.indexer.posts import Posts
 
@@ -183,15 +225,7 @@ class CachedPost:
         if gap:
             missing = cls._select_missing_tuples(last_cached_id, limit)
             for pid, author, permlink in missing:
-                # temporary sanity check -- if we're loading ids ON insert,
-                # they should always be available at this point during listen.
-                if DbState.is_listen_mode():
-                    url = author+'/'+permlink
-                    if url not in cls._dirty:
-                        print("url not registered at all: %s" % url)
-                    elif not cls._dirty[url]:
-                        print("url registered but no id: %s" % url)
-                cls._dirty_full(author, permlink, pid)
+                cls._dirty('insert', author, permlink, pid)
 
         return gap
 
@@ -207,7 +241,6 @@ class CachedPost:
     # there's any missing cache entries.
     @classmethod
     def _update_batch(cls, tuples, trx=True):
-        from hive.indexer.posts import Posts
         steemd = get_adapter()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
         tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
@@ -216,16 +249,13 @@ class CachedPost:
             timer.batch_start()
             buffer = []
 
-            post_ids = [tup[1] for tup in tups]
             post_args = [tup[0].split('/') for tup in tups]
             posts = steemd.get_content_batch(post_args)
-            for pid, post in zip(post_ids, posts):
+            post_ids = [tup[1] for tup in tups]
+            post_levels = [tup[2] for tup in tups]
+            for pid, post, level in zip(post_ids, posts, post_levels):
                 if post['author']:
-                    # -- temp: paranoid enforcement for #78
-                    pid2 = Posts.get_id(post['author'], post['permlink'])
-                    assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
-                    # --
-                    buffer.append(cls._sql(pid, post))
+                    buffer.append(cls._sql(pid, post, level=level))
                 else:
                     print("WARNING: ignoring deleted post {}".format(pid))
                 cls._bump_last_id(pid)
@@ -277,229 +307,120 @@ class CachedPost:
             query("COMMIT")
 
     @classmethod
-    def _sql(cls, pid, post):
-        if not post['author']:
-            raise Exception("ERROR: post id {} has no chain state.".format(pid))
+    def _sql(cls, pid, post, level=None):
+        #pylint: disable=bad-whitespace
+        assert post['author'], "post {} is blank".format(pid)
 
-        md = None
-        try:
-            md = json.loads(post['json_metadata'])
-            if not isinstance(md, dict):
-                md = {}
-        except json.decoder.JSONDecodeError:
-            pass
+        # last-minute sanity check to ensure `pid` is correct #78
+        pid2 = cls._get_id(post['author']+'/'+post['permlink'])
+        assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
 
-        thumb_url = ''
-        if md and 'image' in md:
-            thumb_url = safe_img_url(first(md['image'])) or ''
-            md['image'] = [thumb_url]
+        # inserts always sequential. if pid > last_id, this operation
+        # *must* be an insert; so `level` must not be ay form of update.
+        if pid > cls.last_id() and level != 'insert':
+            raise Exception("WARNING: new pid, but level=%s. #%d vs %d, %s"
+                            % (level, pid, cls.last_id(), repr(post)))
 
-        # clean up tags, check if nsfw
-        tags = [post['category']]
-        if md and 'tags' in md and isinstance(md['tags'], list):
-            tags = tags + md['tags']
-        tags = set(list(map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags))[0:5])
-        tags.discard('')
-        is_nsfw = int('nsfw' in tags)
+        # start building the queries
+        tag_sqls = []
+        values = [('post_id', pid)]
 
-        # payout date is last_payout if paid, and cashout_time if pending.
-        is_paidout = (post['cashout_time'][0:4] == '1969')
-        payout_at = post['last_payout'] if is_paidout else post['cashout_time']
+        # immutable; write only once
+        if level == 'insert':
+            values.extend([
+                ('author',   post['author']),
+                ('permlink', post['permlink']),
+                ('category', post['category']),
+                ('depth',    post['depth'])])
 
-        # get total rshares, and create comma-separated vote data blob
-        rshares = sum(int(v['rshares']) for v in post['active_votes'])
-        csvotes = "\n".join(map(cls._vote_csv_row, post['active_votes']))
+        # always write, unless simple payout update
+        if level in ['payout', 'update']:
+            basic = post_basic(post)
+            values.extend([
+                ('created_at',    post['created']),    # immutable*
+                ('updated_at',    post['last_update']),
+                ('title',         post['title']),
+                ('payout_at',     basic['payout_at']), # immutable*
+                ('preview',       basic['preview']),
+                ('body',          basic['body']),
+                ('img_url',       basic['image']),
+                ('is_nsfw',       basic['is_nsfw']),
+                ('is_declined',   basic['is_payout_declined']),
+                ('is_full_power', basic['is_full_power']),
+                ('is_paidout',    basic['is_paidout']),
+                ('json',          json.dumps(basic['json_metadata'])),
+                ('raw_json',      json.dumps(post_legacy(post))),
+                ('children',      min(post['children'], 32767))])
 
-        payout_declined = False
-        if amount(post['max_accepted_payout']) == 0:
-            payout_declined = True
-        elif len(post['beneficiaries']) == 1:
-            benny = first(post['beneficiaries'])
-            if benny['account'] == 'null' and int(benny['weight']) == 10000:
-                payout_declined = True
+            # update tags if root post
+            if not post['depth']:
+                tag_sqls.extend(cls._tag_sqls(pid, basic['tags']))
 
-        full_power = int(post['percent_steem_dollars']) == 0
-
-        # total payout (completed and/or pending)
-        payout = sum([
-            amount(post['total_payout_value']),
-            amount(post['curator_payout_value']),
-            amount(post['pending_payout_value']),
-        ])
-
-        # total promotion cost
-        promoted = amount(post['promoted'])
-
-        # trending scores
-        timestamp = parse_time(post['created']).timestamp()
-        hot_score = cls._score(rshares, timestamp, 10000)
-        trend_score = cls._score(rshares, timestamp, 480000)
-
-        if post['body'].find('\x00') > -1:
-            print("bad body: {}".format(post['body']))
-            post['body'] = "INVALID"
-
-        children = post['children']
-        if children > 32767:
-            children = 32767
-
-        stats = cls._post_stats(post)
-        body = post['body']
-
-        # empty/deprecated fields
-        useless = [
-            'body_length', 'reblogged_by', 'replies', 'children_abs_rshares',
-            'total_pending_payout_value', 'author_rewards', 'reward_weight',
-            'total_vote_weight', 'vote_rshares', 'abs_rshares',
-            'max_cashout_time']
-        for key in useless:
-            del post[key]
-
-        # we've already pulled these fields out
-        del post['active_votes']
-        del post['body']
-        del post['json_metadata']
-
-        values = collections.OrderedDict([
-            ('post_id', '%d' % pid),
-            ('author', "%s" % post['author']),
-            ('permlink', "%s" % post['permlink']),
-            ('category', "%s" % post['category']),
-            ('depth', "%d" % post['depth']),
-            ('children', "%d" % children),
-
-            ('title', "%s" % post['title']),
-            ('preview', "%s" % body[0:1024]),
-            ('body', "%s" % body),
-            ('img_url', "%s" % thumb_url),
-            ('payout', "%f" % payout),
-            ('promoted', "%f" % promoted),
-            ('payout_at', "%s" % payout_at),
-            ('updated_at', "%s" % post['last_update']),
-            ('created_at', "%s" % post['created']),
-            ('rshares', "%d" % rshares),
-            ('votes', "%s" % csvotes),
-            ('json', "%s" % json.dumps(md)),
-            ('is_nsfw', "%d" % is_nsfw),
-            ('is_paidout', "%d" % is_paidout),
-            ('sc_trend', "%f" % trend_score),
-            ('sc_hot', "%f" % hot_score),
-
+        # update unconditionally
+        payout = post_payout(post)
+        stats = post_stats(post)
+        values.extend([
+            ('payout',      "%f" % payout['payout']),
+            ('promoted',    "%f" % payout['promoted']),
+            ('rshares',     "%d" % payout['rshares']),
+            ('votes',       "%s" % payout['csvotes']),
+            ('sc_trend',    "%f" % payout['sc_trend']),
+            ('sc_hot',      "%f" % payout['sc_hot']),
             ('flag_weight', "%f" % stats['flag_weight']),
             ('total_votes', "%d" % stats['total_votes']),
-            ('up_votes', "%d" % stats['up_votes']),
-            ('is_hidden', "%d" % stats['hide']),
-            ('is_grayed', "%d" % stats['gray']),
-            ('author_rep', "%f" % stats['author_rep']),
-            ('raw_json', "%s" % json.dumps(post)),
-            ('is_declined', "%d" % int(payout_declined)),
-            ('is_full_power', "%d" % int(full_power)),
-        ])
+            ('up_votes',    "%d" % stats['up_votes']),
+            ('is_hidden',   "%d" % stats['hide']),
+            ('is_grayed',   "%d" % stats['gray']),
+            ('author_rep',  "%f" % stats['author_rep'])])
 
-        # Multiple SQL statements are generated for each post
-        sqls = []
-
-        mode = 'insert' if pid > cls.last_id() else 'update'
-        sqls.append((cls._write_sql(values, mode), values))
-
-        # update tag metadata only for top-level posts
-        if not post['parent_author']:
-            sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
-            curr_tags = set(query_col(sql, id=pid))
-
-            to_rem = (curr_tags - tags)
-            if to_rem:
-                sql = "DELETE FROM hive_post_tags WHERE post_id = :id AND tag IN :tags"
-                sqls.append((sql, dict(id=pid, tags=tuple(to_rem))))
-
-            to_add = (tags - curr_tags)
-            if to_add:
-                params = {}
-                vals = []
-                for i, tag in enumerate(to_add):
-                    vals.append("(:id, :t%d)" % i)
-                    params["t%d"%i] = tag
-                sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES %s"
-                sql += " ON CONFLICT DO NOTHING" # (conflicts due to collation)
-                sqls.append((sql % ','.join(vals), {'id': pid, **params}))
-
-        return sqls
+        # build the post insert/update SQL, add tag SQLs
+        mode = 'insert' if level == 'insert' else 'update'
+        return [cls._write_sql(values, mode)] + tag_sqls
 
     @classmethod
-    # see: calculate_score - https://github.com/steemit/steem/blob/8cd5f688d75092298bcffaa48a543ed9b01447a6/libraries/plugins/tags/tags_plugin.cpp#L239
-    def _score(cls, rshares, created_timestamp, timescale=480000):
-        mod_score = rshares / 10000000.0
-        order = math.log10(max((abs(mod_score), 1)))
-        sign = 1 if mod_score > 0 else -1
-        return sign * order + created_timestamp / timescale
+    def _tag_sqls(cls, pid, tags):
+        sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
+        curr_tags = set(query_col(sql, id=pid))
 
-    @classmethod
-    def _vote_csv_row(cls, vote):
-        return ','.join((vote['voter'], str(vote['rshares']), str(vote['percent']),
-                         str(rep_log10(vote['reputation']))))
+        to_rem = (curr_tags - tags)
+        if to_rem:
+            sql = "DELETE FROM hive_post_tags WHERE post_id = :id AND tag IN :tags"
+            yield (sql, dict(id=pid, tags=tuple(to_rem)))
 
-    # see: contentStats - https://github.com/steemit/condenser/blob/master/src/app/utils/StateFunctions.js#L109
-    @classmethod
-    def _post_stats(cls, post):
-        net_rshares_adj = 0
-        neg_rshares = 0
-        total_votes = 0
-        up_votes = 0
-        for vote in post['active_votes']:
-            if vote['percent'] == 0:
-                continue
-
-            total_votes += 1
-            rshares = int(vote['rshares'])
-            sign = 1 if vote['percent'] > 0 else -1
-            if sign > 0:
-                up_votes += 1
-            if sign < 0:
-                neg_rshares += rshares
-
-            # For graying: sum rshares, but ignore neg rep users and dust downvotes
-            neg_rep = str(vote['reputation'])[0] == '-'
-            if not (neg_rep and sign < 0 and len(str(rshares)) < 11):
-                net_rshares_adj += rshares
-
-        # take negative rshares, divide by 2, truncate 10 digits (plus neg sign),
-        #   and count digits. creates a cheap log10, stake-based flag weight.
-        #   result: 1 = approx $400 of downvoting stake; 2 = $4,000; etc
-        flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
-
-        author_rep = rep_log10(post['author_reputation'])
-        is_low_value = net_rshares_adj < -9999999999
-        has_pending_payout = amount(post['pending_payout_value']) >= 0.02
-
-        return {
-            'hide': not has_pending_payout and (author_rep < 0),
-            'gray': not has_pending_payout and (author_rep < 1 or is_low_value),
-            'author_rep': author_rep,
-            'flag_weight': flag_weight,
-            'total_votes': total_votes,
-            'up_votes': up_votes
-        }
+        to_add = (tags - curr_tags)
+        if to_add:
+            params = _keyify(to_add)
+            vals = ["(:id, :%s)" % key for key in params.keys()]
+            sql = "INSERT INTO hive_post_tags (post_id, tag) VALUES %s"
+            sql += " ON CONFLICT DO NOTHING" # (conflicts due to collation)
+            yield (sql % ','.join(vals), {'id': pid, **params})
 
     @classmethod
     def _write(cls, values, mode='insert'):
-        return query(cls._write_sql(values, mode), **values)
+        tup = cls._write_sql(values, mode)
+        return query(tup[0], **tup[1])
 
     # sql builder for writing to hive_posts_cache table
     @classmethod
     def _write_sql(cls, values, mode='insert'):
+        _pk = ['post_id']
+        _table = 'hive_posts_cache'
+        assert _pk, "primary key not defined"
+        assert _table, "table not defined"
+        assert mode in ['insert', 'update'], "invalid mode %s" % mode
+
         values = collections.OrderedDict(values)
         fields = values.keys()
 
         if mode == 'insert':
             cols = ', '.join(fields)
             params = ', '.join([':'+k for k in fields])
-            sql = "INSERT INTO hive_posts_cache (%s) VALUES (%s)"
-            sql = sql % (cols, params)
+            sql = "INSERT INTO %s (%s) VALUES (%s)"
+            sql = sql % (_table, cols, params)
         elif mode == 'update':
-            update = ', '.join([k+" = :"+k for k in fields][1:])
-            sql = "UPDATE hive_posts_cache SET %s WHERE post_id = :post_id"
-            sql = sql % (update)
-        else:
-            raise Exception("unknown write mode %s" % mode)
+            update = ', '.join([k+" = :"+k for k in fields if k not in _pk])
+            where = ' AND '.join([k+" = :"+k for k in fields if k in _pk])
+            sql = "UPDATE %s SET %s WHERE %s"
+            sql = sql % (_table, update, where)
 
-        return sql
+        return (sql, values)

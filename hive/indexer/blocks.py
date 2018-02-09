@@ -24,6 +24,7 @@ class Blocks:
         comment_ops = []
         json_ops = []
         delete_ops = []
+        voted_authors = set()
         for tx in block['transactions']:
             for operation in tx['operations']:
                 op_type, op = operation
@@ -45,9 +46,10 @@ class Blocks:
                 elif op_type == 'vote':
                     if not is_initial_sync:
                         CachedPost.vote(op['author'], op['permlink'])
-                        Accounts.dirty(op['author'])
+                        voted_authors.add(op['author'])
 
         Accounts.register(account_names, date) # register potentially new names
+        Accounts.dirty(voted_authors) # update rep of voted authors
         Posts.comment_ops(comment_ops, date) # ignores edits; inserts, validates
         Posts.delete_ops(delete_ops)  # unallocates hive_posts record, delete cache
         CustomOp.process_ops(json_ops, num, date) # follow, reblog, community ops

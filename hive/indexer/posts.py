@@ -3,7 +3,7 @@ import collections
 from hive.db.methods import query, query_one, query_row
 from hive.db.db_state import DbState
 
-from hive.indexer.normalize import load_json_key
+from hive.utils.normalize import load_json_key
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
@@ -39,8 +39,8 @@ class Posts:
 
         # cache stats
         total = cls._hits + cls._miss
-        if total % 1000 == 0:
-            print("post.id lookups: %d, hits: %d (%.1f%%), entries: %d"
+        if total % 10000 == 0:
+            print("[DEBUG] post.id lookups: %d, hits: %d (%.1f%%), entries: %d"
                   % (total, cls._hits, 100.0*cls._hits/total, len(cls._ids)))
 
         return _id

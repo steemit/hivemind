@@ -11,7 +11,7 @@ from toolz import partition_all
 from hive.db.methods import query
 from hive.db.db_state import DbState
 
-from hive.indexer.timer import Timer
+from hive.utils.timer import Timer
 from hive.indexer.steem_client import get_adapter
 
 from hive.indexer.blocks import Blocks
@@ -81,15 +81,23 @@ def sync_from_steemd():
         print("\n\n[SYNC] Aborted.. cleaning up..")
         _abort = True
 
-    # batch update post cache after catching up to head block
     if not is_initial_sync:
-        # TODO: currently, this only works if a trx is not open, otherwise
-        #       an Assertion error is thrown (which is good but not ideal)
+        # Follows flushing may need to be moved closer to core (i.e. moved
+        # into main block transactions). Important to keep in sync since
+        # we need to prevent expensive recounts. This will fail if we aborted
+        # in the middle of a transaction, meaning data loss. Better than
+        # forcing it, however, since in-memory cache will be out of sync
+        # with db state.
         Follow.flush(trx=True)
+
+        # This flush is low importance; accounts are swept regularly.
         if not _abort:
             Accounts.flush(trx=True)
-            CachedPost.dirty_missing() # no longer needed?
-            CachedPost.dirty_paidouts(Blocks.last()['date'])
+
+        # If this flush fails, all that could potentially be lost here is
+        # edits and pre-payout votes. If the post has not been paid out yet,
+        # then the worst case is it will be synced upon payout. If the post
+        # is already paid out, worst case is to lose an edit.
         CachedPost.flush(trx=True)
 
     if _abort:
@@ -174,21 +182,21 @@ def listen_steemd(trail_blocks=0, max_gap=50):
         block = queue.pop(0)
 
         start_time = time.perf_counter()
+
         query("START TRANSACTION")
         num = Blocks.process(block)
         follows = Follow.flush(trx=False)
         accts = Accounts.flush(trx=False, period=8)
-        posts = CachedPost.dirty_missing() # no longer needed?
-        paids = CachedPost.dirty_paidouts(block['timestamp'])
-        edits = CachedPost.flush(trx=False)
+        CachedPost.dirty_paidouts(block['timestamp'])
+        cnt = CachedPost.flush(trx=False)
         query("COMMIT")
-        secs = time.perf_counter() - start_time
 
+        ms = (time.perf_counter() - start_time) * 1000
         print("[LIVE] Got block %d at %s --% 4d txs,% 3d posts,% 3d edits,"
-              "% 3d payouts,% 3d accounts,% 3d follows --% 5dms%s"
+              "% 3d payouts,% 3d votes,% 3d accounts,% 3d follows --% 5dms%s"
               % (num, block['timestamp'], len(block['transactions']),
-                 posts, edits - posts - paids, paids, accts, follows,
-                 int(secs * 1e3), ' SLOW' if secs > 1 else ''))
+                 cnt['insert'], cnt['update'], cnt['payout'], cnt['upvote'],
+                 accts, follows, int(ms), ' SLOW' if ms > 1000 else ''))
 
         # once per hour, update accounts
         if num % 1200 == 0:
@@ -204,7 +212,7 @@ def listen_steemd(trail_blocks=0, max_gap=50):
 def cache_missing_posts():
     gap = CachedPost.dirty_missing()
     print("[INIT] {} missing post cache entries".format(gap))
-    while CachedPost.flush(trx=True):
+    while CachedPost.flush(trx=True)['insert']:
         CachedPost.dirty_missing()
 
 # refetch dynamic_global_properties, feed price, etc
@@ -247,8 +255,14 @@ def run():
         cache_missing_posts()
 
     while True:
+        # sync up to irreversible block
         sync_from_steemd()
 
+        # take care of payout backlog
+        CachedPost.dirty_paidouts(Blocks.last()['date'])
+        CachedPost.flush(trx=True)
+
+        # start listening
         DbState.start_listen()
         listen_steemd()
         DbState.stop_listen()

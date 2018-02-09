@@ -8,8 +8,8 @@ from toolz import partition_all
 
 from hive.db.methods import query_col, query, query_all
 from hive.indexer.steem_client import get_adapter
-from hive.indexer.normalize import rep_log10, amount, trunc
-from hive.indexer.timer import Timer
+from hive.utils.normalize import rep_log10, amount, trunc
+from hive.utils.timer import Timer
 
 class Accounts:
     _ids = {}
@@ -52,6 +52,8 @@ class Accounts:
 
     @classmethod
     def dirty(cls, accounts):
+        if not accounts:
+            return 0
         if isinstance(accounts, str):
             accounts = [accounts]
         accounts = set(accounts) - set(cls._dirty)
@@ -71,6 +73,8 @@ class Accounts:
     @classmethod
     def flush(cls, trx=False, period=1):
         assert period >= 1
+        if not cls._dirty:
+            return 0
         count = len(cls._dirty)
         if period > 1:
             count = math.ceil(count / period)
