@@ -115,6 +115,7 @@ def _stream_blocks(last_num, trail_blocks=0, max_gap=40):
     head_num = steemd.head_block()
     next_expected = time.time()
 
+    start_head = head_num
     lag_secs = 0
     queue = []
     while True:
@@ -125,6 +126,8 @@ def _stream_blocks(last_num, trail_blocks=0, max_gap=40):
         while time_now >= next_expected + lag_secs:
             head_num += 1
             next_expected += 3
+
+            # check we're not too far behind
             gap = head_num - last['num']
             print("[LIVE] %d blocks behind..." % gap)
             assert gap < max_gap, "gap too large: %d" % gap
@@ -139,10 +142,10 @@ def _stream_blocks(last_num, trail_blocks=0, max_gap=40):
         block_num = last['num'] + 1
         block = steemd.get_block(block_num)
         if not block:
-            lag_secs = (lag_secs + 1) % 3 # tune inter-slot timing
-            print("[LIVE] block %d failed. delay 1s. head: %d/%d."
+            lag_secs = (lag_secs + 0.5) % 3 # tune inter-slot timing
+            print("[LIVE] block %d failed. delay 1/2s. head: %d/%d."
                   % (block_num, head_num, steemd.head_block()))
-            time.sleep(1)
+            time.sleep(0.5)
             continue
         last['num'] = block_num
 
@@ -155,10 +158,10 @@ def _stream_blocks(last_num, trail_blocks=0, max_gap=40):
                 last['hash'], block['previous'], block['block_id']))
         last['hash'] = block['block_id']
 
-        # if missed block detected, adjust schedule
+        # detect missed blocks, adjust schedule
         block_date = parse_time(block['timestamp'])
         miss_secs = (block_date - last['date']).seconds - 3
-        if miss_secs and block_num == head_num:
+        if miss_secs and block_num >= start_head:
             print("[LIVE] %d missed blocks"
                   % (miss_secs / 3))
             next_expected += miss_secs
