@@ -12,8 +12,7 @@ from hive.db.methods import query
 from hive.db.db_state import DbState
 
 from hive.utils.timer import Timer
-from hive.utils.normalize import parse_time
-from hive.indexer.steem_client import get_adapter
+from hive.indexer.steem_client import SteemClient
 
 from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts
@@ -50,7 +49,7 @@ def sync_from_checkpoints(chunk_size=1000):
 
 def sync_from_steemd():
     is_initial_sync = DbState.is_initial_sync()
-    steemd = get_adapter()
+    steemd = SteemClient.instance()
 
     lbound = Blocks.head_num() + 1
     ubound = steemd.last_irreversible()
@@ -101,79 +100,13 @@ def sync_from_steemd():
         exit()
 
 
-def _stream_blocks(last_num, trail_blocks=0, max_gap=40):
-    assert trail_blocks >= 0
-    assert trail_blocks < 25
-
-    last = Blocks.get(last_num)
-    steemd = get_adapter()
-    head_num = steemd.head_block()
-    next_expected = time.time() + 1.5
-
-    start_head = head_num
-    lag_secs = 0
-    queue = []
-    while True:
-        assert not last['num'] > head_num
-
-        # if slots missed, advance head block
-        time_now = time.time()
-        while time_now >= next_expected + lag_secs:
-            head_num += 1
-            next_expected += 3
-
-            # check we're not too far behind
-            gap = head_num - last['num']
-            print("[LIVE] %d blocks behind..." % gap)
-            assert gap < max_gap, "gap too large: %d" % gap
-
-        # if caught up, await head advance.
-        if head_num == last['num']:
-            time.sleep(next_expected + lag_secs - time_now)
-            head_num += 1
-            next_expected += 3
-
-        # get the target block; if DNE, pause and retry
-        block_num = last['num'] + 1
-        block = steemd.get_block(block_num)
-        if not block:
-            lag_secs = (lag_secs + 0.5) % 3 # tune inter-slot timing
-            print("[LIVE] block %d failed. delay 1/2s. head: %d/%d."
-                  % (block_num, head_num, steemd.head_block()))
-            time.sleep(0.5)
-            continue
-        last['num'] = block_num
-
-        # if block doesn't link, we're forked
-        if last['hash'] != block['previous']:
-            if queue: # using trail_blocks, fork might not be in db
-                print("[FORK] Fork in queue; emptying to retry.")
-                return
-            raise Exception("[FORK] Fork in db: from %s, %s->%s" % (
-                last['hash'], block['previous'], block['block_id']))
-        last['hash'] = block['block_id']
-
-        # detect missed blocks, adjust schedule
-        block_date = parse_time(block['timestamp'])
-        miss_secs = (block_date - last['date']).seconds - 3
-        if miss_secs and block_num >= start_head:
-            print("[LIVE] %d missed blocks"
-                  % (miss_secs / 3))
-            next_expected += miss_secs
-        last['date'] = block_date
-
-        # buffer block yield
-        queue.append(block)
-        if len(queue) > trail_blocks:
-            yield queue.pop(0)
-
-
 def listen_steemd(trail_blocks=0, max_gap=40):
     assert trail_blocks >= 0
     assert trail_blocks < 25
 
+    steemd = SteemClient.instance()
     hive_head = Blocks.head_num()
-    for block in _stream_blocks(hive_head, trail_blocks, max_gap):
+    for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap):
         start_time = time.perf_counter()
 
         query("START TRANSACTION")
@@ -199,7 +132,7 @@ def listen_steemd(trail_blocks=0, max_gap=40):
 
         # once a minute, update chain props
         if num % 20 == 0:
-            update_chain_state()
+            update_chain_state(steemd)
 
 
 def cache_missing_posts():
@@ -209,8 +142,8 @@ def cache_missing_posts():
         CachedPost.dirty_missing()
 
 # refetch dynamic_global_properties, feed price, etc
-def update_chain_state():
-    state = get_adapter().gdgp_extended()
+def update_chain_state(adapter):
+    state = adapter.gdgp_extended()
     query("""UPDATE hive_state SET block_num = :block_num,
              steem_per_mvest = :spm, usd_per_steem = :ups,
              sbd_per_steem = :sps, dgpo = :dgpo""",
@@ -264,7 +197,7 @@ def run():
 
 def head_state(*args):
     _ = args  # JSONRPC injects 4 arguments here
-    steemd_head = get_adapter().head_block()
+    steemd_head = SteemClient.instance().head_block()
     hive_head = Blocks.head_num()
     diff = steemd_head - hive_head
     return dict(steemd=steemd_head, hive=hive_head, diff=diff)
