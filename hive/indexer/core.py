@@ -26,32 +26,27 @@ log = logging.getLogger(__name__)
 # sync routines
 # -------------
 
-def sync_from_checkpoints():
+def sync_from_checkpoints(chunk_size=1000):
     last_block = Blocks.head_num()
 
-    _fn = lambda f: [int(f.split('/')[-1].split('.')[0]), f]
-    mydir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
-    files = map(_fn, glob.glob(mydir + "/checkpoints/*.json.lst"))
-    files = sorted(files, key=lambda f: f[0])
+    tuplize = lambda path: [int(path.split('/')[-1].split('.')[0]), path]
+    basedir = os.path.dirname(os.path.realpath(__file__ + "/../.."))
+    files = glob.glob(basedir + "/checkpoints/*.json.lst")
+    tuples = sorted(map(tuplize, files), key=lambda f: f[0])
 
     last_read = 0
-    for (num, path) in files:
+    for (num, path) in tuples:
         if last_block < num:
             print("[SYNC] Load {} -- last block: {}".format(path, last_block))
-            skip_lines = last_block - last_read
-            sync_from_file(path, skip_lines, 250)
+            with open(path) as f:
+                # each line in file represents one block
+                # we can skip the blocks we already have
+                skip_lines = last_block - last_read
+                remaining = drop(skip_lines, f)
+                for lines in partition_all(chunk_size, remaining):
+                    Blocks.process_multi(map(json.loads, lines), True)
             last_block = num
         last_read = num
-
-
-def sync_from_file(file_path, skip_lines, chunk_size=250):
-    with open(file_path) as f:
-        # each line in file represents one block
-        # we can skip the blocks we already have
-        remaining = drop(skip_lines, f)
-        for batch in partition_all(chunk_size, remaining):
-            Blocks.process_multi(map(json.loads, batch), True)
-
 
 def sync_from_steemd():
     is_initial_sync = DbState.is_initial_sync()
