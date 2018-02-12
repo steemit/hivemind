@@ -334,7 +334,7 @@ class CachedPost:
                 ('depth',    post['depth'])])
 
         # always write, unless simple payout update
-        if level in ['payout', 'update']:
+        if level in ['insert', 'payout', 'update']:
             basic = post_basic(post)
             values.extend([
                 ('created_at',    post['created']),    # immutable*
