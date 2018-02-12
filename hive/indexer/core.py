@@ -12,6 +12,7 @@ from hive.db.methods import query
 from hive.db.db_state import DbState
 
 from hive.utils.timer import Timer
+from hive.utils.normalize import parse_time
 from hive.indexer.steem_client import get_adapter
 
 from hive.indexer.blocks import Blocks
@@ -105,82 +106,79 @@ def sync_from_steemd():
         exit()
 
 
-def listen_steemd(trail_blocks=0, max_gap=50):
+def _stream_blocks(last_num, trail_blocks=0, max_gap=40):
     assert trail_blocks >= 0
     assert trail_blocks < 25
 
-    # db state
-    db_last = Blocks.last()
-    last_block = db_last['num']
-    last_hash = db_last['hash']
-
-    # chain state
+    last = Blocks.get(last_num)
     steemd = get_adapter()
-    head_block = steemd.head_block()
+    head_num = steemd.head_block()
     next_expected = time.time()
 
-    # loop state
-    tries = 0
+    start_head = head_num
+    lag_secs = 0
     queue = []
-
-    # TODO: detect missed blocks by looking at block timestamps.
-    #       this would be an even more efficient way to track slots.
     while True:
-        assert not last_block > head_block
+        assert not last['num'] > head_num
 
-        # fast fwd head block if slots missed
-        curr_time = time.time()
-        while curr_time >= next_expected:
-            head_block += 1
+        # if slots missed, advance head block
+        time_now = time.time()
+        while time_now >= next_expected + lag_secs:
+            head_num += 1
             next_expected += 3
 
-        # if gap too large, abort. if caught up, wait.
-        gap = head_block - last_block
-        if gap > max_gap:
-            print("[LIVE] gap too large: %d -- abort listen mode" % gap)
-            return
-        elif gap > 0:
+            # check we're not too far behind
+            gap = head_num - last['num']
             print("[LIVE] %d blocks behind..." % gap)
-        elif gap == 0:
-            time.sleep(next_expected - curr_time)
-            head_block += 1
+            assert gap < max_gap, "gap too large: %d" % gap
+
+        # if caught up, await head advance.
+        if head_num == last['num']:
+            time.sleep(next_expected + lag_secs - time_now)
+            head_num += 1
             next_expected += 3
 
         # get the target block; if DNE, pause and retry
-        block_num = last_block + 1
+        block_num = last['num'] + 1
         block = steemd.get_block(block_num)
         if not block:
-            tries += 1
-            print("[LIVE] block %d unavailable (try %d). delay 1s. head: %d/%d."
-                  % (block_num, tries, head_block, steemd.head_block()))
-            #assert tries < 12, "could not fetch block %s" % block_num
-            assert tries < 240, "could not fetch block %s" % block_num #74
-            time.sleep(1)      # pause for 1s; and,
-            next_expected += 1 # delay schedule 1s
+            lag_secs = (lag_secs + 0.5) % 3 # tune inter-slot timing
+            print("[LIVE] block %d failed. delay 1/2s. head: %d/%d."
+                  % (block_num, head_num, steemd.head_block()))
+            time.sleep(0.5)
             continue
-        last_block = block_num
-        tries = 0
+        last['num'] = block_num
 
-        # ensure this block links to our last; otherwise, blow up. see #59
-        if last_hash != block['previous']:
-            if queue:
-                print("[FORK] Fork encountered. Emptying queue to retry!")
+        # if block doesn't link, we're forked
+        if last['hash'] != block['previous']:
+            if queue: # using trail_blocks, fork might not be in db
+                print("[FORK] Fork in queue; emptying to retry.")
                 return
-            raise Exception("Unlinkable block: have %s, got %s -> %s)"
-                            % (last_hash, block['previous'], block['block_id']))
-        last_hash = block['block_id']
+            raise Exception("[FORK] Fork in db: from %s, %s->%s" % (
+                last['hash'], block['previous'], block['block_id']))
+        last['hash'] = block['block_id']
 
-        # buffer until queue full
+        # detect missed blocks, adjust schedule
+        block_date = parse_time(block['timestamp'])
+        miss_secs = (block_date - last['date']).seconds - 3
+        if miss_secs and block_num >= start_head:
+            print("[LIVE] %d missed blocks"
+                  % (miss_secs / 3))
+            next_expected += miss_secs
+        last['date'] = block_date
+
+        # buffer block yield
         queue.append(block)
-        if len(queue) <= trail_blocks:
-            continue
+        if len(queue) > trail_blocks:
+            yield queue.pop(0)
 
 
-        # buffer primed; process head of queue
-        # ------------------------------------
+def listen_steemd(trail_blocks=0, max_gap=40):
+    assert trail_blocks >= 0
+    assert trail_blocks < 25
 
-        block = queue.pop(0)
-
+    hive_head = Blocks.head_num()
+    for block in _stream_blocks(hive_head, trail_blocks, max_gap):
         start_time = time.perf_counter()
 
         query("START TRANSACTION")

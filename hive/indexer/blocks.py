@@ -15,7 +15,7 @@ class Blocks:
     def last(cls):
         sql = """SELECT num, created_at date, hash
                  FROM hive_blocks ORDER BY num DESC LIMIT 1"""
-        return query_row(sql)
+        return dict(query_row(sql))
 
     @classmethod
     def head_num(cls):
@@ -32,7 +32,7 @@ class Blocks:
     def get(cls, num):
         sql = """SELECT num, created_at date, hash
                  FROM hive_blocks WHERE num = :num LIMIT 1"""
-        return query_row(sql, num=num)
+        return dict(query_row(sql, num=num))
 
     # Process a single block. always wrap in a transaction!
     @classmethod
