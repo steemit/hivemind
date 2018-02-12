@@ -102,13 +102,14 @@ def sync_from_steemd():
         exit()
 
 
-def listen_steemd(trail_blocks=0, max_gap=40):
+def listen_steemd():
+    trail_blocks = Conf.get('trail_blocks')
     assert trail_blocks >= 0
     assert trail_blocks < 25
 
     steemd = SteemClient.instance()
     hive_head = Blocks.head_num()
-    for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap):
+    for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap=40):
         start_time = time.perf_counter()
 
         query("START TRANSACTION")
