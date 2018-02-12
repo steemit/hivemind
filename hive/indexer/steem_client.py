@@ -8,17 +8,18 @@ from .http_client import HttpClient, RPCError
 
 class ClientStats:
     # Assumed HTTP overhead (ms); subtract prior to par check
-    PAR_HTTP_OVERHEAD = 60
+    PAR_HTTP_OVERHEAD = 75
 
     # Reporting threshold (x * par)
     PAR_THRESHOLD = 1.1
 
     # Thresholds for critical call timing (ms)
     PAR_STEEMD = {
-        'get_dynamic_global_properties': 50,
-        'get_block': 5,
-        'get_accounts': 5,
-        'get_content': 5,
+        'get_dynamic_global_properties': 20,
+        'get_block': 50,
+        'get_blocks_batch': 5,
+        'get_accounts': 3,
+        'get_content': 4,
         'get_order_book': 20,
         'get_feed_history': 20,
     }
@@ -47,7 +48,9 @@ class ClientStats:
 
     @classmethod
     def check_timing(cls, method, ms, batch_size):
-        per = (ms - cls.PAR_HTTP_OVERHEAD) / batch_size
+        if method == 'get_block' and batch_size > 1:
+            method = 'get_blocks_batch'
+        per = int((ms - cls.PAR_HTTP_OVERHEAD) / batch_size)
         par = cls.PAR_STEEMD[method]
         over = per / par
         if over >= cls.PAR_THRESHOLD:
@@ -68,8 +71,8 @@ class ClientStats:
                   % (100 * ms/ttl, "{:,}".format(int(ms)),
                      ms/calls, calls, sql[0:180]))
         print("[STEEM] Fastest call was %.3fms" % cls.fastest)
-        max_mem = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) / (1024 * 1024)
-        print("[MEM] peak memory usage: %.2fMB" % max_mem)
+        max_mem = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        print("[MEM] peak memory usage: %.2fMB" % (max_mem / (1024 * 1024)))
         cls.clear()
 
     @classmethod

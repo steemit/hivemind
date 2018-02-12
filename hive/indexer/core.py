@@ -113,7 +113,7 @@ def _stream_blocks(last_num, trail_blocks=0, max_gap=40):
     last = Blocks.get(last_num)
     steemd = get_adapter()
     head_num = steemd.head_block()
-    next_expected = time.time()
+    next_expected = time.time() + 1.5
 
     start_head = head_num
     lag_secs = 0

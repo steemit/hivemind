@@ -133,7 +133,10 @@ class CachedPost:
             tuples.extend(tups)
 
         if trx or len(tuples) > 250:
-            print("[PREP] posts_cache processing %s" % (repr(counts)))
+            changed = filter(lambda t: t[1], counts.items())
+            summary = list(map(lambda group: "%d %ss" % group[::-1], changed))
+            summary = ', '.join(summary) if summary else 'none'
+            print("[PREP] posts cache process: %s" % summary)
 
         cls._update_batch(tuples, trx)
         for url, _, _ in tuples:
