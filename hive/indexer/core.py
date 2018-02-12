@@ -8,6 +8,8 @@ import traceback
 from funcy.seqs import drop
 from toolz import partition_all
 
+from hive.conf import Conf
+
 from hive.db.methods import query
 from hive.db.db_state import DbState
 
@@ -204,4 +206,5 @@ def head_state(*args):
 
 
 if __name__ == '__main__':
+    Conf.read()
     run()

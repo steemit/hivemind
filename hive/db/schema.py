@@ -1,5 +1,4 @@
 import logging
-import os
 
 import sqlalchemy as sa
 from sqlalchemy.sql import text as sql_text
@@ -8,6 +7,10 @@ from sqlalchemy.types import CHAR
 from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
 from sqlalchemy.types import BOOLEAN
+
+from hive.conf import Conf
+
+#pylint: disable=line-too-long
 
 metadata = sa.MetaData()
 
@@ -274,18 +277,17 @@ hive_state = sa.Table(
     mysql_default_charset='utf8mb4'
 )
 
-_url = os.environ.get('DATABASE_URL')
-assert _url, 'missing ENV DATABASE_URL'
 logging.basicConfig()
-#if os.environ.get('LOG_LEVEL') == 'INFO': # ultra-verbose
+#if Conf.get('log_level') == 'INFO': # ultra-verbose
 #    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
-def connect(connection_url=_url, **kwargs):
+def connect(**kwargs):
+    connection_url = Conf.get('database_url')
     return sa.create_engine(connection_url, isolation_level="READ UNCOMMITTED", pool_recycle=3600, **kwargs).connect()
 
-
-def setup(connection_url=_url):
+def setup():
+    connection_url = Conf.get('database_url')
     engine = sa.create_engine(connection_url)
     metadata.create_all(engine)
 
@@ -309,7 +311,8 @@ def setup(connection_url=_url):
     conn.execute(insert)
 
 
-def teardown(connection_url=_url):
+def teardown():
+    connection_url = Conf.get('database_url')
     engine = sa.create_engine(connection_url)
     metadata.drop_all(engine)
 

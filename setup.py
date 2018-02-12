@@ -39,6 +39,7 @@ setup(
         'PrettyTable',
         'psycopg2',
         'aiocache',
+        'configargparse',
     ],
     entry_points={
         'console_scripts': [

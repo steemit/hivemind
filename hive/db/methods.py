@@ -3,9 +3,17 @@ import time
 import re
 import atexit
 
-from hive.db import conn
 from funcy.seqs import first
 from sqlalchemy import text
+
+from hive.db.schema import connect
+
+_conn = None
+def conn():
+    global _conn
+    if not _conn:
+        _conn = connect(echo=False)
+    return _conn
 
 class QueryStats:
     stats = {}
@@ -89,10 +97,10 @@ def __query(sql, **kwargs):
 
     _query = text(sql).execution_options(autocommit=False)
     try:
-        return conn.execute(_query, **kwargs)
+        return conn().execute(_query, **kwargs)
     except Exception as e:
         print("[SQL] Error in query {} ({})".format(sql, kwargs))
-        #conn.close() # TODO: check if needed
+        #conn().close() # TODO: check if needed
         logger.exception(e)
         raise e
 
@@ -124,7 +132,7 @@ def query_one(sql, **kwargs):
         return first(row)
 
 def db_engine():
-    engine = conn.dialect.name
+    engine = conn().dialect.name
     if engine not in ['postgresql', 'mysql']:
         raise Exception("db engine %s not supported" % engine)
     return engine
