@@ -57,6 +57,7 @@ hive_accounts = sa.Table(
 
     sa.UniqueConstraint('name', name='hive_accounts_ux1'),
     sa.Index('hive_accounts_ix1', 'vote_weight', 'id'), # core: quick ranks
+    sa.Index('hive_accounts_ix2', 'name', 'id'), # core: quick id map
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )

@@ -171,7 +171,8 @@ class HttpClient(object):
                 assert isinstance(result, list), "batch result must be list"
                 assert len(body) == len(result), "batch result len mismatch"
                 for item in result:
-                    assert 'result' in item, "batch response had empty item: {}".format(result)
+                    assert 'result' in item, "batch response empty item: {}".format(result)
+                    assert 'error' not in item, "batch response error item: {}".format(result)
                 return [item['result'] for item in result]
             else:
                 assert isinstance(result, dict), "non-batch result must be dict"
