@@ -35,7 +35,7 @@ class Sync:
         last_read = 0
         for (num, path) in tuples:
             if last_block < num:
-                print("[SYNC] Load {} -- last block: {}".format(path, last_block))
+                print("[SYNC] Load %s -- last block: %d" % (path, last_block))
                 with open(path) as f:
                     # each line in file represents one block
                     # we can skip the blocks we already have
@@ -47,28 +47,32 @@ class Sync:
             last_read = num
 
     @classmethod
-    def from_steemd(cls, is_initial_sync=False, chunk_size=100, max_blocks=1000):
+    def from_steemd(cls, is_initial_sync=False, chunk_size=1000):
         steemd = SteemClient.instance()
 
         lbound = Blocks.head_num() + 1
-        ubound = min(steemd.last_irreversible(), lbound + max_blocks - 1)
+        ubound = steemd.last_irreversible()
         if ubound <= lbound:
-            return False
+            return
 
         _abort = False
         try:
-            print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound+1))
+            print("[SYNC] start block %d, +%d to sync" % (lbound, ubound-lbound))
             timer = Timer(ubound - lbound, entity='block', laps=['rps', 'wps'])
             while lbound < ubound:
-                to = min(lbound + chunk_size, ubound)
                 timer.batch_start()
+
+                # fetch blocks
+                to = min(lbound + chunk_size, ubound)
                 blocks = steemd.get_blocks_range(lbound, to)
+                lbound = to
                 timer.batch_lap()
+
+                # process blocks
                 Blocks.process_multi(blocks, is_initial_sync)
                 timer.batch_finish(len(blocks))
                 date = blocks[-1]['timestamp']
                 print(timer.batch_status("[SYNC] Got block %d @ %s" % (to-1, date)))
-                lbound = to
 
         except KeyboardInterrupt:
             traceback.print_exc()
@@ -76,14 +80,6 @@ class Sync:
             _abort = True
 
         if not is_initial_sync:
-            # Follows flushing may need to be moved closer to core (i.e. moved
-            # into main block transactions). Important to keep in sync since
-            # we need to prevent expensive recounts. This will fail if we aborted
-            # in the middle of a transaction, meaning data loss. Better than
-            # forcing it, however, since in-memory cache will be out of sync
-            # with db state.
-            Follow.flush(trx=True)
-
             # This flush is low importance; accounts are swept regularly.
             if not _abort:
                 Accounts.flush(trx=True)
@@ -97,8 +93,6 @@ class Sync:
         if _abort:
             print("[SYNC] Aborted")
             exit()
-
-        return True
 
 
     @classmethod

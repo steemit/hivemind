@@ -36,8 +36,28 @@ class Blocks:
 
     # Process a single block. always wrap in a transaction!
     @classmethod
-    def process(cls, block, is_initial_sync=False):
+    def process(cls, block):
         assert is_trx_active(), "Block.process must be in a trx"
+        return cls._process(block, is_initial_sync=False)
+
+    # batch-process blocks, wrap in a transaction
+    @classmethod
+    def process_multi(cls, blocks, is_initial_sync=False):
+        query("START TRANSACTION")
+
+        for block in blocks:
+            cls._process(block, is_initial_sync)
+
+        # Follows flushing needs to be atomic because recounts are
+        # expensive. So is tracking follows at all; hence we track
+        # deltas in memory and update follow/er counts in bulk.
+        Follow.flush(trx=False)
+
+        query("COMMIT")
+
+    # Process a single block. assumes a trx is open.
+    @classmethod
+    def _process(cls, block, is_initial_sync=False):
         num = cls._push(block)
         date = block['timestamp']
 
@@ -75,14 +95,6 @@ class Blocks:
         Posts.delete_ops(delete_ops)               # handle post deletion
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops
         return num
-
-    # batch-process blocks, wrap in a transaction
-    @classmethod
-    def process_multi(cls, blocks, is_initial_sync=False):
-        query("START TRANSACTION")
-        for block in blocks:
-            cls.process(block, is_initial_sync)
-        query("COMMIT")
 
     @classmethod
     def verify_head(cls):
