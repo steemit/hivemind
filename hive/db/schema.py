@@ -282,13 +282,20 @@ logging.basicConfig()
 #    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
-def connect(**kwargs):
-    connection_url = Conf.get('database_url')
-    return sa.create_engine(connection_url, isolation_level="READ UNCOMMITTED", pool_recycle=3600, **kwargs).connect()
+
+def _create_engine(echo=False):
+    engine = sa.create_engine(
+        Conf.get('database_url'),
+        isolation_level="READ UNCOMMITTED", # only works in mysql
+        pool_recycle=3600,
+        echo=echo)
+    return engine
+
+def connect(echo=False):
+    return _create_engine(echo=echo).connect()
 
 def setup():
-    connection_url = Conf.get('database_url')
-    engine = sa.create_engine(connection_url)
+    engine = _create_engine(echo=True)
     metadata.create_all(engine)
 
     conn = engine.connect()
@@ -310,10 +317,8 @@ def setup():
     insert = hive_state.insert().values(block_num=0, db_version=3, steem_per_mvest=0, usd_per_steem=0, sbd_per_steem=0, dgpo='')
     conn.execute(insert)
 
-
 def teardown():
-    connection_url = Conf.get('database_url')
-    engine = sa.create_engine(connection_url)
+    engine = _create_engine(echo=True)
     metadata.drop_all(engine)
 
 

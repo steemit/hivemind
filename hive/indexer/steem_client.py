@@ -146,7 +146,7 @@ class SteemClient:
 
         last = self.get_block_simple(start_from - 1)
         head_num = self.head_block()
-        next_expected = time.time() + 1.5
+        next_expected = time.time()
 
         start_head = head_num
         lag_secs = 0
@@ -177,11 +177,13 @@ class SteemClient:
             block_num = last['num'] + 1
             block = self.get_block(block_num)
             if not block:
-                lag_secs = (lag_secs + 0.5) % 3 # tune inter-slot timing
-                print("[LIVE] block %d failed. delay 1/2s. head: %d/%d."
-                      % (block_num, head_num, self.head_block()))
+                lag_secs = min(3, lag_secs + 0.25) # tune inter-slot timing
+                print("[LIVE] block %d failed. hive:%d steem:%d. lag:%f"
+                      % (block_num, head_num, self.head_block(), lag_secs))
                 time.sleep(0.5)
                 continue
+            else:
+                lag_secs = max(0, lag_secs - 0.001)
             last['num'] = block_num
 
             # if block doesn't link, we're forked

@@ -1,5 +1,3 @@
-import time
-
 from hive.db.methods import query_row, query_col, query_one, query, is_trx_active
 from hive.indexer.steem_client import SteemClient
 
@@ -7,6 +5,7 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.custom_op import CustomOp
+from hive.indexer.follow import Follow
 
 class Blocks:
 

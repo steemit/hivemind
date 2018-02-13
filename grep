@@ -1,1 +1,1 @@
-grep -rin $1 * --color=always | grep -v __pycache__ --color=auto
+grep -rn $1 * --color=always | grep -v __pycache__ --color=auto
