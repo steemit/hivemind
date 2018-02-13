@@ -2,7 +2,7 @@ import json
 
 from aiocache import cached
 from hive.db.methods import query_one, query_col, query_row, query_all
-from hive.indexer.steem_client import get_adapter
+from hive.indexer.steem_client import SteemClient
 
 # e.g. {"id":0,"jsonrpc":"2.0","method":"call",
 #       "params":["database_api","get_state",["trending"]]}
@@ -38,20 +38,21 @@ async def call(api, method, params):
         return await get_state(params[0])
 
     # passthrough -- TESTING ONLY!
+    steemd = SteemClient.instance()
     if method == 'get_dynamic_global_properties':
-        return get_adapter()._gdgp() # condenser only uses total_vesting_fund_steem, total_vesting_shares, sbd_interest_rate
+        return steemd._gdgp() # condenser only uses total_vesting_fund_steem, total_vesting_shares, sbd_interest_rate
     elif method == 'get_accounts':
-        return get_adapter().get_accounts(params[0])
+        return steemd.get_accounts(params[0])
     elif method == 'get_open_orders':
-        return get_adapter()._client.exec('get_open_orders', params[0])
+        return steemd._client.exec('get_open_orders', params[0])
     elif method == 'get_block':
-        return get_adapter()._client.exec('get_block', params[0])
+        return steemd._client.exec('get_block', params[0])
     elif method == 'broadcast_transaction_synchronous':
-        return get_adapter()._client.exec('broadcast_transaction_synchronous', params[0], api='network_broadcast_api')
+        return steemd._client.exec('broadcast_transaction_synchronous', params[0], api='network_broadcast_api')
     elif method == 'get_savings_withdraw_to':
-        return get_adapter()._client.exec('get_savings_withdraw_to', params[0])
+        return steemd._client.exec('get_savings_withdraw_to', params[0])
     elif method == 'get_savings_withdraw_from':
-        return get_adapter()._client.exec('get_savings_withdraw_from', params[0])
+        return steemd._client.exec('get_savings_withdraw_from', params[0])
 
     raise Exception("unknown method: {}.{}({})".format(api, method, params))
 
@@ -285,7 +286,7 @@ async def get_state(path: str):
         key = keys[part[1]]
 
         # TODO: use _load_accounts([account])? Examine issue w/ login
-        account_obj = get_adapter().get_accounts([account])[0]
+        account_obj = SteemClient.instance().get_accounts([account])[0]
         state['accounts'][account] = account_obj
 
         if key == 'recent_replies':

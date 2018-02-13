@@ -9,18 +9,17 @@ from aiopg.sa import create_engine
 from jsonrpcserver import config
 from jsonrpcserver.async_methods import AsyncMethods
 
+from hive.conf import Conf
+
 from hive.server import condenser_api
 from hive.server import hive_api
 
-str_log_level = os.environ.get('LOG_LEVEL') or 'DEBUG'
-log_level = getattr(logging, str_log_level.upper(), None)
-if not isinstance(log_level, int):
-    raise ValueError('Invalid log level: %s' % str_log_level)
+Conf.read()
+log_level = Conf.log_level()
 
 config.debug = (log_level == logging.DEBUG)
 logging.basicConfig(level=log_level)
 logger = logging.getLogger(__name__)
-
 logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
 
 
@@ -114,7 +113,6 @@ async def health(request):
         state=state,
         timestamp=datetime.utcnow().isoformat()))
 
-
 async def jsonrpc_handler(request):
     request = await request.text()
     response = await methods.dispatch(request)
@@ -134,10 +132,5 @@ app.router.add_post('/legacy', non_appbase_handler)
 
 
 if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser(description="hivemind jsonrpc server")
-    parser.add_argument('--database_url', type=str, default='postgresql://root:root_password@127.0.0.1:5432/testdb')
-    parser.add_argument('--port', type=int, default=8080)
-    args = parser.parse_args()
-    app['config']['args'] = args
-    web.run_app(app, port=args.port)
+    app['config']['args'] = Conf.args()
+    web.run_app(app, port=app['config']['args'].port)

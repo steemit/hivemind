@@ -8,7 +8,7 @@ from hive.db.methods import query, query_all, query_col, query_one
 from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
-from hive.indexer.steem_client import get_adapter
+from hive.indexer.steem_client import SteemClient
 
 # levels of post dirtiness, in order of decreasing priority
 LEVELS = ['insert', 'payout', 'update', 'upvote']
@@ -232,6 +232,12 @@ class CachedPost:
 
         return gap
 
+    @classmethod
+    def recover_missing_posts(cls):
+        gap = cls.dirty_missing()
+        print("[INIT] {} missing post cache entries".format(gap))
+        while cls.flush(trx=True)['insert']:
+            cls.dirty_missing()
 
     # Given a set of posts, fetch them from steemd and write them to the db.
     # The `tuples` arg is a list of (url, id) representing posts which are to be
@@ -244,7 +250,7 @@ class CachedPost:
     # there's any missing cache entries.
     @classmethod
     def _update_batch(cls, tuples, trx=True):
-        steemd = get_adapter()
+        steemd = SteemClient.instance()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
         tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
 

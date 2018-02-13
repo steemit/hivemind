@@ -1,9 +1,9 @@
-import os
 import time
 import atexit
 import resource
 from decimal import Decimal
 
+from hive.conf import Conf
 from hive.utils.normalize import parse_time
 from .http_client import HttpClient, RPCError
 
@@ -83,9 +83,6 @@ class ClientStats:
 
 atexit.register(ClientStats.print)
 
-def get_adapter():
-    return SteemClient.instance()
-
 class SteemClient:
 
     _instance = None
@@ -93,19 +90,13 @@ class SteemClient:
     @classmethod
     def instance(cls):
         if not cls._instance:
-            api_endpoint = os.environ.get('STEEMD_URL')
-            max_batch = int(os.environ.get('MAX_BATCH', 500))
-            max_workers = int(os.environ.get('MAX_WORKERS', 1))
-
-            # TODO: remove after updating docs/orchestration
-            if os.environ.get('JUSSI_URL'):
-                print("JUSSI_URL deprecated; use STEEMD_URL")
-                api_endpoint = os.environ.get('JUSSI_URL')
-
-            cls._instance = SteemClient(api_endpoint, max_batch, max_workers)
+            cls._instance = SteemClient(
+                url=Conf.get('steemd_url'),
+                max_batch=Conf.get('max_batch'),
+                max_workers=Conf.get('max_workers'))
         return cls._instance
 
-    def __init__(self, url, max_batch=500, max_workers=1, use_appbase=False):
+    def __init__(self, url, max_batch=500, max_workers=1):
         assert url, 'steem-API endpoint undefined'
         assert max_batch > 0 and max_batch <= 5000
         assert max_workers > 0 and max_workers <= 500
