@@ -7,7 +7,7 @@ from datetime import datetime
 from toolz import partition_all
 
 from hive.db.methods import query_col, query, query_all
-from hive.indexer.steem_client import get_adapter
+from hive.indexer.steem_client import SteemClient
 from hive.utils.normalize import rep_log10, amount, trunc
 from hive.utils.timer import Timer
 
@@ -121,7 +121,7 @@ class Accounts:
     def _generate_cache_sqls(cls, accounts):
         cached_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
         sqls = []
-        for account in get_adapter().get_accounts(accounts):
+        for account in SteemClient.instance().get_accounts(accounts):
             vote_weight = (amount(account['vesting_shares'])
                            + amount(account['received_vesting_shares'])
                            - amount(account['delegated_vesting_shares']))

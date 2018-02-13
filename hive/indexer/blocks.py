@@ -1,7 +1,7 @@
 import time
 
 from hive.db.methods import query_row, query_col, query_one, query, is_trx_active
-from hive.indexer.steem_client import get_adapter
+from hive.indexer.steem_client import SteemClient
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -93,7 +93,7 @@ class Blocks:
         # move backwards from head until hive/steem agree
         to_pop = []
         cursor = hive_head
-        steemd = get_adapter()
+        steemd = SteemClient.instance()
         while True:
             assert hive_head - cursor < 25, "fork too deep"
             hive_block = cls.get(cursor)
@@ -114,7 +114,7 @@ class Blocks:
               % (hive_head - cursor, cursor + 1, hive_head))
 
         # we should not attempt to recover from fork until it's safe
-        fork_limit = get_adapter().last_irreversible()
+        fork_limit = steemd.last_irreversible()
         assert cursor < fork_limit, "not proceeding until head is irreversible"
 
         cls._pop(to_pop)

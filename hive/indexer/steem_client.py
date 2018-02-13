@@ -83,9 +83,6 @@ class ClientStats:
 
 atexit.register(ClientStats.print)
 
-def get_adapter():
-    return SteemClient.instance()
-
 class SteemClient:
 
     _instance = None

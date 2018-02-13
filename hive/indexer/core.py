@@ -138,12 +138,6 @@ def listen_steemd():
             update_chain_state(steemd)
 
 
-def cache_missing_posts():
-    gap = CachedPost.dirty_missing()
-    print("[INIT] {} missing post cache entries".format(gap))
-    while CachedPost.flush(trx=True)['insert']:
-        CachedPost.dirty_missing()
-
 # refetch dynamic_global_properties, feed price, etc
 def update_chain_state(adapter):
     state = adapter.gdgp_extended()
@@ -175,7 +169,7 @@ def run():
 
         print("[INIT] *** Initial cache build ***")
         # todo: disable indexes during this process
-        cache_missing_posts()
+        CachedPost.recover_missing_posts()
         FeedCache.rebuild()
         DbState.finish_initial_sync()
 
@@ -184,7 +178,7 @@ def run():
         Blocks.verify_head()
 
         # perform cleanup in case process did not exit cleanly
-        cache_missing_posts()
+        CachedPost.recover_missing_posts()
 
     while True:
         # sync up to irreversible block
