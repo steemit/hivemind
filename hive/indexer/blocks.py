@@ -5,6 +5,7 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.custom_op import CustomOp
+from hive.indexer.payments import Payments
 from hive.indexer.follow import Follow
 
 class Blocks:
@@ -65,10 +66,11 @@ class Blocks:
         json_ops = []
         delete_ops = []
         voted_authors = set()
-        for tx in block['transactions']:
+        for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
                 op_type, op = operation
 
+                # account ops
                 if op_type == 'pow':
                     account_names.add(op['worker_account'])
                 elif op_type == 'pow2':
@@ -77,16 +79,22 @@ class Blocks:
                     account_names.add(op['new_account_name'])
                 elif op_type == 'account_create_with_delegation':
                     account_names.add(op['new_account_name'])
+
+                # post ops
                 elif op_type == 'comment':
                     comment_ops.append(op)
                 elif op_type == 'delete_comment':
                     delete_ops.append(op)
-                elif op_type == 'custom_json':
-                    json_ops.append(op)
                 elif op_type == 'vote':
                     if not is_initial_sync:
                         CachedPost.vote(op['author'], op['permlink'])
                         voted_authors.add(op['author'])
+
+                # misc ops
+                elif op_type == 'transfer':
+                    Payments.op_transfer(op, tx_idx, num, date)
+                elif op_type == 'custom_json':
+                    json_ops.append(op)
 
         Accounts.register(account_names, date)     # register any new names
         Accounts.dirty(voted_authors)              # update rep of voted authors
