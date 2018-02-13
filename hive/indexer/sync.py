@@ -109,7 +109,7 @@ class Sync:
 
         steemd = SteemClient.instance()
         hive_head = Blocks.head_num()
-        for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap=4e7):
+        for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap=40):
             start_time = time.perf_counter()
 
             query("START TRANSACTION")

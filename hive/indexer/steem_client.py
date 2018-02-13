@@ -163,7 +163,9 @@ class SteemClient:
                 # check we're not too far behind
                 gap = head_num - last['num']
                 print("[LIVE] %d blocks behind..." % gap)
-                assert gap < max_gap, "gap too large: %d" % gap
+                if gap > max_gap:
+                    print("[LIVE] gap too large: %d" % gap)
+                    return # return to fast-sync
 
             # if caught up, await head advance.
             if head_num == last['num']:
