@@ -87,7 +87,7 @@ def post_payout(post):
     ])
 
     # total promotion cost
-    promoted = amount(post['promoted'])
+    promoted = amount(post['promoted']) # TODO: remove this, handled by Payment class
 
     # get total rshares, and create comma-separated vote data blob
     rshares = sum(int(v['rshares']) for v in post['active_votes'])

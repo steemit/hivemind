@@ -1,7 +1,8 @@
-from hive.indexer.posts import Posts
-from hive.indexer.accounts import Accounts
 from hive.db.adapter import Db
 from hive.utils.normalize import parse_amount
+
+from hive.indexer.posts import Posts
+from hive.indexer.accounts import Accounts
 
 DB = Db.instance()
 
@@ -12,15 +13,22 @@ class Payments:
         if not record:
             return
 
-        print("apply promotion balance of %f to %s" % (record['amount'], op['memo']))
-
         # add payment record
         insert = DB.build_upsert('hive_payments', 'id', record)
         DB.query(insert)
 
+        # read current amount
+        sql = "SELECT promoted FROM hive_posts WHERE id = :id"
+        curr_amount = DB.query_one(sql, id=record['post_id'])
+        new_amount = curr_amount + record['amount']
+
         # update post record
-        sql = "UPDATE hive_posts SET promoted = promoted + :add WHERE id = :id"
-        DB.query(sql, add=record['amount'], id=record['post_id'])
+        sql = "UPDATE hive_posts SET promoted = :val WHERE id = :id"
+        DB.query(sql, val=new_amount, id=record['post_id'])
+
+        # update cache record
+        sql = "UPDATE hive_posts_cache SET promoted = :val WHERE post_id = :id"
+        DB.query(sql, val=new_amount, id=record['post_id'])
 
     @classmethod
     def _validated(cls, op, tx_idx, num, date):
@@ -32,11 +40,11 @@ class Payments:
             return # only care about SBD payments
 
         url = op['memo']
-        if not url or url.count('/') != 1 or url[0] != '@':
-            print("invalid payment memo: {}".format(url))
-            return
+        if not cls._validate_url(url):
+            print("invalid url: {}".format(url))
+            return # invalid url
 
-        author, permlink = url[1:].split('/')
+        author, permlink = cls._split_url(url)
         if not Accounts.exists(author):
             return
 
@@ -53,3 +61,13 @@ class Payments:
                 'to_account': op['to'],
                 'amount': amount,
                 'token': token}
+
+    @staticmethod
+    def _validate_url(url):
+        if not url or url.count('/') != 1 or url[0] != '@':
+            return False
+        return True
+
+    @staticmethod
+    def _split_url(url):
+        return url[1:].split('/')

@@ -370,7 +370,7 @@ class CachedPost:
         stats = post_stats(post)
         values.extend([
             ('payout',      "%f" % payout['payout']),
-            ('promoted',    "%f" % payout['promoted']),
+            ('promoted',    "%f" % payout['promoted']), #TODO: remove this. handled by Payment class
             ('rshares',     "%d" % payout['rshares']),
             ('votes',       "%s" % payout['csvotes']),
             ('sc_trend',    "%f" % payout['sc_trend']),
