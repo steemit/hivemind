@@ -208,7 +208,7 @@ class CachedPost:
         return len(paidout)
 
     @classmethod
-    def _select_missing_tuples(cls, last_cached_id, limit=1_000_000):
+    def _select_missing_tuples(cls, last_cached_id, limit=1000000):
         from hive.indexer.posts import Posts
         sql = """SELECT id, author, permlink FROM hive_posts
                   WHERE is_deleted = '0' AND id > :id
@@ -217,7 +217,7 @@ class CachedPost:
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
-    def dirty_missing(cls, limit=1_000_000):
+    def dirty_missing(cls, limit=1000000):
         from hive.indexer.posts import Posts
 
         # cached posts inserted sequentially, so compare MAX(id)'s

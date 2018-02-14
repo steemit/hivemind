@@ -14,7 +14,7 @@ class QueryStats:
             time_start = time.perf_counter()
             result = fn(*args, **kwargs)
             time_end = time.perf_counter()
-            QueryStats.log(args[0], (time_end - time_start) * 1000)
+            QueryStats.log(args[1], (time_end - time_start) * 1000)
             return result
         return wrap
 
@@ -38,7 +38,7 @@ class QueryStats:
     @classmethod
     def normalize_sql(cls, sql):
         nsql = re.sub(r'\s+', ' ', sql).strip()[0:256]
-        nsql = re.sub(r'VALUES (\s*\([^\)]+\),?)+', 'VALUES (...)', nsql)
+        nsql = re.sub(r'VALUES (\s*\([^)]+\),?)+', 'VALUES (...)', nsql)
         return nsql
 
     @classmethod

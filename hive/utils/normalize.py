@@ -1,7 +1,32 @@
 import json
 import math
+import decimal
 
 from datetime import datetime
+
+def nai_to_name(nai):
+    names = {'@@000000013': 'SBD'}
+    assert nai in names, "unrecognized nai: %s" % nai
+    return names[nai]
+
+def parse_amount(value, expected_unit=None):
+    if isinstance(value, str):
+        raw_amount, unit = value.split(' ')
+        dec_amount = decimal.Decimal(raw_amount)
+
+    elif isinstance(value, list):
+        satoshis, precision, nai = value
+        dec_amount = decimal.Decimal(satoshis) / (10**precision)
+        unit = nai_to_name(nai)
+
+    else:
+        raise Exception("unknown value type {}".format(value))
+
+    if expected_unit:
+        assert unit == expected_unit
+        return dec_amount
+
+    return (dec_amount, unit)
 
 def amount(string):
     return float(string.split(' ')[0])

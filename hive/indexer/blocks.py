@@ -1,4 +1,4 @@
-from hive.db.methods import query_row, query_col, query_one, query, is_trx_active
+from hive.db.methods import query_row, query_col, query_one, query
 from hive.indexer.steem_client import SteemClient
 
 from hive.indexer.accounts import Accounts
@@ -37,7 +37,7 @@ class Blocks:
     # Process a single block. always wrap in a transaction!
     @classmethod
     def process(cls, block):
-        assert is_trx_active(), "Block.process must be in a trx"
+        #assert is_trx_active(), "Block.process must be in a trx"
         return cls._process(block, is_initial_sync=False)
 
     # batch-process blocks, wrap in a transaction
