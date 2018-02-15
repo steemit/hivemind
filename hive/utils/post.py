@@ -86,9 +86,6 @@ def post_payout(post):
         amount(post['pending_payout_value']),
     ])
 
-    # total promotion cost
-    promoted = amount(post['promoted']) # TODO: remove this, handled by Payment class
-
     # get total rshares, and create comma-separated vote data blob
     rshares = sum(int(v['rshares']) for v in post['active_votes'])
     csvotes = "\n".join(map(_vote_csv_row, post['active_votes']))
@@ -100,7 +97,6 @@ def post_payout(post):
 
     return {
         'payout': payout,
-        'promoted': promoted,
         'rshares': rshares,
         'csvotes': csvotes,
         'sc_trend': sc_trend,

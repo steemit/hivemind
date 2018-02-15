@@ -3,6 +3,7 @@ from hive.utils.normalize import parse_amount
 
 from hive.indexer.posts import Posts
 from hive.indexer.accounts import Accounts
+from hive.indexer.cached_post import CachedPost
 
 DB = Db.instance()
 
@@ -26,9 +27,10 @@ class Payments:
         sql = "UPDATE hive_posts SET promoted = :val WHERE id = :id"
         DB.query(sql, val=new_amount, id=record['post_id'])
 
-        # update cache record
-        sql = "UPDATE hive_posts_cache SET promoted = :val WHERE post_id = :id"
-        DB.query(sql, val=new_amount, id=record['post_id'])
+        # notify cached_post of new promoted balance, and trigger update
+        CachedPost.update_promoted_amount(record['post_id'], new_amount)
+        author, permlink = cls._split_url(op['memo'])
+        CachedPost.vote(author, permlink, record['post_id'])
 
     @classmethod
     def _validated(cls, op, tx_idx, num, date):
