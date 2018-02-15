@@ -2,7 +2,7 @@ import logging
 
 from hive.conf import Conf
 from hive.db.db_state import DbState
-from hive.indexer.steem_client import SteemClient
+from hive.steem.steem_client import SteemClient
 
 from hive.indexer.sync import Sync
 from hive.indexer.blocks import Blocks

@@ -13,7 +13,7 @@ from hive.conf import Conf
 from hive.db.methods import query
 
 from hive.utils.timer import Timer
-from hive.indexer.steem_client import SteemClient
+from hive.steem.steem_client import SteemClient
 
 from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts

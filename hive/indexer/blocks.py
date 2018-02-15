@@ -1,5 +1,5 @@
 from hive.db.methods import query_row, query_col, query_one, query
-from hive.indexer.steem_client import SteemClient
+from hive.steem.steem_client import SteemClient
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts

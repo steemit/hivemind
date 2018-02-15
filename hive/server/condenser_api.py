@@ -2,7 +2,7 @@ import json
 
 from aiocache import cached
 from hive.db.methods import query_one, query_col, query_row, query_all
-from hive.indexer.steem_client import SteemClient
+from hive.steem.steem_client import SteemClient
 
 # e.g. {"id":0,"jsonrpc":"2.0","method":"call",
 #       "params":["database_api","get_state",["trending"]]}

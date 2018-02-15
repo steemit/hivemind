@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from hive.conf import Conf
 from hive.utils.normalize import parse_time
-from .http_client import HttpClient, RPCError
+from hive.steem.http_client import HttpClient, RPCError
 
 class ClientStats:
     # Assumed HTTP overhead (ms); subtract prior to par check
@@ -149,7 +149,7 @@ class SteemClient:
         next_expected = time.time()
 
         start_head = head_num
-        lag_secs = 0
+        lag_secs = 1
         queue = []
         while True:
             assert not last['num'] > head_num
@@ -177,13 +177,12 @@ class SteemClient:
             block_num = last['num'] + 1
             block = self.get_block(block_num)
             if not block:
-                lag_secs = min(3, lag_secs + 0.25) # tune inter-slot timing
-                print("[LIVE] block %d failed. hive:%d steem:%d. lag:%f"
+                lag_secs = min(3, lag_secs + 0.1) # tune inter-slot timing
+                print("[LIVE] block %d not available. hive:%d steem:%d. lag:%f"
                       % (block_num, head_num, self.head_block(), lag_secs))
                 time.sleep(0.5)
                 continue
-            else:
-                lag_secs = max(0, lag_secs - 0.001)
+            lag_secs -= 0.001 # timing forward creep
             last['num'] = block_num
 
             # if block doesn't link, we're forked
@@ -198,10 +197,11 @@ class SteemClient:
             # detect missed blocks, adjust schedule
             block_date = parse_time(block['timestamp'])
             miss_secs = (block_date - last['date']).seconds - 3
-            if miss_secs and block_num >= start_head:
+            if miss_secs and last['num'] >= start_head:
                 print("[LIVE] %d missed blocks"
                       % (miss_secs / 3))
                 next_expected += miss_secs
+                lag_secs = 1
             last['date'] = block_date
 
             # buffer block yield

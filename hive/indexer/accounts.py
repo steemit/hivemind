@@ -7,7 +7,7 @@ from datetime import datetime
 from toolz import partition_all
 
 from hive.db.methods import query_col, query, query_all
-from hive.indexer.steem_client import SteemClient
+from hive.steem.steem_client import SteemClient
 from hive.utils.normalize import rep_log10, amount, trunc
 from hive.utils.timer import Timer
 

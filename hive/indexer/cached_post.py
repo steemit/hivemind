@@ -3,12 +3,14 @@ import collections
 import math
 
 from toolz import partition_all
-from hive.db.methods import query, query_all, query_col, query_one
+from hive.db.adapter import Db
+from hive.steem.steem_client import SteemClient
 
 from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
-from hive.indexer.steem_client import SteemClient
+
+DB = Db.instance()
 
 # levels of post dirtiness, in order of decreasing priority
 LEVELS = ['insert', 'payout', 'update', 'upvote']
@@ -86,7 +88,7 @@ class CachedPost:
     #   - you can always get_content on any author/permlink you see in an op
     @classmethod
     def delete(cls, post_id, author, permlink):
-        query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
+        DB.query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
 
         # if it was queued for a write, remove it
         url = author+'/'+permlink
@@ -191,13 +193,13 @@ class CachedPost:
 
         sql = """SELECT post_id FROM hive_posts_cache
                   WHERE is_paidout = '0' AND payout_at <= :date"""
-        ids = query_col(sql, date=date)
+        ids = DB.query_col(sql, date=date)
         if not ids:
             return []
 
         sql = """SELECT id, author, permlink
                  FROM hive_posts WHERE id IN :ids"""
-        results = query_all(sql, ids=tuple(ids))
+        results = DB.query_all(sql, ids=tuple(ids))
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
@@ -220,7 +222,7 @@ class CachedPost:
         sql = """SELECT id, author, permlink, promoted FROM hive_posts
                   WHERE is_deleted = '0' AND id > :id
                ORDER BY id LIMIT :limit"""
-        results = query_all(sql, id=last_cached_id, limit=limit)
+        results = DB.query_all(sql, id=last_cached_id, limit=limit)
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
@@ -289,7 +291,7 @@ class CachedPost:
     def last_id(cls):
         if cls._last_id == -1:
             sql = "SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache"
-            cls._last_id = query_one(sql)
+            cls._last_id = DB.query_one(sql)
         return cls._last_id
 
     @classmethod
@@ -308,7 +310,7 @@ class CachedPost:
     @classmethod
     def _ensure_safe_gap(cls, last_id, next_id):
         sql = "SELECT COUNT(*) FROM hive_posts WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'"
-        missing_posts = query_one(sql, x1=(last_id + 1), x2=(next_id - 1))
+        missing_posts = DB.query_one(sql, x1=(last_id + 1), x2=(next_id - 1))
         if not missing_posts:
             return
         raise Exception("found large cache gap: %d --> %d (%d)"
@@ -317,12 +319,12 @@ class CachedPost:
     @classmethod
     def _batch_queries(cls, batches, trx):
         if trx:
-            query("START TRANSACTION")
+            DB.query("START TRANSACTION")
         for queries in batches:
             for (sql, params) in queries:
-                query(sql, **params)
+                DB.query(sql, **params)
         if trx:
-            query("COMMIT")
+            DB.query("COMMIT")
 
     @classmethod
     def _sql(cls, pid, post, level=None):
@@ -405,7 +407,7 @@ class CachedPost:
     @classmethod
     def _tag_sqls(cls, pid, tags):
         sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
-        curr_tags = set(query_col(sql, id=pid))
+        curr_tags = set(DB.query_col(sql, id=pid))
 
         to_rem = (curr_tags - tags)
         if to_rem:
@@ -423,7 +425,7 @@ class CachedPost:
     @classmethod
     def _write(cls, values, mode='insert'):
         tup = cls._write_sql(values, mode)
-        return query(tup[0], **tup[1])
+        return DB.query(tup[0], **tup[1])
 
     # sql builder for writing to hive_posts_cache table
     @classmethod
