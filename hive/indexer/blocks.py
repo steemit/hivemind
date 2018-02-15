@@ -1,10 +1,11 @@
-from hive.db.methods import query_row, query_col, query_one, query, is_trx_active
+from hive.db.methods import query_row, query_col, query_one, query
 from hive.indexer.steem_client import SteemClient
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.custom_op import CustomOp
+from hive.indexer.payments import Payments
 from hive.indexer.follow import Follow
 
 class Blocks:
@@ -36,7 +37,7 @@ class Blocks:
     # Process a single block. always wrap in a transaction!
     @classmethod
     def process(cls, block):
-        assert is_trx_active(), "Block.process must be in a trx"
+        #assert is_trx_active(), "Block.process must be in a trx"
         return cls._process(block, is_initial_sync=False)
 
     # batch-process blocks, wrap in a transaction
@@ -65,10 +66,11 @@ class Blocks:
         json_ops = []
         delete_ops = []
         voted_authors = set()
-        for tx in block['transactions']:
+        for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
                 op_type, op = operation
 
+                # account ops
                 if op_type == 'pow':
                     account_names.add(op['worker_account'])
                 elif op_type == 'pow2':
@@ -77,16 +79,22 @@ class Blocks:
                     account_names.add(op['new_account_name'])
                 elif op_type == 'account_create_with_delegation':
                     account_names.add(op['new_account_name'])
+
+                # post ops
                 elif op_type == 'comment':
                     comment_ops.append(op)
                 elif op_type == 'delete_comment':
                     delete_ops.append(op)
-                elif op_type == 'custom_json':
-                    json_ops.append(op)
                 elif op_type == 'vote':
                     if not is_initial_sync:
                         CachedPost.vote(op['author'], op['permlink'])
-                        voted_authors.add(op['author'])
+                        voted_authors.add(op['author']) # TODO: move to cachedpost
+
+                # misc ops
+                elif op_type == 'transfer':
+                    Payments.op_transfer(op, tx_idx, num, date)
+                elif op_type == 'custom_json':
+                    json_ops.append(op)
 
         Accounts.register(account_names, date)     # register any new names
         Accounts.dirty(voted_authors)              # update rep of voted authors
@@ -181,6 +189,7 @@ class Blocks:
             query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
             query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
             query("DELETE FROM hive_posts       WHERE id IN :ids", ids=post_ids)
+            query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
             query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
 
         query("COMMIT")

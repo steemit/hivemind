@@ -1,6 +1,6 @@
 import collections
 
-from hive.db.methods import query, query_one, query_row
+from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
 from hive.utils.normalize import load_json_key
@@ -9,6 +9,8 @@ from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 
 from hive.community.roles import is_community_post_valid
+
+DB = Db.instance()
 
 class Posts:
 
@@ -20,7 +22,7 @@ class Posts:
     @classmethod
     def last_id(cls):
         sql = "SELECT MAX(id) FROM hive_posts WHERE is_deleted = '0'"
-        return query_one(sql) or 0
+        return DB.query_one(sql) or 0
 
     @classmethod
     def get_id(cls, author, permlink):
@@ -33,7 +35,7 @@ class Posts:
             cls._miss += 1
             sql = """SELECT id FROM hive_posts WHERE
                      author = :a AND permlink = :p"""
-            _id = query_one(sql, a=author, p=permlink)
+            _id = DB.query_one(sql, a=author, p=permlink)
             if _id:
                 cls._set_id(url, _id)
 
@@ -54,7 +56,8 @@ class Posts:
 
     @classmethod
     def save_ids_from_tuples(cls, tuples):
-        for pid, author, permlink in tuples:
+        for tup in tuples:
+            pid, author, permlink = (tup[0], tup[1], tup[2])
             url = author+'/'+permlink
             if not url in cls._ids:
                 cls._set_id(url, pid)
@@ -65,13 +68,13 @@ class Posts:
         _id = cls.get_id(author, permlink)
         if not _id:
             return (None, -1)
-        depth = query_one("SELECT depth FROM hive_posts WHERE id = :id", id=_id)
+        depth = DB.query_one("SELECT depth FROM hive_posts WHERE id = :id", id=_id)
         return (_id, depth)
 
     @classmethod
     def is_pid_deleted(cls, pid):
         sql = "SELECT is_deleted FROM hive_posts WHERE id = :id"
-        return query_one(sql, id=pid)
+        return DB.query_one(sql, id=pid)
 
     # marks posts as deleted and removes them from feed cache
     @classmethod
@@ -103,7 +106,7 @@ class Posts:
                               :category, :community, :depth, :date)"""
         sql += ";SELECT currval(pg_get_serial_sequence('hive_posts','id'))"
         post = cls._build_post(op, date)
-        result = query(sql, **post)
+        result = DB.query(sql, **post)
         post['id'] = int(list(result)[0][0])
         cls._set_id(op['author']+'/'+op['permlink'], post['id'])
 
@@ -119,7 +122,7 @@ class Posts:
                    community = :community, depth = :depth
                  WHERE id = :id"""
         post = cls._build_post(op, date, pid)
-        query(sql, **post)
+        DB.query(sql, **post)
 
         if not DbState.is_initial_sync():
             CachedPost.undelete(pid, post['author'], post['permlink'])
@@ -129,7 +132,7 @@ class Posts:
     @classmethod
     def delete(cls, op):
         pid, depth = cls.get_id_and_depth(op['author'], op['permlink'])
-        query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=pid)
+        DB.query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=pid)
 
         if not DbState.is_initial_sync():
             CachedPost.delete(pid, op['author'], op['permlink'])
@@ -159,7 +162,7 @@ class Posts:
         else:
             parent_id = cls.get_id(op['parent_author'], op['parent_permlink'])
             sql = "SELECT depth,category,community FROM hive_posts WHERE id=:id"
-            parent_depth, category, community = query_row(sql, id=parent_id)
+            parent_depth, category, community = DB.query_row(sql, id=parent_id)
             depth = parent_depth + 1
 
         # check post validity in specified context

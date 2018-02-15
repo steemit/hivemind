@@ -79,6 +79,7 @@ hive_posts = sa.Table(
     sa.Column('is_pinned', BOOLEAN, nullable=False, server_default='0'),
     sa.Column('is_muted', BOOLEAN, nullable=False, server_default='0'),
     sa.Column('is_valid', BOOLEAN, nullable=False, server_default='1'),
+    sa.Column('promoted', sa.types.DECIMAL(10, 3), nullable=False, server_default='0'),
 
     sa.ForeignKeyConstraint(['author'], ['hive_accounts.name'], name='hive_posts_fk1'),
     sa.ForeignKeyConstraint(['community'], ['hive_accounts.name'], name='hive_posts_fk2'),
@@ -133,6 +134,24 @@ hive_reblogs = sa.Table(
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_reblogs_fk2'),
     sa.UniqueConstraint('account', 'post_id', name='hive_reblogs_ux1'), # core
     sa.Index('hive_reblogs_ix1', 'post_id', 'account', 'created_at'), # API -- TODO: seemingly unused
+    mysql_engine='InnoDB',
+    mysql_default_charset='utf8mb4'
+)
+
+hive_payments = sa.Table(
+    'hive_payments', metadata,
+    sa.Column('id', sa.Integer, primary_key=True),
+    sa.Column('block_num', sa.Integer, nullable=False),
+    sa.Column('tx_idx', SMALLINT, nullable=False),
+    sa.Column('post_id', sa.Integer, nullable=False),
+    sa.Column('from_account', sa.Integer, nullable=False),
+    sa.Column('to_account', sa.Integer, nullable=False),
+    sa.Column('amount', sa.types.DECIMAL(10, 3), nullable=False),
+    sa.Column('token', VARCHAR(5), nullable=False),
+
+    sa.ForeignKeyConstraint(['from_account'], ['hive_accounts.id'], name='hive_payments_fk1'),
+    sa.ForeignKeyConstraint(['to_account'], ['hive_accounts.id'], name='hive_payments_fk2'),
+    sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_payments_fk3'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'
 )

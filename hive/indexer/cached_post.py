@@ -30,6 +30,13 @@ class CachedPost:
     # dirty posts; {key: dirty_level}
     _queue = collections.OrderedDict()
 
+    # new promoted values, pending write
+    _pending_promoted = {}
+
+    @classmethod
+    def update_promoted_amount(cls, post_id, amount):
+        cls._pending_promoted[post_id] = amount
+
     # Mark a post as dirty.
     @classmethod
     def _dirty(cls, level, author, permlink, pid=None):
@@ -60,8 +67,8 @@ class CachedPost:
 
     # Called when a post is voted on.
     @classmethod
-    def vote(cls, author, permlink):
-        cls._dirty('upvote', author, permlink)
+    def vote(cls, author, permlink, pid=None):
+        cls._dirty('upvote', author, permlink, pid)
 
     # Called when a post record is created.
     @classmethod
@@ -208,16 +215,16 @@ class CachedPost:
         return len(paidout)
 
     @classmethod
-    def _select_missing_tuples(cls, last_cached_id, limit=1_000_000):
+    def _select_missing_tuples(cls, last_cached_id, limit=1000000):
         from hive.indexer.posts import Posts
-        sql = """SELECT id, author, permlink FROM hive_posts
+        sql = """SELECT id, author, permlink, promoted FROM hive_posts
                   WHERE is_deleted = '0' AND id > :id
                ORDER BY id LIMIT :limit"""
         results = query_all(sql, id=last_cached_id, limit=limit)
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
-    def dirty_missing(cls, limit=1_000_000):
+    def dirty_missing(cls, limit=1000000):
         from hive.indexer.posts import Posts
 
         # cached posts inserted sequentially, so compare MAX(id)'s
@@ -227,7 +234,9 @@ class CachedPost:
 
         if gap:
             missing = cls._select_missing_tuples(last_cached_id, limit)
-            for pid, author, permlink in missing:
+            for pid, author, permlink, promoted in missing:
+                if promoted > 0: # ensure we don't miss promote amount
+                    cls.update_promoted_amount(pid, promoted)
                 cls._dirty('insert', author, permlink, pid)
 
         return gap
@@ -334,7 +343,7 @@ class CachedPost:
         tag_sqls = []
         values = [('post_id', pid)]
 
-        # immutable; write only once
+        # immutable; write only once (*edge case: undeleted posts)
         if level == 'insert':
             values.extend([
                 ('author',   post['author']),
@@ -365,12 +374,19 @@ class CachedPost:
             if not post['depth']:
                 tag_sqls.extend(cls._tag_sqls(pid, basic['tags']))
 
+        # if there's a pending promoted value to write, pull it out
+        if pid in cls._pending_promoted:
+            bal = cls._pending_promoted[pid]
+            print("promoted @%s/%s to %.3f SBD"
+                  % (post['author'], post['permlink'], bal))
+            values.append(('promoted', bal))
+            del cls._pending_promoted[pid]
+
         # update unconditionally
         payout = post_payout(post)
         stats = post_stats(post)
         values.extend([
             ('payout',      "%f" % payout['payout']),
-            ('promoted',    "%f" % payout['promoted']),
             ('rshares',     "%d" % payout['rshares']),
             ('votes',       "%s" % payout['csvotes']),
             ('sc_trend',    "%f" % payout['sc_trend']),
