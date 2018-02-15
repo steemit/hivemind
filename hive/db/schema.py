@@ -144,13 +144,13 @@ hive_payments = sa.Table(
     sa.Column('block_num', sa.Integer, nullable=False),
     sa.Column('tx_idx', SMALLINT, nullable=False),
     sa.Column('post_id', sa.Integer, nullable=False),
-    sa.Column('from_account', VARCHAR(16), nullable=False),
-    sa.Column('to_account', VARCHAR(16), nullable=False),
+    sa.Column('from_account', sa.Integer, nullable=False),
+    sa.Column('to_account', sa.Integer, nullable=False),
     sa.Column('amount', sa.types.DECIMAL(10, 3), nullable=False),
     sa.Column('token', VARCHAR(5), nullable=False),
 
-    sa.ForeignKeyConstraint(['from_account'], ['hive_accounts.name'], name='hive_payments_fk1'),
-    sa.ForeignKeyConstraint(['to_account'], ['hive_accounts.name'], name='hive_payments_fk2'),
+    sa.ForeignKeyConstraint(['from_account'], ['hive_accounts.id'], name='hive_payments_fk1'),
+    sa.ForeignKeyConstraint(['to_account'], ['hive_accounts.id'], name='hive_payments_fk2'),
     sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_payments_fk3'),
     mysql_engine='InnoDB',
     mysql_default_charset='utf8mb4'

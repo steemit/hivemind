@@ -88,7 +88,7 @@ class Blocks:
                 elif op_type == 'vote':
                     if not is_initial_sync:
                         CachedPost.vote(op['author'], op['permlink'])
-                        voted_authors.add(op['author'])
+                        voted_authors.add(op['author']) # TODO: move to cachedpost
 
                 # misc ops
                 elif op_type == 'transfer':
@@ -189,6 +189,7 @@ class Blocks:
             query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
             query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
             query("DELETE FROM hive_posts       WHERE id IN :ids", ids=post_ids)
+            query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
             query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
 
         query("COMMIT")

@@ -59,8 +59,8 @@ class Payments:
                 'block_num': num,
                 'tx_idx': tx_idx,
                 'post_id': post_id,
-                'from_account': op['from'],
-                'to_account': op['to'],
+                'from_account': Accounts.get_id(op['from']),
+                'to_account': Accounts.get_id(op['to']),
                 'amount': amount,
                 'token': token}
 
