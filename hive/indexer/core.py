@@ -2,18 +2,16 @@ import logging
 
 from hive.conf import Conf
 from hive.db.db_state import DbState
-from hive.steem.steem_client import SteemClient
 
 from hive.indexer.sync import Sync
 from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
-from hive.indexer.feed_cache import FeedCache
 
 log = logging.getLogger(__name__)
 
-def run():
 
+def run():
     print("[HIVE] Welcome to hivemind")
 
     # make sure db schema is up to date, perform checks
@@ -23,14 +21,8 @@ def run():
     Accounts.load_ids()
 
     if DbState.is_initial_sync():
-        print("[INIT] *** Initial fast sync ***")
-        Sync.from_checkpoints()
-        Sync.from_steemd(is_initial_sync=True)
-
-        print("[INIT] *** Initial cache build ***")
-        # todo: disable indexes during this process
-        CachedPost.recover_missing_posts()
-        FeedCache.rebuild()
+        # resume initial sync
+        Sync.initial()
         DbState.finish_initial_sync()
 
     else:
@@ -52,14 +44,9 @@ def run():
         Sync.listen()
 
 
-def head_state(*args):
-    _ = args  # JSONRPC injects 4 arguments here
-    steemd_head = SteemClient.instance().head_block()
-    hive_head = Blocks.head_num()
-    diff = steemd_head - hive_head
-    return dict(steemd=steemd_head, hive=hive_head, diff=diff)
-
-
 if __name__ == '__main__':
-    Conf.read()
-    run()
+    Conf.init_argparse()
+    if Conf.get('mode') == 'status':
+        print(DbState.status())
+    else:
+        run()

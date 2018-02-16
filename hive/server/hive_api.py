@@ -2,16 +2,10 @@ import time
 
 from decimal import Decimal
 from hive.db.methods import query_one, query_col, query_row, query_all
-
+from hive.db.db_state import DbState
 
 async def db_head_state():
-    sql = ("SELECT num,created_at,extract(epoch from created_at) ts "
-           "FROM hive_blocks ORDER BY num DESC LIMIT 1")
-    row = query_row(sql)
-    return dict(db_head_block=row['num'],
-                db_head_time=str(row['created_at']),
-                db_head_age=int(time.time() - row['ts']))
-
+    return DbState.status()
 
 # follow methods
 # --------------

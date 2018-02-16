@@ -14,7 +14,7 @@ from hive.conf import Conf
 from hive.server import condenser_api
 from hive.server import hive_api
 
-Conf.read()
+Conf.init_argparse()
 log_level = Conf.log_level()
 
 config.debug = (log_level == logging.DEBUG)
@@ -73,8 +73,6 @@ for m in condenser_methods:
 
 app = web.Application()
 app['config'] = dict()
-
-app['config']['hive.MAX_BLOCK_NUM_DIFF'] = 10
 app['config']['hive.MAX_DB_ROW_RESULTS'] = 100000
 app['config']['hive.DB_QUERY_LIMIT'] = app['config']['hive.MAX_DB_ROW_RESULTS'] + 1
 app['config']['hive.logger'] = logger
@@ -99,18 +97,24 @@ async def close_db(app):
 # -------------------
 async def health(request):
     state = await hive_api.db_head_state()
-    if state['db_head_age'] > app['config']['hive.MAX_BLOCK_NUM_DIFF'] * 3:
-        return web.json_response(data=dict(result='head block age (%s) > max allowable (%s); head block num: %s' % (
-            state['db_head_age'],
-            app['config']['hive.MAX_BLOCK_NUM_DIFF'] * 3,
-            state['db_head_block'])), status=500)
+    max_head_age = (Conf.get('trail_blocks') + 1) * 3
 
-    return web.json_response(data=dict(
-        status='OK',
+    if state['db_head_age'] > max_head_age:
+        status = 500
+        result = 'head block age (%s) > max (%s); head block num: %s' % (
+            state['db_head_age'], max_head_age, state['db_head_block'])
+    else:
+        status = 200
+        result = 'head block age is %d, head block num is %d' % (
+            state['db_head_age'], state['db_head_block'])
+
+    return web.json_response(status=status, data=dict(
+        state=state,
+        result=result,
+        status='OK' if status == 200 else 'WARN',
         source_commit=os.environ.get('SOURCE_COMMIT'),
         schema_hash=os.environ.get('SCHEMA_HASH'),
         docker_tag=os.environ.get('DOCKER_TAG'),
-        state=state,
         timestamp=datetime.utcnow().isoformat()))
 
 async def jsonrpc_handler(request):

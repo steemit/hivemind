@@ -15,7 +15,7 @@ services:
     build: .
     environment:
       DATABASE_URL: postgresql://testuser:testuserpass@db:5432/testdb
-      LOG_LEVEL: DEBUG
+      LOG_LEVEL: INFO
       STEEMD_URL: https://api.steemit.com
     links:
       - db:db

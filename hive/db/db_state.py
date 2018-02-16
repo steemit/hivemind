@@ -1,5 +1,7 @@
-from hive.db.schema import setup, teardown
-from hive.db.methods import db_engine, query_one, query
+import time
+
+from hive.db.schema import setup #, teardown
+from hive.db.methods import db_engine, query_one, query, query_row
 
 class DbState:
 
@@ -47,6 +49,15 @@ class DbState:
     @classmethod
     def is_initial_sync(cls):
         return cls._is_initial_sync
+
+    @staticmethod
+    def status():
+        sql = ("SELECT num, created_at, extract(epoch from created_at) ts "
+               "FROM hive_blocks ORDER BY num DESC LIMIT 1")
+        row = query_row(sql)
+        return dict(db_head_block=row['num'],
+                    db_head_time=str(row['created_at']),
+                    db_head_age=int(time.time() - row['ts']))
 
     @classmethod
     def _is_schema_loaded(cls):

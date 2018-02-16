@@ -5,11 +5,14 @@ class Conf():
     _args = None
 
     @classmethod
-    def read(cls):
+    def init_argparse(cls):
         assert not cls._args, "config already read"
 
         #pylint: disable=invalid-name,line-too-long
         p = configargparse.get_arg_parser(default_config_files=['./hive.conf'])
+
+        # runmodes: sync, status
+        p.add('--mode', default='sync')
 
         # common
         p.add('--database-url', env_var='DATABASE_URL', required=True, help='database connection url', default='postgresql://user:pass@localhost:5432/hive')
@@ -32,7 +35,7 @@ class Conf():
 
     @classmethod
     def get(cls, param):
-        assert cls._args, "run Conf.read()"
+        assert cls._args, "run init_argparse()"
         return getattr(cls._args, param)
 
     @classmethod

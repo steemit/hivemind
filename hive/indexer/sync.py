@@ -11,6 +11,7 @@ from toolz import partition_all
 from hive.conf import Conf
 
 from hive.db.methods import query
+from hive.db.db_state import DbState
 
 from hive.utils.timer import Timer
 from hive.steem.steem_client import SteemClient
@@ -18,11 +19,28 @@ from hive.steem.steem_client import SteemClient
 from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
+from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
 
 log = logging.getLogger(__name__)
 
 class Sync:
+
+
+    @classmethod
+    def initial(cls):
+        assert DbState.is_initial_sync(), "already synced"
+
+        print("[INIT] *** Initial fast sync ***")
+        cls.from_checkpoints()
+        cls.from_steemd(is_initial_sync=True)
+
+        print("[INIT] *** Initial cache build ***")
+        # TODO: disable indexes during this process
+        CachedPost.recover_missing_posts()
+        FeedCache.rebuild()
+
+
     @classmethod
     def from_checkpoints(cls, chunk_size=1000):
         last_block = Blocks.head_num()
