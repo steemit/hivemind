@@ -8,7 +8,8 @@ from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
 from sqlalchemy.types import BOOLEAN
 
-from hive.conf import Conf
+#from hive.conf import Conf
+from hive.db.adapter import Db
 
 #pylint: disable=line-too-long
 
@@ -302,19 +303,8 @@ logging.basicConfig()
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
 
-def _create_engine(echo=False):
-    engine = sa.create_engine(
-        Conf.get('database_url'),
-        isolation_level="READ UNCOMMITTED", # only works in mysql
-        pool_recycle=3600,
-        echo=echo)
-    return engine
-
-def connect(echo=False):
-    return _create_engine(echo=echo).connect()
-
 def setup():
-    engine = _create_engine(echo=True)
+    engine = Db.create_engine(echo=True)
     metadata.create_all(engine)
 
     conn = engine.connect()
@@ -337,7 +327,7 @@ def setup():
     conn.execute(insert)
 
 def teardown():
-    engine = _create_engine(echo=True)
+    engine = Db.create_engine(echo=True)
     metadata.drop_all(engine)
 
 

@@ -1,10 +1,11 @@
 import logging
 import collections
-
 from funcy.seqs import first
+
+import sqlalchemy
 from sqlalchemy import text
 
-from hive.db.schema import connect
+from hive.conf import Conf
 from hive.db.query_stats import QueryStats
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,24 @@ class Db:
 
     def conn(self):
         if not self._conn:
-            self._conn = connect(echo=False)
+            self._conn = Db.create_engine(echo=False).connect()
+            # It seems as though sqlalchemy tries to take over transactions
+            # and handle them itself; seems to issue a START TRANSACTION on
+            # connect, which makes postgres complain when we start our own:
+            # > WARNING:  there is already a transaction in progress
+            # TODO: handle this behavior properly. In the meantime:
+            self._conn.execute(text("COMMIT"))
         return self._conn
+
+
+    @staticmethod
+    def create_engine(echo=False):
+        engine = sqlalchemy.create_engine(
+            Conf.get('database_url'),
+            isolation_level="READ UNCOMMITTED", # only works in mysql
+            pool_recycle=3600,
+            echo=echo)
+        return engine
 
     def is_trx_active(self):
         return self._trx_active
