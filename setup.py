@@ -18,10 +18,6 @@ setup(
                    'pep8',
                    'pytest-pylint',
                    'yapf',
-                   'sphinx',
-                   'recommonmark',
-                   'sphinxcontrib-restbuilder',
-                   'sphinxcontrib-programoutput',
                    'pytest-console-scripts'],
 
     install_requires=[
