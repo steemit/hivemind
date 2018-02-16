@@ -11,7 +11,7 @@ from hive.indexer.cached_post import CachedPost
 log = logging.getLogger(__name__)
 
 
-def run():
+def run_sync():
     print("[HIVE] Welcome to hivemind")
 
     # make sure db schema is up to date, perform checks
@@ -46,7 +46,4 @@ def run():
 
 if __name__ == '__main__':
     Conf.init_argparse()
-    if Conf.get('mode') == 'status':
-        print(DbState.status())
-    else:
-        run()
+    run_sync()

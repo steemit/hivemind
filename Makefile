@@ -3,7 +3,7 @@ ROOT_DIR := $(shell pwd)
 
 PROJECT_NAME := hive
 PROJECT_DOCKER_TAG := steemit/$(PROJECT_NAME)
-PROJECT_DOCKER_RUN_ARGS := --link mysql:mysql
+PROJECT_DOCKER_RUN_ARGS := --link db:db
 
 default: build
 
@@ -18,9 +18,11 @@ run:
 compose:
 	docker-compose up -d
 
-mysql:
-	docker run -d --name steemit_mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root_password -e MYSQL_DATABASE=testdb mysql
+db:
+	docker run -d --name hive_db -p 5432:5432 -e POSTGRES_PASSWORD=root_password -e POSTGRES_DATABASE=hivepy postgres
 
+mysql:
+	docker run --env DATABASE_URL=mysql://root:root_password@mysql:3306/testdb -p 4000:8080 hive
 
 serve-local:
 	pipenv run python hive/server/serve.py --port 8080 --database_url='mysql://root:root_password@127.0.0.1:3306/testdb'

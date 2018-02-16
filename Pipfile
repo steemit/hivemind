@@ -6,8 +6,6 @@ verify_ssl = true
 
 sqlalchemy = "*"
 mysqlclient = "*"
-click = "*"
-"click-spinner" = "*"
 funcy = "*"
 toolz = "*"
 maya = "*"

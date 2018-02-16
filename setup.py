@@ -30,19 +30,17 @@ setup(
         'aiohttp',
         'certifi',
         'sqlalchemy',
-        'click',
         'funcy',
         'toolz',
         'maya',
         'ujson',
         'urllib3',
-        'PrettyTable',
         'psycopg2',
         'aiocache',
         'configargparse',
     ],
     entry_points={
         'console_scripts': [
-            'hive=hive.cli:cli',
+            'hive=run:run',
         ]
     })

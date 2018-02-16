@@ -11,8 +11,8 @@ class Conf():
         #pylint: disable=invalid-name,line-too-long
         p = configargparse.get_arg_parser(default_config_files=['./hive.conf'])
 
-        # runmodes: sync, status
-        p.add('--mode', default='sync')
+        # runmodes: sync, server, status
+        p.add('mode', nargs='*', default=['sync'])
 
         # common
         p.add('--database-url', env_var='DATABASE_URL', required=True, help='database connection url', default='postgresql://user:pass@localhost:5432/hive')
@@ -25,9 +25,13 @@ class Conf():
         p.add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', default=2)
 
         # specific to API server
-        p.add('--port', type=int, env_var='PORT', default=8080)
+        p.add('--http-server-port', type=int, env_var='HTTP_SERVER_PORT', default=8080)
 
         cls._args = p.parse_args()
+
+        if cls.get('log_level') == 'DEBUG':
+            print(cls._args)
+            print(p.format_values())
 
     @classmethod
     def args(cls):
