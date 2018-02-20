@@ -9,6 +9,9 @@ default: build
 
 .PHONY: test run test-without-lint test-pylint fmt test-without-build build
 
+docs:
+	pdoc --html hive --html-dir docs
+
 build:
 	docker build -t $(PROJECT_DOCKER_TAG) .
 
