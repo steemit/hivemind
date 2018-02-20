@@ -2,4 +2,4 @@
 
 POPULATE_CMD="$(which hive)"
 
-exec "${POPULATE_CMD}" indexer run
+exec "${POPULATE_CMD}" sync
