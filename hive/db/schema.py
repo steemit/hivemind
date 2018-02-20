@@ -308,10 +308,14 @@ def build_metadata():
 
 
 def setup():
+    # initialize schema
     engine = Db.create_engine(echo=True)
-    metadata = build_metadata()
-    metadata.create_all(engine)
+    build_metadata().create_all(engine)
 
+    # tune auto vacuum/analyze
+    reset_autovac()
+
+    # default rows
     sqls = [
         "INSERT INTO hive_state (block_num, db_version, steem_per_mvest, usd_per_steem, sbd_per_steem, dgpo) VALUES (0, 3, 0, 0, 0, '')",
         "INSERT INTO hive_blocks (num, hash, created_at) VALUES (0, '0000000000000000000000000000000000000000', '2016-03-24 16:04:57')",
@@ -321,6 +325,30 @@ def setup():
         "INSERT INTO hive_accounts (name, created_at) VALUES ('initminer', '2016-03-24 16:05:00')"]
     for sql in sqls:
         Db.instance().query(sql)
+
+def reset_autovac():
+    # consider using scale_factor = 0 with flat thresholds:
+    #   autovacuum_vacuum_threshold, autovacuum_analyze_threshold
+
+    autovac_config = {
+        # default
+        'hive_accounts':    (0.2, 0.1),
+        'hive_state':       (0.2, 0.1),
+        'hive_reblogs':     (0.2, 0.1),
+        'hive_payments':    (0.2, 0.1),
+        # more aggresive
+        'hive_posts':       (0.010, 0.005),
+        'hive_post_tags':   (0.010, 0.005),
+        'hive_feed_cache':  (0.010, 0.005),
+        # very aggresive
+        'hive_posts_cache': (0.0050, 0.0025), # @36M, ~2/day,  3/day (~240k new tuples daily)
+        'hive_blocks':      (0.0100, 0.0014), # @20M, ~1/week, 1/day
+        'hive_follows':     (0.0050, 0.0025)} # @47M, ~1/day,  3/day (~300k new tuples daily)
+
+    for table, (vacuum_sf, analyze_sf) in autovac_config.items():
+        sql = """ALTER TABLE %s SET (autovacuum_vacuum_scale_factor = %s,
+                                     autovacuum_analyze_scale_factor = %s)"""
+        Db.instance().query(sql % (table, vacuum_sf, analyze_sf))
 
 def teardown():
     engine = Db.create_engine(echo=True)
