@@ -15,27 +15,26 @@ from hive.server import condenser_api
 from hive.server import hive_api
 
 
-def run_server():
-
-    log_level = Conf.log_level()
-
-    config.debug = (log_level == logging.DEBUG)
-    logging.basicConfig(level=log_level)
-    logger = logging.getLogger(__name__)
-    logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
+def build_methods():
+    methods = AsyncMethods()
 
     hive_methods = (
         hive_api.db_head_state,
-        hive_api.get_followers,
-        hive_api.get_following,
-        hive_api.get_follow_count,
-        hive_api.get_user_feed,
-        hive_api.get_blog_feed,
-        hive_api.get_discussions_by_sort_and_tag,
-        hive_api.get_related_posts,
+        # --- disabled until #92
+        #hive_api.get_followers,
+        #hive_api.get_following,
+        #hive_api.get_follow_count,
+        #hive_api.get_user_feed,
+        #hive_api.get_blog_feed,
+        #hive_api.get_discussions_by_sort_and_tag,
+        #hive_api.get_related_posts,
+        # ---
         hive_api.payouts_total,
-        hive_api.payouts_last_24h
+        hive_api.payouts_last_24h,
     )
+    for method in hive_methods:
+        methods.add(method)
+        #methods.add(method, 'hive.' + method.__name__) #test jussi-ns w/o jussi
 
     condenser_methods = (
         condenser_api.call,
@@ -52,33 +51,27 @@ def run_server():
         condenser_api.get_replies_by_last_update,
         condenser_api.get_content,
         condenser_api.get_content_replies,
-        condenser_api.get_state
+        condenser_api.get_state,
     )
-
-    # Register hive_api methods and (appbase) condenser_api methods
-    methods = AsyncMethods()
-    for method in hive_methods:
-        methods.add(method)
-
-        # TODO: temp, for testing jussi-style path without jussi
-        methods.add(method, 'hive_api.' + method.__name__)
-
     for method in condenser_methods:
-        # note: unclear if appbase expects condenser_api.call or call.condenser_api
+        # todo: unclear if appbase uses condenser_api.call vs call.condenser_api
         methods.add(method, 'condenser_api.' + method.__name__)
 
-        # TODO: temp, for testing jussi-style path without jussi
-        methods.add(method, 'hive_api.condenser_api.' + method.__name__)
+        # todo: temporary non-appbase endpoint (remove once appbase is in prod)
+        methods.add(method, method.__name__)
 
-    # Register non-appbase condenser_api endpoint (remove after appbase in prod)
-    non_appbase_methods = AsyncMethods()
-    for method in condenser_methods:
-        non_appbase_methods.add(method)
+    return methods
 
-    # TODO: temp, for testing jussi-style path without jussi
-    non_appbase_methods.add(condenser_api.call, 'condenser_api.non_appb.call')
-    non_appbase_methods.add(condenser_api.call, 'hive_api.condenser_api.non_appb.call')
-    # -----
+
+def run_server():
+
+    log_level = Conf.log_level()
+    config.debug = (log_level == logging.DEBUG)
+    logging.basicConfig(level=log_level)
+    logger = logging.getLogger(__name__)
+    logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
+
+    methods = build_methods()
 
     app = web.Application()
     app['config'] = dict()
@@ -86,7 +79,6 @@ def run_server():
     app['config']['hive.MAX_DB_ROW_RESULTS'] = 100000
     app['config']['hive.DB_QUERY_LIMIT'] = app['config']['hive.MAX_DB_ROW_RESULTS'] + 1
     app['config']['hive.logger'] = logger
-
 
     async def init_db(app):
         args = app['config']['args']
@@ -135,14 +127,8 @@ def run_server():
         response = await methods.dispatch(request)
         return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
 
-    async def non_appbase_handler(request):
-        request = await request.text()
-        response = await non_appbase_methods.dispatch(request)
-        return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
-
     app.router.add_get('/health', health)
     app.router.add_post('/', jsonrpc_handler)
-    app.router.add_post('/legacy', non_appbase_handler)
 
     web.run_app(app, port=app['config']['args'].http_server_port)
 
