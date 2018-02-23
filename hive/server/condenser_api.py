@@ -3,6 +3,7 @@ import json
 from aiocache import cached
 from hive.db.methods import query_one, query_col, query_row, query_all
 from hive.steem.steem_client import SteemClient
+import hive.server.cursor as cursor
 
 # e.g. {"id":0,"jsonrpc":"2.0","method":"call",
 #       "params":["database_api","get_state",["trending"]]}
@@ -60,100 +61,81 @@ async def call(api, method, params):
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
     limit = _validate_limit(limit, 1000)
     state = _follow_type_to_int(follow_type)
-    account_id = _get_account_id(account)
-    seek = ''
-
-    if start:
-        seek = """
-          AND hf.created_at <= (
-            SELECT created_at FROM hive_follows
-             WHERE following = :account_id AND follower = %d AND state = :state)
-        """ % _get_account_id(start)
-
-    sql = """
-        SELECT name FROM hive_follows hf
-          JOIN hive_accounts ON hf.follower = id
-         WHERE hf.following = :account_id AND state = :state %s
-      ORDER BY hf.created_at DESC LIMIT :limit
-    """ % seek
-
-    res = query_col(sql, account_id=account_id, state=state, limit=int(limit))
-    return [dict(follower=r, following=account, what=[follow_type])
-            for r in res]
-
+    followers = cursor.get_followers(account, start, state, limit)
+    return [dict(follower=name, following=account, what=[follow_type])
+            for name in followers]
 
 async def get_following(account: str, start: str, follow_type: str, limit: int):
     limit = _validate_limit(limit, 1000)
     state = _follow_type_to_int(follow_type)
-    account_id = _get_account_id(account)
-    seek = ''
-
-    if start:
-        seek = """
-          AND hf.created_at <= (
-            SELECT created_at FROM hive_follows
-             WHERE follower = :account_id AND following = %d AND state = :state)
-        """ % _get_account_id(start)
-
-    sql = """
-        SELECT name FROM hive_follows hf
-          JOIN hive_accounts ON hf.following = id
-         WHERE hf.follower = :account_id AND state = :state %s
-      ORDER BY hf.created_at DESC LIMIT :limit
-    """ % seek
-
-    res = query_col(sql, account_id=account_id, state=state, limit=int(limit))
-    return [dict(follower=account, following=r, what=[follow_type])
-            for r in res]
-
+    following = cursor.get_following(account, start, state, limit)
+    return [dict(follower=account, following=name, what=[follow_type])
+            for name in following]
 
 async def get_follow_count(account: str):
-    sql = """
-        SELECT name as account,
-               following as following_count,
-               followers as follower_count
-          FROM hive_accounts WHERE name = :n
-    """
-    return dict(query_row(sql, n=account))
+    count = cursor.get_follow_counts(account)
+    return dict(account=account,
+                following_count=count['following'],
+                follower_count=count['followers'])
 
 
 async def get_discussions_by_trending(start_author: str, start_permlink: str = '',
                                       limit: int = 20, tag: str = None):
-    return _get_discussions('trending', start_author, start_permlink, limit, tag)
+    limit = _validate_limit(limit, 20)
+    ids = cursor.pids_by_query(
+        'trending',
+        start_author,
+        start_permlink,
+        limit,
+        tag)
+    return _get_posts(ids)
+
 
 async def get_discussions_by_hot(start_author: str, start_permlink: str = '',
                                  limit: int = 20, tag: str = None):
-    return _get_discussions('hot', start_author, start_permlink, limit, tag)
+    limit = _validate_limit(limit, 20)
+    ids = cursor.pids_by_query(
+        'hot',
+        start_author,
+        start_permlink,
+        limit,
+        tag)
+    return _get_posts(ids)
+
 
 async def get_discussions_by_promoted(start_author: str, start_permlink: str = '',
                                       limit: int = 20, tag: str = None):
-    return _get_discussions('promoted', start_author, start_permlink, limit, tag)
+    limit = _validate_limit(limit, 20)
+    ids = cursor.pids_by_query(
+        'promoted',
+        start_author,
+        start_permlink,
+        limit,
+        tag)
+    return _get_posts(ids)
+
 
 async def get_discussions_by_created(start_author: str, start_permlink: str = '',
                                      limit: int = 20, tag: str = None):
-    return _get_discussions('created', start_author, start_permlink, limit, tag)
+    limit = _validate_limit(limit, 20)
+    ids = cursor.pids_by_query(
+        'created',
+        start_author,
+        start_permlink,
+        limit,
+        tag)
+    return _get_posts(ids)
 
 
 # author blog
 async def get_discussions_by_blog(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20):
     limit = _validate_limit(limit, 20)
-    account_id = _get_account_id(tag)
-    seek = ''
-
-    if start_permlink:
-        seek = """
-          AND created_at <= (
-            SELECT created_at FROM hive_feed_cache
-             WHERE account_id = :account_id AND post_id = %d)
-        """ % _get_post_id(start_author, start_permlink)
-
-    sql = """
-        SELECT post_id FROM hive_feed_cache WHERE account_id = :account_id %s
-      ORDER BY created_at DESC LIMIT :limit
-    """ % seek
-
-    ids = query_col(sql, account_id=account_id, limit=limit)
+    ids = cursor.pids_by_blog(
+        tag,
+        start_author,
+        start_permlink,
+        limit)
     return _get_posts(ids)
 
 
@@ -161,34 +143,18 @@ async def get_discussions_by_blog(tag: str, start_author: str = '',
 async def get_discussions_by_feed(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20):
     limit = _validate_limit(limit, 20)
-    account_id = _get_account_id(tag)
-    seek = ''
+    res = cursor.pids_by_feed_with_reblog(
+        tag,
+        start_author,
+        start_permlink,
+        limit)
 
-    if start_permlink:
-        seek = """
-          HAVING MIN(hive_feed_cache.created_at) <= (
-            SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = %d
-               AND account_id IN (SELECT following FROM hive_follows
-                                  WHERE follower = :account AND state = 1))
-        """ % _get_post_id(start_author, start_permlink)
-
-    sql = """
-        SELECT post_id, string_agg(name, ',') accounts
-          FROM hive_feed_cache
-          JOIN hive_follows ON account_id = hive_follows.following AND state = 1
-          JOIN hive_accounts ON hive_follows.following = hive_accounts.id
-         WHERE hive_follows.follower = :account
-      GROUP BY post_id %s
-      ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit
-    """ % seek
-
-    res = query_all(sql, account=account_id, limit=limit)
+    reblogged_by = dict(res)
     posts = _get_posts([r[0] for r in res])
 
     # Merge reblogged_by data into result set
-    accts = dict(res)
     for post in posts:
-        rby = set(accts[post['post_id']].split(','))
+        rby = set(reblogged_by[post['post_id']].split(','))
         rby.discard(post['author'])
         if rby:
             post['reblogged_by'] = list(rby)
@@ -198,45 +164,19 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
 
 # author comments
 async def get_discussions_by_comments(start_author: str, start_permlink: str = '', limit: int = 20):
-    limit = _validate_limit(limit, 20)
-    seek = ''
-
-    if start_permlink:
-        seek = """
-          AND created_at <= (SELECT created_at FROM hive_posts WHERE id = %d)
-        """ % _get_post_id(start_author, start_permlink)
-
-    sql = """
-        SELECT id FROM hive_posts WHERE author = :account %s AND depth > 0
-      ORDER BY created_at DESC LIMIT :limit
-    """ % seek
-
-    ids = query_col(sql, account=start_author, limit=limit)
+    ids = cursor.pids_by_account_comments(
+        start_author,
+        start_permlink,
+        _validate_limit(limit, 20))
     return _get_posts(ids)
 
 
 # author replies
 async def get_replies_by_last_update(start_author: str, start_permlink: str = '', limit: int = 20):
-    limit = _validate_limit(limit, 50)
-    parent = start_author
-    seek = ''
-
-    if start_permlink:
-        parent, start_date = query_row("""
-          SELECT p.author, c.created_at
-            FROM hive_posts c
-            JOIN hive_posts p ON c.parent_id = p.id
-           WHERE c.author = :a AND c.permlink = :p
-        """, a=start_author, p=start_permlink)
-        seek = "AND created_at <= '%s'" % start_date
-
-    sql = """
-       SELECT id FROM hive_posts
-        WHERE parent_id IN (SELECT id FROM hive_posts WHERE author = :parent) %s
-     ORDER BY created_at DESC LIMIT :limit
-    """ % seek
-
-    ids = query_col(sql, parent=parent, limit=limit)
+    ids = cursor.pids_by_replies_to_account(
+        start_author,
+        start_permlink,
+        _validate_limit(limit, 50))
     return _get_posts(ids)
 
 
@@ -318,7 +258,7 @@ async def get_state(path: str):
             raise Exception("unexpected discussion path part[2] %s" % path)
         sort = part[0]
         tag = part[1].lower()
-        posts = _get_discussions(sort, '', '', 20, tag)
+        posts = cursor.pids_by_query(sort, '', '', 20, tag)
         state['discussion_idx'][tag] = {sort: []}
         for post in posts:
             ref = post['author'] + '/' + post['permlink']
@@ -418,42 +358,6 @@ def _load_posts_recursive(post_ids):
 
     return out
 
-# sort can be trending, hot, new, promoted
-def _get_discussions(sort, start_author, start_permlink, limit, tag):
-    limit = _validate_limit(limit, 20)
-
-    col = ''
-    where = []
-    if sort == 'trending':
-        col = 'sc_trend'
-    elif sort == 'hot':
-        col = 'sc_hot'
-    elif sort == 'created':
-        col = 'post_id'
-        where.append('depth = 0')
-    elif sort == 'promoted':
-        col = 'promoted'
-        where.append("is_paidout = '0'")
-        where.append('promoted > 0')
-    else:
-        raise Exception("unknown sort order {}".format(sort))
-
-    if tag:
-        tagged_posts = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
-        where.append("post_id IN (%s)" % tagged_posts)
-
-    start_id = None
-    if start_permlink:
-        start_id = _get_post_id(start_author, start_permlink)
-        sql = ("SELECT %s FROM hive_posts_cache %s ORDER BY %s DESC LIMIT 1"
-               % (col, _where([*where, "post_id = :start_id"]), col))
-        where.append("%s <= (%s)" % (col, sql))
-
-    sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s DESC LIMIT :limit"
-           % (_where(where), col))
-    ids = query_col(sql, tag=tag, start_id=start_id, limit=limit)
-    return _get_posts(ids)
-
 def _load_accounts(names):
     sql = """SELECT id, name, display_name, about, reputation
                FROM hive_accounts WHERE name IN :names"""
@@ -466,11 +370,6 @@ def _condenser_account(row):
         'reputation': _rep_to_raw(row['reputation']),
         'json_metadata': json.dumps({
             'profile': {'name': row['display_name'], 'about': row['about']}})}
-
-def _where(conditions):
-    if not conditions:
-        return ''
-    return 'WHERE ' + ' AND '.join(conditions)
 
 def _validate_limit(limit, ubound=100):
     limit = int(limit)
@@ -490,12 +389,6 @@ def _get_post_id(author, permlink):
     _id = query_one(sql, a=author, p=permlink)
     if not _id:
         raise Exception("post not found: %s/%s" % (author, permlink))
-    return _id
-
-def _get_account_id(name):
-    _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
-    if not _id:
-        raise Exception("invalid account `%s`" % name)
     return _id
 
 # given an array of post ids, returns full metadata in the same order

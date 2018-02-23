@@ -1,0 +1,211 @@
+from hive.db.methods import query_one, query_col, query_row, query_all
+
+def get_post_id(author, permlink):
+    sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
+    _id = query_one(sql, a=author, p=permlink)
+    if not _id:
+        raise Exception("post not found: %s/%s" % (author, permlink))
+    return _id
+
+def get_account_id(name):
+    _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
+    if not _id:
+        raise Exception("invalid account `%s`" % name)
+    return _id
+
+
+def get_followers(account: str, start: str, state: int, limit: int):
+    account_id = get_account_id(account)
+
+    seek = ''
+    if start:
+        seek = """
+          AND hf.created_at <= (
+            SELECT created_at FROM hive_follows
+             WHERE following = :account_id
+               AND follower = %d
+               AND state = :state)
+        """ % get_account_id(start)
+
+    sql = """
+        SELECT name FROM hive_follows hf
+          JOIN hive_accounts ON hf.follower = id
+         WHERE hf.following = :account_id
+           AND state = :state %s
+      ORDER BY hf.created_at DESC
+         LIMIT :limit
+    """ % seek
+
+    return query_col(sql, account_id=account_id, state=state, limit=limit)
+
+
+def get_following(account: str, start: str, state: int, limit: int):
+    account_id = get_account_id(account)
+
+    seek = ''
+    if start:
+        seek = """
+          AND hf.created_at <= (
+            SELECT created_at FROM hive_follows
+             WHERE follower = :account_id
+               AND following = %d
+               AND state = :state)
+        """ % get_account_id(start)
+
+    sql = """
+        SELECT name FROM hive_follows hf
+          JOIN hive_accounts ON hf.following = id
+         WHERE hf.follower = :account_id
+           AND state = :state %s
+      ORDER BY hf.created_at DESC
+         LIMIT :limit
+    """ % seek
+
+    return query_col(sql, account_id=account_id, state=state, limit=limit)
+
+
+# following/followers count for account
+def get_follow_counts(account: str):
+    sql = """SELECT following, followers
+               FROM hive_accounts
+              WHERE name = :account"""
+    return dict(query_row(sql, account=account))
+
+
+# sort can be trending, hot, new, promoted
+def pids_by_query(sort, tag, start_author, start_permlink, limit):
+    col = ''
+    where = []
+    if sort == 'trending':
+        col = 'sc_trend'
+    elif sort == 'hot':
+        col = 'sc_hot'
+    elif sort == 'created':
+        col = 'post_id'
+        where.append('depth = 0')
+    elif sort == 'promoted':
+        col = 'promoted'
+        where.append("is_paidout = '0'")
+        where.append('promoted > 0')
+    else:
+        raise Exception("unknown sort order {}".format(sort))
+
+    if tag:
+        tagged_pids = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
+        where.append("post_id IN (%s)" % tagged_pids)
+
+    def _where(conditions):
+        return 'WHERE ' + ' AND '.join(conditions) if conditions else ''
+
+    start_id = None
+    if start_permlink:
+        start_id = get_post_id(start_author, start_permlink)
+        sql = ("SELECT %s FROM hive_posts_cache %s ORDER BY %s DESC LIMIT 1"
+               % (col, _where([*where, "post_id = :start_id"]), col))
+        where.append("%s <= (%s)" % (col, sql))
+
+    sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s DESC LIMIT :limit"
+           % (_where(where), col))
+
+    return query_col(sql, tag=tag, start_id=start_id, limit=limit)
+
+
+# author blog
+def pids_by_blog(account: str, start_author: str = '',
+                 start_permlink: str = '', limit: int = 20):
+    account_id = get_account_id(account)
+
+    seek = ''
+    if start_permlink:
+        seek = """
+          AND created_at <= (
+            SELECT created_at
+              FROM hive_feed_cache
+             WHERE account_id = :account_id
+               AND post_id = %d)
+        """ % get_post_id(start_author, start_permlink)
+
+    sql = """
+        SELECT post_id
+          FROM hive_feed_cache
+         WHERE account_id = :account_id %s
+      ORDER BY created_at DESC
+         LIMIT :limit
+    """ % seek
+
+    return query_col(sql, account_id=account_id, limit=limit)
+
+
+# author feed [[post_id, reblogged_by_str]*]
+def pids_by_feed_with_reblog(account: str, start_author: str = '',
+                             start_permlink: str = '', limit: int = 20):
+    account_id = get_account_id(account)
+
+    seek = ''
+    if start_permlink:
+        seek = """
+          HAVING MIN(hive_feed_cache.created_at) <= (
+            SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = %d
+               AND account_id IN (SELECT following FROM hive_follows
+                                  WHERE follower = :account AND state = 1))
+        """ % get_post_id(start_author, start_permlink)
+
+    sql = """
+        SELECT post_id, string_agg(name, ',') accounts
+          FROM hive_feed_cache
+          JOIN hive_follows ON account_id = hive_follows.following AND state = 1
+          JOIN hive_accounts ON hive_follows.following = hive_accounts.id
+         WHERE hive_follows.follower = :account
+      GROUP BY post_id %s
+      ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit
+    """ % seek
+
+    return query_all(sql, account=account_id, limit=limit)
+
+
+# comments by author
+def pids_by_account_comments(account: str, start_permlink: str = '', limit: int = 20):
+    seek = ''
+    if start_permlink:
+        seek = """
+          AND created_at <= (SELECT created_at FROM hive_posts WHERE id = %d)
+        """ % get_post_id(account, start_permlink)
+
+    sql = """
+        SELECT id FROM hive_posts
+         WHERE author = :account %s
+           AND depth > 0
+      ORDER BY created_at DESC
+         LIMIT :limit
+    """ % seek
+
+    return query_col(sql, account=account, limit=limit)
+
+
+# replies to author
+def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limit: int = 20):
+    seek = ''
+    if start_permlink:
+        sql = """
+          SELECT parent.author,
+                 child.created_at
+            FROM hive_posts child
+            JOIN hive_posts parent
+              ON child.parent_id = parent.id
+           WHERE child.author = :author
+             AND child.permlink = :permlink
+        """
+        account, start_date = query_row(
+            sql, author=start_author, permlink=start_permlink)
+        seek = "AND created_at <= '%s'" % start_date
+    else:
+        account = start_author
+
+    sql = """
+       SELECT id FROM hive_posts
+        WHERE parent_id IN (SELECT id FROM hive_posts WHERE author = :parent) %s
+     ORDER BY created_at DESC
+        LIMIT :limit
+    """ % seek
+
+    return query_col(sql, parent=account, limit=limit)
