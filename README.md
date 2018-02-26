@@ -96,6 +96,8 @@ shared_buffers = 4GB        # 25% of memory
 work_mem = 512MB
 synchronous_commit = off
 checkpoint_completion_target = 0.9
+checkpoint_timeout = 30min
+max_wal_size = 4GB
 ```
 
 ## JSON-RPC API
