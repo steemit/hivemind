@@ -171,12 +171,16 @@ class HttpClient(object):
                 assert isinstance(result, list), "batch result must be list"
                 assert len(body) == len(result), "batch result len mismatch"
                 for item in result:
+                    assert 'error' not in item, "batch response error item: {}".format(item)
                     assert 'result' in item, "batch response empty item: {}".format(result)
-                    assert 'error' not in item, "batch response error item: {}".format(result)
                 return [item['result'] for item in result]
             else:
                 assert isinstance(result, dict), "non-batch result must be dict"
                 return result['result']
+
+        except json.decoder.JSONDecodeError as e:
+            logging.error("invalid JSON response: %s", response.data.decode('utf-8'))
+            raise e
 
         except (MaxRetryError,
                 ConnectionResetError,
