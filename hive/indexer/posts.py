@@ -39,10 +39,11 @@ class Posts:
             if _id:
                 cls._set_id(url, _id)
 
-        # cache stats
+        # cache stats (under 10M every 10K else every 100K)
         total = cls._hits + cls._miss
-        if total % 10000 == 0:
-            print("[DEBUG] post.id lookups: %d, hits: %d (%.1f%%), entries: %d"
+        interval = 10000 if total < 10000000 else 100000
+        if total % interval == 0:
+            print("[STATS] posts.id lookups: %d, hits: %d (%.1f%%), entries: %d"
                   % (total, cls._hits, 100.0*cls._hits/total, len(cls._ids)))
 
         return _id

@@ -77,7 +77,7 @@ class CustomOp:
             return  # prevent comment reblogs
 
         if not post_id:
-            print("reblog: post not found: {}/{}".format(author, permlink))
+            log.debug("reblog: post not found: %s/%s", author, permlink)
             return
 
         if 'delete' in op_json and op_json['delete'] == 'delete':

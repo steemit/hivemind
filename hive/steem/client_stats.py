@@ -58,16 +58,16 @@ class ClientStats:
         if not cls.stats:
             return
         ttl = cls.ttltime
-        print("[DEBUG] total STEEM time: {}s".format(int(ttl / 1000)))
+        print("[STATS] sampled steem time: {}s".format(int(ttl / 1000)))
         for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
             print("% 5.1f%% % 9sms % 7.2favg % 8dx -- %s"
                   % (100 * ms/ttl, "{:,}".format(int(ms)),
                      ms/calls, calls, sql[0:180]))
-        print("[STEEM] Fastest call was %.3fms" % cls.fastest)
+        print("[STATS] fastest steem call was %.3fms" % cls.fastest)
         max_mem = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-        print("[MEM] peak memory usage: %.2fMB" % (max_mem / (1024 * 1024)))
+        print("[STATS] peak memory usage: %.2fMB" % (max_mem / (1024 * 1024)))
         cls.clear()
 
     @classmethod

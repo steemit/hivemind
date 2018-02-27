@@ -1,9 +1,13 @@
+import logging
+
 from hive.db.adapter import Db
 from hive.utils.normalize import parse_amount
 
 from hive.indexer.posts import Posts
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
+
+log = logging.getLogger(__name__)
 
 DB = Db.instance()
 
@@ -43,7 +47,7 @@ class Payments:
 
         url = op['memo']
         if not cls._validate_url(url):
-            print("invalid url: {}".format(url))
+            log.debug("invalid url: %s", url)
             return # invalid url
 
         author, permlink = cls._split_url(url)
@@ -52,7 +56,7 @@ class Payments:
 
         post_id = Posts.get_id(author, permlink)
         if not post_id:
-            print("post does not exist: %s" % url)
+            log.debug("post does not exist: %s", url)
             return
 
         return {'id': None,

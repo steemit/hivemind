@@ -51,7 +51,7 @@ class QueryStats:
         if not cls.stats:
             return
         ttl = cls.ttl_time
-        print("[DEBUG] total SQL time: {}s".format(int(ttl / 1000)))
+        print("[STATS] sampled SQL time: {}s".format(int(ttl / 1000)))
         for arr in sorted(cls.stats.items(), key=lambda x: -x[1][0])[0:40]:
             sql, vals = arr
             ms, calls = vals
