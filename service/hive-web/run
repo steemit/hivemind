@@ -2,4 +2,4 @@
 
 POPULATE_CMD="$(which hive)"
 
-python3 /app/hive/run.py server --database-url="${DATABASE_URL}" --http-server-port="${HTTP_SERVER_PORT}"
+exec "${POPULATE_CMD}" server

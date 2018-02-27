@@ -37,6 +37,6 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'hive=run:run',
+            'hive=hive.cli:run',
         ]
     })

@@ -6,6 +6,8 @@ from hive.indexer.core import run_sync
 from hive.server.serve import run_server
 
 def run():
+    """Main CLI service router"""
+
     Conf.init_argparse()
     mode = Conf.run_mode()
 
