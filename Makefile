@@ -7,7 +7,7 @@ PROJECT_DOCKER_RUN_ARGS := --link db:db
 
 default: build
 
-.PHONY: test run test-without-lint test-pylint fmt test-without-build build
+.PHONY: test run test-without-lint test-pylint fmt test-without-build build docs
 
 docs:
 	pdoc --html hive --html-dir docs

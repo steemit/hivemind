@@ -7,7 +7,7 @@ from hive.server.serve import run_server
 
 def run():
     Conf.init_argparse()
-    mode = '/'.join(Conf.get('mode'))
+    mode = Conf.run_mode()
 
     if mode == 'server':
         run_server()

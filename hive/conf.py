@@ -43,6 +43,13 @@ class Conf():
         return getattr(cls._args, param)
 
     @classmethod
+    def run_mode(cls):
+        mode = '/'.join(cls.get('mode'))
+        valid = ['server', 'sync', 'status']
+        assert mode in valid, "invalid run mode %s" % mode
+        return mode
+
+    @classmethod
     def log_level(cls):
         str_log_level = cls.get('log_level')
         log_level = getattr(logging, str_log_level.upper(), None)
