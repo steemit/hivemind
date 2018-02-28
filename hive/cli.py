@@ -1,12 +1,14 @@
 #!/usr/local/bin/python3
 
+"""CLI service router"""
+
 from hive.conf import Conf
 from hive.db.db_state import DbState
 from hive.indexer.core import run_sync
 from hive.server.serve import run_server
 
 def run():
-    """Main CLI service router"""
+    """Run the proper routine as indicated by hive --mode argument."""
 
     Conf.init_argparse()
     mode = Conf.run_mode()
