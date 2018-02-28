@@ -1,3 +1,5 @@
+"""Timer for reporting progress on long batch operations."""
+
 import time
 
 class Timer:
