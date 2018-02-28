@@ -1,4 +1,6 @@
 # coding=utf-8
+"""Simple HTTP client for communicating with jussi/steem."""
+
 import concurrent.futures
 import json
 import logging
