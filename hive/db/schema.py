@@ -1,3 +1,5 @@
+"""Db schema definitions and setup routines."""
+
 import logging
 
 import sqlalchemy as sa
