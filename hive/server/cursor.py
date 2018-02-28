@@ -1,6 +1,9 @@
+"""Cursor-based pagination queries, mostly supporting condenser_api."""
+
 from hive.db.methods import query_one, query_col, query_row, query_all
 
 def get_post_id(author, permlink):
+    """Get post_id from hive db."""
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
     _id = query_one(sql, a=author, p=permlink)
     if not _id:
@@ -8,6 +11,7 @@ def get_post_id(author, permlink):
     return _id
 
 def get_account_id(name):
+    """Get account id from hive db."""
     _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
     if not _id:
         raise Exception("invalid account `%s`" % name)
@@ -15,6 +19,7 @@ def get_account_id(name):
 
 
 def get_followers(account: str, start: str, state: int, limit: int):
+    """Get a list of accounts following a given account."""
     account_id = get_account_id(account)
 
     seek = ''
@@ -40,6 +45,7 @@ def get_followers(account: str, start: str, state: int, limit: int):
 
 
 def get_following(account: str, start: str, state: int, limit: int):
+    """Get a list of accounts followed by a given account."""
     account_id = get_account_id(account)
 
     seek = ''
@@ -64,16 +70,19 @@ def get_following(account: str, start: str, state: int, limit: int):
     return query_col(sql, account_id=account_id, state=state, limit=limit)
 
 
-# following/followers count for account
 def get_follow_counts(account: str):
+    """Return following/followers count for `account`."""
     sql = """SELECT following, followers
                FROM hive_accounts
               WHERE name = :account"""
     return dict(query_row(sql, account=account))
 
 
-# sort can be trending, hot, new, promoted
 def pids_by_query(sort, tag, start_author, start_permlink, limit):
+    """Get a list of post_ids for a given posts query.
+
+    `sort` can be trending, hot, new, promoted.
+    """
     col = ''
     where = []
     if sort == 'trending':
@@ -110,9 +119,9 @@ def pids_by_query(sort, tag, start_author, start_permlink, limit):
     return query_col(sql, tag=tag, start_id=start_id, limit=limit)
 
 
-# author blog
 def pids_by_blog(account: str, start_author: str = '',
                  start_permlink: str = '', limit: int = 20):
+    """Get a list of post_ids for an author's blog."""
     account_id = get_account_id(account)
 
     seek = ''
@@ -136,9 +145,9 @@ def pids_by_blog(account: str, start_author: str = '',
     return query_col(sql, account_id=account_id, limit=limit)
 
 
-# author feed [[post_id, reblogged_by_str]*]
 def pids_by_feed_with_reblog(account: str, start_author: str = '',
                              start_permlink: str = '', limit: int = 20):
+    """Get a list of [post_id, reblogged_by_str] for an account's feed."""
     account_id = get_account_id(account)
 
     seek = ''
@@ -163,8 +172,8 @@ def pids_by_feed_with_reblog(account: str, start_author: str = '',
     return query_all(sql, account=account_id, limit=limit)
 
 
-# comments by author
 def pids_by_account_comments(account: str, start_permlink: str = '', limit: int = 20):
+    """Get a list of post_ids representing comments by an author."""
     seek = ''
     if start_permlink:
         seek = """
@@ -182,8 +191,8 @@ def pids_by_account_comments(account: str, start_permlink: str = '', limit: int 
     return query_col(sql, account=account, limit=limit)
 
 
-# replies to author
 def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limit: int = 20):
+    """Get a list of post_ids representing replies to an author."""
     seek = ''
     if start_permlink:
         sql = """
