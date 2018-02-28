@@ -1,7 +1,9 @@
+"""[WIP] Community op constructor"""
+
 import json
 from typing import Union
 
-from hive.community.roles import permissions, is_permitted
+from hive.community.roles import PERMISSIONS, is_permitted
 from hive.indexer.community import is_community
 #from steem.account import Account
 
@@ -16,7 +18,7 @@ class Community:
     """
 
     _id = 'com.steemit.community'
-    _roles = permissions.keys()
+    _roles = PERMISSIONS.keys()
     _valid_settings = ['title', 'about', 'description', 'language', 'is_nsfw']
 
     def __init__(self, community_name: str, account_name: str):
@@ -30,17 +32,17 @@ class Community:
 
         Args:
             community_type: Can be **public** (default) or **restricted**.
-            admins: A single username, or a list of users who will be community Admins.
-             If left empty, the community owner will be assigned as a single admin. Can be modified later.
+            admins: list of users who will be community Admins.
+             If left empty, the owner will be assigned as a single admin.
         """
         # validate account and community name
         #Account(self.account)
         assert self.community == self.account, 'Account name and community name need to be the same'
 
         if is_community(self.community):
-            raise NameError('Can not create community %s, because it already exists.' % self.community)
+            raise NameError('community %s already exists.' % self.community)
 
-        if type(admins) == str:
+        if isinstance(admins, str):
             admins = [admins]
         if not admins:
             admins = [self.community]
@@ -62,8 +64,8 @@ class Community:
         """ Add user to the community in the specified role.
 
         Args:
-            account_names (str, list): Steem username(s) of the account we are adding to the community.
-            role (str): Role we are adding this user as. Can be admin, moderator or poster.
+            account_names (str, list): accounts to add to the community.
+            role (str): Roles to apply. Can be admin, moderator or poster.
 
         """
         return self._add_or_remove_users(account_names, role, 'add')
@@ -74,11 +76,11 @@ class Community:
 
     def _add_or_remove_users(self, account_names: Union[str, list], role: str, action: str):
         """ Implementation for adding/removing users to communities under various roles. """
-        if type(account_names) == str:
+        if isinstance(account_names, str):
             account_names = [account_names]
 
         if role not in self._roles:
-            raise ValueError('Invalid role "%s", needs to be either: %s' % (role, ', '.join(self._roles)))
+            raise ValueError('Invalid role `%s`. options: %s' % (role, ', '.join(self._roles)))
 
         action_name = '{0}_{1}s'.format(action, role)
         assert self._has_permissions(action_name), 'Insufficient Community Permissions'
@@ -137,13 +139,13 @@ class Community:
 
     def _commit(self, community_op: Union[list, str]):
         """ Construct and commit a community *custom_json* operation to the blockchain. """
-        if type(community_op) == str:
+        if isinstance(community_op, str):
             community_op = json.loads(community_op)
 
         op = {'json': community_op,
-               'required_auths': [],
-               'required_posting_auths': [self.account],
-               'id': Community._id}
+              'required_auths': [],
+              'required_posting_auths': [self.account],
+              'id': Community._id}
         return op
 
     def _op(self, action: str, **params):
