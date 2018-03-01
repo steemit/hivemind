@@ -1,3 +1,5 @@
+"""Handles follow operations."""
+
 import time
 
 from funcy.seqs import first
@@ -12,6 +14,7 @@ class Follow:
 
     @classmethod
     def follow_op(cls, account, op_json, date):
+        """Process an incoming follow op."""
         op = cls._validated_op(account, op_json, date)
         if not op:
             return
@@ -40,6 +43,7 @@ class Follow:
 
     @classmethod
     def _validated_op(cls, account, op, date):
+        """Validate and normalize the operation."""
         if(not 'what' in op
            or not isinstance(op['what'], list)
            or not 'follower' in op
@@ -64,6 +68,7 @@ class Follow:
 
     @classmethod
     def _get_follow_db_state(cls, follower, following):
+        """Retrieve current follow state of an account pair."""
         sql = """SELECT state FROM hive_follows
                   WHERE follower = :follower
                     AND following = :following"""
@@ -76,22 +81,26 @@ class Follow:
 
     @classmethod
     def follow(cls, follower, following):
+        """Applies follow count change the next flush."""
         cls._apply_delta(follower, FOLLOWING, 1)
         cls._apply_delta(following, FOLLOWERS, 1)
 
     @classmethod
     def unfollow(cls, follower, following):
+        """Applies follow count change the next flush."""
         cls._apply_delta(follower, FOLLOWING, -1)
         cls._apply_delta(following, FOLLOWERS, -1)
 
     @classmethod
     def _apply_delta(cls, account, role, direction):
+        """Modify an account's follow delta in specified direction."""
         if not account in cls._delta[role]:
             cls._delta[role][account] = 0
         cls._delta[role][account] += direction
 
     @classmethod
     def flush(cls, trx=True):
+        """Flushes pending follow count deltas."""
         sqls = []
         for col, deltas in cls._delta.items():
             for name, delta in deltas.items():
@@ -115,6 +124,12 @@ class Follow:
 
     @classmethod
     def flush_recount(cls):
+        """Recounts follows/following counts for all queued accounts.
+
+        This is currently not used; this approach was shown to be too
+        expensive, but it's useful in case follow counts manage to get
+        out of sync.
+        """
         ids = set([*cls._delta[FOLLOWERS].keys(),
                    *cls._delta[FOLLOWING].keys()])
         sql = """

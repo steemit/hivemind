@@ -1,3 +1,5 @@
+"""Process payment ops used for promoted posts."""
+
 import logging
 
 from hive.db.adapter import Db
@@ -12,8 +14,11 @@ log = logging.getLogger(__name__)
 DB = Db.instance()
 
 class Payments:
+    """Handles payments to update post promotion values."""
+
     @classmethod
     def op_transfer(cls, op, tx_idx, num, date):
+        """Process raw transfer op; apply balance if valid post promote."""
         record = cls._validated(op, tx_idx, num, date)
         if not record:
             return
@@ -38,6 +43,7 @@ class Payments:
 
     @classmethod
     def _validated(cls, op, tx_idx, num, date):
+        """Validate and normalize the transfer op."""
         if op['to'] != 'null':
             return # only care about payments to null
 
@@ -70,10 +76,12 @@ class Payments:
 
     @staticmethod
     def _validate_url(url):
+        """Validate if `url` is in proper `@account/permlink` format."""
         if not url or url.count('/') != 1 or url[0] != '@':
             return False
         return True
 
     @staticmethod
     def _split_url(url):
+        """Split a `@account/permlink` string into (account, permlink)."""
         return url[1:].split('/')

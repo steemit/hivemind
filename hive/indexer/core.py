@@ -1,3 +1,5 @@
+"""Main hive sync/listen routine."""
+
 import logging
 
 from hive.conf import Conf
@@ -12,9 +14,9 @@ log = logging.getLogger(__name__)
 
 
 def run_sync():
-    print("[HIVE] Welcome to hivemind")
+    """Initialize state, perform setup/recovery, then sync and listen."""
 
-    # make sure db schema is up to date, perform checks
+    # ensure db schema up to date, check app status
     DbState.initialize()
 
     # prefetch id->name memory map
@@ -29,7 +31,7 @@ def run_sync():
         # recover from fork
         Blocks.verify_head()
 
-        # perform cleanup in case process did not exit cleanly
+        # perform cleanup if process did not exit cleanly
         CachedPost.recover_missing_posts()
 
     while True:
@@ -40,7 +42,7 @@ def run_sync():
         CachedPost.dirty_paidouts(Blocks.head_date())
         CachedPost.flush(trx=True)
 
-        # start listening
+        # listen for new blocks
         Sync.listen()
 
 

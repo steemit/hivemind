@@ -24,9 +24,11 @@ class DbState:
         3) Check if initial sync has completed
         """
 
+        print("[INIT] Welcome! Initializing hive.")
+
         # create db schema if needed
         if not cls._is_schema_loaded():
-            print("[INIT] Initializing db...")
+            print("[INIT] Create db schema...")
             setup()
 
         # perform db migrations

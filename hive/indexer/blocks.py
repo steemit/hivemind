@@ -1,3 +1,5 @@
+"""Blocks processor."""
+
 from hive.db.methods import query_row, query_col, query_one, query
 from hive.steem.steem_client import SteemClient
 
@@ -9,40 +11,29 @@ from hive.indexer.payments import Payments
 from hive.indexer.follow import Follow
 
 class Blocks:
-
-    # Fetch last block
-    @classmethod
-    def last(cls):
-        sql = """SELECT num, created_at date, hash
-                 FROM hive_blocks ORDER BY num DESC LIMIT 1"""
-        return dict(query_row(sql))
+    """Processes blocks, dispatches work, manages `hive_blocks` table."""
 
     @classmethod
     def head_num(cls):
+        """Get hive's head block number."""
         sql = "SELECT num FROM hive_blocks ORDER BY num DESC LIMIT 1"
         return query_one(sql) or 0
 
     @classmethod
     def head_date(cls):
+        """Get hive's head block date."""
         sql = "SELECT created_at FROM hive_blocks ORDER BY num DESC LIMIT 1"
         return str(query_one(sql) or '')
 
-    # Fetch specific block
-    @classmethod
-    def get(cls, num):
-        sql = """SELECT num, created_at date, hash
-                 FROM hive_blocks WHERE num = :num LIMIT 1"""
-        return dict(query_row(sql, num=num))
-
-    # Process a single block. always wrap in a transaction!
     @classmethod
     def process(cls, block):
+        """Process a single block. Always wrap in a transaction!"""
         #assert is_trx_active(), "Block.process must be in a trx"
         return cls._process(block, is_initial_sync=False)
 
-    # batch-process blocks, wrap in a transaction
     @classmethod
     def process_multi(cls, blocks, is_initial_sync=False):
+        """Batch-process blocks; wrapped in a transaction."""
         query("START TRANSACTION")
 
         for block in blocks:
@@ -55,9 +46,9 @@ class Blocks:
 
         query("COMMIT")
 
-    # Process a single block. assumes a trx is open.
     @classmethod
     def _process(cls, block, is_initial_sync=False):
+        """Process a single block. Assumes a trx is open."""
         num = cls._push(block)
         date = block['timestamp']
 
@@ -105,6 +96,7 @@ class Blocks:
 
     @classmethod
     def verify_head(cls):
+        """Perform a fork recovery check on startup."""
         hive_head = cls.head_num()
         if not hive_head:
             return
@@ -115,7 +107,7 @@ class Blocks:
         steemd = SteemClient.instance()
         while True:
             assert hive_head - cursor < 25, "fork too deep"
-            hive_block = cls.get(cursor)
+            hive_block = cls._get(cursor)
             steem_hash = steemd.get_block(cursor)['block_id']
             match = hive_block['hash'] == steem_hash
             print("[INIT] fork check. block %d: %s vs %s --- %s"
@@ -139,7 +131,15 @@ class Blocks:
         cls._pop(to_pop)
 
     @classmethod
+    def _get(cls, num):
+        """Fetch a specific block."""
+        sql = """SELECT num, created_at date, hash
+                 FROM hive_blocks WHERE num = :num LIMIT 1"""
+        return dict(query_row(sql, num=num))
+
+    @classmethod
     def _push(cls, block):
+        """Insert a row in `hive_blocks`."""
         num = int(block['block_id'][:8], base=16)
         txs = block['transactions']
         query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
@@ -152,24 +152,28 @@ class Blocks:
                   'date': block['timestamp']})
         return num
 
-    # Pop head blocks -- used for navigating head to a point prior to a fork.
-    # Without an undo database, there is a limit to how fully we can recover.
-    #
-    # If consistency is critical, run hive with TRAIL_BLOCKS=-1 to only index
-    # up to last irreversible. Otherwise use TRAIL_BLOCKS=2 to stay closer
-    # while avoiding the vast majority of microforks.
-    #
-    # As-is, there are a few caveats with the following strategy:
-    #  - follow counts can get out of sync (hive needs to force-recount)
-    #  - follow state could get out of sync (user-recoverable)
-    #
-    # For 1.5, also need to handle:
-    # - hive_communities
-    # - hive_members
-    # - hive_flags
-    # - hive_modlog
     @classmethod
     def _pop(cls, blocks):
+        """Pop head blocks to navigate head to a point prior to fork.
+
+        Without an undo database, there is a limit to how fully we can recover.
+
+        If consistency is critical, run hive with TRAIL_BLOCKS=-1 to only index
+        up to last irreversible. Otherwise use TRAIL_BLOCKS=2 to stay closer
+        while avoiding the vast majority of microforks.
+
+        As-is, there are a few caveats with the following strategy:
+
+         - follow counts can get out of sync (hive needs to force-recount)
+         - follow state could get out of sync (user-recoverable)
+
+        For 1.5, also need to handle:
+
+         - hive_communities
+         - hive_members
+         - hive_flags
+         - hive_modlog
+        """
         query("START TRANSACTION")
 
         for block in blocks:
