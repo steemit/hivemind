@@ -148,7 +148,7 @@ Specifically, the goal is to completely remove the `follow` and `tags` plugins, 
  - *communities:* mod roles/actions, members, feeds, etc
  - *accounts:* normalized profile data, reputation
  - *feeds:* un/follows and un/reblogs
- - *communities:* members, permissions (in 1.5; [spec](https://github.com/steemit/condenser/wiki/Community-Spec-%5BDRAFT%5D))
+ - *communities:* members, permissions (in 1.5; [spec](https://github.com/steemit/hivemind/blob/master/docs/communities.md))
 
 ##### Hive does not track most blockchain operations.
 
