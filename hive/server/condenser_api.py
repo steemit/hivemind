@@ -1,3 +1,5 @@
+"""Steemd/condenser_api compatibility layer API methods."""
+
 import json
 
 from aiocache import cached
@@ -127,9 +129,9 @@ async def get_discussions_by_created(start_author: str, start_permlink: str = ''
     return _get_posts(ids)
 
 
-# author blog
 async def get_discussions_by_blog(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20):
+    """Retrieve account's blog."""
     limit = _validate_limit(limit, 20)
     ids = cursor.pids_by_blog(
         tag,
@@ -139,9 +141,9 @@ async def get_discussions_by_blog(tag: str, start_author: str = '',
     return _get_posts(ids)
 
 
-# author feed
 async def get_discussions_by_feed(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20):
+    """Retrieve account's feed."""
     limit = _validate_limit(limit, 20)
     res = cursor.pids_by_feed_with_reblog(
         tag,
@@ -162,8 +164,8 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
     return posts
 
 
-# author comments
 async def get_discussions_by_comments(start_author: str, start_permlink: str = '', limit: int = 20):
+    """Get comments by author."""
     ids = cursor.pids_by_account_comments(
         start_author,
         start_permlink,
@@ -171,8 +173,8 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
     return _get_posts(ids)
 
 
-# author replies
 async def get_replies_by_last_update(start_author: str, start_permlink: str = '', limit: int = 20):
+    """Get replies to author."""
     ids = cursor.pids_by_replies_to_account(
         start_author,
         start_permlink,
@@ -180,8 +182,11 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
     return _get_posts(ids)
 
 
-# https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
 async def get_state(path: str):
+    """`get_state` reimplementation.
+
+    See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
+    """
     # pylint: disable=too-many-locals, too-many-branches, too-many-statements
     if path[0] == '/':
         path = path[1:]
@@ -290,17 +295,20 @@ async def get_state(path: str):
 
 
 async def get_content(author: str, permlink: str):
+    """Get a single post object."""
     post_id = _get_post_id(author, permlink)
     return _get_posts([post_id])[0]
 
 
 async def get_content_replies(parent: str, parent_permlink: str):
+    """Get a list of post objects based on parent."""
     post_id = _get_post_id(parent, parent_permlink)
     post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d" % post_id)
     return _get_posts(post_ids)
 
 @cached(ttl=3600)
 async def _get_top_trending_tags():
+    """Get top 50 trending tags among pending posts."""
     sql = """
         SELECT category FROM hive_posts_cache WHERE is_paidout = '0'
       GROUP BY category ORDER BY SUM(payout) DESC LIMIT 50
@@ -309,6 +317,7 @@ async def _get_top_trending_tags():
 
 @cached(ttl=3600)
 async def _get_trending_tags():
+    """Get top 250 trending tags among pending posts, with stats."""
     sql = """
       SELECT category,
              COUNT(*) AS total_posts,
@@ -331,19 +340,23 @@ async def _get_trending_tags():
     return out
 
 def _get_props_lite():
+    """Return a minimal version of get_dynamic_global_properties data."""
     # TODO: trim this response; really only need: total_vesting_fund_steem,
     #   total_vesting_shares, sbd_interest_rate
     return json.loads(query_one("SELECT dgpo FROM hive_state"))
 
 def _get_feed_price():
+    """Get a steemd-style ratio object representing feed price."""
     price = query_one("SELECT usd_per_steem FROM hive_state")
     return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
 
 def _load_discussion_recursive(author, permlink):
+    """`get_state`-compatible recursive thread loader."""
     post_id = _get_post_id(author, permlink)
     return _load_posts_recursive([post_id])
 
 def _load_posts_recursive(post_ids):
+    """Recursive post loader used by `_load_discussion_recursive`."""
     posts = _get_posts(post_ids)
 
     out = {}
@@ -359,12 +372,14 @@ def _load_posts_recursive(post_ids):
     return out
 
 def _load_accounts(names):
+    """`get_accounts`-style lookup for `get_state` compat layer."""
     sql = """SELECT id, name, display_name, about, reputation
                FROM hive_accounts WHERE name IN :names"""
     rows = query_all(sql, names=tuple(names))
     return [_condenser_account(row) for row in rows]
 
 def _condenser_account(row):
+    """Convert an internal account record into legacy-steemd style."""
     return {
         'name': row['name'],
         'reputation': _rep_to_raw(row['reputation']),
@@ -372,6 +387,7 @@ def _condenser_account(row):
             'profile': {'name': row['display_name'], 'about': row['about']}})}
 
 def _validate_limit(limit, ubound=100):
+    """Given a user-provided limit, return a valid int, or raise."""
     limit = int(limit)
     if limit <= 0:
         raise Exception("invalid limit")
@@ -380,19 +396,21 @@ def _validate_limit(limit, ubound=100):
     return limit
 
 def _follow_type_to_int(follow_type: str):
+    """Convert steemd-style "follow type" into internal status (int)."""
     if follow_type not in ['blog', 'ignore']:
         raise Exception("Invalid follow_type")
     return 1 if follow_type == 'blog' else 2
 
 def _get_post_id(author, permlink):
+    """Given an author/permlink, retrieve the id from db."""
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
     _id = query_one(sql, a=author, p=permlink)
     if not _id:
         raise Exception("post not found: %s/%s" % (author, permlink))
     return _id
 
-# given an array of post ids, returns full metadata in the same order
 def _get_posts(ids):
+    """Given an array of post ids, returns full objects in the same order."""
     if not ids:
         raise Exception("no ids provided")
 
@@ -422,8 +440,8 @@ def _get_posts(ids):
     return [posts_by_id[_id] for _id in ids]
 
 
-# given a hive_posts_cache row, create a condenser-api style post object
 def _condenser_post_object(row):
+    """Given a hive_posts_cache row, create a legacy-style post object."""
     paid = row['is_paidout']
 
     post = {}
@@ -481,11 +499,13 @@ def _condenser_post_object(row):
     return post
 
 def _amount(amount, asset='SBD'):
+    """Return a steem-style amount string given a (numeric, asset-str)."""
     if asset == 'SBD':
         return "%.3f SBD" % amount
     raise Exception("unexpected %s" % asset)
 
 def _hydrate_active_votes(vote_csv):
+    """Convert minimal CSV representation into steemd-style object."""
     if not vote_csv:
         return []
     cols = 'voter,rshares,percent,reputation'.split(',')
@@ -493,11 +513,13 @@ def _hydrate_active_votes(vote_csv):
     return [dict(zip(cols, line.split(','))) for line in votes]
 
 def _json_date(date=None):
+    """Given a db datetime, return a steemd/json-friendly version."""
     if not date:
         return '1969-12-31T23:59:59'
     return 'T'.join(str(date).split(' '))
 
 def _rep_to_raw(rep):
+    """Convert a UI-ready rep score back into its approx raw value."""
     if not isinstance(rep, (str, float, int)):
         return 0
     rep = float(rep) - 25

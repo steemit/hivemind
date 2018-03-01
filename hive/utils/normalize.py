@@ -1,3 +1,5 @@
+"""Methods to parse steemd values and clean strings."""
+
 import json
 import math
 import decimal
@@ -5,11 +7,13 @@ import decimal
 from datetime import datetime
 
 def nai_to_name(nai):
+    """Get friendly name from NAI vector."""
     names = {'@@000000013': 'SBD'}
     assert nai in names, "unrecognized nai: %s" % nai
     return names[nai]
 
 def parse_amount(value, expected_unit=None):
+    """Parse steemd-style amout/asset value, return (decimal, name)."""
     if isinstance(value, str):
         raw_amount, unit = value.split(' ')
         dec_amount = decimal.Decimal(raw_amount)
@@ -29,12 +33,15 @@ def parse_amount(value, expected_unit=None):
     return (dec_amount, unit)
 
 def amount(string):
+    """Parse a string asset amount as a float."""
     return float(string.split(' ')[0])
 
 def parse_time(block_time):
+    """Convert chain date into datetime object."""
     return datetime.strptime(block_time, '%Y-%m-%dT%H:%M:%S')
 
 def load_json_key(obj, key):
+    """Given a dict, parse JSON in `key`. Blank dict on failure."""
     if not obj[key]:
         return {}
     ret = {}
@@ -45,6 +52,7 @@ def load_json_key(obj, key):
     return ret
 
 def trunc(string, maxlen):
+    """Truncate a string, with a 3-char penalty if maxlen exceeded."""
     if string:
         string = string.strip()
         if len(string) > maxlen:
@@ -53,6 +61,7 @@ def trunc(string, maxlen):
 
 
 def rep_log10(rep):
+    """Convert raw steemd rep into a UI-ready value centered at 25."""
     def log10(string):
         leading_digits = int(string[0:4])
         log = math.log10(leading_digits) + 0.00000001
@@ -74,6 +83,7 @@ def rep_log10(rep):
 
 
 def safe_img_url(url, max_size=1024):
+    """Given an image URL, strict enforce size and validity."""
     if url and not isinstance(url, str):
         url = None
     if url:

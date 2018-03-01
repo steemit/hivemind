@@ -1,8 +1,7 @@
-# Ignore hive checkpoint files
+# client-only hive files
 checkpoints/*.json.lst
-
-# ignore hive.conf
 hive.conf
+docs/hive
 
 # OSX
 .DS_Store

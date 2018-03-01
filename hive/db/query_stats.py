@@ -1,3 +1,5 @@
+"""Tracks SQL timing stats and prints results periodically or on exit."""
+
 import time
 import re
 import atexit

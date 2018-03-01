@@ -1,3 +1,5 @@
+"""Core posts manager."""
+
 import collections
 
 from hive.db.adapter import Db
@@ -13,6 +15,7 @@ from hive.community.roles import is_community_post_valid
 DB = Db.instance()
 
 class Posts:
+    """Handles critical/core post ops and data."""
 
     # LRU cache for (author-permlink -> id) lookup
     _ids = collections.OrderedDict()
@@ -21,11 +24,13 @@ class Posts:
 
     @classmethod
     def last_id(cls):
+        """Get the last indexed post id."""
         sql = "SELECT MAX(id) FROM hive_posts WHERE is_deleted = '0'"
         return DB.query_one(sql) or 0
 
     @classmethod
     def get_id(cls, author, permlink):
+        """Look up id by author/permlink, making use of LRU cache."""
         url = author+'/'+permlink
         if url in cls._ids:
             cls._hits += 1
@@ -50,6 +55,7 @@ class Posts:
 
     @classmethod
     def _set_id(cls, url, pid):
+        """Add an entry to the LRU, maintaining max size."""
         assert pid, "no pid provided for %s" % url
         if len(cls._ids) > 1000000:
             cls._ids.popitem(last=False)
@@ -57,6 +63,7 @@ class Posts:
 
     @classmethod
     def save_ids_from_tuples(cls, tuples):
+        """Skim & cache `author/permlink -> id` from external queries."""
         for tup in tuples:
             pid, author, permlink = (tup[0], tup[1], tup[2])
             url = author+'/'+permlink
@@ -66,6 +73,7 @@ class Posts:
 
     @classmethod
     def get_id_and_depth(cls, author, permlink):
+        """Get the id and depth of @author/permlink post."""
         _id = cls.get_id(author, permlink)
         if not _id:
             return (None, -1)
@@ -74,18 +82,22 @@ class Posts:
 
     @classmethod
     def is_pid_deleted(cls, pid):
+        """Check if the state of post is deleted."""
         sql = "SELECT is_deleted FROM hive_posts WHERE id = :id"
         return DB.query_one(sql, id=pid)
 
-    # marks posts as deleted and removes them from feed cache
     @classmethod
     def delete_ops(cls, ops):
+        """Given a list of delete ops, mark the posts as deleted.
+
+        (And remove them from the feed cache.)
+        """
         for op in ops:
             cls.delete(op)
 
-    # registers new posts (ignores edits), inserts into feed cache
     @classmethod
     def comment_ops(cls, ops, block_date):
+        """Register new/edited/undeleted posts; insert into feed cache."""
         for op in ops:
             pid = cls.get_id(op['author'], op['permlink'])
             if not pid:
@@ -98,9 +110,9 @@ class Posts:
                 # post exists but was deleted. time to reinstate.
                 cls.undelete(op, block_date, pid)
 
-    # inserts new post records
     @classmethod
     def insert(cls, op, date):
+        """Inserts new post records."""
         sql = """INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
                                         category, community, depth, created_at)
                       VALUES (:is_valid, :parent_id, :author, :permlink,
@@ -115,9 +127,9 @@ class Posts:
             CachedPost.insert(op['author'], op['permlink'], post['id'])
             cls._insert_feed_cache(post)
 
-    # re-allocates an existing record flagged as deleted
     @classmethod
     def undelete(cls, op, date, pid):
+        """Re-allocates an existing record flagged as deleted."""
         sql = """UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0',
                    parent_id = :parent_id, category = :category,
                    community = :community, depth = :depth
@@ -129,9 +141,9 @@ class Posts:
             CachedPost.undelete(pid, post['author'], post['permlink'])
             cls._insert_feed_cache(post)
 
-    # marks a post record as being deleted
     @classmethod
     def delete(cls, op):
+        """Marks a post record as being deleted."""
         pid, depth = cls.get_id_and_depth(op['author'], op['permlink'])
         DB.query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=pid)
 
@@ -142,18 +154,24 @@ class Posts:
 
     @classmethod
     def update(cls, op, date, pid):
-        # here we could also build content diffs...
+        """Handle post updates.
+
+        Here we could also build content diffs, but for now just used
+        a signal to update cache record.
+        """
         if not DbState.is_initial_sync():
             CachedPost.update(op['author'], op['permlink'], pid)
 
     @classmethod
     def _insert_feed_cache(cls, post):
+        """Insert the new post into feed cache if it's not a comment."""
         if not post['depth']:
             account_id = Accounts.get_id(post['author'])
             FeedCache.insert(post['id'], account_id, post['date'])
 
     @classmethod
     def _build_post(cls, op, date, pid=None):
+        """Validate and normalize a post operation."""
         # either a top-level post or comment (with inherited props)
         if not op['parent_author']:
             parent_id = None
@@ -176,9 +194,9 @@ class Posts:
                     is_valid=is_valid, parent_id=parent_id, depth=depth,
                     category=category, community=community, date=date)
 
-    # given a comment op, safely read 'community' field from json
     @classmethod
     def _get_op_community(cls, comment):
+        """Given a comment op, safely read 'community' field from json."""
         md = load_json_key(comment, 'json_metadata')
         if not md or not isinstance(md, dict) or 'community' not in md:
             return None

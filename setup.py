@@ -34,6 +34,7 @@ setup(
         'psycopg2',
         'aiocache',
         'configargparse',
+        'pdoc',
     ],
     entry_points={
         'console_scripts': [

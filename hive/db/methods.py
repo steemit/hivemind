@@ -1,26 +1,25 @@
+"""[Deprecated] Importable methods which proxy to `hive.db.adapter`."""
+
 from hive.db.adapter import Db
 
 DB = Db.instance()
 
-# non-SELECT queries
 def query(sql, **kwargs):
+    """non-SELECT queries"""
     return DB.query(sql, **kwargs)
 
-# SELECT n*m
 def query_all(sql, **kwargs):
+    """SELECT n*m"""
     return DB.query_all(sql, **kwargs)
 
-# SELECT 1*m
 def query_row(sql, **kwargs):
+    """SELECT 1*m"""
     return DB.query_row(sql, **kwargs)
 
-# SELECT n*1
 def query_col(sql, **kwargs):
+    """SELECT n*1"""
     return DB.query_col(sql, **kwargs)
 
-# SELECT 1*1
 def query_one(sql, **kwargs):
+    """SELECT 1*1"""
     return DB.query_one(sql, **kwargs)
-
-def db_engine():
-    return DB.db_engine()

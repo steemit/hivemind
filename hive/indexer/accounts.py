@@ -1,6 +1,7 @@
+"""Accounts indexer."""
+
 import math
 import json
-import re
 
 from collections import deque
 from datetime import datetime
@@ -8,11 +9,17 @@ from toolz import partition_all
 
 from hive.db.methods import query_col, query, query_all
 from hive.steem.steem_client import SteemClient
-from hive.utils.normalize import rep_log10, amount, trunc
+from hive.utils.normalize import rep_log10, amount
 from hive.utils.timer import Timer
+from hive.utils.account import safe_profile_metadata
 
 class Accounts:
+    """Manages account id map, dirty queue, and `hive_accounts` table."""
+
+    # name->id map
     _ids = {}
+
+    # fifo queue
     _dirty = deque()
 
     # account core methods
@@ -20,29 +27,41 @@ class Accounts:
 
     @classmethod
     def load_ids(cls):
-        assert not cls._ids, "id map only needs to be loaded once"
+        """Load a full (name: id) dict into memory."""
+        assert not cls._ids, "id map already loaded"
         cls._ids = dict(query_all("SELECT name, id FROM hive_accounts"))
 
     @classmethod
     def get_id(cls, name):
+        """Get account id by name. Throw if not found."""
         assert name in cls._ids, "account does not exist or was not registered"
         return cls._ids[name]
 
     @classmethod
     def exists(cls, name):
+        """Check if an account name exists."""
         return name in cls._ids
 
     @classmethod
     def register(cls, names, block_date):
+        """Block processing: register "candidate" names.
+
+        There are four ops which can result in account creation:
+        *account_create*, *account_create_with_delegation*, *pow*,
+        and *pow2*. *pow* ops result in account creation only when
+        the account they name does not already exist!
+        """
+
+        # filter out names which already registered
         new_names = list(filter(lambda n: not cls.exists(n), set(names)))
         if not new_names:
             return
 
-        # insert new names and add the new ids to our mem map
         for name in new_names:
             query("INSERT INTO hive_accounts (name, created_at) "
                   "VALUES (:name, :date)", name=name, date=block_date)
 
+        # pull newly-inserted ids and merge into our map
         sql = "SELECT name, id FROM hive_accounts WHERE name IN :names"
         cls._ids = {**dict(query_all(sql, names=tuple(new_names))), **cls._ids}
 
@@ -52,6 +71,7 @@ class Accounts:
 
     @classmethod
     def dirty(cls, accounts):
+        """Marks given accounts as needing an update."""
         if not accounts:
             return 0
         if isinstance(accounts, str):
@@ -62,30 +82,40 @@ class Accounts:
 
     @classmethod
     def dirty_all(cls):
+        """Marks all accounts as dirty. Use to rebuild entire table."""
         cls.dirty(query_col("SELECT name FROM hive_accounts"))
 
     @classmethod
     def dirty_oldest(cls, limit=50000):
+        """Flag `limit` least-recently updated accounts for update."""
         print("[HIVE] flagging %d oldest accounts for update" % limit)
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
         return cls.dirty(query_col(sql, limit=limit))
 
     @classmethod
-    def flush(cls, trx=False, period=1):
-        assert period >= 1
+    def flush(cls, trx=False, spread=1):
+        """Process all accounts flagged for update.
+
+         - trx: bool - wrap the update in a transaction
+         - spread: int - spread writes over a period of `n` calls
+        """
+        assert spread >= 1
         if not cls._dirty:
             return 0
+
         count = len(cls._dirty)
-        if period > 1:
-            count = math.ceil(count / period)
-        accounts = [cls._dirty.popleft() for _ in range(count)]
+        if spread > 1:
+            count = math.ceil(count / spread)
         if trx:
             print("[SYNC] update %d accounts" % count)
+
+        accounts = [cls._dirty.popleft() for _ in range(count)]
         cls._cache_accounts(accounts, trx=trx)
         return count
 
     @classmethod
     def update_ranks(cls):
+        """Rebuild `hive_accounts` table rank-by-vote-weight column."""
         sql = """
         UPDATE hive_accounts
            SET rank = r.rnk
@@ -96,6 +126,7 @@ class Accounts:
 
     @classmethod
     def _cache_accounts(cls, accounts, trx=True):
+        """Fetch all `accounts` and write to db."""
         timer = Timer(len(accounts), 'account', ['rps', 'wps'])
         for batch in partition_all(1000, accounts):
 
@@ -110,6 +141,7 @@ class Accounts:
 
     @classmethod
     def _batch_update(cls, sqls, trx):
+        """Sends batched of prepared queries to db adapter."""
         if trx:
             query("START TRANSACTION")
         for (sql, params) in sqls:
@@ -119,6 +151,7 @@ class Accounts:
 
     @classmethod
     def _generate_cache_sqls(cls, accounts):
+        """Prepare a SQL query from a steemd account."""
         cached_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
         sqls = []
         for account in SteemClient.instance().get_accounts(accounts):
@@ -134,7 +167,7 @@ class Accounts:
                 del account[key]
 
             # pull out valid profile md and delete the key
-            profile = cls._safe_account_metadata(account)
+            profile = safe_profile_metadata(account)
             del account['json_metadata']
 
             values = {
@@ -147,12 +180,14 @@ class Accounts:
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
                 'active_at': account['last_bandwidth_update'],
                 'cached_at': cached_at,
+
                 'display_name': profile['name'],
                 'about': profile['about'],
                 'location': profile['location'],
                 'website': profile['website'],
                 'profile_image': profile['profile_image'],
                 'cover_image': profile['cover_image'],
+
                 'raw_json': json.dumps(account)
             }
 
@@ -160,66 +195,6 @@ class Accounts:
             sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
             sqls.append((sql, values))
         return sqls
-
-    @classmethod
-    def _safe_account_metadata(cls, account):
-        prof = {}
-        try:
-            prof = json.loads(account['json_metadata'])['profile']
-            if not isinstance(prof, dict):
-                prof = {}
-        except Exception:
-            pass
-
-        name = str(prof['name']) if 'name' in prof else None
-        about = str(prof['about']) if 'about' in prof else None
-        location = str(prof['location']) if 'location' in prof else None
-        website = str(prof['website']) if 'website' in prof else None
-        profile_image = str(prof['profile_image']) if 'profile_image' in prof else None
-        cover_image = str(prof['cover_image']) if 'cover_image' in prof else None
-
-        name = cls._char_police(name)
-        about = cls._char_police(about)
-        location = cls._char_police(location)
-
-        name = trunc(name, 20)
-        about = trunc(about, 160)
-        location = trunc(location, 30)
-
-        if name and name[0:1] == '@':
-            name = None
-        if website and len(website) > 100:
-            website = None
-        if website and not re.match('^https?://', website):
-            website = 'http://' + website
-
-        if profile_image and not re.match('^https?://', profile_image):
-            profile_image = None
-        if cover_image and not re.match('^https?://', cover_image):
-            cover_image = None
-        if profile_image and len(profile_image) > 1024:
-            profile_image = None
-        if cover_image and len(cover_image) > 1024:
-            cover_image = None
-
-        return dict(
-            name=name or '',
-            about=about or '',
-            location=location or '',
-            website=website or '',
-            profile_image=profile_image or '',
-            cover_image=cover_image or '',
-        )
-
-    @classmethod
-    def _char_police(cls, string):
-        if not string:
-            return None
-        if string.find('\x00') > -1:
-            print("bad string: {}".format(string))
-            return None
-        return string
-
 
 if __name__ == '__main__':
     Accounts.update_ranks()

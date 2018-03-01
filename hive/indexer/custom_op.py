@@ -1,3 +1,4 @@
+"""Main custom_json op handler."""
 import logging
 
 from funcy.seqs import first, second
@@ -15,15 +16,17 @@ from hive.utils.normalize import load_json_key
 log = logging.getLogger(__name__)
 
 class CustomOp:
+    """Processes custom ops and dispatches updates."""
 
     @classmethod
     def process_ops(cls, ops, block_num, block_date):
+        """Given a list of operation in block, filter and process them."""
         for op in ops:
             if op['id'] not in ['follow', 'com.steemit.community']:
                 continue
 
-            # we are assuming `required_posting_auths` is always used and length 1.
-            # it may be that some ops will require `required_active_auths` instead
+            # we assume `required_posting_auths` is always used and length 1.
+            # it may be that some ops require `required_active_auths` instead.
             # (e.g. if we use that route for admin action of acct creation)
             # if op['required_active_auths']:
             #    log.warning("unexpected active auths: %s" % op)
@@ -44,7 +47,7 @@ class CustomOp:
 
     @classmethod
     def _process_legacy(cls, account, op_json, block_date):
-        """ Process legacy 'follow' plugin ops (follow/mute/clear, reblog) """
+        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog)"""
         if not isinstance(op_json, list):
             return
         if len(op_json) != 2:
@@ -62,6 +65,7 @@ class CustomOp:
 
     @classmethod
     def reblog(cls, account, op_json, block_date):
+        """Handle legacy 'reblog' op"""
         blogger = op_json['account']
         author = op_json['author']
         permlink = op_json['permlink']

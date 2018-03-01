@@ -1,3 +1,5 @@
+"""Stat tracker for steemd API call performance."""
+
 import atexit
 import resource
 

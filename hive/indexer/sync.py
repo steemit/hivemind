@@ -1,3 +1,5 @@
+"""Hive sync manager."""
+
 import json
 import logging
 import glob
@@ -25,10 +27,47 @@ from hive.indexer.follow import Follow
 log = logging.getLogger(__name__)
 
 class Sync:
+    """Manages the sync/index process.
 
+    Responsible for initial sync, fast sync, and listen (block-follow).
+    """
+
+    @classmethod
+    def run(cls):
+        """Initialize state; setup/recovery checks; sync and runloop."""
+
+        # ensure db schema up to date, check app status
+        DbState.initialize()
+
+        # prefetch id->name memory map
+        Accounts.load_ids()
+
+        if DbState.is_initial_sync():
+            # resume initial sync
+            cls.initial()
+            DbState.finish_initial_sync()
+
+        else:
+            # recover from fork
+            Blocks.verify_head()
+
+            # perform cleanup if process did not exit cleanly
+            CachedPost.recover_missing_posts()
+
+        while True:
+            # sync up to irreversible block
+            cls.from_steemd()
+
+            # take care of payout backlog
+            CachedPost.dirty_paidouts(Blocks.head_date())
+            CachedPost.flush(trx=True)
+
+            # listen for new blocks
+            cls.listen()
 
     @classmethod
     def initial(cls):
+        """Initial sync routine."""
         assert DbState.is_initial_sync(), "already synced"
 
         print("[INIT] *** Initial fast sync ***")
@@ -43,6 +82,12 @@ class Sync:
 
     @classmethod
     def from_checkpoints(cls, chunk_size=1000):
+        """Initial sync strategy: read from blocks on disk.
+
+        This methods scans for files matching ./checkpoints/*.json.lst
+        and uses them for hive's initial sync. Each line must contain
+        exactly one block in JSON format.
+        """
         last_block = Blocks.head_num()
 
         tuplize = lambda path: [int(path.split('/')[-1].split('.')[0]), path]
@@ -66,6 +111,7 @@ class Sync:
 
     @classmethod
     def from_steemd(cls, is_initial_sync=False, chunk_size=1000):
+        """Fast sync strategy: read/process blocks in batches."""
         steemd = SteemClient.instance()
 
         lbound = Blocks.head_num() + 1
@@ -115,6 +161,7 @@ class Sync:
 
     @classmethod
     def listen(cls):
+        """Live (block following) mode."""
         trail_blocks = Conf.get('trail_blocks')
         assert trail_blocks >= 0
         assert trail_blocks < 25
@@ -127,7 +174,7 @@ class Sync:
             query("START TRANSACTION")
             num = Blocks.process(block)
             follows = Follow.flush(trx=False)
-            accts = Accounts.flush(trx=False, period=8)
+            accts = Accounts.flush(trx=False, spread=8)
             CachedPost.dirty_paidouts(block['timestamp'])
             cnt = CachedPost.flush(trx=False)
             query("COMMIT")
@@ -149,10 +196,10 @@ class Sync:
             if num % 20 == 0:
                 cls._update_chain_state(steemd)
 
-
     # refetch dynamic_global_properties, feed price, etc
     @classmethod
     def _update_chain_state(cls, adapter):
+        """Update basic state props (head block, feed price) in db."""
         state = adapter.gdgp_extended()
         query("""UPDATE hive_state SET block_num = :block_num,
                  steem_per_mvest = :spm, usd_per_steem = :ups,

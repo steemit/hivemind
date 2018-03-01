@@ -1,6 +1,8 @@
+"""[WIP] Process community ops."""
+
 from funcy.seqs import flatten
 from hive.db.methods import query_one
-from hive.community.roles import permissions, is_permitted
+from hive.community.roles import PERMISSIONS, is_permitted
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 
@@ -9,7 +11,7 @@ from hive.indexer.posts import Posts
 def process_json_community_op(account, op_json, date):
     cmd_name, cmd_op = op_json  # ['flagPost', {community: '', author: '', ...}]
 
-    commands = list(flatten(permissions.values()))
+    commands = list(flatten(PERMISSIONS.values()))
     if cmd_name not in commands:
         return
 

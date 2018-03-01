@@ -10,7 +10,7 @@ default: build
 .PHONY: test run test-without-lint test-pylint fmt test-without-build build docs
 
 docs:
-	pdoc --html hive --html-dir docs
+	pdoc --html hive --html-dir docs --overwrite
 
 build:
 	docker build -t $(PROJECT_DOCKER_TAG) .
@@ -65,4 +65,4 @@ clean-pyc:
 	find . -name '*~' -exec rm -f {} +
 
 install: clean
-	pip install -e .
+	pip3 install -e .

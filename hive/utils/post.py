@@ -1,3 +1,4 @@
+"""Methods for normalizing steemd post metadata."""
 #pylint: disable=line-too-long
 
 import math
@@ -9,6 +10,7 @@ from hive.utils.normalize import amount, rep_log10, safe_img_url, parse_time
 
 
 def post_basic(post):
+    """Basic post normalization: json-md, tags, and flags."""
     md = {}
     try:
         md = json.loads(post['json_metadata'])
@@ -70,7 +72,10 @@ def post_basic(post):
     }
 
 def post_legacy(post):
-    # extra steemd fields to save (some UIs need these, but no index req'd)
+    """Return legacy fields which may be useful to save.
+
+    Some UI's may want to leverage these, but no point in indexing.
+    """
     _legacy = ['id', 'url', 'root_comment', 'root_author', 'root_permlink',
                'root_title', 'parent_author', 'parent_permlink',
                'max_accepted_payout', 'percent_steem_dollars',
@@ -79,6 +84,7 @@ def post_legacy(post):
     return {k: v for k, v in post.items() if k in _legacy}
 
 def post_payout(post):
+    """Get current vote/payout data and recalculate trend/hot score."""
     # total payout (completed and/or pending)
     payout = sum([
         amount(post['total_payout_value']),
@@ -104,18 +110,25 @@ def post_payout(post):
     }
 
 def _vote_csv_row(vote):
+    """Convert a vote object into minimal CSV line."""
     rep = rep_log10(vote['reputation'])
     return "%s,%s,%s,%s" % (vote['voter'], vote['rshares'], vote['percent'], rep)
 
-# see: calculate_score - https://github.com/steemit/steem/blob/8cd5f688d75092298bcffaa48a543ed9b01447a6/libraries/plugins/tags/tags_plugin.cpp#L239
 def score(rshares, created_timestamp, timescale=480000):
+    """Calculate trending/hot score.
+
+    Source: calculate_score - https://github.com/steemit/steem/blob/8cd5f688d75092298bcffaa48a543ed9b01447a6/libraries/plugins/tags/tags_plugin.cpp#L239
+    """
     mod_score = rshares / 10000000.0
     order = math.log10(max((abs(mod_score), 1)))
     sign = 1 if mod_score > 0 else -1
     return sign * order + created_timestamp / timescale
 
-# see: contentStats - https://github.com/steemit/condenser/blob/master/src/app/utils/StateFunctions.js#L109
 def post_stats(post):
+    """Get post statistics and derived properties.
+
+    Source: contentStats - https://github.com/steemit/condenser/blob/master/src/app/utils/StateFunctions.js#L109
+    """
     net_rshares_adj = 0
     neg_rshares = 0
     total_votes = 0

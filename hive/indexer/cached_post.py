@@ -1,3 +1,5 @@
+"""Manages cached post data."""
+
 import json
 import collections
 import math
@@ -19,6 +21,7 @@ def _keyify(items):
     return dict(map(lambda x: ("val_%d" % x[0], x[1]), enumerate(items)))
 
 class CachedPost:
+    """Maintain update queue and writing to `hive_posts_cache`."""
 
     # cursor signifying upper bound of cached post span
     _last_id = -1
@@ -37,11 +40,12 @@ class CachedPost:
 
     @classmethod
     def update_promoted_amount(cls, post_id, amount):
+        """Set a new pending amount for a post for its next update."""
         cls._pending_promoted[post_id] = amount
 
-    # Mark a post as dirty.
     @classmethod
     def _dirty(cls, level, author, permlink, pid=None):
+        """Mark a post as dirty."""
         assert level in LEVELS, "invalid level {}".format(level)
         mode = LEVELS.index(level)
         url = author + '/' + permlink
@@ -63,31 +67,36 @@ class CachedPost:
 
     @classmethod
     def _get_id(cls, url):
+        """Given a post url, get its id."""
         if url in cls._ids:
             return cls._ids[url]
         raise Exception("requested id for %s not in map" % url)
 
-    # Called when a post is voted on.
     @classmethod
     def vote(cls, author, permlink, pid=None):
+        """Handle a post dirtied by a `vote` op."""
         cls._dirty('upvote', author, permlink, pid)
 
-    # Called when a post record is created.
     @classmethod
     def insert(cls, author, permlink, pid):
+        """Handle a post created by a `comment` op."""
         cls._dirty('insert', author, permlink, pid)
 
-    # Called when a post's content is edited.
     @classmethod
     def update(cls, author, permlink, pid):
+        """Handle a post updated by a `comment` op."""
         cls._dirty('update', author, permlink, pid)
 
-    # In steemd, posts can be 'deleted' or unallocated in certain conditions.
-    # This requires foregoing some convenient assumptions, such as:
-    #   - author/permlink is unique and always references the same post
-    #   - you can always get_content on any author/permlink you see in an op
     @classmethod
     def delete(cls, post_id, author, permlink):
+        """Handle a post deleted by a `delete_comment` op.
+
+        With steemd, posts can be 'deleted' or unallocated in certain
+        conditions. It requires foregoing convenient assumptions, e.g.:
+
+         - author/permlink is unique and always references the same post
+         - you can always get_content on any author/permlink you see in an op
+        """
         DB.query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
 
         # if it was queued for a write, remove it
@@ -95,24 +104,28 @@ class CachedPost:
         if url in cls._queue:
             del cls._queue[url]
 
-    # 'Undeletion' event occurs when hive detects that a previously deleted
-    #   author/permlink combination has been reused on a new post. Hive does
-    #   not delete hive_posts entries because they are currently irreplaceable
-    #   in case of a fork. Instead, we reuse the slot. It's important to
-    #   immediately insert a placeholder in the cache table, because hive only
-    #   scans forward. Here we create a dummy record whose properties push it
-    #   to the front of update-immediately queue.
-    #
-    # Alternate ways of handling undeletes:
-    #  - delete row from hive_posts so that it can be re-indexed (re-id'd)
-    #    - comes at a risk of losing expensive entry on fork (and no undo)
-    #  - create undo table for hive_posts, hive_follows, etc, & link to block
-    #  - rely on steemd's post.id instead of database autoincrement
-    #    - requires way to query steemd post objects by id to be useful
-    #      - batch get_content_by_ids in steemd would be /huge/ speedup
-    #  - create a consistent cache queue table or dirty flag col
     @classmethod
     def undelete(cls, post_id, author, permlink):
+        """Handle a post 'undeleted' by a `comment` op.
+
+        'Undeletion' occurs when hive detects that a previously deleted
+        author/permlink combination has been reused on a new post. Hive
+        does not delete hive_posts entries because they are currently
+        irreplaceable in case of a fork. Instead, we reuse the slot.
+        It's important to immediately insert a placeholder in the cache
+        table since hive only scans forward. This row's properties push
+        it to the front of update-immediately queue.
+
+        Alternate ways of handling undeletes:
+
+         - delete row from hive_posts so that it can be re-indexed (re-id'd)
+            - comes at a risk of losing expensive entry on fork (and no undo)
+         - create undo table for hive_posts, hive_follows, etc, & link to block
+         - rely on steemd's post.id instead of database autoincrement
+           - requires way to query steemd post objects by id to be useful
+             - batch get_content_by_ids in steemd would be /huge/ speedup
+         - create a consistent cache queue table or dirty flag col
+        """
         # do not force-write unless cache spans this id.
         if post_id > cls.last_id():
             cls.insert(author, permlink, post_id)
@@ -128,16 +141,16 @@ class CachedPost:
                    mode='insert')
         cls.update(author, permlink, post_id)
 
-    # Process all posts which have been marked as dirty.
     @classmethod
-    def flush(cls, trx=False, period=1):
+    def flush(cls, trx=False, spread=1):
+        """Process all posts which have been marked as dirty."""
         cls._load_noids() # load missing ids
-        assert period == 1, "period not tested"
+        assert spread == 1, "not fully tested, use with caution"
 
         counts = {}
         tuples = []
         for level in LEVELS:
-            tups = cls._get_tuples_for_level(level, period)
+            tups = cls._get_tuples_for_level(level, spread)
             counts[level] = len(tups)
             tuples.extend(tups)
 
@@ -157,22 +170,29 @@ class CachedPost:
 
         return counts
 
-    # Given a specific flush level (insert, payout, update, upvote),
-    # return a list of tuples to be passed to _update_batch, in the form
-    # of: [(url, id, level)*]
     @classmethod
     def _get_tuples_for_level(cls, level, fraction=1):
+        """Query tuples to be updated.
+
+        Given a specific flush level (insert, payout, update, upvote),
+        returns a list of tuples to be passed to _update_batch, in the
+        form of: `[(url, id, level)*]`
+        """
         mode = LEVELS.index(level)
         urls = [url for url, i in cls._queue.items() if i == mode]
         if fraction > 1 and level != 'insert': # inserts must be full flush
             urls = urls[0:math.ceil(len(urls) / fraction)]
         return [(url, cls._get_id(url), level) for url in urls]
 
-    # When posts are marked dirty, specifying the id is optional because
-    # a successive call might be able to provide it "for free". Before
-    # flushing changes this method should be called to fill in any gaps.
     @classmethod
     def _load_noids(cls):
+        """Load ids for posts we don't know the ids of.
+
+        When posts are marked dirty, specifying the id is optional
+        because a successive call might be able to provide it "for
+        free". Before flushing changes this method should be called
+        to fill in any gaps.
+        """
         from hive.indexer.posts import Posts
         noids = cls._noids - set(cls._ids.keys())
         tuples = [(Posts.get_id(*url.split('/')), url) for url in noids]
@@ -182,13 +202,17 @@ class CachedPost:
         cls._noids = set()
         return len(tuples)
 
-    # Select all posts which should have been paid out before `date` yet do not
-    # have the `is_paidout` flag set. We perform this sweep to ensure that we
-    # always have accurate final payout state. Since payout values vary even
-    # between votes, we'd have stale data if we didn't sweep, and only waited
-    # for incoming votes before an update.
     @classmethod
     def _select_paidout_tuples(cls, date):
+        """Query hive_posts_cache for payout sweep.
+
+        Select all posts which should have been paid out before `date`
+        yet do not have the `is_paidout` flag set. We perform this
+        sweep to ensure that we always have accurate final payout
+        state. Since payout values vary even between votes, we'd have
+        stale data if we didn't sweep, and only waited for incoming
+        votes before an update.
+        """
         from hive.indexer.posts import Posts
 
         sql = """SELECT post_id FROM hive_posts_cache
@@ -204,6 +228,7 @@ class CachedPost:
 
     @classmethod
     def dirty_paidouts(cls, date):
+        """Mark dirty all paidout posts not yet updated in db."""
         paidout = cls._select_paidout_tuples(date)
         authors = set()
         for (pid, author, permlink) in paidout:
@@ -218,6 +243,7 @@ class CachedPost:
 
     @classmethod
     def _select_missing_tuples(cls, last_cached_id, limit=1000000):
+        """Fetch posts inserted into main posts table but not cache."""
         from hive.indexer.posts import Posts
         sql = """SELECT id, author, permlink, promoted FROM hive_posts
                   WHERE is_deleted = '0' AND id > :id
@@ -227,6 +253,7 @@ class CachedPost:
 
     @classmethod
     def dirty_missing(cls, limit=1000000):
+        """Mark dirty all hive_posts records not yet written to cache."""
         from hive.indexer.posts import Posts
 
         # cached posts inserted sequentially, so compare MAX(id)'s
@@ -245,22 +272,32 @@ class CachedPost:
 
     @classmethod
     def recover_missing_posts(cls):
+        """Startup routine that cycles through missing posts.
+
+        This is used for (1) initial sync, and (2) recovering missing
+        cache records upon launch if hive fast-sync was interrupted.
+        """
         gap = cls.dirty_missing()
         print("[INIT] {} missing post cache entries".format(gap))
         while cls.flush(trx=True)['insert']:
             cls.dirty_missing()
 
-    # Given a set of posts, fetch them from steemd and write them to the db.
-    # The `tuples` arg is a list of (url, id) representing posts which are to be
-    # fetched from steemd and updated in hive_posts_cache table.
-    #
-    # Regarding _bump_last_id: there's a rare edge case when the last hive_post
-    # entry has been deleted "in the future" (ie, we haven't seen the delete op
-    # yet). So even when the post is not found (i.e. `not post['author']`), it's
-    # important to advance _last_id, because this cursor is used to deduce if
-    # there's any missing cache entries.
     @classmethod
     def _update_batch(cls, tuples, trx=True):
+        """Fetch, process, and write a batch of posts.
+
+        Given a set of posts, fetch from steemd and write them to the
+        db. The `tuples` arg is the form of `[(url, id, level)*]`
+        representing posts which are to be fetched from steemd and
+        updated in cache.
+
+        Regarding _bump_last_id: there's a rare edge case when the last
+        hive_post entry has been deleted "in the future" (ie, we haven't
+        seen the delete op yet). So even when the post is not found
+        (i.e. `not post['author']`), it's important to advance _last_id,
+        because this cursor is used to deduce any missing cache entries.
+        """
+
         steemd = SteemClient.instance()
         timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
         tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
@@ -289,13 +326,16 @@ class CachedPost:
 
     @classmethod
     def last_id(cls):
+        """Retrieve the latest post_id that was cached."""
         if cls._last_id == -1:
+            # after initial query, we maintain last_id w/ _bump_last_id()
             sql = "SELECT COALESCE(MAX(post_id), 0) FROM hive_posts_cache"
             cls._last_id = DB.query_one(sql)
         return cls._last_id
 
     @classmethod
     def _bump_last_id(cls, next_id):
+        """Update our last_id based on a recent insert."""
         last_id = cls.last_id()
         if next_id <= last_id:
             return
@@ -306,9 +346,9 @@ class CachedPost:
 
         cls._last_id = next_id
 
-    # paranoid check of important operating assumption
     @classmethod
     def _ensure_safe_gap(cls, last_id, next_id):
+        """Paranoid check of important operating assumption."""
         sql = "SELECT COUNT(*) FROM hive_posts WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'"
         missing_posts = DB.query_one(sql, x1=(last_id + 1), x2=(next_id - 1))
         if not missing_posts:
@@ -318,6 +358,7 @@ class CachedPost:
 
     @classmethod
     def _batch_queries(cls, batches, trx):
+        """Process batches of prepared SQL tuples."""
         if trx:
             DB.query("START TRANSACTION")
         for queries in batches:
@@ -328,6 +369,8 @@ class CachedPost:
 
     @classmethod
     def _sql(cls, pid, post, level=None):
+        """Given a post and "update level", generate SQL edit statement."""
+
         #pylint: disable=bad-whitespace
         assert post['author'], "post {} is blank".format(pid)
 
@@ -406,6 +449,7 @@ class CachedPost:
 
     @classmethod
     def _tag_sqls(cls, pid, tags):
+        """Generate SQL "deltas" for a post_id's associated tags."""
         sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
         curr_tags = set(DB.query_col(sql, id=pid))
 
@@ -424,12 +468,13 @@ class CachedPost:
 
     @classmethod
     def _write(cls, values, mode='insert'):
+        """Given row `values`, write to our table."""
         tup = cls._write_sql(values, mode)
         return DB.query(tup[0], **tup[1])
 
-    # sql builder for writing to hive_posts_cache table
     @classmethod
     def _write_sql(cls, values, mode='insert'):
+        """SQL builder for writing to hive_posts_cache table."""
         _pk = ['post_id']
         _table = 'hive_posts_cache'
         assert _pk, "primary key not defined"

@@ -1,3 +1,5 @@
+"""Tight and reliable steem API client for hive indexer."""
+
 import time
 from decimal import Decimal
 
@@ -7,6 +9,7 @@ from hive.steem.http_client import HttpClient, RPCError
 from hive.steem.client_stats import ClientStats
 
 class SteemClient:
+    """Handles upstream calls to jussi/steemd, with batching and retrying."""
 
     _instance = None
 
@@ -64,6 +67,7 @@ class SteemClient:
                 'hash': block['block_id']}
 
     def stream_blocks(self, start_from, trail_blocks=0, max_gap=40):
+        """ETA-based block follower."""
         assert trail_blocks >= 0
         assert trail_blocks < 25
 
@@ -148,6 +152,7 @@ class SteemClient:
         return self._gdgp()['last_irreversible_block_num']
 
     def gdgp_extended(self):
+        """Get dynamic global props without the cruft plus useful bits."""
         dgpo = self._gdgp()
 
         # remove unused/deprecated keys
@@ -183,7 +188,8 @@ class SteemClient:
         price = (ask + bid) / 2
         return "%.6f" % price
 
-    def get_blocks_range(self, lbound, ubound): # [lbound, ubound)
+    def get_blocks_range(self, lbound, ubound):
+        """Retrieves blocks in the range of [lbound, ubound)."""
         block_nums = range(lbound, ubound)
         required = set(block_nums)
         available = set()
@@ -208,8 +214,8 @@ class SteemClient:
         return [blocks[x] for x in block_nums]
 
 
-    # perform single steemd call
     def __exec(self, method, *params):
+        """Perform a single steemd call."""
         time_start = time.perf_counter()
         tries = 0
         while True:
@@ -229,8 +235,8 @@ class SteemClient:
         ClientStats.log(method, total_time, batch_size)
         return result
 
-    # perform batch call
     def __exec_batch(self, method, params):
+        """Perform batch call. Based on config uses either batch or futures."""
         time_start = time.perf_counter()
         result = None
 
@@ -244,8 +250,8 @@ class SteemClient:
         ClientStats.log(method, total_time, len(params))
         return result
 
-    # perform a json-rpc batch request, retrying on error
     def __exec_batch_with_retry(self, method, params, batch_size):
+        """Perform a json-rpc batch request, retrying on error."""
         tries = 0
         while True:
             try:

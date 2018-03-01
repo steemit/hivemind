@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+"""Hive JSON-RPC API server."""
 import os
 import logging
 
@@ -16,6 +17,7 @@ from hive.server import hive_api
 
 
 def build_methods():
+    """Build a map of all supported hive_api/condenser_api calls."""
     methods = AsyncMethods()
 
     hive_methods = (
@@ -64,6 +66,7 @@ def build_methods():
 
 
 def run_server():
+    """Configure and launch the API server."""
 
     log_level = Conf.log_level()
     config.debug = (log_level == logging.DEBUG)

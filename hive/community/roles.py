@@ -1,15 +1,15 @@
+"""[WIP] Role-based auth engine for communities."""
+
 from collections import OrderedDict
-from typing import List
 
 from hive.db.methods import query_one, query_row
 
-privacy_types = ('open', 'restricted', 'closed')
-privacy_map = dict(enumerate(privacy_types))
+PRIVACY_MAP = {0: 'open', 1: 'restricted', 2: 'closed'}
 
 # each group inherits permissions from groups below it
 # hence we use OrderedDict to ensure order
 # TODO: implement support for non-json-op actions: post, comment
-permissions = OrderedDict([
+PERMISSIONS = OrderedDict([
     ('muted', []),
     ('guest', []),
     ('member', ['flag_post']),
@@ -29,10 +29,10 @@ permissions = OrderedDict([
 ])
 
 
-def role_permissions(account_role: str) -> List[str]:
+def role_permissions(account_role: str):
     """ Fetch a list of community permissions role is entitled to."""
     acc_perm = []
-    for role, role_perm in permissions.items():
+    for role, role_perm in PERMISSIONS.items():
         acc_perm.extend(role_perm)
         if role == account_role:
             break
@@ -44,7 +44,7 @@ def role_permissions(account_role: str) -> List[str]:
 
 def is_permitted(account: str, community: str, action: str) -> bool:
     """ Check if an account is allowed to perform an action in a given community."""
-    if action not in permissions.keys():
+    if action not in PERMISSIONS.keys():
         raise ValueError('Action %s is not valid.' % action)
 
     account_role = get_user_role(account, community)
@@ -77,22 +77,22 @@ def get_user_role(account: str, community: str) -> str:
 
 def get_community_privacy(community: str) -> str:
     type_id = query_one('SELECT type_id from hive_communities WHERE name = "%s"' % community)
-    return privacy_map.get(type_id)
+    return PRIVACY_MAP.get(type_id)
 
 
 def is_community_post_valid(community, comment_op: dict) -> str:
     """ Given a new Steem post/comment, check if valid as per community rules
-    
+
     For a comment to be valid, these conditions apply:
         - Post must be new (edits don't count)
         - Author is allowed to post in this community (membership & privacy)
         - Author is not muted in this community
-        
-    
+
+
     Args:
         community (str): Community intended for this post op
         comment_op (dict): Raw post operation
-        
+
     Returns:
         is_valid (bool): If all checks pass, true
     """
@@ -113,7 +113,7 @@ def is_community_post_valid(community, comment_op: dict) -> str:
     if get_user_role(author, community) == 'muted':
         return False
 
-    privacy = privacy_map[community_props['privacy']]
+    privacy = PRIVACY_MAP[community_props['privacy']]
     if privacy == 'open':
         pass
     elif privacy == 'restricted':
