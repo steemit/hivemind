@@ -2,6 +2,8 @@
 checkpoints/*.json.lst
 hive.conf
 docs/hive
+grep
+lint
 
 # OSX
 .DS_Store
