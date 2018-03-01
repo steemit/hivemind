@@ -4,7 +4,7 @@
 
 from hive.conf import Conf
 from hive.db.db_state import DbState
-from hive.indexer.core import run_sync
+from hive.indexer.sync import Sync
 from hive.server.serve import run_server
 
 def run():
@@ -17,7 +17,7 @@ def run():
         run_server()
 
     elif mode == 'sync':
-        run_sync()
+        Sync.run()
 
     elif mode == 'status':
         print(DbState.status())

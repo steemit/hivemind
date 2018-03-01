@@ -33,6 +33,39 @@ class Sync:
     """
 
     @classmethod
+    def run(cls):
+        """Initialize state; setup/recovery checks; sync and runloop."""
+
+        # ensure db schema up to date, check app status
+        DbState.initialize()
+
+        # prefetch id->name memory map
+        Accounts.load_ids()
+
+        if DbState.is_initial_sync():
+            # resume initial sync
+            cls.initial()
+            DbState.finish_initial_sync()
+
+        else:
+            # recover from fork
+            Blocks.verify_head()
+
+            # perform cleanup if process did not exit cleanly
+            CachedPost.recover_missing_posts()
+
+        while True:
+            # sync up to irreversible block
+            cls.from_steemd()
+
+            # take care of payout backlog
+            CachedPost.dirty_paidouts(Blocks.head_date())
+            CachedPost.flush(trx=True)
+
+            # listen for new blocks
+            cls.listen()
+
+    @classmethod
     def initial(cls):
         """Initial sync routine."""
         assert DbState.is_initial_sync(), "already synced"
