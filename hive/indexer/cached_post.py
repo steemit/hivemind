@@ -422,8 +422,8 @@ class CachedPost:
         # if there's a pending promoted value to write, pull it out
         if pid in cls._pending_promoted:
             bal = cls._pending_promoted[pid]
-            print("promoted @%s/%s to %.3f SBD"
-                  % (post['author'], post['permlink'], bal))
+            #print("promoted @%s/%s to %.3f SBD"
+            #      % (post['author'], post['permlink'], bal))
             values.append(('promoted', bal))
             del cls._pending_promoted[pid]
 
