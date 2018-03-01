@@ -1,4 +1,4 @@
-# Ignore hive checkpoint files
+# client-only hive files
 checkpoints/*.json.lst
 hive.conf
 docs/hive

@@ -65,4 +65,4 @@ clean-pyc:
 	find . -name '*~' -exec rm -f {} +
 
 install: clean
-	pip install -e .
+	pip3 install -e .
