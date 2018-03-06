@@ -20,18 +20,23 @@ ENV HTTP_SERVER_PORT 8080
 RUN \
     apt-get update && \
     apt-get install -y \
+        awscli \
         build-essential \
         daemontools \
         libffi-dev \
         libmysqlclient-dev \
         libssl-dev \
         make \
+        pbzip2 \
+        postgresql \
+        postgresql-contrib \
         python3 \
         python3-dev \
         python3-pip \
         libxml2-dev \
         libxslt-dev \
         runit \
+        s3cmd \
         libpcre3 \
         libpcre3-dev
 
@@ -40,11 +45,12 @@ RUN \
 
 ADD . /app
 
-RUN \
-    mv /app/service/* /etc/service && \
-    chmod +x /etc/service/*/run
-
 WORKDIR /app
+
+ADD scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+ADD scripts/hivesync.sh /usr/local/bin/hivesync.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/hivesync.sh
 
 RUN \
     pip3 install . && \
@@ -63,3 +69,5 @@ RUN \
         /usr/local/include
 
 EXPOSE ${HTTP_SERVER_PORT}
+
+CMD /usr/local/bin/entrypoint.sh
