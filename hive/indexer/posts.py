@@ -46,8 +46,7 @@ class Posts:
 
         # cache stats (under 10M every 10K else every 100K)
         total = cls._hits + cls._miss
-        interval = 10000 if total < 10000000 else 100000
-        if total % interval == 0:
+        if total % 100000 == 0:
             print("[STATS] posts.id lookups: %d, hits: %d (%.1f%%), entries: %d"
                   % (total, cls._hits, 100.0*cls._hits/total, len(cls._ids)))
 

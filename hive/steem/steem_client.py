@@ -69,7 +69,7 @@ class SteemClient:
     def stream_blocks(self, start_from, trail_blocks=0, max_gap=40):
         """ETA-based block follower."""
         assert trail_blocks >= 0
-        assert trail_blocks < 25
+        assert trail_blocks <= 100
 
         last = self.get_block_simple(start_from - 1)
         head_num = self.head_block()
@@ -88,7 +88,7 @@ class SteemClient:
                 next_expected += 3
 
                 # check we're not too far behind
-                gap = head_num - last['num']
+                gap = (head_num - last['num']) - trail_blocks
                 print("[LIVE] %d blocks behind..." % gap)
                 if gap > max_gap:
                     print("[LIVE] gap too large: %d" % gap)

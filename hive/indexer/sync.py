@@ -164,7 +164,7 @@ class Sync:
         """Live (block following) mode."""
         trail_blocks = Conf.get('trail_blocks')
         assert trail_blocks >= 0
-        assert trail_blocks < 25
+        assert trail_blocks <= 100
 
         steemd = SteemClient.instance()
         hive_head = Blocks.head_num()
