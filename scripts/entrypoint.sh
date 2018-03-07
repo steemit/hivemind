@@ -23,8 +23,8 @@ if [[ "$RUN_IN_EB" ]]; then
       chpst -upostgres /usr/lib/postgresql/9.5/bin/initdb -D /var/lib/postgresql/9.5/main
     fi
   fi
-  chpasswd <<<"postgres:postgres"
   service postgresql start
+  sudo -u postgres psql --command '\password postgres'
 fi
 
 cd $APP_ROOT
