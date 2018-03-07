@@ -24,7 +24,8 @@ if [[ "$RUN_IN_EB" ]]; then
     fi
   fi
   service postgresql start
-  sudo -u postgres psql --command '\password postgres'
+  chpst -upostgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+  service postgresql restart
 fi
 
 cd $APP_ROOT
