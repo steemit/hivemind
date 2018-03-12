@@ -1,7 +1,7 @@
 """Stat tracker for steemd API call performance."""
 
 import atexit
-import resource
+from hive.utils.system import colorize, peak_usage_mb
 
 class ClientStats:
     # Assumed HTTP overhead (ms); subtract prior to par check
@@ -53,7 +53,7 @@ class ClientStats:
         if over >= cls.PAR_THRESHOLD:
             out = ("[STEEM][%dms] %s[%d] -- %.1fx par (%d/%d)"
                    % (ms, method, batch_size, over, per, par))
-            print("\033[93m" + out + "\033[0m")
+            print(colorize(out))
 
     @classmethod
     def print(cls):
@@ -68,8 +68,7 @@ class ClientStats:
                   % (100 * ms/ttl, "{:,}".format(int(ms)),
                      ms/calls, calls, sql[0:180]))
         print("[STATS] fastest steem call was %.3fms" % cls.fastest)
-        max_mem = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-        print("[STATS] peak memory usage: %.2fMB" % (max_mem / (1024 * 1024)))
+        print("[STATS] peak memory usage: %.2fMB" % peak_usage_mb())
         cls.clear()
 
     @classmethod
