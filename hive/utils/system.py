@@ -3,7 +3,7 @@
 import sys
 import resource
 
-USE_COLOR = sys.stdout.isatty()
+USE_COLOR = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
 
 def colorize(string, color='93'):
     if not USE_COLOR:
