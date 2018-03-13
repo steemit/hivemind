@@ -3,7 +3,7 @@
 import json
 
 from aiocache import cached
-from hive.db.methods import query_one, query_col, query_row, query_all
+from hive.db.methods import query_one, query_col, query_all
 from hive.steem.steem_client import SteemClient
 import hive.server.cursor as cursor
 
