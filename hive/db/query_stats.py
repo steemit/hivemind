@@ -3,8 +3,11 @@
 import time
 import re
 import atexit
+from hive.utils.system import colorize
 
 class QueryStats:
+    SLOW_QUERY_MS = 250
+
     stats = {}
     ttl_time = 0.0
 
@@ -45,8 +48,8 @@ class QueryStats:
 
     @classmethod
     def check_timing(cls, nsql, ms):
-        if ms > 100:
-            print("\033[93m[SQL][%dms] %s\033[0m" % (ms, nsql[:250]))
+        if ms > cls.SLOW_QUERY_MS:
+            print(colorize("[SQL][%dms] %s" % (ms, nsql[:250])))
 
     @classmethod
     def print(cls):

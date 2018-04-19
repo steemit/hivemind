@@ -9,6 +9,7 @@ from hive.indexer.posts import Posts
 # community methods
 # -----------------
 def process_json_community_op(account, op_json, date):
+    #pylint: disable=line-too-long
     cmd_name, cmd_op = op_json  # ['flagPost', {community: '', author: '', ...}]
 
     commands = list(flatten(PERMISSIONS.values()))

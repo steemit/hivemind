@@ -38,7 +38,8 @@ def post_basic(post):
     # TODO: be strict with nulls, or let them pass?
     body = post['body']
     if body.find('\x00') > -1:
-        print("bad body: {}".format(body))
+        url = post['author'] + '/' + post['permlink']
+        print("bad body in {}: {}".format(url, body))
         body = "INVALID"
 
     # payout date is last_payout if paid, and cashout_time if pending.

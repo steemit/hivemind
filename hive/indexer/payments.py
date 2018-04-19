@@ -3,6 +3,7 @@
 import logging
 
 from hive.db.adapter import Db
+from hive.db.db_state import DbState
 from hive.utils.normalize import parse_amount
 
 from hive.indexer.posts import Posts
@@ -37,9 +38,10 @@ class Payments:
         DB.query(sql, val=new_amount, id=record['post_id'])
 
         # notify cached_post of new promoted balance, and trigger update
-        CachedPost.update_promoted_amount(record['post_id'], new_amount)
-        author, permlink = cls._split_url(op['memo'])
-        CachedPost.vote(author, permlink, record['post_id'])
+        if not DbState.is_initial_sync():
+            CachedPost.update_promoted_amount(record['post_id'], new_amount)
+            author, permlink = cls._split_url(op['memo'])
+            CachedPost.vote(author, permlink, record['post_id'])
 
     @classmethod
     def _validated(cls, op, tx_idx, num, date):

@@ -1,4 +1,4 @@
-# Hivemind
+# Hivemind [ALPHA]
 
 #### Developer-friendly microservice powering social networks on the Steem blockchain.
 
@@ -145,10 +145,9 @@ Specifically, the goal is to completely remove the `follow` and `tags` plugins, 
 ##### Hive tracks posts, relationships, social actions, custom operations, and derived states.
 
  - *discussions:* by blog, trending, hot, created, etc
- - *communities:* mod roles/actions, members, feeds, etc
+ - *communities:* mod roles/actions, members, feeds (in 1.5; [spec](https://github.com/steemit/hivemind/blob/master/docs/communities.md))
  - *accounts:* normalized profile data, reputation
  - *feeds:* un/follows and un/reblogs
- - *communities:* members, permissions (in 1.5; [spec](https://github.com/steemit/hivemind/blob/master/docs/communities.md))
 
 ##### Hive does not track most blockchain operations.
 
