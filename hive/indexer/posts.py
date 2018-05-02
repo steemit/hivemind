@@ -172,12 +172,15 @@ class Posts:
     @classmethod
     def _build_post(cls, op, date, pid=None):
         """Validate and normalize a post operation."""
-        # either a top-level post or comment (with inherited props)
+
+        # if this is a top-level post:
         if not op['parent_author']:
             parent_id = None
             depth = 0
             category = op['parent_permlink']
-            community = cls._get_op_community(op) or op['author']
+            community = cls._get_op_community(op, date) or op['author']
+
+        # this is a comment; inherit parent props.
         else:
             parent_id = cls.get_id(op['parent_author'], op['parent_permlink'])
             sql = "SELECT depth,category,community FROM hive_posts WHERE id=:id"
@@ -195,14 +198,22 @@ class Posts:
                     category=category, community=community, date=date)
 
     @classmethod
-    def _get_op_community(cls, comment):
-        """Given a comment op, safely read 'community' field from json."""
+    def _get_op_community(cls, comment, date):
+        """Given a comment op, safely read 'community' field from json.
+
+        Ensures value is readable and referenced account exists.
+        """
+
+        # short-circuit pre-launch
+        if date < '2018-07-01':
+            return None
+
         md = load_json_key(comment, 'json_metadata')
-        if not md or not isinstance(md, dict) or 'community' not in md:
+        if (not md
+                or not isinstance(md, dict)
+                or not 'community' in md
+                or not isinstance(md['community'], str)
+                or not Accounts.exists(md['community'])):
             return None
-        community = md['community']
-        if not isinstance(community, str):
-            return None
-        if not Accounts.exists(community):
-            return None
-        return community
+
+        return md['community']
