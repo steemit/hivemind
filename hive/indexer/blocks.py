@@ -65,7 +65,8 @@ class Blocks:
         voted_authors = set()
         for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
-                op_type, op = operation
+                op_type = operation['type'].split('_operation')[0]
+                op = operation['value']
 
                 # account ops
                 if op_type == 'pow':

@@ -58,7 +58,9 @@ class SteemClient:
 
     def get_block(self, num):
         #assert num == int(block['block_id'][:8], base=16)
-        return self.__exec('get_block', num)
+        result = self.__exec('get_block', num)
+        assert 'block' in result, "result has no 'block' key: {}".format(result)
+        return result['block']
 
     def get_block_simple(self, block_num):
         block = self.get_block(block_num)
@@ -197,7 +199,8 @@ class SteemClient:
         blocks = {}
 
         while missing:
-            for block in self.__exec_batch('get_block', [[i] for i in missing]):
+            for result in self.__exec_batch('get_block', [[i] for i in missing]):
+                block = result['block']
                 if not 'block_id' in block:
                     print("WARNING: invalid block returned: {}".format(block))
                     continue
