@@ -4,7 +4,7 @@ import time
 from decimal import Decimal
 
 from hive.conf import Conf
-from hive.utils.normalize import parse_time
+from hive.utils.normalize import parse_time, parse_amount, steem_amount, vests_amount
 from hive.steem.http_client import HttpClient, RPCError
 from hive.steem.client_stats import ClientStats
 
@@ -172,15 +172,15 @@ class SteemClient:
 
     @staticmethod
     def _get_steem_per_mvest(dgpo):
-        steem = Decimal(dgpo['total_vesting_fund_steem'].split(' ')[0])
-        mvests = Decimal(dgpo['total_vesting_shares'].split(' ')[0]) / Decimal(1e6)
+        steem = steem_amount(dgpo['total_vesting_fund_steem'])
+        mvests = vests_amount(dgpo['total_vesting_shares']) / Decimal(1e6)
         return "%.6f" % (steem / mvests)
 
     def _get_feed_price(self):
         # TODO: add latest feed price: get_feed_history.price_history[0]
         feed = self.__exec('get_feed_history')['current_median_history']
-        units = dict([feed[k].split(' ')[::-1] for k in ['base', 'quote']])
-        price = Decimal(units['SBD']) / Decimal(units['STEEM'])
+        units = dict([parse_amount(feed[k])[::-1] for k in ['base', 'quote']])
+        price = units['SBD'] / units['STEEM']
         return "%.6f" % price
 
     def _get_steem_price(self):

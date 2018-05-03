@@ -9,7 +9,7 @@ from toolz import partition_all
 
 from hive.db.methods import query_col, query, query_all
 from hive.steem.steem_client import SteemClient
-from hive.utils.normalize import rep_log10, amount
+from hive.utils.normalize import rep_log10, vests_amount
 from hive.utils.timer import Timer
 from hive.utils.account import safe_profile_metadata
 
@@ -155,9 +155,9 @@ class Accounts:
         cached_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
         sqls = []
         for account in SteemClient.instance().get_accounts(accounts):
-            vote_weight = (amount(account['vesting_shares'])
-                           + amount(account['received_vesting_shares'])
-                           - amount(account['delegated_vesting_shares']))
+            vote_weight = (vests_amount(account['vesting_shares'])
+                           + vests_amount(account['received_vesting_shares'])
+                           - vests_amount(account['delegated_vesting_shares']))
 
             # remove empty keys
             useless = ['transfer_history', 'market_history', 'post_history',
@@ -175,7 +175,7 @@ class Accounts:
                 'proxy': account['proxy'],
                 'post_count': account['post_count'],
                 'reputation': rep_log10(account['reputation']),
-                'proxy_weight': amount(account['vesting_shares']),
+                'proxy_weight': vests_amount(account['vesting_shares']),
                 'vote_weight': vote_weight,
                 'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
                 'active_at': account['last_bandwidth_update'],
