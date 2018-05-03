@@ -158,6 +158,7 @@ class Posts:
         Here we could also build content diffs, but for now just used
         a signal to update cache record.
         """
+        # pylint: disable=unused-argument
         if not DbState.is_initial_sync():
             CachedPost.update(op['author'], op['permlink'], pid)
 

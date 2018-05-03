@@ -35,6 +35,24 @@ def chunkify(iterable, chunksize=3000):
     if chunk:
         yield chunk
 
+def rpc_error_str(result):
+    """ Get friendly error string from steemd RPC response. """
+    error = result['error']
+    detail = error['message'] if 'message' in error else str(error)
+
+    if 'data' not in result['error']:
+        name = 'error' # eg db_lock_error
+    elif 'name' not in result['error']['data']:
+        name = 'error2' # eg jussi error
+    else:
+        name = result['error']['data']['name']
+
+    # append hint if looks like legacy call to appbase node
+    if error['code'] == -32002 and 'api.method' in detail:
+        detail += " (missing appbase flag?)"
+
+    return "%s: `%s`" % (name, detail)
+
 class HttpClient(object):
     """ Simple Steem JSON-HTTP-RPC API
 
@@ -159,30 +177,24 @@ class HttpClient(object):
 
             # check response format/success
             result = json.loads(response.data.decode('utf-8'))
-            if not result:
-                raise Exception("result entirely blank")
+            assert result, "result entirely blank"
             if 'error' in result:
-                error = result['error']
-                if error['code'] == -32002 and 'api.method' in error['message']:
-                    raise RPCError("missing appbase flag? {}".format(result))
-                raise RPCError("result['error'] -- {}".format(result))
+                raise RPCError(rpc_error_str(result))
 
             # pylint: disable=no-else-return
             # final sanity checks and trimming
             if is_batch:
                 assert isinstance(result, list), "batch result must be list"
                 assert len(body) == len(result), "batch result len mismatch"
-                for item in result:
-                    assert 'error' not in item, "batch response error item: {}".format(item)
+                for i, item in enumerate(result):
+                    if 'error' in item:
+                        raise RPCError("batch response error: {} in {}".format(
+                            rpc_error_str(item), body[i]))
                     assert 'result' in item, "batch response empty item: {}".format(result)
                 return [item['result'] for item in result]
             else:
                 assert isinstance(result, dict), "non-batch result must be dict"
                 return result['result']
-
-        except json.decoder.JSONDecodeError as e:
-            logging.error("invalid JSON response: %s", response.data.decode('utf-8'))
-            raise e
 
         except (MaxRetryError,
                 ConnectionResetError,
@@ -199,7 +211,22 @@ class HttpClient(object):
             logging.error("call failed, retry %d. %s", _ret_cnt, repr(e))
             return self._exec(body, _ret_cnt=_ret_cnt + 1)
 
+        except json.decoder.JSONDecodeError as e:
+            logging.error("invalid JSON response: %s", response.data.decode('utf-8'))
+            raise e
+
+        # indicates a fundamental assumption was broken
+        except AssertionError as e:
+            raise e
+
+        # steemd RPC errors
+        except RPCError as e:
+            # TODO: retry automatically on db_lock errors
+            raise e
+
+        # record all instances of this and handle explicitly
         except Exception as e:
+            print("Unhandled exception! %s: %s" % e.__class__.__name__, e)
             raise e
 
     def exec(self, name, *args, api=None):

@@ -49,6 +49,7 @@ class Blocks:
     @classmethod
     def _process(cls, block, is_initial_sync=False):
         """Process a single block. Assumes a trx is open."""
+        # pylint: disable=too-many-boolean-expressions,too-many-branches
         num = cls._push(block)
         date = block['timestamp']
 
@@ -92,6 +93,16 @@ class Blocks:
         Posts.comment_ops(comment_ops, date)       # handle inserts, edits
         Posts.delete_ops(delete_ops)               # handle post deletion
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops
+
+        if (num > 20000000
+                and not account_names
+                and not voted_authors
+                and not comment_ops
+                and not delete_ops
+                and not json_ops):
+            # nothing for hive to process in this block... panic
+            raise Exception("Panic: no actions in block %d" % num)
+
         return num
 
     @classmethod

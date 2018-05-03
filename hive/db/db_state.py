@@ -24,7 +24,7 @@ class DbState:
         3) Check if initial sync has completed
         """
 
-        print("[INIT] Welcome! Initializing hive.")
+        print("[INIT] Welcome to hive!")
 
         # create db schema if needed
         if not cls._is_schema_loaded():
@@ -38,6 +38,8 @@ class DbState:
         cls._is_initial_sync = cls._is_feed_cache_empty()
         if cls._is_initial_sync:
             print("[INIT] Continue with initial sync...")
+        else:
+            print("[INIT] Hive initialized.")
 
     @classmethod
     def db(cls):

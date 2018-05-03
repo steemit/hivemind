@@ -1,6 +1,6 @@
 if [ -z "$1" ]
   then
-    pylint hive/**/*.py -f colorized -r n
+    pylint hive/**/*.py -f colorized -r n --disable=fixme
 else
-    pylint $1 -f colorized -r n
+    pylint $1 -f colorized -r n --disable=fixme
 fi
