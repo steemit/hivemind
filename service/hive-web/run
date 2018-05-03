@@ -1,5 +1,0 @@
-#!/bin/bash
-
-POPULATE_CMD="$(which hive)"
-
-exec "${POPULATE_CMD}" server
