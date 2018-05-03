@@ -18,6 +18,7 @@ class Posts:
     """Handles critical/core post ops and data."""
 
     # LRU cache for (author-permlink -> id) lookup
+    CACHE_SIZE = 2000000
     _ids = collections.OrderedDict()
     _hits = 0
     _miss = 0
@@ -56,7 +57,7 @@ class Posts:
     def _set_id(cls, url, pid):
         """Add an entry to the LRU, maintaining max size."""
         assert pid, "no pid provided for %s" % url
-        if len(cls._ids) > 1000000:
+        if len(cls._ids) > cls.CACHE_SIZE:
             cls._ids.popitem(last=False)
         cls._ids[url] = pid
 
