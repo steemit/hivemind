@@ -23,9 +23,10 @@ class Conf():
         p.add('--log-level', env_var='LOG_LEVEL', default='INFO')
 
         # specific to indexer
-        p.add('--max-workers', type=int, env_var='MAX_WORKERS', default=1)
-        p.add('--max-batch', type=int, env_var='MAX_BATCH', default=100)
-        p.add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', default=2)
+        p.add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests (untested)', default=1)
+        p.add('--max-batch', type=int, env_var='MAX_BATCH', help='max size for batch block/content requests', default=100)
+        p.add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', help='number of blocks to trail head by', default=2)
+        p.add('--disable-sync', type=bool, env_var='DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
 
         # specific to API server
         p.add('--http-server-port', type=int, env_var='HTTP_SERVER_PORT', default=8080)
