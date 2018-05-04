@@ -36,8 +36,13 @@ class Blocks:
         """Batch-process blocks; wrapped in a transaction."""
         query("START TRANSACTION")
 
-        for block in blocks:
-            cls._process(block, is_initial_sync)
+        last_num = 0
+        try:
+            for block in blocks:
+                last_num = cls._process(block, is_initial_sync)
+        except Exception as e:
+            print("[FATAL] could not process block %d" % (last_num + 1))
+            raise e
 
         # Follows flushing needs to be atomic because recounts are
         # expensive. So is tracking follows at all; hence we track
