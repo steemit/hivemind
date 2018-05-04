@@ -72,7 +72,7 @@ class Blocks:
                 if op_type == 'pow':
                     account_names.add(op['worker_account'])
                 elif op_type == 'pow2':
-                    account_names.add(op['work'][1]['input']['worker_account'])
+                    account_names.add(op['work']['value']['input']['worker_account'])
                 elif op_type == 'account_create':
                     account_names.add(op['new_account_name'])
                 elif op_type == 'account_create_with_delegation':
