@@ -31,8 +31,10 @@ fi
 cd $APP_ROOT
 
 # startup hive
+echo hivemind: starting sync
 exec "${POPULATE_CMD}" sync 2>&1&
 
+echo hivemind: starting server
 if [[ ! "$SYNC_TO_S3" ]]; then
 	exec "${POPULATE_CMD}" server
 else
