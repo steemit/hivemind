@@ -23,6 +23,9 @@ def sbd_amount(value):
 
 def parse_amount(value, expected_unit=None):
     """Parse steemd-style amout/asset value, return (decimal, name)."""
+    if isinstance(value, dict):
+        value = [value['amount'], value['precision'], value['nai']]
+
     if isinstance(value, str):
         raw_amount, unit = value.split(' ')
         dec_amount = decimal.Decimal(raw_amount)
