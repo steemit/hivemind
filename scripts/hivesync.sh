@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # if the indexer dies by itself, kill runsv causing the container to exit
-HIVESYNC_PID=`pgrep -f sync`
+HIVESYNC_PID=`pgrep -f 'hive sync'`
 if [[ ! $? -eq 0 ]]; then
 	echo NOTIFYALERT! hivemindsync has quit unexpectedly, killing container and starting a new instance..
 	sleep 30
@@ -9,7 +9,8 @@ if [[ ! $? -eq 0 ]]; then
 	kill -9 $RUN_SV_PID
 fi
 
-HTTP_CODE=`curl -I -s -o /dev/null -w "%{http_code}" http://127.0.0.1/health/`
+# NOTE: this API endpoint returns head age in seconds, and a 200 code if it's less than 3600
+HTTP_CODE=`curl -I -s -o /dev/null -w "%{http_code}" http://127.0.0.1/head_age`
 
 # if we get a 200 then hive is synced, start syncing operation
 if [[ ${HTTP_CODE} -eq 200 ]]; then

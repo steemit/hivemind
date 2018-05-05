@@ -101,6 +101,12 @@ def run_server():
     app.on_startup.append(init_db)
     app.on_cleanup.append(close_db)
 
+    async def head_age(request):
+        #pylint: disable=unused-argument
+        healthy_age = 3600 # one hour
+        curr_age = (await hive_api.db_head_state())['db_head_age']
+        status = 500 if curr_age > healthy_age else 200
+        return web.Response(status=status, text=str(curr_age))
 
     async def health(request):
         #pylint: disable=unused-argument
@@ -134,6 +140,7 @@ def run_server():
         return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
 
     app.router.add_get('/.well-known/healthcheck.json', health)
+    app.router.add_get('/head_age', head_age)
     app.router.add_get('/health', health)
     app.router.add_post('/', jsonrpc_handler)
 

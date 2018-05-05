@@ -42,6 +42,7 @@ else
     mkdir -p /etc/service/hivesync
     cp /usr/local/bin/hivesync.sh /etc/service/hivesync/run
     chmod +x /etc/service/hivesync/run
+    echo hivemind: starting hivesync service
     runsv /etc/service/hivesync
 fi
 
