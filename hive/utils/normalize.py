@@ -8,6 +8,8 @@ from datetime import datetime
 
 NAI_MAP = {
     '@@000000013': 'SBD',
+    '@@000000021': 'STEEM',
+    '@@000000037': 'VESTS',
 }
 
 def vests_amount(value):
