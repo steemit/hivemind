@@ -73,14 +73,17 @@ class Timer:
 
     def _time(self, secs):
         """Given number of seconds returns, e.g., `02h 29m 39s`"""
-        units = (('s', 60), ('m', 60), ('h', 60), ('d', 7))
+        units = (('s', 60), ('m', 60), ('h', 24), ('d', 7))
         out = []
         rem = secs
-        for (unit, div) in units:
-            out.append((rem % div, unit))
-            rem = int(rem / div)
-        out.append((rem, 'w'))
-        return ' '.join(["%02d%s" % (n, unit) for (n, unit) in out[::-1] if n])
+        for (unit, cycle) in units:
+            out.append((rem % cycle, unit))
+            rem = int(rem / cycle)
+            if not rem:
+                break
+        if rem: # leftover = weeks
+            out.append((rem, 'w'))
+        return ' '.join(["%02d%s" % tup for tup in out[::-1]])
 
     def _elapsed(self, lap_idx=None):
         if not lap_idx:
