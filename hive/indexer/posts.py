@@ -17,7 +17,7 @@ DB = Db.instance()
 class Posts:
     """Handles critical/core post ops and data."""
 
-    # LRU cache for (author-permlink -> id) lookup
+    # LRU cache for (author-permlink -> id) lookup (~500mb per 1M entries)
     CACHE_SIZE = 2000000
     _ids = collections.OrderedDict()
     _hits = 0
@@ -189,7 +189,7 @@ class Posts:
             depth = parent_depth + 1
 
         # check post validity in specified context
-        is_valid = is_community_post_valid(community, op)
+        is_valid = date < '2018-07-01' or is_community_post_valid(community, op)
         if not is_valid:
             url = "@{}/{}".format(op['author'], op['permlink'])
             print("Invalid post {} in @{}".format(url, community))
