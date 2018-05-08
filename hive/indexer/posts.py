@@ -17,8 +17,7 @@ DB = Db.instance()
 class Posts:
     """Handles critical/core post ops and data."""
 
-    # LRU cache for (author-permlink -> id) lookup (~500mb per 1M entries)
-    CACHE_SIZE = 2000000
+    # LRU cache for (author-permlink -> id) lookup
     _ids = collections.OrderedDict()
     _hits = 0
     _miss = 0
@@ -57,7 +56,7 @@ class Posts:
     def _set_id(cls, url, pid):
         """Add an entry to the LRU, maintaining max size."""
         assert pid, "no pid provided for %s" % url
-        if len(cls._ids) > cls.CACHE_SIZE:
+        if len(cls._ids) > 1000000:
             cls._ids.popitem(last=False)
         cls._ids[url] = pid
 
@@ -173,15 +172,12 @@ class Posts:
     @classmethod
     def _build_post(cls, op, date, pid=None):
         """Validate and normalize a post operation."""
-
-        # if this is a top-level post:
+        # either a top-level post or comment (with inherited props)
         if not op['parent_author']:
             parent_id = None
             depth = 0
             category = op['parent_permlink']
-            community = cls._get_op_community(op, date) or op['author']
-
-        # this is a comment; inherit parent props.
+            community = cls._get_op_community(op) or op['author']
         else:
             parent_id = cls.get_id(op['parent_author'], op['parent_permlink'])
             sql = "SELECT depth,category,community FROM hive_posts WHERE id=:id"
@@ -189,7 +185,7 @@ class Posts:
             depth = parent_depth + 1
 
         # check post validity in specified context
-        is_valid = date < '2018-07-01' or is_community_post_valid(community, op)
+        is_valid = is_community_post_valid(community, op)
         if not is_valid:
             url = "@{}/{}".format(op['author'], op['permlink'])
             print("Invalid post {} in @{}".format(url, community))
@@ -199,22 +195,14 @@ class Posts:
                     category=category, community=community, date=date)
 
     @classmethod
-    def _get_op_community(cls, comment, date):
-        """Given a comment op, safely read 'community' field from json.
-
-        Ensures value is readable and referenced account exists.
-        """
-
-        # short-circuit pre-launch
-        if date < '2018-07-01':
-            return None
-
+    def _get_op_community(cls, comment):
+        """Given a comment op, safely read 'community' field from json."""
         md = load_json_key(comment, 'json_metadata')
-        if (not md
-                or not isinstance(md, dict)
-                or not 'community' in md
-                or not isinstance(md['community'], str)
-                or not Accounts.exists(md['community'])):
+        if not md or not isinstance(md, dict) or 'community' not in md:
             return None
-
-        return md['community']
+        community = md['community']
+        if not isinstance(community, str):
+            return None
+        if not Accounts.exists(community):
+            return None
+        return community

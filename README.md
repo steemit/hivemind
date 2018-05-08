@@ -68,7 +68,7 @@ Precedence: CLI over ENV over hive.conf. Check `hive --help` for details.
 ### Hardware
 
  - Focus on Postgres performance
- - 2.5GB of memory for `hive sync` process
+ - 2GB of memory for hive itself (TODO: verify/limit max usage during initial sync)
  - 200GB storage for database
 
 

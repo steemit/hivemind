@@ -311,7 +311,7 @@ def build_metadata():
 
 def setup():
     # initialize schema
-    engine = Db.create_engine(echo=False)
+    engine = Db.create_engine(echo=True)
     build_metadata().create_all(engine)
 
     # tune auto vacuum/analyze

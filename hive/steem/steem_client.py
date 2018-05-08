@@ -4,7 +4,7 @@ import time
 from decimal import Decimal
 
 from hive.conf import Conf
-from hive.utils.normalize import parse_time, parse_amount, steem_amount, vests_amount
+from hive.utils.normalize import parse_time
 from hive.steem.http_client import HttpClient, RPCError
 from hive.steem.client_stats import ClientStats
 
@@ -58,9 +58,7 @@ class SteemClient:
 
     def get_block(self, num):
         #assert num == int(block['block_id'][:8], base=16)
-        result = self.__exec('get_block', num)
-        assert 'block' in result, "result has no 'block' key: {}".format(result)
-        return result['block']
+        return self.__exec('get_block', num)
 
     def get_block_simple(self, block_num):
         block = self.get_block(block_num)
@@ -172,15 +170,15 @@ class SteemClient:
 
     @staticmethod
     def _get_steem_per_mvest(dgpo):
-        steem = steem_amount(dgpo['total_vesting_fund_steem'])
-        mvests = vests_amount(dgpo['total_vesting_shares']) / Decimal(1e6)
+        steem = Decimal(dgpo['total_vesting_fund_steem'].split(' ')[0])
+        mvests = Decimal(dgpo['total_vesting_shares'].split(' ')[0]) / Decimal(1e6)
         return "%.6f" % (steem / mvests)
 
     def _get_feed_price(self):
         # TODO: add latest feed price: get_feed_history.price_history[0]
         feed = self.__exec('get_feed_history')['current_median_history']
-        units = dict([parse_amount(feed[k])[::-1] for k in ['base', 'quote']])
-        price = units['SBD'] / units['STEEM']
+        units = dict([feed[k].split(' ')[::-1] for k in ['base', 'quote']])
+        price = Decimal(units['SBD']) / Decimal(units['STEEM'])
         return "%.6f" % price
 
     def _get_steem_price(self):
@@ -199,8 +197,7 @@ class SteemClient:
         blocks = {}
 
         while missing:
-            for result in self.__exec_batch('get_block', [[i] for i in missing]):
-                block = result['block']
+            for block in self.__exec_batch('get_block', [[i] for i in missing]):
                 if not 'block_id' in block:
                     print("WARNING: invalid block returned: {}".format(block))
                     continue

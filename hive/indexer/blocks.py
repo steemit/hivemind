@@ -36,13 +36,8 @@ class Blocks:
         """Batch-process blocks; wrapped in a transaction."""
         query("START TRANSACTION")
 
-        last_num = 0
-        try:
-            for block in blocks:
-                last_num = cls._process(block, is_initial_sync)
-        except Exception as e:
-            print("[FATAL] could not process block %d" % (last_num + 1))
-            raise e
+        for block in blocks:
+            cls._process(block, is_initial_sync)
 
         # Follows flushing needs to be atomic because recounts are
         # expensive. So is tracking follows at all; hence we track
@@ -65,14 +60,13 @@ class Blocks:
         voted_authors = set()
         for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
-                op_type = operation['type'].split('_operation')[0]
-                op = operation['value']
+                op_type, op = operation
 
                 # account ops
                 if op_type == 'pow':
                     account_names.add(op['worker_account'])
                 elif op_type == 'pow2':
-                    account_names.add(op['work']['value']['input']['worker_account'])
+                    account_names.add(op['work'][1]['input']['worker_account'])
                 elif op_type == 'account_create':
                     account_names.add(op['new_account_name'])
                 elif op_type == 'account_create_with_delegation':
@@ -106,11 +100,8 @@ class Blocks:
                 and not comment_ops
                 and not delete_ops
                 and not json_ops):
-            if not block['transactions']:
-                print("[WARNING] block %d appears to be empty" % num)
-            else:
-                # nothing for hive to process in this block... panic
-                raise Exception("Panic: no actions in block %d" % num)
+            # nothing for hive to process in this block... panic
+            raise Exception("Panic: no actions in block %d" % num)
 
         return num
 

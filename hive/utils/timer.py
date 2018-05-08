@@ -53,6 +53,7 @@ class Timer:
         out += " (%s) -- "  % ', '.join(rates)
 
         if self._processed < self._total:
+            # "eta 01:22"
             out += "eta %s" % self._eta()
         else:
             total_time = self._end_time - self._start_time
@@ -72,18 +73,7 @@ class Timer:
         return self._time(secs)
 
     def _time(self, secs):
-        """Given number of seconds returns, e.g., `02h 29m 39s`"""
-        units = (('s', 60), ('m', 60), ('h', 24), ('d', 7))
-        out = []
-        rem = secs
-        for (unit, cycle) in units:
-            out.append((rem % cycle, unit))
-            rem = int(rem / cycle)
-            if not rem:
-                break
-        if rem: # leftover = weeks
-            out.append((rem, 'w'))
-        return ' '.join(["%02d%s" % tup for tup in out[::-1]])
+        return "%02d:%02d" % (secs / 60, secs % 60)
 
     def _elapsed(self, lap_idx=None):
         if not lap_idx:
