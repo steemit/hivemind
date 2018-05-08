@@ -19,13 +19,15 @@ class Conf():
 
         # common
         p.add('--database-url', env_var='DATABASE_URL', required=True, help='database connection url', default='postgresql://user:pass@localhost:5432/hive')
-        p.add('--steemd-url', env_var='STEEMD_URL', required=True, help='steemd/jussi endpoint', default='https://api.steemit.com')
+        p.add('--steemd-url', env_var='STEEMD_URL', required=False, help='steemd/jussi endpoint', default='https://api.steemit.com')
         p.add('--log-level', env_var='LOG_LEVEL', default='INFO')
 
         # specific to indexer
-        p.add('--max-workers', type=int, env_var='MAX_WORKERS', default=1)
-        p.add('--max-batch', type=int, env_var='MAX_BATCH', default=100)
-        p.add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', default=2)
+        p.add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests (untested)', default=1)
+        p.add('--max-batch', type=int, env_var='MAX_BATCH', help='max size for batch block/content requests', default=100)
+        p.add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', help='number of blocks to trail head by', default=2)
+        p.add('--disable-sync', type=bool, env_var='DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
+        p.add('--sync-to-s3', type=bool, env_var='SYNC_TO_S3', help='alternative healthcheck for background sync service', default=False)
 
         # specific to API server
         p.add('--http-server-port', type=int, env_var='HTTP_SERVER_PORT', default=8080)

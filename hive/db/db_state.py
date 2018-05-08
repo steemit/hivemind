@@ -2,7 +2,7 @@
 
 import time
 
-from hive.db.schema import setup #, teardown
+from hive.db.schema import setup, build_metadata # teardown
 from hive.db.adapter import Db
 
 class DbState:
@@ -30,6 +30,7 @@ class DbState:
         if not cls._is_schema_loaded():
             print("[INIT] Create db schema...")
             setup()
+            cls._before_initial_sync()
 
         # perform db migrations
         cls._check_migrations()
@@ -51,13 +52,64 @@ class DbState:
     @classmethod
     def finish_initial_sync(cls):
         """Set status to initial sync complete."""
-        print("[INIT] Initial sync complete!")
+        assert cls._is_initial_sync, "initial sync was not started."
+        cls._after_initial_sync()
         cls._is_initial_sync = False
+        print("[INIT] Initial sync complete!")
 
     @classmethod
     def is_initial_sync(cls):
         """Check if we're still in the process of initial sync."""
         return cls._is_initial_sync
+
+    @classmethod
+    def _disableable_indexes(cls):
+        to_locate = [
+            'hive_posts_ix1', # (parent_id)
+            'hive_posts_ix2', # (is_deleted, depth)
+            'hive_follows_ix2', # (following, follower, state=1)
+            'hive_follows_ix3', # (follower, following, state=1)
+            'hive_reblogs_ix1', # (post_id, account, created_at)
+            'hive_posts_cache_ix6', # (sc_trend, post_id)
+            'hive_posts_cache_ix7', # (sc_hot, post_id)
+        ]
+
+        to_return = []
+        md = build_metadata()
+        for table in md.tables:
+            for index in md.tables[table].indexes:
+                if index.name not in to_locate:
+                    continue
+                to_locate.remove(index.name)
+                to_return.append(index)
+
+        # ensure we found all the items we expected
+        assert not to_locate, "indexes not located: {}".format(to_locate)
+        return to_return
+
+    @classmethod
+    def _before_initial_sync(cls):
+        """Routine which runs *once* after db setup.
+
+        Disables non-critical indexes for faster initial sync."""
+        engine = cls.db().create_engine()
+        print("[INIT] Begin pre-initial sync hooks")
+        for index in cls._disableable_indexes():
+            print("Drop index %s.%s" % (index.table, index.name))
+            index.drop(engine)
+        print("[INIT] Finish pre-initial sync hooks")
+
+    @classmethod
+    def _after_initial_sync(cls):
+        """Routine which runs *once* after initial sync.
+
+        Re-creates non-core indexes for serving APIs after init sync."""
+        print("[INIT] Begin post-initial sync hooks")
+        engine = cls.db().create_engine()
+        for index in cls._disableable_indexes():
+            print("Create index %s.%s" % (index.table, index.name))
+            index.create(engine)
+        print("[INIT] Finish post-initial sync hooks")
 
     @staticmethod
     def status():
