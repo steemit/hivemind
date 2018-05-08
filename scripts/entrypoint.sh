@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# NOTE: this script will be executed again if hive crashes or aborts. This
+# could happen in the case of an unexpected upstream/API response, or when
+# a non-micro-fork was encountered. Hive has a startup routine which attempts
+# to recover automatically, so database should be kept intact between restarts.
+
 # eb need to set: RUN_IN_EB, S3_BUCKET, SYNC_TO_S3 (boolean) if a syncer
 # hive expects: DATABASE_URL, LOG_LEVEL, STEEMD_URL, JUSSI_URL
 # default DATABASE_URL should be postgresql://postgres:postgres@localhost:5432/postgres
@@ -7,25 +12,31 @@
 POPULATE_CMD="$(which hive)"
 
 if [[ "$RUN_IN_EB" ]]; then
-  # mkdir /var/lib/postgresql/9.5
   mkdir /var/lib/postgresql/9.5/main
-  chown -R postgres:postgres /var/lib/postgresql/9.5
-  cd /var/lib/postgresql/9.5
-  echo hivemind: attempting to pull in state file from s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.bz2
-  s3cmd get s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.bz2 - | pbzip2 -m2000dc | tar x
   if [[ $? -ne 0 ]]; then
-    if [[ ! "$SYNC_TO_S3" ]]; then
-      echo notifyalert hivemind: unable to pull state from S3 - exiting
-      exit 1
-    else
-      echo hivemindsync: state file for schema version $SCHEMA_HASH not found, creating a new one from genesis
-      # initialize a new postgres db to start fresh
-      chpst -upostgres /usr/lib/postgresql/9.5/bin/initdb -D /var/lib/postgresql/9.5/main
+    echo hivemind: restarted -- db already exists, skipping init
+  else
+    chown -R postgres:postgres /var/lib/postgresql/9.5
+    cd /var/lib/postgresql/9.5
+
+    echo hivemind: attempting to pull in state file from s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.bz2
+    s3cmd get s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.bz2 - | pbzip2 -m2000dc | tar x
+    if [[ $? -ne 0 ]]; then
+      if [[ ! "$SYNC_TO_S3" ]]; then
+        echo notifyalert hivemind: unable to pull state from S3 - exiting
+        exit 1
+      else
+        echo hivemindsync: state file for schema version $SCHEMA_HASH not found, creating a new one from genesis
+        # NOTE: this command may be executed multiple times; however postgres errors
+        # after the first run since the database already exists. safe to ignore.
+        chpst -upostgres /usr/lib/postgresql/9.5/bin/initdb -D /var/lib/postgresql/9.5/main
+      fi
     fi
+
+    service postgresql start
+    chpst -upostgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+    service postgresql restart
   fi
-  service postgresql start
-  chpst -upostgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
-  service postgresql restart
 fi
 
 cd $APP_ROOT
@@ -36,9 +47,9 @@ exec "${POPULATE_CMD}" sync 2>&1&
 
 echo hivemind: starting server
 if [[ ! "$SYNC_TO_S3" ]]; then
-	exec "${POPULATE_CMD}" server
+    exec "${POPULATE_CMD}" server
 else
-	exec "${POPULATE_CMD}" server 2>&1&
+    exec "${POPULATE_CMD}" server 2>&1&
     mkdir -p /etc/service/hivesync
     cp /usr/local/bin/hivesync.sh /etc/service/hivesync/run
     chmod +x /etc/service/hivesync/run
