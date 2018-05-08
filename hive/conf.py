@@ -4,6 +4,7 @@ import logging
 import configargparse
 
 class Conf():
+    """ Manages sync/server configuration via args, ENVs, and hive.conf. """
     _args = None
 
     @classmethod
