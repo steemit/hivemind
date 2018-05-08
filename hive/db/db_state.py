@@ -6,6 +6,7 @@ from hive.db.schema import setup, build_metadata # teardown
 from hive.db.adapter import Db
 
 class DbState:
+    """Manages database state: sync status, migrations, etc."""
 
     _db = None
 
@@ -63,6 +64,14 @@ class DbState:
         return cls._is_initial_sync
 
     @classmethod
+    def _all_foreign_keys(cls):
+        md = build_metadata()
+        out = []
+        for table in md.tables.values():
+            out.extend(table.foreign_keys)
+        return out
+
+    @classmethod
     def _disableable_indexes(cls):
         to_locate = [
             'hive_posts_ix1', # (parent_id)
@@ -76,8 +85,8 @@ class DbState:
 
         to_return = []
         md = build_metadata()
-        for table in md.tables:
-            for index in md.tables[table].indexes:
+        for table in md.tables.values():
+            for index in table.indexes:
                 if index.name not in to_locate:
                     continue
                 to_locate.remove(index.name)
@@ -91,24 +100,40 @@ class DbState:
     def _before_initial_sync(cls):
         """Routine which runs *once* after db setup.
 
-        Disables non-critical indexes for faster initial sync."""
+        Disables non-critical indexes for faster initial sync, as well
+        as foreign key constraints."""
+
         engine = cls.db().create_engine()
         print("[INIT] Begin pre-initial sync hooks")
+
         for index in cls._disableable_indexes():
             print("Drop index %s.%s" % (index.table, index.name))
             index.drop(engine)
+
+        for key in cls._all_foreign_keys():
+            print("Drop fk %s.%s" % (key.table, key.name))
+            key.drop(engine)
+
         print("[INIT] Finish pre-initial sync hooks")
 
     @classmethod
     def _after_initial_sync(cls):
         """Routine which runs *once* after initial sync.
 
-        Re-creates non-core indexes for serving APIs after init sync."""
-        print("[INIT] Begin post-initial sync hooks")
+        Re-creates non-core indexes for serving APIs after init sync,
+        as well as all foreign keys."""
+
         engine = cls.db().create_engine()
+        print("[INIT] Begin post-initial sync hooks")
+
         for index in cls._disableable_indexes():
             print("Create index %s.%s" % (index.table, index.name))
             index.create(engine)
+
+        for key in cls._all_foreign_keys():
+            print("Create fk %s.%s" % (key.table, key.name))
+            key.create(engine)
+
         print("[INIT] Finish post-initial sync hooks")
 
     @staticmethod
