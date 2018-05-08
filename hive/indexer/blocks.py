@@ -105,8 +105,11 @@ class Blocks:
                 and not comment_ops
                 and not delete_ops
                 and not json_ops):
-            # nothing for hive to process in this block... panic
-            raise Exception("Panic: no actions in block %d" % num)
+            if not block['transactions']:
+                print("[WARNING] block %d appears to be empty" % num)
+            else:
+                # nothing for hive to process in this block... panic
+                raise Exception("Panic: no actions in block %d" % num)
 
         return num
 
