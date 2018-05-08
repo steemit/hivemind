@@ -46,6 +46,7 @@ class Payments:
     @classmethod
     def _validated(cls, op, tx_idx, num, date):
         """Validate and normalize the transfer op."""
+        # pylint: disable=unused-argument
         if op['to'] != 'null':
             return # only care about payments to null
 

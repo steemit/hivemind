@@ -101,13 +101,21 @@ def run_server():
     app.on_startup.append(init_db)
     app.on_cleanup.append(close_db)
 
+    async def head_age(request):
+        #pylint: disable=unused-argument
+        healthy_age = 3600 # one hour
+        curr_age = (await hive_api.db_head_state())['db_head_age']
+        status = 500 if curr_age > healthy_age else 200
+        return web.Response(status=status, text=str(curr_age))
 
     async def health(request):
         #pylint: disable=unused-argument
         state = await hive_api.db_head_state()
+        is_syncer = Conf.get('sync_to_s3')
         max_head_age = (Conf.get('trail_blocks') + 1) * 3
 
-        if state['db_head_age'] > max_head_age:
+        if not is_syncer and state['db_head_age'] > max_head_age:
+            # TODO: establish criteria for unhealthy sync service. currently force OK.
             status = 500
             result = 'head block age (%s) > max (%s); head block num: %s' % (
                 state['db_head_age'], max_head_age, state['db_head_block'])
@@ -120,6 +128,7 @@ def run_server():
             state=state,
             result=result,
             status='OK' if status == 200 else 'WARN',
+            sync_service=is_syncer,
             source_commit=os.environ.get('SOURCE_COMMIT'),
             schema_hash=os.environ.get('SCHEMA_HASH'),
             docker_tag=os.environ.get('DOCKER_TAG'),
@@ -130,6 +139,8 @@ def run_server():
         response = await methods.dispatch(request)
         return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
 
+    app.router.add_get('/.well-known/healthcheck.json', health)
+    app.router.add_get('/head_age', head_age)
     app.router.add_get('/health', health)
     app.router.add_post('/', jsonrpc_handler)
 

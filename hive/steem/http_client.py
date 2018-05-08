@@ -145,7 +145,12 @@ class HttpClient(object):
         """ Build request body for steemd RPC requests."""
         assert isinstance(args, (list, tuple, set)), "args must be list"
 
-        if self.use_appbase:
+        if method == 'get_block':
+            method = "block_api."+method
+            assert isinstance(args, (tuple, list)), "get_block arg must be list"
+            assert len(args) == 1, "get_block arg is list of size 1"
+            args = {'block_num': args[0]}
+        elif self.use_appbase:
             method = "condenser_api."+method
 
         if api: # TODO: does this xform need to happen before condenser_api?

@@ -6,14 +6,26 @@ import decimal
 
 from datetime import datetime
 
-def nai_to_name(nai):
-    """Get friendly name from NAI vector."""
-    names = {'@@000000013': 'SBD'}
-    assert nai in names, "unrecognized nai: %s" % nai
-    return names[nai]
+NAI_MAP = {
+    '@@000000013': 'SBD',
+    '@@000000021': 'STEEM',
+    '@@000000037': 'VESTS',
+}
+
+def vests_amount(value):
+    return parse_amount(value, 'VESTS')
+
+def steem_amount(value):
+    return parse_amount(value, 'STEEM')
+
+def sbd_amount(value):
+    return parse_amount(value, 'SBD')
 
 def parse_amount(value, expected_unit=None):
     """Parse steemd-style amout/asset value, return (decimal, name)."""
+    if isinstance(value, dict):
+        value = [value['amount'], value['precision'], value['nai']]
+
     if isinstance(value, str):
         raw_amount, unit = value.split(' ')
         dec_amount = decimal.Decimal(raw_amount)
@@ -21,10 +33,12 @@ def parse_amount(value, expected_unit=None):
     elif isinstance(value, list):
         satoshis, precision, nai = value
         dec_amount = decimal.Decimal(satoshis) / (10**precision)
-        unit = nai_to_name(nai)
+        assert nai in NAI_MAP, "unknown NAI %s; expected %s" % (
+            nai, expected_unit or '(any)')
+        unit = NAI_MAP[nai]
 
     else:
-        raise Exception("unknown value type {}".format(value))
+        raise Exception("unexpected %s" % repr(value))
 
     if expected_unit:
         assert unit == expected_unit
@@ -33,8 +47,8 @@ def parse_amount(value, expected_unit=None):
     return (dec_amount, unit)
 
 def amount(string):
-    """Parse a string asset amount as a float."""
-    return float(string.split(' ')[0])
+    """Parse a string asset amount to a Decimal."""
+    return parse_amount(string)[0]
 
 def parse_time(block_time):
     """Convert chain date into datetime object."""

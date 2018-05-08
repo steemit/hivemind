@@ -6,7 +6,7 @@ import json
 
 from funcy.seqs import first
 
-from hive.utils.normalize import amount, rep_log10, safe_img_url, parse_time
+from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time
 
 
 def post_basic(post):
@@ -48,7 +48,7 @@ def post_basic(post):
 
     # payout is declined if max_payout = 0, or if 100% is burned
     is_payout_declined = False
-    if amount(post['max_accepted_payout']) == 0:
+    if sbd_amount(post['max_accepted_payout']) == 0:
         is_payout_declined = True
     elif len(post['beneficiaries']) == 1:
         benny = first(post['beneficiaries'])
@@ -88,9 +88,9 @@ def post_payout(post):
     """Get current vote/payout data and recalculate trend/hot score."""
     # total payout (completed and/or pending)
     payout = sum([
-        amount(post['total_payout_value']),
-        amount(post['curator_payout_value']),
-        amount(post['pending_payout_value']),
+        sbd_amount(post['total_payout_value']),
+        sbd_amount(post['curator_payout_value']),
+        sbd_amount(post['pending_payout_value']),
     ])
 
     # get total rshares, and create comma-separated vote data blob
@@ -158,7 +158,7 @@ def post_stats(post):
 
     author_rep = rep_log10(post['author_reputation'])
     is_low_value = net_rshares_adj < -9999999999
-    has_pending_payout = amount(post['pending_payout_value']) >= 0.02
+    has_pending_payout = sbd_amount(post['pending_payout_value']) >= 0.02
 
     return {
         'hide': not has_pending_payout and (author_rep < 0),

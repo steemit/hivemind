@@ -54,6 +54,10 @@ class Sync:
             # perform cleanup if process did not exit cleanly
             CachedPost.recover_missing_posts()
 
+        # debug mode: no sync, just stream
+        if Conf.get('disable_sync'):
+            return cls.listen()
+
         while True:
             # sync up to irreversible block
             cls.from_steemd()
@@ -166,9 +170,12 @@ class Sync:
         assert trail_blocks >= 0
         assert trail_blocks <= 100
 
+        # debug: no max gap if disable_sync in effect
+        max_gap = 40 if not Conf.get('disable_sync') else 999999999
+
         steemd = SteemClient.instance()
         hive_head = Blocks.head_num()
-        for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap=40):
+        for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap=max_gap):
             start_time = time.perf_counter()
 
             query("START TRANSACTION")
