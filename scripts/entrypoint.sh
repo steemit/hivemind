@@ -27,14 +27,23 @@ if [[ "$RUN_IN_EB" ]]; then
         exit 1
       else
         echo hivemindsync: state file for schema version $SCHEMA_HASH not found, creating a new one from genesis
-        # NOTE: this command may be executed multiple times; however postgres errors
-        # after the first run since the database already exists. safe to ignore.
         chpst -upostgres /usr/lib/postgresql/9.5/bin/initdb -D /var/lib/postgresql/9.5/main
       fi
     fi
 
     service postgresql start
+
+    # following config assumes 12GB mem available for pg
+    chpst -upostgres psql -c "ALTER SYSTEM SET effective_cache_size = '7GB';"
+    chpst -upostgres psql -c "ALTER SYSTEM SET maintenance_work_mem = '512MB';"
+    chpst -upostgres psql -c "ALTER SYSTEM SET random_page_cost = 1.0;"
+    chpst -upostgres psql -c "ALTER SYSTEM SET shared_buffers = '3GB';"
+    chpst -upostgres psql -c "ALTER SYSTEM SET work_mem = '512MB';"
+    chpst -upostgres psql -c "ALTER SYSTEM SET max_wal_size = '4GB';"
+    chpst -upostgres psql -c "ALTER SYSTEM SET checkpoint_timeout = '30min';"
+
     chpst -upostgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+
     service postgresql restart
   fi
 fi
