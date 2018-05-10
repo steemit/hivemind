@@ -20,9 +20,59 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 class RPCError(Exception):
+    """Represents a structured error returned from Steem/Jussi"""
+
+    @staticmethod
+    def humanize(result):
+        """Get friendly error string from steemd RPC response."""
+        error = result['error']
+        detail = error['message'] if 'message' in error else str(error)
+
+        if 'data' not in result['error']:
+            name = 'error' # eg db_lock_error
+        elif 'name' not in result['error']['data']:
+            name = 'error2' # eg jussi error
+        else:
+            name = result['error']['data']['name']
+
+        return "%s: `%s`" % (name, detail)
+
+    @staticmethod
+    def is_recoverable(result):
+        """Check if error appears recoverable (e.g. network condition)"""
+        error = result['error']
+        assert 'message' in error, "missing error msg key: {}".format(error)
+        assert 'code' in error, "missing error code key: {}".format(error)
+        message = error['message']
+        code = error['code']
+
+        # common steemd error
+        # {"code"=>-32003, "message"=>"Unable to acquire database lock"}
+        if message == 'Unable to acquire database lock':
+            return True
+
+        # rare steemd error
+        # {"code"=>-32000, "message"=>"Unknown exception",
+        #  "data"=>"0 exception: unspecified\nUnknown Exception\n[...]"}
+        if message == 'Unknown exception':
+            return True
+
+        # generic jussi error
+        # {'code': -32603, 'message': 'Internal Error', 'data': {
+        #    'error_id': 'c7a15140-f306-4727-acbd-b5e8f3717e9b',
+        #    'request': {'amzn_trace_id': 'Root=1-5ad4cb9f-...',
+        #      'jussi_request_id': None}}}
+        if message == 'Internal Error' and code == -32603:
+            return True
+
+        return False
+
+class RPCErrorFatal(RPCError):
+    """Represents a structured steemd error which is not recoverable."""
     pass
 
 def chunkify(iterable, chunksize=3000):
+    """Yields chunks of an iterator."""
     i = 0
     chunk = []
     for item in iterable:
@@ -35,54 +85,21 @@ def chunkify(iterable, chunksize=3000):
     if chunk:
         yield chunk
 
-def rpc_error_str(result):
-    """ Get friendly error string from steemd RPC response. """
-    error = result['error']
-    detail = error['message'] if 'message' in error else str(error)
-
-    if 'data' not in result['error']:
-        name = 'error' # eg db_lock_error
-    elif 'name' not in result['error']['data']:
-        name = 'error2' # eg jussi error
-    else:
-        name = result['error']['data']['name']
-
-    # append hint if looks like legacy call to appbase node
-    if error['code'] == -32002 and 'api.method' in detail:
-        detail += " (missing appbase flag?)"
-
-    return "%s: `%s`" % (name, detail)
 
 class HttpClient(object):
-    """ Simple Steem JSON-HTTP-RPC API
+    """ Simple Steem JSON-HTTP-RPC API """
 
-    This class serves as an abstraction layer for easy use of the Steem API.
-
-    Args:
-      nodes (list): A list of Steem HTTP RPC nodes to connect to.
-
-    .. code-block:: python
-
-       rpc = HttpClient(['https://steemd-node1.com', 'https://steemd-node2.com'])
-
-    any call available to that port can be issued using the instance
-    via the syntax ``rpc.exec('command', *parameters)``.
-
-    Example:
-
-    .. code-block:: python
-
-       rpc.exec(
-           'get_followers',
-           'furion', 'abit', 'blog', 10,
-           api='follow_api'
-       )
-
-    """
+    METHOD_API = dict(
+        get_block='block_api',
+        get_content='condenser_api',
+        get_accounts='database_api',
+        get_order_book='condenser_api',
+        get_feed_history='condenser_api',
+        get_dynamic_global_properties='database_api',
+    )
 
     def __init__(self, nodes, **kwargs):
         self.max_workers = kwargs.get('max_workers', None)
-        self.use_appbase = kwargs.get('use_appbase', True)
 
         num_pools = kwargs.get('num_pools', 10)
         maxsize = kwargs.get('maxsize', 10)
@@ -141,132 +158,84 @@ class HttpClient(object):
         self.url = node_url
         self.request = partial(self.http.urlopen, 'POST', self.url)
 
-    def rpc_body(self, method, args, api=None, jsonrpc_id=0):
+    def rpc_body(self, method, args, is_batch=False, _id=0):
         """ Build request body for steemd RPC requests."""
-        assert isinstance(args, (list, tuple, set)), "args must be list"
+        if is_batch:
+            return [self.rpc_body(method, _arg, _id=i+1)
+                    for i, _arg in enumerate(args)]
 
-        if method == 'get_block':
-            method = "block_api."+method
-            assert isinstance(args, (tuple, list)), "get_block arg must be list"
-            assert len(args) == 1, "get_block arg is list of size 1"
-            args = {'block_num': args[0]}
-        elif self.use_appbase:
-            method = "condenser_api."+method
+        return dict(jsonrpc="2.0", id=_id, method=method, params=args)
 
-        if api: # TODO: does this xform need to happen before condenser_api?
-            args = [api, method, args]
-            method = "call"
-
-        return {"jsonrpc": "2.0",
-                "id": jsonrpc_id,
-                "method": method,
-                "params": args}
-
-    def _exec(self, body, _ret_cnt=0):
+    def exec(self, method, args, is_batch=False):
         """ Execute a method against steemd RPC.
 
             Warning: Auto-retry on failure, including broadcasting a tx.
         """
 
-        assert isinstance(body, (dict, list)), "body must be dict or list"
-        is_batch = isinstance(body, list)
+        fqm = self.METHOD_API[method] + '.' + method
+        body = self.rpc_body(fqm, args, is_batch)
+        body_json = json.dumps(body, ensure_ascii=False).encode('utf8')
 
-        try:
-            encoded_body = json.dumps(body, ensure_ascii=False).encode('utf8')
-            response = self.request(body=encoded_body)
+        tries = 0
+        while True:
+            try:
+                response = self.request(body=body_json)
+                if response.status != 200:
+                    raise RPCError("non-200 response: %s" % response.status)
 
-            # check response status
-            if response.status not in tuple(
-                    [*response.REDIRECT_STATUSES, 200]):
-                raise RPCError("non-200 response:%s" % response.status)
+                response_data = response.data.decode('utf-8')
+                result = json.loads(response_data)
+                assert result, "result entirely blank"
 
-            # check response format/success
-            result = json.loads(response.data.decode('utf-8'))
-            assert result, "result entirely blank"
-            if 'error' in result:
-                raise RPCError(rpc_error_str(result))
+                if 'error' in result:
+                    if RPCError.is_recoverable(result):
+                        raise RPCError(RPCError.humanize(result))
+                    raise RPCErrorFatal(RPCError.humanize(result))
 
-            # pylint: disable=no-else-return
-            # final sanity checks and trimming
-            if is_batch:
+                if not is_batch:
+                    assert isinstance(result, dict), "result was not a dict"
+                    return result['result']
+
+                # sanity-checking of batch results
                 assert isinstance(result, list), "batch result must be list"
-                assert len(body) == len(result), "batch result len mismatch"
+                assert len(args) == len(result), "batch result len mismatch"
                 for i, item in enumerate(result):
                     if 'error' in item:
-                        raise RPCError("batch response error: {} in {}".format(
-                            rpc_error_str(item), body[i]))
-                    assert 'result' in item, "batch response empty item: {}".format(result)
+                        raise RPCError("batch[%d] error: %s in %s(%s)" % (
+                            i, RPCError.humanize(item), method, args[i]))
+                    assert 'result' in item, "batch[%d] response empty" % i
                 return [item['result'] for item in result]
-            else:
-                assert isinstance(result, dict), "non-batch result must be dict"
-                return result['result']
 
-        except (MaxRetryError,
-                ConnectionResetError,
-                ReadTimeoutError,
-                RemoteDisconnected,
-                ProtocolError) as e:
-
-            if _ret_cnt > 10:
+            except (AssertionError, RPCErrorFatal) as e:
                 raise e
-            elif _ret_cnt > 2:
-                time.sleep(_ret_cnt)
 
-            self.next_node()
-            logging.error("call failed, retry %d. %s", _ret_cnt, repr(e))
-            return self._exec(body, _ret_cnt=_ret_cnt + 1)
+            except (MaxRetryError, ConnectionResetError, ReadTimeoutError,
+                    RemoteDisconnected, ProtocolError, RPCError) as e:
+                self.next_node()
+                logging.error("%s failed, try %d. %s", method, tries, repr(e))
 
-        except json.decoder.JSONDecodeError as e:
-            logging.error("invalid JSON response: %s", response.data.decode('utf-8'))
-            raise e
+            except json.decoder.JSONDecodeError as e:
+                logging.error("invalid JSON response: %s", response_data)
 
-        # indicates a fundamental assumption was broken
-        except AssertionError as e:
-            raise e
+            except Exception as e:
+                logging.error('Unexpected %s: %s', e.__class__.__name__, e)
 
-        # steemd RPC errors
-        except RPCError as e:
-            # TODO: retry automatically on db_lock errors
-            raise e
+            if tries >= 50:
+                raise Exception("giving up after %d tries" % tries)
+            tries += 1
+            time.sleep(tries / 10)
 
-        # record all instances of this and handle explicitly
-        except Exception as e:
-            print("Unhandled exception! %s: %s" % e.__class__.__name__, e)
-            raise e
-
-    def exec(self, name, *args, api=None):
-        body = self.rpc_body(name, args, api=api)
-        return self._exec(body)
-
-    def exec_multi_with_futures(self, name, params, api=None, max_workers=None):
+    def exec_multi_with_futures(self, name, params, max_workers=None):
+        """Process a batch as parallel signular requests."""
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=max_workers) as executor:
-            futures = (executor.submit(self.exec, name, *args, api=api)
+            futures = (executor.submit(self.exec, name, *args)
                        for args in params)
             for future in concurrent.futures.as_completed(futures):
                 yield future.result()
 
     def exec_batch(self, name, params, batch_size):
-        for batch in chunkify(params, batch_size):
-            calls = [self.rpc_body(name, args) for args in batch]
-            response = self._exec(body=calls)
-            for item in response:
+        """Chunkify batch requests and return them in order"""
+        for batch_params in chunkify(params, batch_size):
+            for item in self.exec(name, batch_params, is_batch=True):
                 yield item
-
-def run():
-    import argparse
-    parser = argparse.ArgumentParser('jussi client')
-    parser.add_argument('--url', type=str, default='https://api.steemitdev.com')
-    parser.add_argument('--start_block', type=int, default=1)
-    parser.add_argument('--end_block', type=int, default=15000000)
-    parser.add_argument('--batch_request_size', type=int, default=20)
-    parser.add_argument('--log_level', type=str, default='DEBUG')
-    args = parser.parse_args()
-
-    client = HttpClient(nodes=[args.url], batch_size=args.batch_request_size)
-    block_nums = range(args.start_block, args.end_block)
-    for response in client.exec_batch('get_block', block_nums, 50):
-        print(json.dumps(response))
-
-if __name__ == '__main__':
-    run()
