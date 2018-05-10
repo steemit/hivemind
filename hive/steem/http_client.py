@@ -229,7 +229,7 @@ class HttpClient(object):
         """Process a batch as parallel signular requests."""
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=max_workers) as executor:
-            futures = (executor.submit(self.exec, name, *args)
+            futures = (executor.submit(self.exec, name, args)
                        for args in params)
             for future in concurrent.futures.as_completed(futures):
                 yield future.result()

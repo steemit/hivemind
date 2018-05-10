@@ -217,13 +217,13 @@ class SteemClient:
         return [blocks[x] for x in block_nums]
 
 
-    def __exec(self, method, *params):
+    def __exec(self, method, params=None):
         """Perform a single steemd call."""
         time_start = time.perf_counter()
         tries = 0
         while True:
             try:
-                result = self._client.exec(method, *params)
+                result = self._client.exec(method, params or dict())
                 if method != 'get_block':
                     assert result, "empty response {}".format(result)
             except (AssertionError, RPCError) as e:
