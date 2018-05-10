@@ -39,8 +39,10 @@ if [[ "$RUN_IN_EB" ]]; then
     chpst -upostgres psql -c "ALTER SYSTEM SET random_page_cost = 1.0;"
     chpst -upostgres psql -c "ALTER SYSTEM SET shared_buffers = '3GB';"
     chpst -upostgres psql -c "ALTER SYSTEM SET work_mem = '512MB';"
-    chpst -upostgres psql -c "ALTER SYSTEM SET max_wal_size = '4GB';"
+    chpst -upostgres psql -c "ALTER SYSTEM SET synchronous_commit = 'off';"
+    chpst -upostgres psql -c "ALTER SYSTEM SET checkpoint_completion_target = 0.9;"
     chpst -upostgres psql -c "ALTER SYSTEM SET checkpoint_timeout = '30min';"
+    chpst -upostgres psql -c "ALTER SYSTEM SET max_wal_size = '4GB';"
 
     chpst -upostgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
 
