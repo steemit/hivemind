@@ -20,7 +20,7 @@ def post_basic(post):
         pass
 
     thumb_url = ''
-    if md and 'image' in md:
+    if md and 'image' in md and md['image']:
         thumb_url = safe_img_url(first(md['image'])) or ''
         if thumb_url:
             md['image'] = [thumb_url]
