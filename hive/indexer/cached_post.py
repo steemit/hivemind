@@ -142,7 +142,7 @@ class CachedPost:
         cls.update(author, permlink, post_id)
 
     @classmethod
-    def flush(cls, trx=False, spread=1):
+    def flush(cls, trx=False, spread=1, full_total=None):
         """Process all posts which have been marked as dirty."""
         cls._load_noids() # load missing ids
         assert spread == 1, "not fully tested, use with caution"
@@ -160,7 +160,7 @@ class CachedPost:
             summary = ', '.join(summary) if summary else 'none'
             print("[PREP] posts cache process: %s" % summary)
 
-        cls._update_batch(tuples, trx)
+        cls._update_batch(tuples, trx, full_total=full_total)
         for url, _, _ in tuples:
             del cls._queue[url]
 
@@ -279,11 +279,11 @@ class CachedPost:
         """
         gap = cls.dirty_missing()
         print("[INIT] {} missing post cache entries".format(gap))
-        while cls.flush(trx=True)['insert']:
-            cls.dirty_missing()
+        while cls.flush(trx=True, full_total=gap)['insert']:
+            gap = cls.dirty_missing()
 
     @classmethod
-    def _update_batch(cls, tuples, trx=True):
+    def _update_batch(cls, tuples, trx=True, full_total=None):
         """Fetch, process, and write a batch of posts.
 
         Given a set of posts, fetch from steemd and write them to the
@@ -299,7 +299,8 @@ class CachedPost:
         """
 
         steemd = SteemClient.instance()
-        timer = Timer(total=len(tuples), entity='post', laps=['rps', 'wps'])
+        timer = Timer(total=len(tuples), entity='post',
+                      laps=['rps', 'wps'], full_total=full_total)
         tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
 
         for tups in partition_all(1000, tuples):
