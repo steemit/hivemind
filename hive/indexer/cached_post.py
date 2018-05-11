@@ -252,7 +252,7 @@ class CachedPost:
         return Posts.save_ids_from_tuples(results)
 
     @classmethod
-    def dirty_missing(cls, limit=1000000):
+    def dirty_missing(cls, limit=250000):
         """Mark dirty all hive_posts records not yet written to cache."""
         from hive.indexer.posts import Posts
 
