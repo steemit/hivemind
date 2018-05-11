@@ -27,20 +27,12 @@ class SteemClient:
         assert max_batch > 0 and max_batch <= 5000
         assert max_workers > 0 and max_workers <= 500
 
-        use_appbase = False # until deployed, assume False
-        if url[-8:] == '#appbase':
-            use_appbase = True
-            url = url[:-8]
-
         self._max_batch = max_batch
         self._max_workers = max_workers
-        self._client = HttpClient(nodes=[url],
-                                  maxsize=50,
-                                  num_pools=50,
-                                  use_appbase=use_appbase)
+        self._client = HttpClient(nodes=[url], maxsize=50, num_pools=50)
 
-        print("[STEEM] init url:%s batch:%s workers:%d appbase:%s"
-              % (url, max_batch, max_workers, use_appbase))
+        print("[STEEM] init url:%s batch:%s workers:%d"
+              % (url, max_batch, max_workers))
 
     def get_accounts(self, accounts):
         assert accounts, "no accounts passed to get_accounts"
