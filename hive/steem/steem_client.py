@@ -49,13 +49,17 @@ class SteemClient:
         return posts
 
     def get_block(self, num):
-        #assert num == int(block['block_id'][:8], base=16)
-        result = self.__exec('get_block', {'block_num': num})
-        assert 'block' in result, "result has no 'block' key: {}".format(result)
-        return result['block']
+        """Fetches a single block.
 
-    def get_block_simple(self, block_num):
+        If the result does not contain a `block` key, it's assumed
+        this block does not yet exist and None is returned.
+        """
+        result = self.__exec('get_block', {'block_num': num})
+        return result['block'] if 'block' in result else None
+
+    def _get_block_simple(self, block_num):
         block = self.get_block(block_num)
+        assert block, 'could not load block %d' % block_num
         return {'num': int(block['block_id'][:8], base=16),
                 'date': parse_time(block['timestamp']),
                 'hash': block['block_id']}
@@ -65,7 +69,7 @@ class SteemClient:
         assert trail_blocks >= 0
         assert trail_blocks <= 100
 
-        last = self.get_block_simple(start_from - 1)
+        last = self._get_block_simple(start_from - 1)
         head_num = self.head_block()
         next_expected = time.time()
 
@@ -176,7 +180,7 @@ class SteemClient:
         return "%.6f" % price
 
     def _get_steem_price(self):
-        orders = self.__exec('get_order_book', 1)
+        orders = self.__exec('get_order_book', [1])
         ask = Decimal(orders['asks'][0]['real_price'])
         bid = Decimal(orders['bids'][0]['real_price'])
         price = (ask + bid) / 2
@@ -189,6 +193,7 @@ class SteemClient:
 
         batch_params = [{'block_num': i} for i in block_nums]
         for result in self.__exec_batch('get_block', batch_params):
+            assert 'block' in result, "result w/o block key: {}".format(result)
             block = result['block']
             num = int(block['block_id'][:8], base=16)
             blocks[num] = block
@@ -198,7 +203,7 @@ class SteemClient:
     def __exec(self, method, params=None):
         """Perform a single steemd call."""
         time_start = time.perf_counter()
-        result = self._client.exec(method, params or dict())
+        result = self._client.exec(method, params)
         total_time = (time.perf_counter() - time_start) * 1000
 
         batch_size = len(params[0]) if method == 'get_accounts' else 1

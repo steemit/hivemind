@@ -164,6 +164,8 @@ class HttpClient(object):
             return [self.rpc_body(method, _arg, _id=i+1)
                     for i, _arg in enumerate(args)]
 
+        if args is None:
+            args = [] if 'condenser_api' in method else {}
         return dict(jsonrpc="2.0", id=_id, method=method, params=args)
 
     def exec(self, method, args, is_batch=False):
