@@ -36,7 +36,7 @@ class SteemClient:
 
     def get_accounts(self, accounts):
         assert accounts, "no accounts passed to get_accounts"
-        ret = self.__exec('get_accounts', accounts)
+        ret = self.__exec('get_accounts', [accounts])
         assert len(accounts) == len(ret), ("requested %d accounts got %d"
                                            % (len(accounts), len(ret)))
         return ret
