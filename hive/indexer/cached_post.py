@@ -370,7 +370,14 @@ class CachedPost:
 
     @classmethod
     def _sql(cls, pid, post, level=None):
-        """Given a post and "update level", generate SQL edit statement."""
+        """Given a post and "update level", generate SQL edit statement.
+
+        Valid levels are:
+         - `insert`: post does not yet exist in cache
+         - `update`: post was modified
+         - `payout`: post was paidout
+         - `upvote`: post payout/votes changed
+        """
 
         #pylint: disable=bad-whitespace
         assert post['author'], "post {} is blank".format(pid)
@@ -380,7 +387,7 @@ class CachedPost:
         assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
 
         # inserts always sequential. if pid > last_id, this operation
-        # *must* be an insert; so `level` must not be ay form of update.
+        # *must* be an insert; so `level` must not be any form of update.
         if pid > cls.last_id() and level != 'insert':
             raise Exception("WARNING: new pid, but level=%s. #%d vs %d, %s"
                             % (level, pid, cls.last_id(), repr(post)))
@@ -397,7 +404,7 @@ class CachedPost:
                 ('category', post['category']),
                 ('depth',    post['depth'])])
 
-        # always write, unless simple payout update
+        # always write, unless simple vote update
         if level in ['insert', 'payout', 'update']:
             basic = post_basic(post)
             values.extend([
@@ -416,15 +423,14 @@ class CachedPost:
                 ('raw_json',      json.dumps(post_legacy(post))),
                 ('children',      min(post['children'], 32767))])
 
-            # update tags if root post
-            if not post['depth']:
-                tag_sqls.extend(cls._tag_sqls(pid, basic['tags']))
+        # update tags if action is insert/update and is root post
+        if level in ['insert', 'update'] and not post['depth']:
+            diff = level != 'insert' # do not attempt tag diff on insert
+            tag_sqls.extend(cls._tag_sqls(pid, basic['tags'], diff=diff))
 
         # if there's a pending promoted value to write, pull it out
         if pid in cls._pending_promoted:
             bal = cls._pending_promoted[pid]
-            #print("promoted @%s/%s to %.3f SBD"
-            #      % (post['author'], post['permlink'], bal))
             values.append(('promoted', bal))
             del cls._pending_promoted[pid]
 
@@ -449,10 +455,12 @@ class CachedPost:
         return [cls._write_sql(values, mode)] + tag_sqls
 
     @classmethod
-    def _tag_sqls(cls, pid, tags):
+    def _tag_sqls(cls, pid, tags, diff=True):
         """Generate SQL "deltas" for a post_id's associated tags."""
-        sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
-        curr_tags = set(DB.query_col(sql, id=pid))
+        curr_tags = set()
+        if diff:
+            sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
+            curr_tags = set(DB.query_col(sql, id=pid))
 
         to_rem = (curr_tags - tags)
         if to_rem:
