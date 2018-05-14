@@ -7,7 +7,7 @@ if [[ ! $? -eq 0 ]]; then
     FILE_NAME=hivemind-$SCHEMA_HASH-`date '+%Y%m%d-%H%M%S'`-partial.tar.bz2
 
 else
-    # returns 200 if head is < 1hr old, signalling sync is complete. else, 500.
+    # returns 200 if head is < 15s old, signaling sync is complete. else, 500.
     HTTP_CODE=`curl -I -s -o /dev/null -w "%{http_code}" http://127.0.0.1/head_age`
     if [[ ${HTTP_CODE} -eq 200 ]]; then
         echo hivemindsync: sync complete, waiting for hive to exit cleanly...
