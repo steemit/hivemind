@@ -28,12 +28,12 @@ class RPCError(Exception):
         error = result['error']
         detail = error['message'] if 'message' in error else str(error)
 
-        if 'data' not in result['error']:
+        if 'data' not in error:
             name = 'error' # eg db_lock_error
-        elif 'name' not in result['error']['data']:
+        elif 'name' not in error['data']:
             name = 'error2' # eg jussi error
         else:
-            name = result['error']['data']['name']
+            name = error['data']['name']
 
         return "%s: `%s`" % (name, detail)
 

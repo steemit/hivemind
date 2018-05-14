@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from hive.conf import Conf
 from hive.utils.normalize import parse_time, parse_amount, steem_amount, vests_amount
-from hive.steem.http_client import HttpClient, RPCError
+from hive.steem.http_client import HttpClient
 from hive.steem.client_stats import ClientStats
 
 class SteemClient:
@@ -86,7 +86,7 @@ class SteemClient:
                 print("[LIVE] %d blocks behind..." % gap)
                 if gap > max_gap:
                     print("[LIVE] gap too large: %d" % gap)
-                    return # return to fast-sync
+                    return # abort streaming; return to fast-sync
 
             # if caught up, await head advance.
             if head_num == last['num']:
@@ -185,58 +185,33 @@ class SteemClient:
     def get_blocks_range(self, lbound, ubound):
         """Retrieves blocks in the range of [lbound, ubound)."""
         block_nums = range(lbound, ubound)
-        required = set(block_nums)
-        available = set()
-        missing = required - available
         blocks = {}
 
-        while missing:
-            for result in self.__exec_batch('get_block', [{'block_num': i} for i in missing]):
-                block = result['block']
-                if not 'block_id' in block:
-                    print("WARNING: invalid block returned: {}".format(block))
-                    continue
-                num = int(block['block_id'][:8], base=16)
-                if num in blocks:
-                    print("WARNING: batch get_block returned dupe %d" % num)
-                blocks[num] = block
-            available = set(blocks.keys())
-            missing = required - available
-            if missing:
-                print("WARNING: API missed blocks {}".format(missing))
-                time.sleep(3)
+        batch_params = [{'block_num': i} for i in block_nums]
+        for result in self.__exec_batch('get_block', batch_params):
+            block = result['block']
+            num = int(block['block_id'][:8], base=16)
+            blocks[num] = block
 
         return [blocks[x] for x in block_nums]
-
 
     def __exec(self, method, params=None):
         """Perform a single steemd call."""
         time_start = time.perf_counter()
-        tries = 0
-        while True:
-            try:
-                result = self._client.exec(method, params or dict())
-                if method != 'get_block':
-                    assert result, "empty response {}".format(result)
-            except (AssertionError, RPCError) as e:
-                tries += 1
-                print("{} failure, retry in {}s -- {}".format(method, tries / 10, e))
-                time.sleep(tries / 10)
-                continue
-            break
+        result = self._client.exec(method, params or dict())
+        total_time = (time.perf_counter() - time_start) * 1000
 
         batch_size = len(params[0]) if method == 'get_accounts' else 1
-        total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, batch_size)
         return result
 
     def __exec_batch(self, method, params):
         """Perform batch call. Based on config uses either batch or futures."""
         time_start = time.perf_counter()
-        result = None
 
         if self._max_workers == 1:
-            result = self.__exec_batch_with_retry(method, params, self._max_batch)
+            result = list(self._client.exec_batch(
+                method, params, batch_size=self._max_batch))
         else:
             result = list(self._client.exec_multi_with_futures(
                 method, params, max_workers=self._max_workers))
@@ -244,15 +219,3 @@ class SteemClient:
         total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, len(params))
         return result
-
-    def __exec_batch_with_retry(self, method, params, batch_size):
-        """Perform a json-rpc batch request, retrying on error."""
-        tries = 0
-        while True:
-            try:
-                return list(self._client.exec_batch(method, params, batch_size))
-            except (AssertionError, RPCError) as e:
-                tries += 1
-                print("batch {} failure, retry in {}s -- {}".format(method, tries / 10, repr(e)))
-                time.sleep(tries / 10)
-                continue
