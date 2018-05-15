@@ -130,9 +130,10 @@ class DbState:
             print("Create index %s.%s" % (index.table, index.name))
             index.create(engine)
 
-        for key in cls._all_foreign_keys():
-            print("Create fk %s" % (key.name))
-            key.create(engine)
+        # TODO: #111
+        #for key in cls._all_foreign_keys():
+        #    print("Create fk %s" % (key.name))
+        #    key.create(engine)
 
         print("[INIT] Finish post-initial sync hooks")
 
