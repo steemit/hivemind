@@ -51,7 +51,7 @@ async def call(api, method, params):
     elif method == 'get_block':
         return steemd._client.exec('get_block', params[0])
     elif method == 'broadcast_transaction_synchronous':
-        return steemd._client.exec('broadcast_transaction_synchronous', params[0], api='network_broadcast_api')
+        return steemd._client.exec('broadcast_transaction_synchronous', params[0])
     elif method == 'get_savings_withdraw_to':
         return steemd._client.exec('get_savings_withdraw_to', params[0])
     elif method == 'get_savings_withdraw_from':
@@ -494,7 +494,7 @@ def _condenser_post_object(row):
     #post['allow_curation_rewards'] = raw_json['allow_curation_rewards']
     #post['beneficiaries'] = raw_json['beneficiaries']
     #post['curator_payout_value'] = raw_json['curator_payout_value'] if paid else _amount(0)
-    #post['total_payout_value'] = _amount(row['payout'] - float(raw_json['curator_payout_value'].split(' ')[0])) if paid else _amount(0)
+    #post['total_payout_value'] = _amount(row['payout'] - amount(raw_json['curator_payout_value'])) if paid else _amount(0)
 
     return post
 

@@ -4,8 +4,8 @@ import time
 from decimal import Decimal
 
 from hive.conf import Conf
-from hive.utils.normalize import parse_time
-from hive.steem.http_client import HttpClient, RPCError
+from hive.utils.normalize import parse_time, parse_amount, steem_amount, vests_amount
+from hive.steem.http_client import HttpClient
 from hive.steem.client_stats import ClientStats
 
 class SteemClient:
@@ -27,24 +27,16 @@ class SteemClient:
         assert max_batch > 0 and max_batch <= 5000
         assert max_workers > 0 and max_workers <= 500
 
-        use_appbase = False # until deployed, assume False
-        if url[-8:] == '#appbase':
-            use_appbase = True
-            url = url[:-8]
-
         self._max_batch = max_batch
         self._max_workers = max_workers
-        self._client = HttpClient(nodes=[url],
-                                  maxsize=50,
-                                  num_pools=50,
-                                  use_appbase=use_appbase)
+        self._client = HttpClient(nodes=[url], maxsize=50, num_pools=50)
 
-        print("[STEEM] init url:%s batch:%s workers:%d appbase:%s"
-              % (url, max_batch, max_workers, use_appbase))
+        print("[STEEM] init url:%s batch:%s workers:%d"
+              % (url, max_batch, max_workers))
 
     def get_accounts(self, accounts):
         assert accounts, "no accounts passed to get_accounts"
-        ret = self.__exec('get_accounts', accounts)
+        ret = self.__exec('get_accounts', [accounts])
         assert len(accounts) == len(ret), ("requested %d accounts got %d"
                                            % (len(accounts), len(ret)))
         return ret
@@ -57,11 +49,17 @@ class SteemClient:
         return posts
 
     def get_block(self, num):
-        #assert num == int(block['block_id'][:8], base=16)
-        return self.__exec('get_block', num)
+        """Fetches a single block.
 
-    def get_block_simple(self, block_num):
+        If the result does not contain a `block` key, it's assumed
+        this block does not yet exist and None is returned.
+        """
+        result = self.__exec('get_block', {'block_num': num})
+        return result['block'] if 'block' in result else None
+
+    def _get_block_simple(self, block_num):
         block = self.get_block(block_num)
+        assert block, 'could not load block %d' % block_num
         return {'num': int(block['block_id'][:8], base=16),
                 'date': parse_time(block['timestamp']),
                 'hash': block['block_id']}
@@ -71,7 +69,7 @@ class SteemClient:
         assert trail_blocks >= 0
         assert trail_blocks <= 100
 
-        last = self.get_block_simple(start_from - 1)
+        last = self._get_block_simple(start_from - 1)
         head_num = self.head_block()
         next_expected = time.time()
 
@@ -92,7 +90,7 @@ class SteemClient:
                 print("[LIVE] %d blocks behind..." % gap)
                 if gap > max_gap:
                     print("[LIVE] gap too large: %d" % gap)
-                    return # return to fast-sync
+                    return # abort streaming; return to fast-sync
 
             # if caught up, await head advance.
             if head_num == last['num']:
@@ -170,19 +168,19 @@ class SteemClient:
 
     @staticmethod
     def _get_steem_per_mvest(dgpo):
-        steem = Decimal(dgpo['total_vesting_fund_steem'].split(' ')[0])
-        mvests = Decimal(dgpo['total_vesting_shares'].split(' ')[0]) / Decimal(1e6)
+        steem = steem_amount(dgpo['total_vesting_fund_steem'])
+        mvests = vests_amount(dgpo['total_vesting_shares']) / Decimal(1e6)
         return "%.6f" % (steem / mvests)
 
     def _get_feed_price(self):
         # TODO: add latest feed price: get_feed_history.price_history[0]
         feed = self.__exec('get_feed_history')['current_median_history']
-        units = dict([feed[k].split(' ')[::-1] for k in ['base', 'quote']])
-        price = Decimal(units['SBD']) / Decimal(units['STEEM'])
+        units = dict([parse_amount(feed[k])[::-1] for k in ['base', 'quote']])
+        price = units['SBD'] / units['STEEM']
         return "%.6f" % price
 
     def _get_steem_price(self):
-        orders = self.__exec('get_order_book', 1)
+        orders = self.__exec('get_order_book', [1])
         ask = Decimal(orders['asks'][0]['real_price'])
         bid = Decimal(orders['bids'][0]['real_price'])
         price = (ask + bid) / 2
@@ -191,57 +189,34 @@ class SteemClient:
     def get_blocks_range(self, lbound, ubound):
         """Retrieves blocks in the range of [lbound, ubound)."""
         block_nums = range(lbound, ubound)
-        required = set(block_nums)
-        available = set()
-        missing = required - available
         blocks = {}
 
-        while missing:
-            for block in self.__exec_batch('get_block', [[i] for i in missing]):
-                if not 'block_id' in block:
-                    print("WARNING: invalid block returned: {}".format(block))
-                    continue
-                num = int(block['block_id'][:8], base=16)
-                if num in blocks:
-                    print("WARNING: batch get_block returned dupe %d" % num)
-                blocks[num] = block
-            available = set(blocks.keys())
-            missing = required - available
-            if missing:
-                print("WARNING: API missed blocks {}".format(missing))
-                time.sleep(3)
+        batch_params = [{'block_num': i} for i in block_nums]
+        for result in self.__exec_batch('get_block', batch_params):
+            assert 'block' in result, "result w/o block key: {}".format(result)
+            block = result['block']
+            num = int(block['block_id'][:8], base=16)
+            blocks[num] = block
 
         return [blocks[x] for x in block_nums]
 
-
-    def __exec(self, method, *params):
+    def __exec(self, method, params=None):
         """Perform a single steemd call."""
         time_start = time.perf_counter()
-        tries = 0
-        while True:
-            try:
-                result = self._client.exec(method, *params)
-                if method != 'get_block':
-                    assert result, "empty response {}".format(result)
-            except (AssertionError, RPCError) as e:
-                tries += 1
-                print("{} failure, retry in {}s -- {}".format(method, tries / 10, e))
-                time.sleep(tries / 10)
-                continue
-            break
+        result = self._client.exec(method, params)
+        total_time = (time.perf_counter() - time_start) * 1000
 
         batch_size = len(params[0]) if method == 'get_accounts' else 1
-        total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, batch_size)
         return result
 
     def __exec_batch(self, method, params):
         """Perform batch call. Based on config uses either batch or futures."""
         time_start = time.perf_counter()
-        result = None
 
         if self._max_workers == 1:
-            result = self.__exec_batch_with_retry(method, params, self._max_batch)
+            result = list(self._client.exec_batch(
+                method, params, batch_size=self._max_batch))
         else:
             result = list(self._client.exec_multi_with_futures(
                 method, params, max_workers=self._max_workers))
@@ -249,15 +224,3 @@ class SteemClient:
         total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, len(params))
         return result
-
-    def __exec_batch_with_retry(self, method, params, batch_size):
-        """Perform a json-rpc batch request, retrying on error."""
-        tries = 0
-        while True:
-            try:
-                return list(self._client.exec_batch(method, params, batch_size))
-            except (AssertionError, RPCError) as e:
-                tries += 1
-                print("batch {} failure, retry in {}s -- {}".format(method, tries / 10, repr(e)))
-                time.sleep(tries / 10)
-                continue

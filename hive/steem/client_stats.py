@@ -4,6 +4,8 @@ import atexit
 from hive.utils.system import colorize, peak_usage_mb
 
 class ClientStats:
+    """Collects steemd API timing data."""
+
     # Assumed HTTP overhead (ms); subtract prior to par check
     PAR_HTTP_OVERHEAD = 75
 
