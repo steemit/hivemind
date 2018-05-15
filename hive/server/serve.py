@@ -4,9 +4,10 @@ import os
 import logging
 
 from datetime import datetime
-from sqlalchemy.engine.url import make_url
+#from sqlalchemy.engine.url import make_url
+from sqlalchemy.exc import OperationalError
 from aiohttp import web
-from aiopg.sa import create_engine
+#from aiopg.sa import create_engine
 from jsonrpcserver import config
 from jsonrpcserver.async_methods import AsyncMethods
 
@@ -83,25 +84,26 @@ def run_server():
     app['config']['hive.DB_QUERY_LIMIT'] = app['config']['hive.MAX_DB_ROW_RESULTS'] + 1
     app['config']['hive.logger'] = logger
 
-    async def init_db(app):
-        args = app['config']['args']
-        db = make_url(args.database_url)
-        engine = await create_engine(user=db.username,
-                                     database=db.database,
-                                     password=db.password,
-                                     host=db.host,
-                                     port=db.port,
-                                     **db.query)
-        app['db'] = engine
-
-    async def close_db(app):
-        app['db'].close()
-        await app['db'].wait_closed()
-
-    app.on_startup.append(init_db)
-    app.on_cleanup.append(close_db)
+    #async def init_db(app):
+    #    args = app['config']['args']
+    #    db = make_url(args.database_url)
+    #    engine = await create_engine(user=db.username,
+    #                                 database=db.database,
+    #                                 password=db.password,
+    #                                 host=db.host,
+    #                                 port=db.port,
+    #                                 **db.query)
+    #    app['db'] = engine
+    #
+    #async def close_db(app):
+    #    app['db'].close()
+    #    await app['db'].wait_closed()
+    #
+    #app.on_startup.append(init_db)
+    #app.on_cleanup.append(close_db)
 
     async def head_age(request):
+        """Get hive head block age in seconds. 500 if greater than 15s."""
         #pylint: disable=unused-argument
         healthy_age = 15 # hive is synced if head block within 15s
         curr_age = (await hive_api.db_head_state())['db_head_age']
@@ -109,12 +111,24 @@ def run_server():
         return web.Response(status=status, text=str(curr_age))
 
     async def health(request):
+        """Get hive health data. 500 if behind by more than a few secs."""
         #pylint: disable=unused-argument
-        state = await hive_api.db_head_state()
         is_syncer = Conf.get('sync_to_s3')
         max_head_age = (Conf.get('trail_blocks') + 1) * 3
 
-        if not is_syncer and state['db_head_age'] > max_head_age:
+        try:
+            state = await hive_api.db_head_state()
+        except OperationalError as e:
+            if 'could not connect to server: Connection refused' in str(e):
+                logging.error("hive /health could not connect to db")
+                state = None
+            else:
+                raise e
+
+        if not state:
+            status = 500
+            result = 'db not available'
+        elif not is_syncer and state['db_head_age'] > max_head_age:
             status = 500
             result = 'head block age (%s) > max (%s); head block num: %s' % (
                 state['db_head_age'], max_head_age, state['db_head_block'])
@@ -134,6 +148,7 @@ def run_server():
             timestamp=datetime.utcnow().isoformat()))
 
     async def jsonrpc_handler(request):
+        """Handles all hive jsonrpc API requests."""
         request = await request.text()
         response = await methods.dispatch(request)
         return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
