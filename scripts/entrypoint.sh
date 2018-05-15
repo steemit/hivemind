@@ -20,9 +20,23 @@ if [[ "$RUN_IN_EB" ]]; then
     chown -R postgres:postgres /var/lib/postgresql/9.5
     cd /var/lib/postgresql/9.5
 
-    echo hivemind: attempting to pull in state file from s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.bz2
-    s3cmd get s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.bz2 - | pbzip2 -m2000dc | tar x
-    if [[ $? -ne 0 ]]; then
+    echo hivemind: attempting to pull in state file from s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.lz4
+
+    finished=0
+    count=1
+    while [[ $count -le 5 ]] && [[ $finished == 0 ]]
+    do
+      s3cmd get s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.lz4 - | lz4 -d | tar x
+      if [[ $? -ne 0 ]]; then
+        sleep 1
+        echo notifyalert hivemind: unable to pull state from S3 - attempt $count
+        (( count++ ))
+      else
+        finished=1
+      fi
+    done
+
+    if [[ $finished == 0 ]]; then
       if [[ ! "$SYNC_TO_S3" ]]; then
         echo notifyalert hivemind: unable to pull state from S3 - exiting
         exit 1
