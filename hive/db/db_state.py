@@ -111,7 +111,7 @@ class DbState:
             index.drop(engine)
 
         for key in cls._all_foreign_keys():
-            print("Drop fk %s.%s" % (key.table, key.name))
+            print("Drop fk %s" % (key.name))
             key.drop(engine)
 
         print("[INIT] Finish pre-initial sync hooks")
@@ -131,7 +131,7 @@ class DbState:
             index.create(engine)
 
         for key in cls._all_foreign_keys():
-            print("Create fk %s.%s" % (key.table, key.name))
+            print("Create fk %s" % (key.name))
             key.create(engine)
 
         print("[INIT] Finish post-initial sync hooks")
