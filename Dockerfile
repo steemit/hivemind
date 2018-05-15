@@ -27,7 +27,6 @@ RUN \
         libmysqlclient-dev \
         libssl-dev \
         make \
-        pbzip2 \
         liblz4-tool \
         postgresql \
         postgresql-contrib \
