@@ -147,6 +147,7 @@ class Db:
         action = sql.strip()[0:6].strip()
         if action == 'SELECT':
             return False
-        if action in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START', 'ALTER']:
+        if action in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START',
+                      'ALTER', 'TRUNCA']:
             return True
         raise Exception("unknown action: {}".format(sql))

@@ -103,7 +103,7 @@ def run_server():
 
     async def head_age(request):
         #pylint: disable=unused-argument
-        healthy_age = 3600 # one hour
+        healthy_age = 15 # hive is synced if head block within 15s
         curr_age = (await hive_api.db_head_state())['db_head_age']
         status = 500 if curr_age > healthy_age else 200
         return web.Response(status=status, text=str(curr_age))
@@ -115,7 +115,6 @@ def run_server():
         max_head_age = (Conf.get('trail_blocks') + 1) * 3
 
         if not is_syncer and state['db_head_age'] > max_head_age:
-            # TODO: establish criteria for unhealthy sync service. currently force OK.
             status = 500
             result = 'head block age (%s) > max (%s); head block num: %s' % (
                 state['db_head_age'], max_head_age, state['db_head_block'])

@@ -120,6 +120,12 @@ class Sync:
 
         lbound = Blocks.head_num() + 1
         ubound = steemd.last_irreversible()
+        if is_initial_sync:
+            # if initial sync, do not touch last hours-worth of blocks.
+            # 1hr is threshold for healthy/complete sync, so this is a
+            # cheap way to avoid "sync complete" signal until posts_cache
+            # is fully populated, etc.
+            ubound = ubound - 1200
         if ubound <= lbound:
             return
 

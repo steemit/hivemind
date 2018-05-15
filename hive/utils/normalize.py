@@ -13,12 +13,15 @@ NAI_MAP = {
 }
 
 def vests_amount(value):
+    """Returns a decimal amount, asserting units are VESTS"""
     return parse_amount(value, 'VESTS')
 
 def steem_amount(value):
+    """Returns a decimal amount, asserting units are STEEM"""
     return parse_amount(value, 'STEEM')
 
 def sbd_amount(value):
+    """Returns a decimal amount, asserting units are SBD"""
     return parse_amount(value, 'SBD')
 
 def parse_amount(value, expected_unit=None):
@@ -76,7 +79,7 @@ def trunc(string, maxlen):
 
 def rep_log10(rep):
     """Convert raw steemd rep into a UI-ready value centered at 25."""
-    def log10(string):
+    def _log10(string):
         leading_digits = int(string[0:4])
         log = math.log10(leading_digits) + 0.00000001
         num = len(string) - 1
@@ -90,7 +93,7 @@ def rep_log10(rep):
     if sign < 0:
         rep = rep[1:]
 
-    out = log10(rep)
+    out = _log10(rep)
     out = max(out - 9, 0) * sign  # @ -9, $1 earned is approx magnitude 1
     out = (out * 9) + 25          # 9 points per magnitude. center at 25
     return round(out, 2)
@@ -98,9 +101,8 @@ def rep_log10(rep):
 
 def safe_img_url(url, max_size=1024):
     """Given an image URL, strict enforce size and validity."""
-    if url and not isinstance(url, str):
-        url = None
-    if url:
-        url = url.strip()
-    if url and len(url) < max_size and url[0:4] == 'http':
-        return url
+    if (url and isinstance(url, str)
+            and len(url) < max_size
+            and url[0:4] == 'http'):
+        return url.strip()
+    return None
