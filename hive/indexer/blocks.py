@@ -65,13 +65,17 @@ class Blocks:
         voted_authors = set()
         for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
-                op_type = operation['type'].split('_operation')[0]
-                op = operation['value']
+                if isinstance(operation, dict):
+                    op_type = operation['type'].split('_operation')[0]
+                    op = operation['value']
+                else: # pre-appbase-style. remove after deploy. #APPBASE
+                    op_type, op = operation
 
                 # account ops
                 if op_type == 'pow':
                     account_names.add(op['worker_account'])
                 elif op_type == 'pow2':
+                    #account_names.add(op['work'][1]['input']['worker_account']) # old style. remove after #APPBASE
                     account_names.add(op['work']['value']['input']['worker_account'])
                 elif op_type == 'account_create':
                     account_names.add(op['new_account_name'])
