@@ -96,6 +96,7 @@ class HttpClient(object):
         get_order_book='condenser_api',
         get_feed_history='condenser_api',
         get_dynamic_global_properties='database_api',
+        broadcast_transaction_synchronous='network_broadcast_api', # temporary; for testing condenser_api
     )
 
     def __init__(self, nodes, **kwargs):
