@@ -14,7 +14,8 @@ POPULATE_CMD="$(which hive)"
 if [[ "$RUN_IN_EB" ]]; then
   mkdir /var/lib/postgresql/9.5/main
   if [[ $? -ne 0 ]]; then
-    echo hivemind: restarted -- db already exists, skipping init
+    echo hivemind: restarted -- db already exists. skip init, start postgres
+    service postgresql start
   else
     chown -R postgres:postgres /var/lib/postgresql/9.5
     cd /var/lib/postgresql/9.5
@@ -29,6 +30,8 @@ if [[ "$RUN_IN_EB" ]]; then
         echo hivemindsync: state file for schema version $SCHEMA_HASH not found, creating a new one from genesis
         chpst -upostgres /usr/lib/postgresql/9.5/bin/initdb -D /var/lib/postgresql/9.5/main
       fi
+    else
+      echo hivemind: state file loaded successfully
     fi
 
     service postgresql start
