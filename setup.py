@@ -31,7 +31,7 @@ setup(
         'maya',
         'ujson',
         'urllib3',
-        'psycopg2',
+        'psycopg2-binary',
         'aiocache',
         'configargparse',
         'pdoc',
