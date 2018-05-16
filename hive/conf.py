@@ -22,6 +22,7 @@ class Conf():
         p.add('--database-url', env_var='DATABASE_URL', required=True, help='database connection url', default='postgresql://user:pass@localhost:5432/hive')
         p.add('--steemd-url', env_var='STEEMD_URL', required=False, help='steemd/jussi endpoint', default='https://api.steemit.com')
         p.add('--log-level', env_var='LOG_LEVEL', default='INFO')
+        p.add('--dump-config', type=bool, env_var='DUMP_CONFIG', default=False)
 
         # specific to indexer
         p.add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests (untested)', default=1)
@@ -35,8 +36,7 @@ class Conf():
 
         cls._args = p.parse_args()
 
-        if cls.get('log_level') == 'DEBUG':
-            print(cls._args)
+        if cls.get('dump_config') or cls.get('log_level') == 'DEBUG':
             print(p.format_values())
 
     @classmethod
