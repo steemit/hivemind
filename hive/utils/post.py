@@ -87,10 +87,12 @@ def post_legacy(post):
 def post_payout(post):
     """Get current vote/payout data and recalculate trend/hot score."""
     # total payout (completed and/or pending)
+    is_paidout = (post['cashout_time'][0:4] == '1969')
+
     payout = sum([
         sbd_amount(post['total_payout_value']),
         sbd_amount(post['curator_payout_value']),
-        sbd_amount(post['pending_payout_value']),
+        0 if is_paidout else sbd_amount(post['pending_payout_value']),
     ])
 
     # get total rshares, and create comma-separated vote data blob
@@ -158,7 +160,8 @@ def post_stats(post):
 
     author_rep = rep_log10(post['author_reputation'])
     is_low_value = net_rshares_adj < -9999999999
-    has_pending_payout = sbd_amount(post['pending_payout_value']) >= 0.02
+    is_paidout = (post['cashout_time'][0:4] == '1969')
+    has_pending_payout = not is_paidout and sbd_amount(post['pending_payout_value']) >= 0.02
 
     return {
         'hide': not has_pending_payout and (author_rep < 0),

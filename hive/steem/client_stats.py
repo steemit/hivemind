@@ -21,6 +21,7 @@ class ClientStats:
         'get_content': 4,
         'get_order_book': 20,
         'get_feed_history': 20,
+        'find_comments': 5,
     }
 
     stats = {}

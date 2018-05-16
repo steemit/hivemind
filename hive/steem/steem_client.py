@@ -42,7 +42,7 @@ class SteemClient:
         return ret
 
     def get_content_batch(self, tuples):
-        posts = self.__exec_batch('get_content', tuples)
+        posts = self.__exec('find_comments', {'comments': tuples})['comments']
         # TODO: how are we ensuring sequential results? need to set and sort id.
         for post in posts: # sanity-checking jussi responses
             assert 'author' in post, "invalid post: {}".format(post)
@@ -204,10 +204,15 @@ class SteemClient:
         """Perform a single steemd call."""
         time_start = time.perf_counter()
         result = self._client.exec(method, params)
-        total_time = (time.perf_counter() - time_start) * 1000
 
-        batch_size = len(params[0]) if method == 'get_accounts' else 1
-        ClientStats.log(method, total_time, batch_size)
+        items = 1
+        if method == 'get_accounts':
+            items = len(params[0])
+        elif method == 'find_comments':
+            items = len(params[0]['comments'])
+
+        total_time = (time.perf_counter() - time_start) * 1000
+        ClientStats.log(method, total_time, items)
         return result
 
     def __exec_batch(self, method, params):
