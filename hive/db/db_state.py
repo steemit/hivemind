@@ -110,9 +110,10 @@ class DbState:
             print("Drop index %s.%s" % (index.table, index.name))
             index.drop(engine)
 
-        for key in cls._all_foreign_keys():
-            print("Drop fk %s" % (key.name))
-            key.drop(engine)
+        # TODO: #111
+        #for key in cls._all_foreign_keys():
+        #    print("Drop fk %s" % (key.name))
+        #    key.drop(engine)
 
         print("[INIT] Finish pre-initial sync hooks")
 
