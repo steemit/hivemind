@@ -14,7 +14,7 @@ import certifi
 import urllib3
 
 from urllib3.connection import HTTPConnection
-from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError
+from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError, HTTPError
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
@@ -23,9 +23,19 @@ class RPCError(Exception):
     """Represents a structured error returned from Steem/Jussi"""
 
     @staticmethod
-    def humanize(result):
+    def build(error, method, args, index=None):
+        """Given an RPC error, builds exception w/ appropriate severity."""
+        index = '[%d]' % index if index else ''
+        message = RPCError.humanize(error)
+        message += ' in %s%s(%s)' % (method, index, args)
+
+        if RPCError.is_recoverable(error):
+            return RPCError(message)
+        return RPCErrorFatal(message)
+
+    @staticmethod
+    def humanize(error):
         """Get friendly error string from steemd RPC response."""
-        error = result['error']
         detail = error['message'] if 'message' in error else str(error)
 
         if 'data' not in error:
@@ -38,9 +48,8 @@ class RPCError(Exception):
         return "%s: `%s`" % (name, detail)
 
     @staticmethod
-    def is_recoverable(result):
+    def is_recoverable(error):
         """Check if error appears recoverable (e.g. network condition)"""
-        error = result['error']
         assert 'message' in error, "missing error msg key: {}".format(error)
         assert 'code' in error, "missing error code key: {}".format(error)
         message = error['message']
@@ -85,6 +94,10 @@ def chunkify(iterable, chunksize=3000):
     if chunk:
         yield chunk
 
+def _rpc_body(method, args, _id=0):
+    if args is None:
+        args = [] if 'condenser_api' in method else {}
+    return dict(jsonrpc="2.0", id=_id, method=method, params=args)
 
 class HttpClient(object):
     """ Simple Steem JSON-HTTP-RPC API """
@@ -159,74 +172,75 @@ class HttpClient(object):
         self.url = node_url
         self.request = partial(self.http.urlopen, 'POST', self.url)
 
-    def rpc_body(self, method, args, is_batch=False, _id=0):
-        """ Build request body for steemd RPC requests."""
-        if is_batch:
-            return [self.rpc_body(method, _arg, _id=i+1)
-                    for i, _arg in enumerate(args)]
+    def rpc_body(self, method, args, is_batch=False):
+        """ Build JSON request body for steemd RPC requests."""
+        api = self.METHOD_API[method]
+        fqm = api + '.' + method
 
-        if args is None:
-            args = [] if 'condenser_api' in method else {}
-        return dict(jsonrpc="2.0", id=_id, method=method, params=args)
+        if not is_batch:
+            body = _rpc_body(fqm, args, -1)
+        else:
+            body = [_rpc_body(fqm, arg, i+1) for i, arg in enumerate(args)]
+
+        return json.dumps(body, ensure_ascii=False).encode('utf8')
 
     def exec(self, method, args, is_batch=False):
         """ Execute a method against steemd RPC.
 
             Warning: Auto-retry on failure, including broadcasting a tx.
         """
-
-        fqm = self.METHOD_API[method] + '.' + method
-        body = self.rpc_body(fqm, args, is_batch)
-        body_json = json.dumps(body, ensure_ascii=False).encode('utf8')
+        body = self.rpc_body(method, args, is_batch)
 
         tries = 0
-        while True:
+        while tries < 50:
+            tries += 1
             try:
-                response = self.request(body=body_json)
+                response = self.request(body=body)
                 if response.status != 200:
-                    raise RPCError("non-200 response: %s" % response.status)
+                    raise HTTPError(response.status, "non-200 response")
 
                 response_data = response.data.decode('utf-8')
                 result = json.loads(response_data)
                 assert result, "result entirely blank"
 
                 if 'error' in result:
-                    if RPCError.is_recoverable(result):
-                        raise RPCError(RPCError.humanize(result))
-                    raise RPCErrorFatal(RPCError.humanize(result))
+                    raise RPCError.build(result['error'], method, args)
 
                 if not is_batch:
                     assert isinstance(result, dict), "result was not a dict"
+                    assert 'result' in result, "response with no result key"
                     return result['result']
 
                 # sanity-checking of batch results
                 assert isinstance(result, list), "batch result must be list"
                 assert len(args) == len(result), "batch result len mismatch"
                 for i, item in enumerate(result):
+                    id1, id2 = [i+1, item['id']]
+                    assert id1 == id2, "got id %s, expected %s" % (id2, id1)
                     if 'error' in item:
-                        raise RPCError("batch[%d] error: %s in %s(%s)" % (
-                            i, RPCError.humanize(item), method, args[i]))
-                    assert 'result' in item, "batch[%d] response empty" % i
+                        raise RPCError.build(item['error'], method, args[i], i)
+                    assert 'result' in item, "batch[%d] result empty" % i
                 return [item['result'] for item in result]
 
             except (AssertionError, RPCErrorFatal) as e:
                 raise e
 
             except (MaxRetryError, ConnectionResetError, ReadTimeoutError,
-                    RemoteDisconnected, ProtocolError, RPCError) as e:
-                self.next_node()
+                    RemoteDisconnected, ProtocolError, RPCError,
+                    HTTPError) as e:
                 logging.error("%s failed, try %d. %s", method, tries, repr(e))
 
             except json.decoder.JSONDecodeError as e:
-                logging.error("invalid JSON response: %s", response_data)
+                logging.error("invalid JSON returned: %s", response_data)
 
             except Exception as e:
                 logging.error('Unexpected %s: %s', e.__class__.__name__, e)
 
-            if tries >= 50:
-                raise Exception("giving up after %d tries" % tries)
-            tries += 1
+            if tries % 2 == 0:
+                self.next_node()
             time.sleep(tries / 10)
+
+        raise Exception("abort %s after %d tries" % (method, tries))
 
     def exec_multi_with_futures(self, name, params, max_workers=None):
         """Process a batch as parallel signular requests."""
