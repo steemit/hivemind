@@ -107,7 +107,10 @@ def run_server():
             return await hive_api.db_head_state()
         except OperationalError as e:
             if 'could not connect to server: Connection refused' in str(e):
-                logging.warning("could not connect to db for head state")
+                logging.warning("could not get head state (connection refused)")
+                return None
+            if 'the database system is shutting down' in str(e):
+                logging.warning("could not get head state (db shutting down)")
                 return None
             raise e
 
