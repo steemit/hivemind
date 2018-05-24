@@ -102,11 +102,21 @@ def run_server():
     #app.on_startup.append(init_db)
     #app.on_cleanup.append(close_db)
 
+    async def _head_state():
+        try:
+            return await hive_api.db_head_state()
+        except OperationalError as e:
+            if 'could not connect to server: Connection refused' in str(e):
+                logging.warning("could not connect to db for head state")
+                return None
+            raise e
+
     async def head_age(request):
         """Get hive head block age in seconds. 500 if greater than 15s."""
         #pylint: disable=unused-argument
         healthy_age = 15 # hive is synced if head block within 15s
-        curr_age = (await hive_api.db_head_state())['db_head_age']
+        state = await _head_state()
+        curr_age = state['db_head_age'] if state else 31e6
         status = 500 if curr_age > healthy_age else 200
         return web.Response(status=status, text=str(curr_age))
 
@@ -115,15 +125,7 @@ def run_server():
         #pylint: disable=unused-argument
         is_syncer = Conf.get('sync_to_s3')
         max_head_age = (Conf.get('trail_blocks') + 1) * 3
-
-        try:
-            state = await hive_api.db_head_state()
-        except OperationalError as e:
-            if 'could not connect to server: Connection refused' in str(e):
-                logging.error("hive /health could not connect to db")
-                state = None
-            else:
-                raise e
+        state = await _head_state()
 
         if not state:
             status = 500
