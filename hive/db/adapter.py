@@ -136,7 +136,7 @@ class Db:
         try:
             return self.conn().execute(query, **kwargs)
         except Exception as e:
-            print("[SQL] %s in query %s (%s)" % (
+            print("[SQL-ERR] %s in query %s (%s)" % (
                 e.__class__.__name__, sql, kwargs))
             raise e
 
