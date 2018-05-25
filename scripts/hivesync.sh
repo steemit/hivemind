@@ -33,17 +33,19 @@ tar cf hivemind.tar.lz4 --use-compress-prog=lz4 -C /var/lib/postgresql/9.5 main
 if [[ ! $? -eq 0 ]]; then
   echo NOTIFYALERT! hivemindsync was unable to compress state file, check the logs.
   exit 1
+else
+  echo hivemindsync: compressed `du -hs hivemind.tar.lz4`
 fi
 
 echo hivemindsync: uploading $FILE_NAME to s3://$S3_BUCKET
-aws s3 cp hivemind.tar.lz4 s3://$S3_BUCKET/$FILE_NAME
+aws s3 cp hivemind.tar.lz4 s3://$S3_BUCKET/$FILE_NAME --only-show-errors
 if [[ ! $? -eq 0 ]]; then
     echo NOTIFYALERT! hivemindsync was unable to upload $FILE_NAME to s3://$S3_BUCKET
     exit 1
 fi
 
 echo hivemindsync: replacing current version of hivemind-$SCHEMA_HASH-latest.tar.lz4 with $FILE_NAME
-aws s3 cp s3://$S3_BUCKET/$FILE_NAME s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.lz4
+aws s3 cp s3://$S3_BUCKET/$FILE_NAME s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.lz4 --only-show-errors
 if [[ ! $? -eq 0 ]]; then
     echo NOTIFYALERT! hivemindsync was unable to overwrite the current statefile with $FILE_NAME
     exit 1

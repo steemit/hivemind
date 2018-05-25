@@ -3,7 +3,7 @@
 import time
 import re
 import atexit
-from hive.utils.system import colorize
+from hive.utils.system import colorize, peak_usage_mb
 
 class QueryStats:
     SLOW_QUERY_MS = 250
@@ -49,7 +49,7 @@ class QueryStats:
     @classmethod
     def check_timing(cls, nsql, ms):
         if ms > cls.SLOW_QUERY_MS:
-            print(colorize("[SQL][%dms] %s" % (ms, nsql[:250])))
+            print(colorize("[SQL-SLOW][%dms] %s" % (ms, nsql[:250])))
 
     @classmethod
     def print(cls):
@@ -62,6 +62,7 @@ class QueryStats:
             ms, calls = vals
             print("% 5.1f%% % 7dms % 9.2favg % 8dx -- %s"
                   % (100 * ms/ttl, ms, ms/calls, calls, sql[0:180]))
+        print("[STATS] peak memory usage: %.2fMB" % peak_usage_mb())
         cls.clear()
 
     @classmethod

@@ -136,9 +136,8 @@ class Db:
         try:
             return self.conn().execute(query, **kwargs)
         except Exception as e:
-            print("[SQL] Error in query {} ({})".format(sql, kwargs))
-            #self.conn.close() # TODO: check if needed
-            logger.exception(e)
+            print("[SQL-ERR] %s in query %s (%s)" % (
+                e.__class__.__name__, sql, kwargs))
             raise e
 
     @staticmethod

@@ -343,7 +343,9 @@ class CachedPost:
 
         if next_id - last_id > 2:
             cls._ensure_safe_gap(last_id, next_id)
-            print("[WARN] skip post ids: %d -> %d" % (last_id, next_id))
+            if next_id - last_id > 4:
+                # gap of 2 is common due to deletions. report on larger gaps.
+                print("[WARN] skip post ids: %d -> %d" % (last_id, next_id))
 
         cls._last_id = next_id
 
