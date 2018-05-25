@@ -263,7 +263,8 @@ async def get_state(path: str):
             raise Exception("unexpected discussion path part[2] %s" % path)
         sort = part[0]
         tag = part[1].lower()
-        posts = cursor.pids_by_query(sort, '', '', 20, tag)
+        ids = cursor.pids_by_query(sort, '', '', 20, tag)
+        posts = _get_posts(ids)
         state['discussion_idx'][tag] = {sort: []}
         for post in posts:
             ref = post['author'] + '/' + post['permlink']
