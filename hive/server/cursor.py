@@ -78,7 +78,7 @@ def get_follow_counts(account: str):
     return dict(query_row(sql, account=account))
 
 
-def pids_by_query(sort, tag, start_author, start_permlink, limit):
+def pids_by_query(sort, start_author, start_permlink, limit, tag):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, new, promoted.
