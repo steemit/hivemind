@@ -11,6 +11,8 @@ import hive.server.cursor as cursor
 #       "params":["database_api","get_state",["trending"]]}
 async def call(api, method, params):
     # pylint: disable=line-too-long, protected-access, too-many-return-statements, too-many-branches
+    assert not params or isinstance(params, list), "legacy expects params array"
+
     if method == 'get_followers':
         return await get_followers(params[0], params[1], params[2], params[3])
     elif method == 'get_following':
@@ -43,7 +45,7 @@ async def call(api, method, params):
     # passthrough -- TESTING ONLY!
     steemd = SteemClient.instance()
     if method == 'get_dynamic_global_properties':
-        return steemd._gdgp() # condenser only uses total_vesting_fund_steem, total_vesting_shares, sbd_interest_rate
+        return _get_props_lite()
     elif method == 'get_accounts':
         return steemd.get_accounts(params[0])
     elif method == 'get_open_orders':
@@ -350,12 +352,13 @@ def _get_props_lite():
     """Return a minimal version of get_dynamic_global_properties data."""
     raw = json.loads(query_one("SELECT dgpo FROM hive_state"))
     return dict(
-        time=raw['time'],
+        time=raw['time'], #*
         sbd_print_rate=raw['sbd_print_rate'],
         sbd_interest_rate=raw['sbd_interest_rate'],
-        head_block_number=raw['head_block_number'],
+        head_block_number=raw['head_block_number'], #*
         total_vesting_shares=raw['total_vesting_shares'],
         total_vesting_fund_steem=raw['total_vesting_fund_steem'],
+        last_irreversible_block_num=raw['last_irreversible_block_num'], #*
     )
 
 def _get_feed_price():
@@ -510,7 +513,8 @@ def _condenser_post_object(row):
     #post['allow_curation_rewards'] = raw_json['allow_curation_rewards']
     #post['beneficiaries'] = raw_json['beneficiaries']
     #post['curator_payout_value'] = raw_json['curator_payout_value'] if paid else _amount(0)
-    #post['total_payout_value'] = _amount(row['payout'] - amount(raw_json['curator_payout_value'])) if paid else _amount(0)
+    #curator_payout = amount(raw_json['curator_payout_value'])
+    #post['total_payout_value'] = _amount(row['payout'] - curator_payout) if paid else _amount(0)
 
     return post
 
