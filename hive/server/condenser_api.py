@@ -3,7 +3,7 @@
 import json
 
 from aiocache import cached
-from hive.db.methods import query_one, query_col, query_all
+from hive.db.methods import query_one, query_row, query_col, query_all
 from hive.steem.steem_client import SteemClient
 import hive.server.cursor as cursor
 
@@ -310,7 +310,7 @@ async def get_content(author: str, permlink: str):
 async def get_content_replies(parent: str, parent_permlink: str):
     """Get a list of post objects based on parent."""
     post_id = _get_post_id(parent, parent_permlink)
-    post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d" % post_id)
+    post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d AND is_deleted = 0" % post_id)
     return _get_posts(post_ids)
 
 @cached(ttl=3600)
@@ -415,10 +415,13 @@ def _follow_type_to_int(follow_type: str):
 
 def _get_post_id(author, permlink):
     """Given an author/permlink, retrieve the id from db."""
-    sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    _id = query_one(sql, a=author, p=permlink)
-    if not _id:
+    sql = "SELECT id, is_deleted FROM hive_posts WHERE author = :a AND permlink = :p"
+    row = query_row(sql, a=author, p=permlink)
+    if not row:
         raise Exception("post not found: %s/%s" % (author, permlink))
+    _id, deleted = row
+    if deleted:
+        raise Exception("requested deleted post %s/%s" % (author, permlink))
     return _id
 
 def _get_posts(ids):
