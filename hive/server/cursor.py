@@ -204,8 +204,17 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
            WHERE child.author = :author
              AND child.permlink = :permlink
         """
-        account, start_date = query_row(
-            sql, author=start_author, permlink=start_permlink)
+
+        # //-- debug: query_row was None, let's monitor..
+        row = query_row(sql, author=start_author, permlink=start_permlink)
+        if not row:
+            print("[NOTICE] could not seek pids_by_replies from @%s/%s"
+                  % (start_author, start_permlink))
+            return []
+        else:
+            account, start_date = row
+        # //--
+
         seek = "AND created_at <= '%s'" % start_date
     else:
         account = start_author
