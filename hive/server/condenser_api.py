@@ -1,6 +1,7 @@
 """Steemd/condenser_api compatibility layer API methods."""
 
 import json
+import inspect
 
 from aiocache import cached
 from hive.db.methods import query_one, query_row, query_col, query_all
@@ -451,7 +452,9 @@ def _get_post_id(author, permlink):
 def _get_posts(ids):
     """Given an array of post ids, returns full objects in the same order."""
     if not ids:
-        raise Exception("no ids provided")
+        caller = inspect.stack()[1][3]
+        print("empty result for %s" % caller)
+        return []
 
     sql = """
     SELECT post_id, author, permlink, title, body, promoted, payout, created_at,
