@@ -348,9 +348,14 @@ async def _get_trending_tags():
 
 def _get_props_lite():
     """Return a minimal version of get_dynamic_global_properties data."""
-    # TODO: trim this response; really only need: total_vesting_fund_steem,
-    #   total_vesting_shares, sbd_interest_rate
-    return json.loads(query_one("SELECT dgpo FROM hive_state"))
+    raw = json.loads(query_one("SELECT dgpo FROM hive_state"))
+    return dict(
+        time=raw['time'],
+        head_block_number=raw['head_block_number'],
+        sbd_interest_rate=raw['sbd_interest_rate'],
+        total_vesting_shares=raw['total_vesting_shares'],
+        total_vesting_fund_steem=raw['total_vesting_fund_steem'],
+    )
 
 def _get_feed_price():
     """Get a steemd-style ratio object representing feed price."""
