@@ -124,10 +124,10 @@ def run_server():
         return web.Response(status=status, text=str(curr_age))
 
     async def health(request):
-        """Get hive health data. 500 if behind by more than a few secs."""
+        """Get hive health data. 500 if behind by more than 3 blocks."""
         #pylint: disable=unused-argument
         is_syncer = Conf.get('sync_to_s3')
-        max_head_age = (Conf.get('trail_blocks') + 1) * 3
+        max_head_age = (Conf.get('trail_blocks') + 3) * 3
         state = await _head_state()
 
         if not state:
