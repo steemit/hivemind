@@ -12,6 +12,8 @@ def get_post_id(author, permlink):
 
 def get_account_id(name):
     """Get account id from hive db."""
+    assert isinstance(name, str), "expected str for name: `%s`" % name
+    assert len(name) >= 3 and len(name) <= 16, "invalid name: `%s`" % name
     _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
     if not _id:
         raise Exception("invalid account `%s`" % name)
