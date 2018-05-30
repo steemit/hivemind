@@ -351,8 +351,9 @@ def _get_props_lite():
     raw = json.loads(query_one("SELECT dgpo FROM hive_state"))
     return dict(
         time=raw['time'],
-        head_block_number=raw['head_block_number'],
+        sbd_print_rate=raw['sbd_print_rate'],
         sbd_interest_rate=raw['sbd_interest_rate'],
+        head_block_number=raw['head_block_number'],
         total_vesting_shares=raw['total_vesting_shares'],
         total_vesting_fund_steem=raw['total_vesting_fund_steem'],
     )
