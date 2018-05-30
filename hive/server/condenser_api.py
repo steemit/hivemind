@@ -208,7 +208,10 @@ async def get_state(path: str):
     state['accounts'] = {}
     state['discussion_idx'] = {"": {}}
     state['feed_price'] = _get_feed_price()
+
+    # //-- debug; temp sanity check
     state1 = "{}".format(state)
+    # //--
 
     # account tabs (feed, blog, comments, replies)
     if part[0] and part[0][0] == '@':
@@ -273,7 +276,7 @@ async def get_state(path: str):
         state['tag_idx']['trending'] = await _get_top_trending_tags()
 
     # witness list
-    elif part[0] == 'witnesses':
+    elif part[0] == 'witnesses' or part[0] == '~witnesses':
         raise Exception("not implemented")
 
     # tag "explorer"
@@ -284,13 +287,16 @@ async def get_state(path: str):
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
+    # non-matching path
     else:
-        raise Exception("unknown path {}".format(path))
+        print("[WARNING] unknown path {}".format(path))
+        return state
 
-    # (debug; should not happen) if state did not change, complain
+    # //-- debug; should not happen
     state2 = "{}".format(state)
-    if state1 == state2:
+    if state1 == state2: # if state did not change, complain
         raise Exception("unrecognized path `{}`" % path)
+    # //--
 
     return state
 
