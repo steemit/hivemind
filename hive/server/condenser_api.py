@@ -307,13 +307,19 @@ async def get_state(path: str):
 async def get_content(author: str, permlink: str):
     """Get a single post object."""
     post_id = _get_post_id(author, permlink)
+    if not post_id:
+        return {'id': 0, 'author': '', 'permlink': ''}
     return _get_posts([post_id])[0]
 
 
 async def get_content_replies(parent: str, parent_permlink: str):
     """Get a list of post objects based on parent."""
     post_id = _get_post_id(parent, parent_permlink)
+    if not post_id:
+        return []
     post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d AND is_deleted = 0" % post_id)
+    if not post_ids:
+        return []
     return _get_posts(post_ids)
 
 @cached(ttl=3600)
@@ -379,6 +385,8 @@ def _get_feed_price():
 def _load_discussion_recursive(author, permlink):
     """`get_state`-compatible recursive thread loader."""
     post_id = _get_post_id(author, permlink)
+    if not post_id:
+        return {}
     return _load_posts_recursive([post_id])
 
 def _load_posts_recursive(post_ids):
@@ -432,10 +440,12 @@ def _get_post_id(author, permlink):
     sql = "SELECT id, is_deleted FROM hive_posts WHERE author = :a AND permlink = :p"
     row = query_row(sql, a=author, p=permlink)
     if not row:
-        raise Exception("post not found: %s/%s" % (author, permlink))
+        print("_get_post_id - post not found: %s/%s" % (author, permlink))
+        return None
     _id, deleted = row
     if deleted:
-        raise Exception("requested deleted post %s/%s" % (author, permlink))
+        print("_get_post_id - post was deleted %s/%s" % (author, permlink))
+        return None
     return _id
 
 def _get_posts(ids):
