@@ -5,6 +5,7 @@ import json
 from aiocache import cached
 from hive.db.methods import query_one, query_row, query_col, query_all
 from hive.steem.steem_client import SteemClient
+from hive.utils.normalize import parse_amount
 import hive.server.cursor as cursor
 
 # e.g. {"id":0,"jsonrpc":"2.0","method":"call",
@@ -351,6 +352,15 @@ async def _get_trending_tags():
 def _get_props_lite():
     """Return a minimal version of get_dynamic_global_properties data."""
     raw = json.loads(query_one("SELECT dgpo FROM hive_state"))
+
+    # convert NAI amounts to legacy
+    nais = ['virtual_supply', 'current_supply', 'current_sbd_supply',
+            'pending_rewarded_vesting_steem', 'pending_rewarded_vesting_shares',
+            'total_vesting_fund_steem', 'total_vesting_shares']
+    for k in nais:
+        if k in raw:
+            raw[k] = _legacy_amount(raw[k])
+
     return dict(
         time=raw['time'], #*
         sbd_print_rate=raw['sbd_print_rate'],
@@ -548,6 +558,14 @@ def _rep_to_raw(rep):
     sign = 1 if rep >= 0 else -1
     return int(sign * pow(10, rep))
 
+def _legacy_amount(value):
+    """Return a steem-style amount string given a (numeric, asset-str)."""
+    if isinstance(value, str):
+        return value # already legacy
+    amount, asset = parse_amount(value)
+    prec = {'SBD': 3, 'STEEM': 3, 'VESTS': 6}[asset]
+    tmpl = ("%%.%df %%s" % prec)
+    return tmpl % (amount, asset)
 
 if __name__ == '__main__':
     print(_load_discussion_recursive('roadscape', 'hello-world'))

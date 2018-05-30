@@ -41,7 +41,7 @@ def parse_amount(value, expected_unit=None):
         unit = NAI_MAP[nai]
 
     else:
-        raise Exception("unexpected %s" % repr(value))
+        raise Exception("invalid input amount %s" % repr(value))
 
     if expected_unit:
         assert unit == expected_unit
@@ -50,7 +50,7 @@ def parse_amount(value, expected_unit=None):
     return (dec_amount, unit)
 
 def amount(string):
-    """Parse a string asset amount to a Decimal."""
+    """Parse a steemd asset-amount as a Decimal(). Discard asset type."""
     return parse_amount(string)[0]
 
 def parse_time(block_time):
