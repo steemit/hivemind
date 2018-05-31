@@ -4,6 +4,8 @@ from hive.db.methods import query_one, query_col, query_row, query_all
 
 def get_post_id(author, permlink):
     """Get post_id from hive db."""
+    assert isinstance(author, str), "expected str for author: `%s`" % author
+    assert len(author) >= 3 and len(author) <= 16, "invalid author: `%s`" % author
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
     _id = query_one(sql, a=author, p=permlink)
     if not _id:
