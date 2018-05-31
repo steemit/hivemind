@@ -318,7 +318,7 @@ async def get_content_replies(parent: str, parent_permlink: str):
     post_id = _get_post_id(parent, parent_permlink)
     if not post_id:
         return []
-    post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d AND is_deleted = 0" % post_id)
+    post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d AND is_deleted = '0'" % post_id)
     if not post_ids:
         return []
     return _get_posts(post_ids)
