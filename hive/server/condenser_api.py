@@ -87,6 +87,29 @@ async def get_follow_count(account: str):
                 follower_count=count['followers'])
 
 
+def nested_query_compat(function):
+    # TODO: the API is seeing incoming requests of the following form; the args
+    #       object is nested inside a list[1]. Check if this is valid against
+    #       steemd/jussi, and document if so, otherwise detect and fail early.
+    #
+    #   {... "method":"condenser_api.get_discussions_by_hot",
+    #        "params":[{"tag":"steem","limit":1}]}
+    #
+    def wrapper(*args, **kwargs):
+        if not args and kwargs:
+            suspect = None
+            for _, val in kwargs.items():
+                if isinstance(val, list) and len(val) == 1:
+                    assert isinstance(val[0], dict), "compat case expects dict"
+                    assert not suspect, "compat suspect already encountered"
+                    suspect = val
+            if suspect:
+                return function(**suspect)
+        return function(*args, **kwargs)
+    return wrapper
+
+
+@nested_query_compat
 async def get_discussions_by_trending(start_author: str, start_permlink: str = '',
                                       limit: int = 20, tag: str = None):
     ids = cursor.pids_by_query(
@@ -98,6 +121,7 @@ async def get_discussions_by_trending(start_author: str, start_permlink: str = '
     return _get_posts(ids)
 
 
+@nested_query_compat
 async def get_discussions_by_hot(start_author: str, start_permlink: str = '',
                                  limit: int = 20, tag: str = None):
     ids = cursor.pids_by_query(
@@ -109,6 +133,7 @@ async def get_discussions_by_hot(start_author: str, start_permlink: str = '',
     return _get_posts(ids)
 
 
+@nested_query_compat
 async def get_discussions_by_promoted(start_author: str, start_permlink: str = '',
                                       limit: int = 20, tag: str = None):
     ids = cursor.pids_by_query(
@@ -120,6 +145,7 @@ async def get_discussions_by_promoted(start_author: str, start_permlink: str = '
     return _get_posts(ids)
 
 
+@nested_query_compat
 async def get_discussions_by_created(start_author: str, start_permlink: str = '',
                                      limit: int = 20, tag: str = None):
     ids = cursor.pids_by_query(
@@ -131,6 +157,7 @@ async def get_discussions_by_created(start_author: str, start_permlink: str = ''
     return _get_posts(ids)
 
 
+@nested_query_compat
 async def get_discussions_by_blog(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20):
     """Retrieve account's blog."""
@@ -142,6 +169,7 @@ async def get_discussions_by_blog(tag: str, start_author: str = '',
     return _get_posts(ids)
 
 
+@nested_query_compat
 async def get_discussions_by_feed(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20):
     """Retrieve account's feed."""
@@ -164,6 +192,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
     return posts
 
 
+@nested_query_compat
 async def get_discussions_by_comments(start_author: str, start_permlink: str = '', limit: int = 20):
     """Get comments by author."""
     ids = cursor.pids_by_account_comments(
@@ -173,6 +202,7 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
     return _get_posts(ids)
 
 
+@nested_query_compat
 async def get_replies_by_last_update(start_author: str, start_permlink: str = '', limit: int = 20):
     """Get replies to author."""
     ids = cursor.pids_by_replies_to_account(
