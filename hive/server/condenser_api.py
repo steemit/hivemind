@@ -65,6 +65,7 @@ async def call(api, method, params):
 
 
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
+    account = _validate_account(account)
     limit = _validate_limit(limit, 1000)
     state = _follow_type_to_int(follow_type)
     followers = cursor.get_followers(account, start, state, limit)
@@ -72,6 +73,7 @@ async def get_followers(account: str, start: str, follow_type: str, limit: int):
             for name in followers]
 
 async def get_following(account: str, start: str, follow_type: str, limit: int):
+    account = _validate_account(account)
     limit = _validate_limit(limit, 1000)
     state = _follow_type_to_int(follow_type)
     following = cursor.get_following(account, start, state, limit)
@@ -87,48 +89,44 @@ async def get_follow_count(account: str):
 
 async def get_discussions_by_trending(start_author: str, start_permlink: str = '',
                                       limit: int = 20, tag: str = None):
-    limit = _validate_limit(limit, 20)
     ids = cursor.pids_by_query(
         'trending',
-        start_author,
-        start_permlink,
-        limit,
+        _validate_account(start_author, allow_empty=True),
+        _validate_permlink(start_permlink, allow_empty=True),
+        _validate_limit(limit, 20),
         tag)
     return _get_posts(ids)
 
 
 async def get_discussions_by_hot(start_author: str, start_permlink: str = '',
                                  limit: int = 20, tag: str = None):
-    limit = _validate_limit(limit, 20)
     ids = cursor.pids_by_query(
         'hot',
-        start_author,
-        start_permlink,
-        limit,
+        _validate_account(start_author, allow_empty=True),
+        _validate_permlink(start_permlink, allow_empty=True),
+        _validate_limit(limit, 20),
         tag)
     return _get_posts(ids)
 
 
 async def get_discussions_by_promoted(start_author: str, start_permlink: str = '',
                                       limit: int = 20, tag: str = None):
-    limit = _validate_limit(limit, 20)
     ids = cursor.pids_by_query(
         'promoted',
-        start_author,
-        start_permlink,
-        limit,
+        _validate_account(start_author, allow_empty=True),
+        _validate_permlink(start_permlink, allow_empty=True),
+        _validate_limit(limit, 20),
         tag)
     return _get_posts(ids)
 
 
 async def get_discussions_by_created(start_author: str, start_permlink: str = '',
                                      limit: int = 20, tag: str = None):
-    limit = _validate_limit(limit, 20)
     ids = cursor.pids_by_query(
         'created',
-        start_author,
-        start_permlink,
-        limit,
+        _validate_account(start_author, allow_empty=True),
+        _validate_permlink(start_permlink, allow_empty=True),
+        _validate_limit(limit, 20),
         tag)
     return _get_posts(ids)
 
@@ -136,24 +134,22 @@ async def get_discussions_by_created(start_author: str, start_permlink: str = ''
 async def get_discussions_by_blog(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20):
     """Retrieve account's blog."""
-    limit = _validate_limit(limit, 20)
     ids = cursor.pids_by_blog(
-        tag,
-        start_author,
-        start_permlink,
-        limit)
+        _validate_account(tag),
+        _validate_account(start_author, allow_empty=True),
+        _validate_permlink(start_permlink, allow_empty=True),
+        _validate_limit(limit, 20))
     return _get_posts(ids)
 
 
 async def get_discussions_by_feed(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20):
     """Retrieve account's feed."""
-    limit = _validate_limit(limit, 20)
     res = cursor.pids_by_feed_with_reblog(
-        tag,
-        start_author,
-        start_permlink,
-        limit)
+        _validate_account(tag),
+        _validate_account(start_author, allow_empty=True),
+        _validate_permlink(start_permlink, allow_empty=True),
+        _validate_limit(limit, 20))
 
     reblogged_by = dict(res)
     posts = _get_posts([r[0] for r in res])
@@ -171,8 +167,8 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
 async def get_discussions_by_comments(start_author: str, start_permlink: str = '', limit: int = 20):
     """Get comments by author."""
     ids = cursor.pids_by_account_comments(
-        start_author,
-        start_permlink,
+        _validate_account(start_author),
+        _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 20))
     return _get_posts(ids)
 
@@ -180,8 +176,8 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
 async def get_replies_by_last_update(start_author: str, start_permlink: str = '', limit: int = 20):
     """Get replies to author."""
     ids = cursor.pids_by_replies_to_account(
-        start_author,
-        start_permlink,
+        _validate_account(start_author),
+        _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 50))
     return _get_posts(ids)
 
@@ -266,8 +262,8 @@ async def get_state(path: str):
 
     # discussion thread
     elif part[1] and part[1][0] == '@':
-        author = part[1][1:]
-        permlink = part[2]
+        author = _validate_account(part[1][1:])
+        permlink = _validate_permlink(part[2])
         state['content'] = _load_discussion_recursive(author, permlink)
         accounts = set(map(lambda p: p['author'], state['content'].values()))
         state['accounts'] = {a['name']: a for a in _load_accounts(accounts)}
@@ -315,6 +311,8 @@ async def get_state(path: str):
 
 async def get_content(author: str, permlink: str):
     """Get a single post object."""
+    _validate_account(author)
+    _validate_permlink(permlink)
     post_id = _get_post_id(author, permlink)
     if not post_id:
         return {'id': 0, 'author': '', 'permlink': ''}
@@ -323,6 +321,8 @@ async def get_content(author: str, permlink: str):
 
 async def get_content_replies(parent: str, parent_permlink: str):
     """Get a list of post objects based on parent."""
+    _validate_account(parent)
+    _validate_permlink(parent_permlink)
     post_id = _get_post_id(parent, parent_permlink)
     if not post_id:
         return []
@@ -393,6 +393,8 @@ def _get_feed_price():
 
 def _load_discussion_recursive(author, permlink):
     """`get_state`-compatible recursive thread loader."""
+    _validate_account(author)
+    _validate_permlink(permlink)
     post_id = _get_post_id(author, permlink)
     if not post_id:
         return {}
@@ -429,19 +431,29 @@ def _condenser_account(row):
         'json_metadata': json.dumps({
             'profile': {'name': row['display_name'], 'about': row['about']}})}
 
+def _validate_account(name, allow_empty=False):
+    assert isinstance(name, str), "account must be string; received: %s" % name
+    if not (allow_empty and name == ''):
+        assert len(name) >= 3 and len(name) <= 16, "invalid account: %s" % name
+    return name
+
+def _validate_permlink(permlink, allow_empty=False):
+    # pylint: disable=len-as-condition
+    assert isinstance(permlink, str), "permlink must be string: %s" % permlink
+    if not (allow_empty and permlink == ''):
+        assert len(permlink) > 0 and len(permlink) <= 256, "invalid permlink"
+    return permlink
+
 def _validate_limit(limit, ubound=100):
     """Given a user-provided limit, return a valid int, or raise."""
     limit = int(limit)
-    if limit <= 0:
-        raise Exception("invalid limit")
-    if limit > ubound:
-        raise Exception("limit exceeded")
+    assert limit > 0, "limit must be positive"
+    assert limit <= ubound, "limit exceeds max"
     return limit
 
 def _follow_type_to_int(follow_type: str):
     """Convert steemd-style "follow type" into internal status (int)."""
-    if follow_type not in ['blog', 'ignore']:
-        raise Exception("Invalid follow_type")
+    assert follow_type in ['blog', 'ignore'], "invalid follow_type"
     return 1 if follow_type == 'blog' else 2
 
 def _get_post_id(author, permlink):

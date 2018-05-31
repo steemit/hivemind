@@ -112,6 +112,9 @@ def run_server():
             if 'the database system is shutting down' in str(e):
                 logging.warning("could not get head state (db shutting down)")
                 return None
+            if 'terminating connection due to administrator command' in str(e):
+                logging.warning("could not get head state (admin terminated)")
+                return None
             raise e
 
     async def head_age(request):
