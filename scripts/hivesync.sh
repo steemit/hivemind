@@ -7,21 +7,23 @@ if [[ ! $? -eq 0 ]]; then
     FILE_NAME=hivemind-$SCHEMA_HASH-`date '+%Y%m%d-%H%M%S'`-partial.tar.lz4
 
 else
+    HEAD_AGE=`curl -s http://127.0.0.1:8080/head_age`
+    if [ -n "$HEAD_AGE" ]; then
+        echo hivemindsync: current head age is $HEAD_AGE seconds
+    end
+
     # returns 200 if head is < 15s old, signaling sync is complete. else, 500.
     HTTP_CODE=`curl -I -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/head_age`
-    HEAD_AGE=`curl -s http://127.0.0.1:8080/head_age`
-    echo hivemindsync: current head age is $HEAD_AGE seconds
-
-    if [[ ${HTTP_CODE} -eq 200 ]]; then
-        echo hivemindsync: sync complete, waiting for hive to exit cleanly...
-        kill -SIGINT $HIVESYNC_PID
-        while [ -e /proc/$HIVESYNC_PID ]; do sleep 0.1; done
-        FILE_NAME=hivemind-$SCHEMA_HASH-`date '+%Y%m%d-%H%M%S'`.tar.lz4
-    else
+    if [[ ${HTTP_CODE} -ne 200 ]]; then
         # hive is still syncing, not complete... check back in 5 minutes
         sleep 300
         exit 0
     fi
+
+    echo hivemindsync: sync complete, waiting for hive to exit cleanly...
+    kill -SIGINT $HIVESYNC_PID
+    while [ -e /proc/$HIVESYNC_PID ]; do sleep 0.1; done
+    FILE_NAME=hivemind-$SCHEMA_HASH-`date '+%Y%m%d-%H%M%S'`.tar.lz4
 fi
 
 echo hivemindsync: stopping postgres service
@@ -45,15 +47,16 @@ if [[ ! $? -eq 0 ]]; then
     exit 1
 fi
 
-echo hivemindsync: replacing current version of hivemind-$SCHEMA_HASH-latest.tar.lz4 with $FILE_NAME
-aws s3 cp s3://$S3_BUCKET/$FILE_NAME s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.lz4 --only-show-errors
+FILE_LAST=hivemind-$SCHEMA_HASH-latest.tar.lz4
+echo hivemindsync: replacing current version of $FILE_LAST with $FILE_NAME
+aws s3 cp s3://$S3_BUCKET/$FILE_NAME s3://$S3_BUCKET/$FILE_LAST --only-show-errors
 if [[ ! $? -eq 0 ]]; then
-    echo NOTIFYALERT! hivemindsync was unable to overwrite the current statefile with $FILE_NAME
+    echo NOTIFYALERT! hivemindsync was unable to overwrite $FILE_LAST with $FILE_NAME
     exit 1
 fi
 
-echo hivemindsync: state upload complete, pausing for 30 mins before restarting sync...
-sleep 1800
+echo hivemindsync: state upload complete, restarting sync...
+# sleep 1800
 
 # kill the container starting the process again
 echo hivemindsync: killing container and starting a new instance..
