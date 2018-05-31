@@ -10,7 +10,7 @@ else
     HEAD_AGE=`curl -s http://127.0.0.1:8080/head_age`
     if [ -n "$HEAD_AGE" ]; then
         echo hivemindsync: current head age is $HEAD_AGE seconds
-    end
+    fi
 
     # returns 200 if head is < 15s old, signaling sync is complete. else, 500.
     HTTP_CODE=`curl -I -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/head_age`
