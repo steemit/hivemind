@@ -228,14 +228,22 @@ async def get_state(path: str):
 
         account = part[0][1:]
 
+        # dummy paths used by condenser - just need account object
+        ignore = ['following', 'followers', 'permissions',
+                  'password', 'settings']
+
+        # steemd account 'tabs' - specific post list queries
         keys = {'recent-replies': 'recent_replies',
                 'comments': 'comments',
                 'blog': 'blog',
                 'feed': 'feed'}
 
-        if part[1] not in keys:
+        if part[1] in ignore:
+            key = None
+        elif part[1] not in keys:
             raise Exception("invalid account path %s" % path)
-        key = keys[part[1]]
+        else:
+            key = keys[part[1]]
 
         # TODO: use _load_accounts([account])? Examine issue w/ login
         account_obj = SteemClient.instance().get_accounts([account])[0]
