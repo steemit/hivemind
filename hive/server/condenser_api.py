@@ -13,6 +13,7 @@ import hive.server.cursor as cursor
 # e.g. {"id":0,"jsonrpc":"2.0","method":"call",
 #       "params":["database_api","get_state",["trending"]]}
 async def call(api, method, params):
+    """Routes legacy-style `call` method requests."""
     # pylint: disable=line-too-long, protected-access, too-many-return-statements, too-many-branches
     assert not params or isinstance(params, list), "legacy expects params array"
 
@@ -106,67 +107,73 @@ def nested_query_compat(function):
 
 @nested_query_compat
 async def get_discussions_by_trending(start_author: str, start_permlink: str = '',
-                                      limit: int = 20, tag: str = None):
+                                      limit: int = 20, tag: str = None,
+                                      truncate_body: int = 0):
     ids = cursor.pids_by_query(
         'trending',
         _validate_account(start_author, allow_empty=True),
         _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 20),
         tag)
-    return _get_posts(ids)
+    return _get_posts(ids, truncate_body=truncate_body)
 
 
 @nested_query_compat
 async def get_discussions_by_hot(start_author: str, start_permlink: str = '',
-                                 limit: int = 20, tag: str = None):
+                                 limit: int = 20, tag: str = None,
+                                 truncate_body: int = 0):
     ids = cursor.pids_by_query(
         'hot',
         _validate_account(start_author, allow_empty=True),
         _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 20),
         tag)
-    return _get_posts(ids)
+    return _get_posts(ids, truncate_body=truncate_body)
 
 
 @nested_query_compat
 async def get_discussions_by_promoted(start_author: str, start_permlink: str = '',
-                                      limit: int = 20, tag: str = None):
+                                      limit: int = 20, tag: str = None,
+                                      truncate_body: int = 0):
     ids = cursor.pids_by_query(
         'promoted',
         _validate_account(start_author, allow_empty=True),
         _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 20),
         tag)
-    return _get_posts(ids)
+    return _get_posts(ids, truncate_body=truncate_body)
 
 
 @nested_query_compat
 async def get_discussions_by_created(start_author: str, start_permlink: str = '',
-                                     limit: int = 20, tag: str = None):
+                                     limit: int = 20, tag: str = None,
+                                     truncate_body: int = 0):
     ids = cursor.pids_by_query(
         'created',
         _validate_account(start_author, allow_empty=True),
         _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 20),
         tag)
-    return _get_posts(ids)
+    return _get_posts(ids, truncate_body=truncate_body)
 
 
 @nested_query_compat
 async def get_discussions_by_blog(tag: str, start_author: str = '',
-                                  start_permlink: str = '', limit: int = 20):
+                                  start_permlink: str = '', limit: int = 20,
+                                  truncate_body: int = 0):
     """Retrieve account's blog."""
     ids = cursor.pids_by_blog(
         _validate_account(tag),
         _validate_account(start_author, allow_empty=True),
         _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 20))
-    return _get_posts(ids)
+    return _get_posts(ids, truncate_body=truncate_body)
 
 
 @nested_query_compat
 async def get_discussions_by_feed(tag: str, start_author: str = '',
-                                  start_permlink: str = '', limit: int = 20):
+                                  start_permlink: str = '', limit: int = 20,
+                                  truncate_body: int = 0):
     """Retrieve account's feed."""
     res = cursor.pids_by_feed_with_reblog(
         _validate_account(tag),
@@ -175,7 +182,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
         _validate_limit(limit, 20))
 
     reblogged_by = dict(res)
-    posts = _get_posts([r[0] for r in res])
+    posts = _get_posts([r[0] for r in res], truncate_body=truncate_body)
 
     # Merge reblogged_by data into result set
     for post in posts:
@@ -188,23 +195,25 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
 
 
 @nested_query_compat
-async def get_discussions_by_comments(start_author: str, start_permlink: str = '', limit: int = 20):
+async def get_discussions_by_comments(start_author: str, start_permlink: str = '',
+                                      limit: int = 20, truncate_body: int = 0):
     """Get comments by author."""
     ids = cursor.pids_by_account_comments(
         _validate_account(start_author),
         _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 20))
-    return _get_posts(ids)
+    return _get_posts(ids, truncate_body=truncate_body)
 
 
 @nested_query_compat
-async def get_replies_by_last_update(start_author: str, start_permlink: str = '', limit: int = 20):
+async def get_replies_by_last_update(start_author: str, start_permlink: str = '',
+                                     limit: int = 20, truncate_body: int = 0):
     """Get replies to author."""
     ids = cursor.pids_by_replies_to_account(
         _validate_account(start_author),
         _validate_permlink(start_permlink, allow_empty=True),
         _validate_limit(limit, 50))
-    return _get_posts(ids)
+    return _get_posts(ids, truncate_body=truncate_body)
 
 
 async def get_state(path: str):
@@ -494,7 +503,7 @@ def _get_post_id(author, permlink):
         return None
     return _id
 
-def _get_posts(ids):
+def _get_posts(ids, truncate_body=0):
     """Given an array of post ids, returns full objects in the same order."""
     if not ids:
         caller = inspect.stack()[1][3]
@@ -514,7 +523,7 @@ def _get_posts(ids):
     posts_by_id = {}
     for row in query_all(sql, ids=tuple(ids)):
         row = dict(row)
-        post = _condenser_post_object(row)
+        post = _condenser_post_object(row, truncate_body=truncate_body)
         posts_by_id[row['post_id']] = post
 
     # in rare cases of cache inconsistency, recover and warn
@@ -527,7 +536,7 @@ def _get_posts(ids):
     return [posts_by_id[_id] for _id in ids]
 
 
-def _condenser_post_object(row):
+def _condenser_post_object(row, truncate_body=0):
     """Given a hive_posts_cache row, create a legacy-style post object."""
     paid = row['is_paidout']
 
@@ -540,7 +549,7 @@ def _condenser_post_object(row):
     post['parent_author'] = ''
 
     post['title'] = row['title']
-    post['body'] = row['body']
+    post['body'] = row['body'][0:truncate_body] if truncate_body else row['body']
     post['json_metadata'] = row['json']
 
     post['created'] = _json_date(row['created_at'])
