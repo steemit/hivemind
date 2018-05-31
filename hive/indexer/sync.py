@@ -138,13 +138,14 @@ class Sync:
 
                 # fetch blocks
                 to = min(lbound + chunk_size, ubound)
-                blocks = steemd.get_blocks_range(lbound, to)
+                blocks = list(steemd.get_blocks_range(lbound, to))
+                count = to - lbound
                 lbound = to
                 timer.batch_lap()
 
                 # process blocks
                 Blocks.process_multi(blocks, is_initial_sync)
-                timer.batch_finish(len(blocks))
+                timer.batch_finish(count)
                 date = blocks[-1]['timestamp']
                 print(timer.batch_status("[SYNC] Got block %d @ %s" % (to-1, date)))
 

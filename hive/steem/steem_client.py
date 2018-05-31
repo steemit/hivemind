@@ -42,11 +42,11 @@ class SteemClient:
         return ret
 
     def get_content_batch(self, tuples):
-        posts = self.__exec_batch('get_content', tuples)
-        # TODO: how are we ensuring sequential results? need to set and sort id.
-        for post in posts: # sanity-checking jussi responses
-            assert 'author' in post, "invalid post: {}".format(post)
-        return posts
+        for batch in self.__exec_batches('get_content', tuples):
+            for post in batch: # sanity-checking jussi responses
+                assert 'author' in post, "invalid post: {}".format(post)
+                yield post
+        #return posts
 
     def get_block(self, num):
         """Fetches a single block.
@@ -192,13 +192,15 @@ class SteemClient:
         blocks = {}
 
         batch_params = [{'block_num': i} for i in block_nums]
-        for result in self.__exec_batch('get_block', batch_params):
-            assert 'block' in result, "result w/o block key: {}".format(result)
-            block = result['block']
-            num = int(block['block_id'][:8], base=16)
-            blocks[num] = block
+        for batch in self.__exec_batches('get_block', batch_params):
+            for result in batch:
+                assert 'block' in result, "block w/o key: {}".format(result)
+                block = result['block']
+                num = int(block['block_id'][:8], base=16)
+                yield block
+                #blocks[num] = block
 
-        return [blocks[x] for x in block_nums]
+        #return [blocks[x] for x in block_nums]
 
     def __exec(self, method, params=None):
         """Perform a single steemd call."""

@@ -19,6 +19,31 @@ from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError, H
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
+
+
+def exec_parallel_batch2(self, name, params, max_workers, batch_size):
+    """Process a batch as parallel requests."""
+    def exec_batch(name, params, batch_size, index):
+        """Chunkify batch requests and return them in order"""
+        for batch_params in chunkify(params, batch_size):
+            for item in self.exec(name, batch_params, is_batch=True):
+                yield [index, item]
+
+    ret = {}
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=max_workers) as executor:
+        futures = (executor.submit(exec_batch, name, args, batch_size, i)
+                   for i, args in enumerate(chunkify(params, batch_size)))
+        for future in concurrent.futures.as_completed(futures):
+            for index, item in future.result():
+                if index not in ret:
+                    ret[index] = []
+                ret[index].append(item)
+    out = []
+    for k in sorted(ret.keys()):
+        out.extend(ret[k])
+    return out
+
 class RPCError(Exception):
     """Represents a structured error returned from Steem/Jussi"""
 

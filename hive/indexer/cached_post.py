@@ -321,7 +321,7 @@ class CachedPost:
             timer.batch_lap()
             cls._batch_queries(buffer, trx)
 
-            timer.batch_finish(len(posts))
+            timer.batch_finish(len(post_ids))
             if len(tuples) >= 1000:
                 print(timer.batch_status())
 
