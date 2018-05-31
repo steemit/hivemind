@@ -25,8 +25,8 @@ class Conf():
         p.add('--dump-config', type=bool, env_var='DUMP_CONFIG', default=False)
 
         # specific to indexer
-        p.add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests (untested)', default=1)
-        p.add('--max-batch', type=int, env_var='MAX_BATCH', help='max size for batch block/content requests', default=100)
+        p.add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests', default=4)
+        p.add('--max-batch', type=int, env_var='MAX_BATCH', help='max chunk size for batch requests', default=50)
         p.add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', help='number of blocks to trail head by', default=2)
         p.add('--disable-sync', type=bool, env_var='DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
         p.add('--sync-to-s3', type=bool, env_var='SYNC_TO_S3', help='alternative healthcheck for background sync service', default=False)

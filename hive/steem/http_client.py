@@ -242,17 +242,10 @@ class HttpClient(object):
 
         raise Exception("abort %s after %d tries" % (method, tries))
 
-    def exec_multi_with_futures(self, name, params, max_workers=None):
-        """Process a batch as parallel signular requests."""
+    def exec_multi(self, name, params, max_workers, batch_size):
+        """Process a batch as parallel requests."""
+        chunks = [[name, args, True] for args in chunkify(params, batch_size)]
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=max_workers) as executor:
-            futures = (executor.submit(self.exec, name, args)
-                       for args in params)
-            for future in concurrent.futures.as_completed(futures):
-                yield future.result()
-
-    def exec_batch(self, name, params, batch_size):
-        """Chunkify batch requests and return them in order"""
-        for batch_params in chunkify(params, batch_size):
-            for item in self.exec(name, batch_params, is_batch=True):
-                yield item
+            for items in executor.map(lambda tup: self.exec(*tup), chunks):
+                yield list(items) # (use of `map` preserves request order)

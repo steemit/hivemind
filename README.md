@@ -55,7 +55,8 @@ Hive is deployed as Docker container &mdash; see `Dockerfile`.
 | `HTTP_SERVER_PORT`       | `--http-server-port` | 8080    |
 | `DATABASE_URL`           | `--database-url`     | postgresql://user:pass@localhost:5432/hive |
 | `STEEMD_URL`             | `--steemd-url`       | https://api.steemit.com |
-| `MAX_BATCH`              | `--max-batch`        | 200     |
+| `MAX_BATCH`              | `--max-batch`        | 50      |
+| `MAX_WORKERS`            | `--max-workers`      | 4       |
 | `TRAIL_BLOCKS`           | `--trail-blocks`     | 2       |
 
 Precedence: CLI over ENV over hive.conf. Check `hive --help` for details.
