@@ -3,6 +3,7 @@
 import json
 import inspect
 
+from functools import wraps
 from aiocache import cached
 from hive.db.methods import query_one, query_row, query_col, query_all
 from hive.steem.steem_client import SteemClient
@@ -95,16 +96,10 @@ def nested_query_compat(function):
     #   {... "method":"condenser_api.get_discussions_by_hot",
     #        "params":[{"tag":"steem","limit":1}]}
     #
+    @wraps(function)
     def wrapper(*args, **kwargs):
-        if not args and kwargs:
-            suspect = None
-            for _, val in kwargs.items():
-                if isinstance(val, list) and len(val) == 1:
-                    assert isinstance(val[0], dict), "compat case expects dict"
-                    assert not suspect, "compat suspect already encountered"
-                    suspect = val
-            if suspect:
-                return function(**suspect)
+        if args and not kwargs and len(args) < 2 and isinstance(args[0], dict):
+            return function(**args[0])
         return function(*args, **kwargs)
     return wrapper
 
@@ -255,7 +250,7 @@ async def get_state(path: str):
         account = part[0][1:]
 
         # dummy paths used by condenser - just need account object
-        ignore = ['following', 'followers', 'permissions',
+        ignore = ['followed', 'followers', 'permissions',
                   'password', 'settings']
 
         # steemd account 'tabs' - specific post list queries
