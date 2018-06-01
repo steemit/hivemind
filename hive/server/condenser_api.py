@@ -10,58 +10,83 @@ from hive.steem.steem_client import SteemClient
 from hive.utils.normalize import parse_amount
 import hive.server.cursor as cursor
 
+def _strict_list(params, expected_len):
+    assert isinstance(params, list), "params not a list"
+    assert len(params) == expected_len, "expected %d params" % expected_len
+    return params
+
+def _strict_query(params, ignore_key=None):
+    query = _strict_list(params, 1)[0]
+    assert isinstance(query, dict), "query must be dict"
+
+    optional_keys = set(['truncate_body'])
+    expected_keys = set(['start_author', 'start_permlink', 'limit', 'tag'])
+    if ignore_key: # e.g. `tag` unused by get_discussion_by_comments
+        expected_keys = expected_keys - set([ignore_key])
+
+    provided_keys = query.keys()
+    missing = expected_keys - provided_keys
+    unknown = provided_keys - expected_keys - optional_keys
+    assert not missing, "missing query key %s" % missing
+    assert not unknown, "unknown query key %s" % unknown
+
+    return query
+
 # e.g. {"id":0,"jsonrpc":"2.0","method":"call",
 #       "params":["database_api","get_state",["trending"]]}
 async def call(api, method, params):
     """Routes legacy-style `call` method requests."""
-    # pylint: disable=line-too-long, protected-access, too-many-return-statements, too-many-branches
-    assert not params or isinstance(params, list), "legacy expects params array"
+    # pylint: disable=protected-access, too-many-return-statements, too-many-branches
 
     if method == 'get_followers':
-        return await get_followers(params[0], params[1], params[2], params[3])
+        return await get_followers(*_strict_list(params, 4))
     elif method == 'get_following':
-        return await get_following(params[0], params[1], params[2], params[3])
+        return await get_following(*_strict_list(params, 4))
     elif method == 'get_follow_count':
-        return await get_follow_count(params[0])
+        return await get_follow_count(*_strict_list(params, 1))
+
     elif method == 'get_discussions_by_trending':
-        return await get_discussions_by_trending(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+        return await get_discussions_by_trending(**_strict_query(params))
     elif method == 'get_discussions_by_hot':
-        return await get_discussions_by_hot(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+        return await get_discussions_by_hot(**_strict_query(params))
     elif method == 'get_discussions_by_promoted':
-        return await get_discussions_by_promoted(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+        return await get_discussions_by_promoted(**_strict_query(params))
     elif method == 'get_discussions_by_created':
-        return await get_discussions_by_created(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'], params[0]['tag'])
+        return await get_discussions_by_created(**_strict_query(params))
     elif method == 'get_discussions_by_blog':
-        return await get_discussions_by_blog(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+        return await get_discussions_by_blog(**_strict_query(params))
     elif method == 'get_discussions_by_feed':
-        return await get_discussions_by_feed(params[0]['tag'], params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+        return await get_discussions_by_feed(**_strict_query(params))
     elif method == 'get_discussions_by_comments':
-        return await get_discussions_by_comments(params[0]['start_author'], params[0]['start_permlink'], params[0]['limit'])
+        return await get_discussions_by_comments(**_strict_query(params, 'tag'))
     elif method == 'get_replies_by_last_update':
-        return await get_replies_by_last_update(params[0], params[1], params[2])
+        return await get_replies_by_last_update(*_strict_list(params, 3))
+
     elif method == 'get_content':
-        return await get_content(params[0], params[1]) # after submit vote/post
+        return await get_content(*_strict_list(params, 2))
     elif method == 'get_content_replies':
-        return await get_content_replies(params[0], params[1])
+        return await get_content_replies(*_strict_list(params, 2))
     elif method == 'get_state':
-        return await get_state(params[0])
+        return await get_state(*_strict_list(params, 1))
 
     # passthrough -- TESTING ONLY!
     steemd = SteemClient.instance()
+    assert not params or (isinstance(params, list) and len(params) == 1)
+    print("forwarding {}({})".format(method, params))
     if method == 'get_dynamic_global_properties':
         return _get_props_lite()
     elif method == 'get_accounts':
-        return steemd.get_accounts(params[0])
+        return steemd.get_accounts(*params)
     elif method == 'get_open_orders':
-        return steemd._client.exec('get_open_orders', params[0])
+        return steemd._client.exec('get_open_orders', *params)
     elif method == 'get_block':
-        return steemd._client.exec('get_block', params[0])
+        return steemd._client.exec('get_block', *params)
     elif method == 'broadcast_transaction_synchronous':
-        return steemd._client.exec('broadcast_transaction_synchronous', params[0])
+        return steemd._client.exec('broadcast_transaction_synchronous', *params)
     elif method == 'get_savings_withdraw_to':
-        return steemd._client.exec('get_savings_withdraw_to', params[0])
+        return steemd._client.exec('get_savings_withdraw_to', *params)
     elif method == 'get_savings_withdraw_from':
-        return steemd._client.exec('get_savings_withdraw_from', params[0])
+        return steemd._client.exec('get_savings_withdraw_from', *params)
 
     raise Exception("unknown method: {}.{}({})".format(api, method, params))
 
@@ -287,6 +312,8 @@ async def get_state(path: str):
             posts = await get_discussions_by_blog(account, "", "", 20)
         elif key == 'feed':
             posts = await get_discussions_by_feed(account, "", "", 20)
+        else:
+            posts = [] # no-op for `ignore` paths
 
         state['accounts'][account][key] = []
         for post in posts:
@@ -360,7 +387,8 @@ async def get_content_replies(parent: str, parent_permlink: str):
     post_id = _get_post_id(parent, parent_permlink)
     if not post_id:
         return []
-    post_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d AND is_deleted = '0'" % post_id)
+    post_ids = query_col("SELECT id FROM hive_posts WHERE "
+                         "parent_id = %d AND is_deleted = '0'" % post_id)
     if not post_ids:
         return []
     return _get_posts(post_ids)
