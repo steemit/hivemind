@@ -32,12 +32,18 @@ def _strict_query(params, ignore_key=None):
 
     return query
 
-# e.g. {"id":0,"jsonrpc":"2.0","method":"call",
-#       "params":["database_api","get_state",["trending"]]}
 async def call(api, method, params):
-    """Routes legacy-style `call` method requests."""
-    # pylint: disable=protected-access, too-many-return-statements, too-many-branches
+    """Routes legacy-style `call` method requests.
 
+    Example:
+    ```
+    {"id":0,"jsonrpc":"2.0","method":"call",
+     "params":["database_api","get_state",["trending"]]}
+    ```"""
+    # pylint: disable=too-many-return-statements, too-many-branches
+    assert api == 'condenser_api', "`call` requires condenser_api"
+
+    # Follows
     if method == 'get_followers':
         return await get_followers(*_strict_list(params, 4))
     elif method == 'get_following':
@@ -45,13 +51,17 @@ async def call(api, method, params):
     elif method == 'get_follow_count':
         return await get_follow_count(*_strict_list(params, 1))
 
+    # Content primitives
     elif method == 'get_content':
         return await get_content(*_strict_list(params, 2))
     elif method == 'get_content_replies':
         return await get_content_replies(*_strict_list(params, 2))
+
+    # Content monolith
     elif method == 'get_state':
         return await get_state(*_strict_list(params, 1))
 
+    # Global discussion queries
     elif method == 'get_discussions_by_trending':
         return await get_discussions_by_trending(**_strict_query(params))
     elif method == 'get_discussions_by_hot':
@@ -60,6 +70,8 @@ async def call(api, method, params):
         return await get_discussions_by_promoted(**_strict_query(params))
     elif method == 'get_discussions_by_created':
         return await get_discussions_by_created(**_strict_query(params))
+
+    # Account discussion queries
     elif method == 'get_discussions_by_blog':
         return await get_discussions_by_blog(**_strict_query(params))
     elif method == 'get_discussions_by_feed':

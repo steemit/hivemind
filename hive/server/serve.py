@@ -37,7 +37,6 @@ def build_methods():
     )]
 
     [methods.add(method, 'condenser_api.' + method.__name__) for method in (
-        condenser_api.call,
         condenser_api.get_followers,
         condenser_api.get_following,
         condenser_api.get_follow_count,
@@ -53,6 +52,8 @@ def build_methods():
         condenser_api.get_discussions_by_comments,
         condenser_api.get_replies_by_last_update,
     )]
+
+    methods.add(condenser_api.call)
 
     return methods
 
