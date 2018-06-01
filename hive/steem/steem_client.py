@@ -86,9 +86,9 @@ class SteemClient:
                 next_expected += 3
 
                 # check we're not too far behind
-                gap = (head_num - last['num']) - trail_blocks
+                gap = (head_num - last['num'])
                 print("[LIVE] %d blocks behind..." % gap)
-                if gap > max_gap:
+                if max_gap and gap > max_gap:
                     print("[LIVE] gap too large: %d" % gap)
                     return # abort streaming; return to fast-sync
 
