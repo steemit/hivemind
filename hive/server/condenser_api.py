@@ -131,7 +131,7 @@ def nested_query_compat(function):
 
 
 @nested_query_compat
-async def get_discussions_by_trending(start_author: str, start_permlink: str = '',
+async def get_discussions_by_trending(start_author: str = '', start_permlink: str = '',
                                       limit: int = 20, tag: str = None,
                                       truncate_body: int = 0):
     ids = cursor.pids_by_query(
@@ -144,7 +144,7 @@ async def get_discussions_by_trending(start_author: str, start_permlink: str = '
 
 
 @nested_query_compat
-async def get_discussions_by_hot(start_author: str, start_permlink: str = '',
+async def get_discussions_by_hot(start_author: str = '', start_permlink: str = '',
                                  limit: int = 20, tag: str = None,
                                  truncate_body: int = 0):
     ids = cursor.pids_by_query(
@@ -157,7 +157,7 @@ async def get_discussions_by_hot(start_author: str, start_permlink: str = '',
 
 
 @nested_query_compat
-async def get_discussions_by_promoted(start_author: str, start_permlink: str = '',
+async def get_discussions_by_promoted(start_author: str = '', start_permlink: str = '',
                                       limit: int = 20, tag: str = None,
                                       truncate_body: int = 0):
     ids = cursor.pids_by_query(
@@ -170,7 +170,7 @@ async def get_discussions_by_promoted(start_author: str, start_permlink: str = '
 
 
 @nested_query_compat
-async def get_discussions_by_created(start_author: str, start_permlink: str = '',
+async def get_discussions_by_created(start_author: str = '', start_permlink: str = '',
                                      limit: int = 20, tag: str = None,
                                      truncate_body: int = 0):
     ids = cursor.pids_by_query(
