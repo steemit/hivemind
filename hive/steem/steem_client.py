@@ -64,7 +64,7 @@ class SteemClient:
                 'date': parse_time(block['timestamp']),
                 'hash': block['block_id']}
 
-    def stream_blocks(self, start_from, trail_blocks=0, max_gap=40):
+    def stream_blocks(self, start_from, trail_blocks=0, max_gap=100):
         """ETA-based block follower."""
         assert trail_blocks >= 0
         assert trail_blocks <= 100
