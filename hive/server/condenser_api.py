@@ -45,6 +45,13 @@ async def call(api, method, params):
     elif method == 'get_follow_count':
         return await get_follow_count(*_strict_list(params, 1))
 
+    elif method == 'get_content':
+        return await get_content(*_strict_list(params, 2))
+    elif method == 'get_content_replies':
+        return await get_content_replies(*_strict_list(params, 2))
+    elif method == 'get_state':
+        return await get_state(*_strict_list(params, 1))
+
     elif method == 'get_discussions_by_trending':
         return await get_discussions_by_trending(**_strict_query(params))
     elif method == 'get_discussions_by_hot':
@@ -62,37 +69,13 @@ async def call(api, method, params):
     elif method == 'get_replies_by_last_update':
         return await get_replies_by_last_update(*_strict_list(params, 3))
 
-    elif method == 'get_content':
-        return await get_content(*_strict_list(params, 2))
-    elif method == 'get_content_replies':
-        return await get_content_replies(*_strict_list(params, 2))
-    elif method == 'get_state':
-        return await get_state(*_strict_list(params, 1))
-
-    # passthrough -- TESTING ONLY!
-    steemd = SteemClient.instance()
-    assert not params or (isinstance(params, list) and len(params) == 1)
-    print("forwarding {}({})".format(method, params))
-    if method == 'get_dynamic_global_properties':
-        return _get_props_lite()
-    elif method == 'get_accounts':
-        return steemd.get_accounts(*params)
-    elif method == 'get_open_orders':
-        return steemd._client.exec('get_open_orders', *params)
-    elif method == 'get_block':
-        return steemd._client.exec('get_block', *params)
-    elif method == 'broadcast_transaction_synchronous':
-        return steemd._client.exec('broadcast_transaction_synchronous', *params)
-    elif method == 'get_savings_withdraw_to':
-        return steemd._client.exec('get_savings_withdraw_to', *params)
-    elif method == 'get_savings_withdraw_from':
-        return steemd._client.exec('get_savings_withdraw_from', *params)
-
     raise Exception("unknown method: {}.{}({})".format(api, method, params))
 
 
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
+    """Get all accounts following `account`. (EOL)"""
     account = _validate_account(account)
+    start = _validate_account(account, allow_empty=True)
     limit = _validate_limit(limit, 1000)
     state = _follow_type_to_int(follow_type)
     followers = cursor.get_followers(account, start, state, limit)
@@ -100,7 +83,9 @@ async def get_followers(account: str, start: str, follow_type: str, limit: int):
             for name in followers]
 
 async def get_following(account: str, start: str, follow_type: str, limit: int):
+    """Get all accounts `account` follows. (EOL)"""
     account = _validate_account(account)
+    start = _validate_account(account, allow_empty=True)
     limit = _validate_limit(limit, 1000)
     state = _follow_type_to_int(follow_type)
     following = cursor.get_following(account, start, state, limit)
@@ -108,6 +93,7 @@ async def get_following(account: str, start: str, follow_type: str, limit: int):
             for name in following]
 
 async def get_follow_count(account: str):
+    """Get follow count stats. (EOL)"""
     count = cursor.get_follow_counts(account)
     return dict(account=account,
                 following_count=count['following'],
@@ -115,15 +101,20 @@ async def get_follow_count(account: str):
 
 
 def nested_query_compat(function):
-    # TODO: the API is seeing incoming requests of the following form; the args
-    #       object is nested inside a list[1]. Check if this is valid against
-    #       steemd/jussi, and document if so, otherwise detect and fail early.
-    #
-    #   {... "method":"condenser_api.get_discussions_by_hot",
-    #        "params":[{"tag":"steem","limit":1}]}
-    #
+    """Unpack strange format used by some clients, accepted by steemd.
+
+    Sometimes a discussion query object is nested inside a list[1]. Eg:
+
+        {... "method":"condenser_api.get_discussions_by_hot",
+             "params":[{"tag":"steem","limit":1}]}
+
+    In these cases jsonrpcserver dispatch just shoves it into the first
+    arg. This decorator checks for this specific condition and unpacks
+    the query to be passed as kwargs.
+    """
     @wraps(function)
     def wrapper(*args, **kwargs):
+        """Checks for specific condition signature and unpacks query"""
         if args and not kwargs and len(args) < 2 and isinstance(args[0], dict):
             return function(**args[0])
         return function(*args, **kwargs)
@@ -134,6 +125,7 @@ def nested_query_compat(function):
 async def get_discussions_by_trending(start_author: str = '', start_permlink: str = '',
                                       limit: int = 20, tag: str = None,
                                       truncate_body: int = 0):
+    """Query posts, sorted by trending score."""
     ids = cursor.pids_by_query(
         'trending',
         _validate_account(start_author, allow_empty=True),
@@ -147,6 +139,7 @@ async def get_discussions_by_trending(start_author: str = '', start_permlink: st
 async def get_discussions_by_hot(start_author: str = '', start_permlink: str = '',
                                  limit: int = 20, tag: str = None,
                                  truncate_body: int = 0):
+    """Query posts, sorted by hot score."""
     ids = cursor.pids_by_query(
         'hot',
         _validate_account(start_author, allow_empty=True),
@@ -160,6 +153,7 @@ async def get_discussions_by_hot(start_author: str = '', start_permlink: str = '
 async def get_discussions_by_promoted(start_author: str = '', start_permlink: str = '',
                                       limit: int = 20, tag: str = None,
                                       truncate_body: int = 0):
+    """Query posts, sorted by promoted amount."""
     ids = cursor.pids_by_query(
         'promoted',
         _validate_account(start_author, allow_empty=True),
@@ -173,6 +167,7 @@ async def get_discussions_by_promoted(start_author: str = '', start_permlink: st
 async def get_discussions_by_created(start_author: str = '', start_permlink: str = '',
                                      limit: int = 20, tag: str = None,
                                      truncate_body: int = 0):
+    """Query posts, sorted by creation date."""
     ids = cursor.pids_by_query(
         'created',
         _validate_account(start_author, allow_empty=True),
@@ -186,7 +181,7 @@ async def get_discussions_by_created(start_author: str = '', start_permlink: str
 async def get_discussions_by_blog(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
                                   truncate_body: int = 0):
-    """Retrieve account's blog."""
+    """Retrieve account's blog posts."""
     ids = cursor.pids_by_blog(
         _validate_account(tag),
         _validate_account(start_author, allow_empty=True),
@@ -199,7 +194,7 @@ async def get_discussions_by_blog(tag: str, start_author: str = '',
 async def get_discussions_by_feed(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
                                   truncate_body: int = 0):
-    """Retrieve account's feed."""
+    """Retrieve account's personalized feed."""
     res = cursor.pids_by_feed_with_reblog(
         _validate_account(tag),
         _validate_account(start_author, allow_empty=True),
@@ -222,7 +217,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
 @nested_query_compat
 async def get_discussions_by_comments(start_author: str, start_permlink: str = '',
                                       limit: int = 20, truncate_body: int = 0):
-    """Get comments by author."""
+    """Get comments by made by author."""
     ids = cursor.pids_by_account_comments(
         _validate_account(start_author),
         _validate_permlink(start_permlink, allow_empty=True),
@@ -233,7 +228,7 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
 @nested_query_compat
 async def get_replies_by_last_update(start_author: str, start_permlink: str = '',
                                      limit: int = 20, truncate_body: int = 0):
-    """Get replies to author."""
+    """Get all replies made to any of author's posts."""
     ids = cursor.pids_by_replies_to_account(
         _validate_account(start_author),
         _validate_permlink(start_permlink, allow_empty=True),
