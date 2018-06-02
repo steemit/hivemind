@@ -6,7 +6,6 @@ import inspect
 from functools import wraps
 from aiocache import cached
 from hive.db.methods import query_one, query_row, query_col, query_all
-from hive.steem.steem_client import SteemClient
 from hive.utils.normalize import parse_amount
 import hive.server.cursor as cursor
 
@@ -288,7 +287,7 @@ async def get_state(path: str):
         if part[2]:
             raise Exception("unexpected account path part[2] %s" % path)
 
-        account = part[0][1:]
+        account = _validate_account(part[0][1:])
 
         # dummy paths used by condenser - just need account object
         ignore = ['followed', 'followers', 'permissions',
@@ -307,9 +306,7 @@ async def get_state(path: str):
         else:
             key = keys[part[1]]
 
-        # TODO: use _load_accounts([account])? Examine issue w/ login
-        account_obj = SteemClient.instance().get_accounts([account])[0]
-        state['accounts'][account] = account_obj
+        state['accounts'][account] = _load_accounts([account])[0]
 
         if key == 'recent_replies':
             posts = await get_replies_by_last_update(account, "", 20)
