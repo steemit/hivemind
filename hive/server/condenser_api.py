@@ -477,7 +477,8 @@ def _load_posts_recursive(post_ids):
     for post, post_id in zip(posts, post_ids):
         out[post['author'] + '/' + post['permlink']] = post
 
-        child_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d" % post_id)
+        child_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d "
+                              "AND is_deleted = '0'" % post_id)
         if child_ids:
             children = _load_posts_recursive(child_ids)
             post['replies'] = list(children.keys())
