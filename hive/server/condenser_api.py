@@ -2,6 +2,7 @@
 
 import json
 import inspect
+import re
 
 from functools import wraps
 from aiocache import cached
@@ -263,31 +264,23 @@ async def get_state(path: str):
     while len(part) < 3:
         part.append('')
 
-    state = {}
-    state['current_route'] = path
-    state['props'] = _get_props_lite()
-    state['tags'] = {}
-    state['tag_idx'] = {}
-    state['tag_idx']['trending'] = []
-    state['content'] = {}
-    state['accounts'] = {}
-    state['discussion_idx'] = {"": {}}
-    state['feed_price'] = _get_feed_price()
-
-    # //-- debug; temp sanity check
-    state1 = "{}".format(state)
-    # //--
+    state = {
+        'feed_price': _get_feed_price(),
+        'props': _get_props_lite(),
+        'tags': {},
+        'accounts': {},
+        'content': {},
+        'tag_idx': {'trending': []},
+        'discussion_idx': {"": {}}}
 
     # account tabs (feed, blog, comments, replies)
     if part[0] and part[0][0] == '@':
-        if not part[1]:
-            part[1] = 'blog'
-        if part[1] == 'transfers':
-            raise Exception("transfers API not served by hive")
-        if part[2]:
-            raise Exception("unexpected account path part[2] %s" % path)
+        assert not part[1] == 'transfers', 'transfers API not served here'
+        assert not part[1] == 'blog', 'canonical blog route is `/@account`'
+        assert not part[2], 'unexpected account path[2] %s' % path
 
         account = _validate_account(part[0][1:])
+        state['accounts'][account] = _load_accounts([account])[0]
 
         # dummy paths used by condenser - just need account object
         ignore = ['followed', 'followers', 'permissions',
@@ -296,34 +289,27 @@ async def get_state(path: str):
         # steemd account 'tabs' - specific post list queries
         keys = {'recent-replies': 'recent_replies',
                 'comments': 'comments',
-                'blog': 'blog',
-                'feed': 'feed'}
+                'feed': 'feed',
+                '': 'blog'}
 
-        if part[1] in ignore:
-            key = None
-        elif part[1] not in keys:
-            raise Exception("invalid account path %s" % path)
-        else:
+        if part[1] not in ignore:
+            assert part[1] in keys, "invalid account path %s" % path
             key = keys[part[1]]
 
-        state['accounts'][account] = _load_accounts([account])[0]
+            if key == 'recent_replies':
+                posts = await get_replies_by_last_update(account, '', 20)
+            elif key == 'comments':
+                posts = await get_discussions_by_comments(account, '', 20)
+            elif key == 'blog':
+                posts = await get_discussions_by_blog(account, '', '', 20)
+            elif key == 'feed':
+                posts = await get_discussions_by_feed(account, '', '', 20)
 
-        if key == 'recent_replies':
-            posts = await get_replies_by_last_update(account, "", 20)
-        elif key == 'comments':
-            posts = await get_discussions_by_comments(account, "", 20)
-        elif key == 'blog':
-            posts = await get_discussions_by_blog(account, "", "", 20)
-        elif key == 'feed':
-            posts = await get_discussions_by_feed(account, "", "", 20)
-        else:
-            posts = [] # no-op for `ignore` paths
-
-        state['accounts'][account][key] = []
-        for post in posts:
-            ref = post['author'] + '/' + post['permlink']
-            state['accounts'][account][key].append(ref)
-            state['content'][ref] = post
+            state['accounts'][account][key] = []
+            for post in posts:
+                ref = post['author'] + '/' + post['permlink']
+                state['accounts'][account][key].append(ref)
+                state['content'][ref] = post
 
     # discussion thread
     elif part[1] and part[1][0] == '@':
@@ -335,12 +321,10 @@ async def get_state(path: str):
 
     # trending/etc pages
     elif part[0] in ['trending', 'promoted', 'hot', 'created']:
-        if part[2]:
-            raise Exception("unexpected discussion path part[2] %s" % path)
-        sort = part[0]
-        tag = part[1].lower()
-        ids = cursor.pids_by_query(sort, '', '', 20, tag)
-        posts = _get_posts(ids)
+        assert not part[2], "unexpected discussion path part[2] %s" % path
+        sort = _validate_sort(part[0])
+        tag = _validate_tag(part[1].lower(), allow_empty=True)
+        posts = _get_posts(cursor.pids_by_query(sort, '', '', 20, tag))
         state['discussion_idx'][tag] = {sort: []}
         for post in posts:
             ref = post['author'] + '/' + post['permlink']
@@ -348,28 +332,22 @@ async def get_state(path: str):
             state['discussion_idx'][tag][sort].append(ref)
         state['tag_idx']['trending'] = await _get_top_trending_tags()
 
-    # witness list
-    elif part[0] == 'witnesses' or part[0] == '~witnesses':
-        raise Exception("not implemented")
-
     # tag "explorer"
     elif part[0] == "tags":
+        assert not part[1] and not part[2], 'invalid /tags path'
         state['tag_idx']['trending'] = []
         tags = await _get_trending_tags()
         for tag in tags:
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
+    # witness list
+    elif part[0] == 'witnesses' or part[0] == '~witnesses':
+        raise Exception("not implemented")
+
     # non-matching path
     else:
-        print("[WARNING] unknown path {}".format(path))
-        return state
-
-    # //-- debug; should not happen
-    state2 = "{}".format(state)
-    if state1 == state2: # if state did not change, complain
-        raise Exception("unrecognized path `{}`" % path)
-    # //--
+        raise Exception('unknown path %s' % path)
 
     return state
 
@@ -496,7 +474,8 @@ def _condenser_account(row):
         'name': row['name'],
         'reputation': _rep_to_raw(row['reputation']),
         'json_metadata': json.dumps({
-            'profile': {'name': row['display_name'], 'about': row['about']}})}
+            'profile': {'name': row['display_name'],
+                        'about': row['about']}})}
 
 def _validate_account(name, allow_empty=False):
     assert isinstance(name, str), "account must be string; received: %s" % name
@@ -510,6 +489,19 @@ def _validate_permlink(permlink, allow_empty=False):
     if not (allow_empty and permlink == ''):
         assert len(permlink) > 0 and len(permlink) <= 256, "invalid permlink"
     return permlink
+
+def _validate_sort(sort, allow_empty=False):
+    assert isinstance(sort, str), 'sort must be a string'
+    if not (allow_empty and sort == ''):
+        valid_sorts = ['trending', 'promoted', 'hot', 'created']
+        assert sort in valid_sorts, 'invalid sort'
+    return sort
+
+def _validate_tag(tag, allow_empty=False):
+    assert isinstance(tag, str), 'tag must be a string'
+    if not (allow_empty and tag == ''):
+        assert re.match('^[a-z0-9-]+$', str), 'invalid tag'
+    return tag
 
 def _validate_limit(limit, ubound=100):
     """Given a user-provided limit, return a valid int, or raise."""
