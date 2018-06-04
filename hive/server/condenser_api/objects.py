@@ -9,7 +9,7 @@ from hive.db.methods import query_all
 
 def load_accounts(names):
     """`get_accounts`-style lookup for `get_state` compat layer."""
-    sql = """SELECT id, name, display_name, about, reputation
+    sql = """SELECT id, name, display_name, about, reputation, vote_weight
                FROM hive_accounts WHERE name IN :names"""
     rows = query_all(sql, names=tuple(names))
     return [_condenser_account_object(row) for row in rows]
@@ -52,6 +52,7 @@ def _condenser_account_object(row):
     return {
         'name': row['name'],
         'reputation': _rep_to_raw(row['reputation']),
+        'net_vesting_shares': row['vote_weight'],
         'json_metadata': json.dumps({
             'profile': {'name': row['display_name'],
                         'about': row['about']}})}
