@@ -3,12 +3,13 @@
 import json
 import inspect
 import re
+import collections
 
 from functools import wraps
 from aiocache import cached
 from hive.db.methods import query_one, query_row, query_col, query_all
 from hive.utils.normalize import parse_amount
-import hive.server.cursor as cursor
+import hive.server.condenser_api.cursor as cursor
 
 def _strict_list(params, expected_len):
     assert isinstance(params, list), "params not a list"
@@ -83,26 +84,27 @@ async def call(api, method, params):
 
     raise Exception("unknown method: {}.{}({})".format(api, method, params))
 
+def _legacy_follower(follower, following, follow_type):
+    return dict(follower=follower, following=following, what=[follow_type])
 
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
     """Get all accounts following `account`. (EOL)"""
-    account = _validate_account(account)
-    start = _validate_account(account, allow_empty=True)
-    limit = _validate_limit(limit, 1000)
-    state = _follow_type_to_int(follow_type)
-    followers = cursor.get_followers(account, start, state, limit)
-    return [dict(follower=name, following=account, what=[follow_type])
-            for name in followers]
+    followers = cursor.get_followers(
+        _validate_account(account),
+        _validate_account(start, allow_empty=True),
+        _follow_type_to_int(follow_type),
+        _validate_limit(limit, 1000))
+    return [_legacy_follower(name, account, follow_type) for name in followers]
+
 
 async def get_following(account: str, start: str, follow_type: str, limit: int):
     """Get all accounts `account` follows. (EOL)"""
-    account = _validate_account(account)
-    start = _validate_account(account, allow_empty=True)
-    limit = _validate_limit(limit, 1000)
-    state = _follow_type_to_int(follow_type)
-    following = cursor.get_following(account, start, state, limit)
-    return [dict(follower=account, following=name, what=[follow_type])
-            for name in following]
+    following = cursor.get_following(
+        _validate_account(account),
+        _validate_account(start, allow_empty=True),
+        _follow_type_to_int(follow_type),
+        _validate_limit(limit, 1000))
+    return [_legacy_follower(account, name, follow_type) for name in following]
 
 async def get_follow_count(account: str):
     """Get follow count stats. (EOL)"""
@@ -247,22 +249,36 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
         _validate_limit(limit, 50))
     return _get_posts(ids, truncate_body=truncate_body)
 
+def _normalize_path(path):
+    if path[0] == '/':
+        path = path[1:]
+    if not path:
+        path = 'trending'
+    parts = path.split('/')
+    if len(parts) > 3:
+        raise Exception("invalid path %s" % path)
+    while len(parts) < 3:
+        parts.append('')
+    return (path, parts)
+
+def _keyed_posts(posts):
+    out = collections.OrderedDict()
+    for post in posts:
+        ref = post['author'] + '/' + post['permlink']
+        out[ref] = post
+    return out
+
+def _load_posts_accounts(posts):
+    names = set(map(lambda p: p['author'], posts))
+    accounts = _load_accounts(names)
+    return {a['name']: a for a in accounts}
 
 async def get_state(path: str):
     """`get_state` reimplementation.
 
     See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
     """
-    # pylint: disable=too-many-locals, too-many-branches, too-many-statements
-    if path[0] == '/':
-        path = path[1:]
-    if not path:
-        path = 'trending'
-    part = path.split('/')
-    if len(part) > 3:
-        raise Exception("invalid path %s" % path)
-    while len(part) < 3:
-        part.append('')
+    (path, part) = _normalize_path(path)
 
     state = {
         'feed_price': _get_feed_price(),
@@ -287,37 +303,33 @@ async def get_state(path: str):
                   'password', 'settings']
 
         # steemd account 'tabs' - specific post list queries
-        keys = {'recent-replies': 'recent_replies',
+        tabs = {'recent-replies': 'recent_replies',
                 'comments': 'comments',
                 'feed': 'feed',
                 '': 'blog'}
 
         if part[1] not in ignore:
-            assert part[1] in keys, "invalid account path %s" % path
-            key = keys[part[1]]
+            assert part[1] in tabs, "invalid account path %s" % path
+            tab = tabs[part[1]]
 
-            if key == 'recent_replies':
+            if tab == 'recent_replies':
                 posts = await get_replies_by_last_update(account, '', 20)
-            elif key == 'comments':
+            elif tab == 'comments':
                 posts = await get_discussions_by_comments(account, '', 20)
-            elif key == 'blog':
+            elif tab == 'blog':
                 posts = await get_discussions_by_blog(account, '', '', 20)
-            elif key == 'feed':
+            elif tab == 'feed':
                 posts = await get_discussions_by_feed(account, '', '', 20)
 
-            state['accounts'][account][key] = []
-            for post in posts:
-                ref = post['author'] + '/' + post['permlink']
-                state['accounts'][account][key].append(ref)
-                state['content'][ref] = post
+            state['content'] = _keyed_posts(posts)
+            state['accounts'][account][tab] = state['content'].keys()
 
     # discussion thread
     elif part[1] and part[1][0] == '@':
         author = _validate_account(part[1][1:])
         permlink = _validate_permlink(part[2])
         state['content'] = _load_discussion_recursive(author, permlink)
-        accounts = set(map(lambda p: p['author'], state['content'].values()))
-        state['accounts'] = {a['name']: a for a in _load_accounts(accounts)}
+        state['accounts'] = _load_posts_accounts(state['content'].values())
 
     # trending/etc pages
     elif part[0] in ['trending', 'promoted', 'hot', 'created']:
@@ -325,19 +337,14 @@ async def get_state(path: str):
         sort = _validate_sort(part[0])
         tag = _validate_tag(part[1].lower(), allow_empty=True)
         posts = _get_posts(cursor.pids_by_query(sort, '', '', 20, tag))
-        state['discussion_idx'][tag] = {sort: []}
-        for post in posts:
-            ref = post['author'] + '/' + post['permlink']
-            state['content'][ref] = post
-            state['discussion_idx'][tag][sort].append(ref)
+        state['content'] = _keyed_posts(posts)
+        state['discussion_idx'][tag][sort] = state['content'].keys()
         state['tag_idx']['trending'] = await _get_top_trending_tags()
 
     # tag "explorer"
     elif part[0] == "tags":
         assert not part[1] and not part[2], 'invalid /tags path'
-        state['tag_idx']['trending'] = []
-        tags = await _get_trending_tags()
-        for tag in tags:
+        for tag in await _get_trending_tags():
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
@@ -484,10 +491,9 @@ def _validate_account(name, allow_empty=False):
     return name
 
 def _validate_permlink(permlink, allow_empty=False):
-    # pylint: disable=len-as-condition
     assert isinstance(permlink, str), "permlink must be string: %s" % permlink
     if not (allow_empty and permlink == ''):
-        assert len(permlink) > 0 and len(permlink) <= 256, "invalid permlink"
+        assert permlink and len(permlink) <= 256, "invalid permlink"
     return permlink
 
 def _validate_sort(sort, allow_empty=False):

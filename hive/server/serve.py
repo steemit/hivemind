@@ -13,7 +13,7 @@ from jsonrpcserver.async_methods import AsyncMethods
 
 from hive.conf import Conf
 
-from hive.server import condenser_api
+from hive.server.condenser_api import methods as condenser_api
 from hive.server import hive_api
 
 
