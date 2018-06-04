@@ -87,6 +87,8 @@ def pids_by_query(sort, start_author, start_permlink, limit, tag):
 
     `sort` can be trending, hot, new, promoted.
     """
+    assert sort in ['trending', 'hot', 'created', 'promoted']
+
     col = ''
     where = []
     if sort == 'trending':
@@ -100,8 +102,6 @@ def pids_by_query(sort, start_author, start_permlink, limit, tag):
         col = 'promoted'
         where.append("is_paidout = '0'")
         where.append('promoted > 0')
-    else:
-        raise Exception("unknown sort order {}".format(sort))
 
     if tag:
         tagged_pids = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
@@ -196,7 +196,12 @@ def pids_by_account_comments(account: str, start_permlink: str = '', limit: int 
 
 
 def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limit: int = 20):
-    """Get a list of post_ids representing replies to an author."""
+    """Get a list of post_ids representing replies to an author.
+
+    To get the first page of results, specify `start_author` as the
+    account being replied to. For successive pages, provide the
+    last loaded reply's author/permlink.
+    """
     seek = ''
     if start_permlink:
         sql = """
@@ -209,15 +214,10 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
              AND child.permlink = :permlink
         """
 
-        # //-- debug: query_row was None, let's monitor..
         row = query_row(sql, author=start_author, permlink=start_permlink)
         if not row:
-            print("[NOTICE] could not seek pids_by_replies from @%s/%s"
-                  % (start_author, start_permlink))
             return []
-        else:
-            account, start_date = row
-        # //--
+        account, start_date = row
 
         seek = "AND created_at <= '%s'" % start_date
     else:

@@ -2,48 +2,18 @@
 import time
 
 from decimal import Decimal
-from hive.db.methods import query_one, query_col, query_row, query_all
+from hive.db.methods import query_one, query_col, query_all
 from hive.db.db_state import DbState
 
 async def db_head_state():
+    """Status/health check."""
     return DbState.status()
-
-# follow methods
-# --------------
-
-async def get_followers(account: str, skip: int, limit: int):
-    account_id = _get_account_id(account)
-    sql = """
-      SELECT name FROM hive_follows hf
-        JOIN hive_accounts ON hf.follower = id
-       WHERE hf.following = :account_id AND state = 1
-    ORDER BY hf.created_at DESC LIMIT :limit OFFSET :skip
-    """
-    return query_col(sql, account_id=account_id, skip=skip, limit=limit)
-
-
-async def get_following(account: str, skip: int, limit: int):
-    account_id = _get_account_id(account)
-    sql = """
-      SELECT name FROM hive_follows hf
-        JOIN hive_accounts ON hf.following = id
-       WHERE hf.follower = :account_id AND state = 1
-    ORDER BY hf.created_at DESC LIMIT :limit OFFSET :skip
-    """
-    res = query_all(sql, account_id=account_id, skip=int(skip), limit=int(limit))
-    return [[r[0], str(r[1])] for r in res]
-
-
-async def get_follow_count(account: str):
-    sql = "SELECT name, following, followers FROM hive_accounts WHERE name = :n"
-    return dict(query_row(sql, n=account))
-
 
 # stats methods
 # -------------
 
-# all completed payouts
 async def payouts_total():
+    """Get total sum of all completed payouts."""
     # memoized historical sum. To update:
     #  SELECT SUM(payout) FROM hive_posts_cache
     #  WHERE is_paidout = 1 AND payout_at <= precalc_date
@@ -58,8 +28,8 @@ async def payouts_total():
 
     return float(precalc_sum + query_one(sql)) #TODO: decimal
 
-# sum of completed payouts last 24 hrs
 async def payouts_last_24h():
+    """Sum of completed payouts in the last 24 hours."""
     sql = """
       SELECT SUM(payout) FROM hive_posts_cache WHERE is_paidout = '1'
       AND payout_at > (NOW() AT TIME ZONE 'utc') - INTERVAL '24 HOUR'
@@ -70,72 +40,8 @@ async def payouts_last_24h():
 # discussion apis
 # ---------------
 
-# builds SQL query to pull a list of posts for any sort order or tag
-# sort can be: trending hot new promoted
-async def get_discussions_by_sort_and_tag(sort, tag, skip, limit, context=None):
-    if skip > 5000:
-        raise Exception("cannot skip {} results".format(skip))
-    if limit > 100:
-        raise Exception("cannot limit {} results".format(limit))
-
-    order = ''
-    where = []
-
-    if sort == 'trending':
-        order = 'sc_trend DESC'
-    elif sort == 'hot':
-        order = 'sc_hot DESC'
-    elif sort == 'new':
-        order = 'post_id DESC'
-        where.append('depth = 0')
-    elif sort == 'promoted':
-        order = 'promoted DESC'
-        where.append('is_paidout = 0')
-        where.append('promoted > 0')
-    else:
-        raise Exception("unknown sort order {}".format(sort))
-
-    if tag:
-        where.append('post_id IN (SELECT post_id FROM hive_post_tags WHERE tag = :tag)')
-
-    if where:
-        where = 'WHERE ' + ' AND '.join(where)
-    else:
-        where = ''
-
-    sql = "SELECT post_id FROM hive_posts_cache %s ORDER BY %s LIMIT :limit OFFSET :skip" % (where, order)
-    ids = query_col(sql, tag=tag, limit=limit, skip=skip)
-    return _get_posts(ids, context)
-
-
-# returns "homepage" feed for specified account
-async def get_user_feed(account: str, skip: int, limit: int, context: str = None):
-    account_id = _get_account_id(account)
-    sql = """
-      SELECT post_id, string_agg(name, ',') accounts
-        FROM hive_feed_cache
-        JOIN hive_follows ON account_id = hive_follows.following AND state = 1
-        JOIN hive_accounts ON hive_follows.following = hive_accounts.id
-       WHERE hive_follows.follower = :account
-    GROUP BY post_id
-    ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit OFFSET :skip
-    """
-    res = query_all(sql, account=account_id, skip=skip, limit=limit)
-    posts = _get_posts([r[0] for r in res], context)
-
-    # Merge reblogged_by data into result set
-    accts = dict(res)
-    for post in posts:
-        rby = set(accts[post['post_id']].split(','))
-        rby.discard(post['author'])
-        if rby:
-            post['reblogged_by'] = list(rby)
-
-    return posts
-
-
-# returns a blog feed (posts and reblogs from the specified account)
 async def get_blog_feed(account: str, skip: int, limit: int, context: str = None):
+    """Get a blog feed (posts and reblogs from the specified account)"""
     account_id = _get_account_id(account)
     sql = ("SELECT post_id FROM hive_feed_cache WHERE account_id = :account_id "
            "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
@@ -144,6 +50,10 @@ async def get_blog_feed(account: str, skip: int, limit: int, context: str = None
 
 
 async def get_related_posts(account: str, permlink: str):
+    """Get related trending posts.
+
+    Based on the provided post's primary tag."""
+
     sql = """
       SELECT p2.id
         FROM hive_posts p1
@@ -160,10 +70,8 @@ async def get_related_posts(account: str, permlink: str):
 
 # ---
 
-
 def _get_account_id(name):
     return query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
-
 
 # given an array of post ids, returns full metadata in the same order
 def _get_posts(ids, context=None):
@@ -175,7 +83,9 @@ def _get_posts(ids, context=None):
 
     reblogged_ids = []
     if context:
-        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs WHERE account = :a AND post_id IN :ids", a=context, ids=tuple(ids))
+        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs "
+                                  "WHERE account = :a AND post_id IN :ids",
+                                  a=context, ids=tuple(ids))
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
