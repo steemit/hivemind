@@ -84,6 +84,14 @@ async def call(api, method, params):
 
     raise Exception("unknown method: {}.{}({})".format(api, method, params))
 
+
+# Follows Queries
+
+def _follow_type_to_int(follow_type: str):
+    """Convert steemd-style "follow type" into internal status (int)."""
+    assert follow_type in ['blog', 'ignore'], "invalid follow_type"
+    return 1 if follow_type == 'blog' else 2
+
 def _legacy_follower(follower, following, follow_type):
     return dict(follower=follower, following=following, what=[follow_type])
 
@@ -322,7 +330,7 @@ async def get_state(path: str):
                 posts = await get_discussions_by_feed(account, '', '', 20)
 
             state['content'] = _keyed_posts(posts)
-            state['accounts'][account][tab] = state['content'].keys()
+            state['accounts'][account][tab] = list(state['content'].keys())
 
     # discussion thread
     elif part[1] and part[1][0] == '@':
@@ -337,7 +345,7 @@ async def get_state(path: str):
         sort = _validate_sort(part[0])
         tag = _validate_tag(part[1].lower(), allow_empty=True)
         posts = _get_posts(cursor.pids_by_query(sort, '', '', 20, tag))
-        state['content'] = _keyed_posts(posts)
+        state['content'] = list(_keyed_posts(posts))
         state['discussion_idx'][tag][sort] = state['content'].keys()
         state['tag_idx']['trending'] = await _get_top_trending_tags()
 
@@ -515,11 +523,6 @@ def _validate_limit(limit, ubound=100):
     assert limit > 0, "limit must be positive"
     assert limit <= ubound, "limit exceeds max"
     return limit
-
-def _follow_type_to_int(follow_type: str):
-    """Convert steemd-style "follow type" into internal status (int)."""
-    assert follow_type in ['blog', 'ignore'], "invalid follow_type"
-    return 1 if follow_type == 'blog' else 2
 
 def _get_post_id(author, permlink):
     """Given an author/permlink, retrieve the id from db."""
