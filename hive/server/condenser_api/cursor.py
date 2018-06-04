@@ -2,29 +2,21 @@
 
 from hive.db.methods import query_one, query_col, query_row, query_all
 
-def get_post_id(author, permlink):
+def _get_post_id(author, permlink):
     """Get post_id from hive db."""
-    assert isinstance(author, str), "expected str for author: `%s`" % author
-    assert len(author) >= 3 and len(author) <= 16, "invalid author: `%s`" % author
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    _id = query_one(sql, a=author, p=permlink)
-    if not _id:
-        raise Exception("post not found: %s/%s" % (author, permlink))
-    return _id
+    return query_one(sql, a=author, p=permlink)
 
-def get_account_id(name):
+def _get_account_id(name):
     """Get account id from hive db."""
-    assert isinstance(name, str), "expected str for name: `%s`" % name
-    assert len(name) >= 3 and len(name) <= 16, "invalid name: `%s`" % name
     _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
-    if not _id:
-        raise Exception("invalid account `%s`" % name)
+    assert _id, "invalid account `%s`" % name
     return _id
 
 
 def get_followers(account: str, start: str, state: int, limit: int):
     """Get a list of accounts following a given account."""
-    account_id = get_account_id(account)
+    account_id = _get_account_id(account)
 
     seek = ''
     if start:
@@ -34,7 +26,7 @@ def get_followers(account: str, start: str, state: int, limit: int):
              WHERE following = :account_id
                AND follower = %d
                AND state = :state)
-        """ % get_account_id(start)
+        """ % _get_account_id(start)
 
     sql = """
         SELECT name FROM hive_follows hf
@@ -50,7 +42,7 @@ def get_followers(account: str, start: str, state: int, limit: int):
 
 def get_following(account: str, start: str, state: int, limit: int):
     """Get a list of accounts followed by a given account."""
-    account_id = get_account_id(account)
+    account_id = _get_account_id(account)
 
     seek = ''
     if start:
@@ -60,7 +52,7 @@ def get_following(account: str, start: str, state: int, limit: int):
              WHERE follower = :account_id
                AND following = %d
                AND state = :state)
-        """ % get_account_id(start)
+        """ % _get_account_id(start)
 
     sql = """
         SELECT name FROM hive_follows hf
@@ -112,7 +104,10 @@ def pids_by_query(sort, start_author, start_permlink, limit, tag):
 
     start_id = None
     if start_permlink:
-        start_id = get_post_id(start_author, start_permlink)
+        start_id = _get_post_id(start_author, start_permlink)
+        if not start_id:
+            return []
+
         sql = ("SELECT %s FROM hive_posts_cache %s ORDER BY %s DESC LIMIT 1"
                % (col, _where([*where, "post_id = :start_id"]), col))
         where.append("%s <= (%s)" % (col, sql))
@@ -126,17 +121,21 @@ def pids_by_query(sort, start_author, start_permlink, limit, tag):
 def pids_by_blog(account: str, start_author: str = '',
                  start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids for an author's blog."""
-    account_id = get_account_id(account)
+    account_id = _get_account_id(account)
 
     seek = ''
     if start_permlink:
+        start_id = _get_post_id(start_author, start_permlink)
+        if not start_id:
+            return []
+
         seek = """
           AND created_at <= (
             SELECT created_at
               FROM hive_feed_cache
              WHERE account_id = :account_id
                AND post_id = %d)
-        """ % get_post_id(start_author, start_permlink)
+        """ % start_id
 
     sql = """
         SELECT post_id
@@ -152,16 +151,20 @@ def pids_by_blog(account: str, start_author: str = '',
 def pids_by_feed_with_reblog(account: str, start_author: str = '',
                              start_permlink: str = '', limit: int = 20):
     """Get a list of [post_id, reblogged_by_str] for an account's feed."""
-    account_id = get_account_id(account)
+    account_id = _get_account_id(account)
 
     seek = ''
     if start_permlink:
+        start_id = _get_post_id(start_author, start_permlink)
+        if not start_id:
+            return []
+
         seek = """
           HAVING MIN(hive_feed_cache.created_at) <= (
             SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = %d
                AND account_id IN (SELECT following FROM hive_follows
                                   WHERE follower = :account AND state = 1))
-        """ % get_post_id(start_author, start_permlink)
+        """ % start_id
 
     sql = """
         SELECT post_id, string_agg(name, ',') accounts
@@ -180,9 +183,13 @@ def pids_by_account_comments(account: str, start_permlink: str = '', limit: int 
     """Get a list of post_ids representing comments by an author."""
     seek = ''
     if start_permlink:
+        start_id = _get_post_id(account, start_permlink)
+        if not start_id:
+            return []
+
         seek = """
           AND created_at <= (SELECT created_at FROM hive_posts WHERE id = %d)
-        """ % get_post_id(account, start_permlink)
+        """ % start_id
 
     sql = """
         SELECT id FROM hive_posts
@@ -217,11 +224,11 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
         row = query_row(sql, author=start_author, permlink=start_permlink)
         if not row:
             return []
-        account, start_date = row
 
-        seek = "AND created_at <= '%s'" % start_date
+        parent_account = row[0]
+        seek = "AND created_at <= '%s'" % row[1]
     else:
-        account = start_author
+        parent_account = start_author
 
     sql = """
        SELECT id FROM hive_posts
@@ -230,4 +237,4 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
         LIMIT :limit
     """ % seek
 
-    return query_col(sql, parent=account, limit=limit)
+    return query_col(sql, parent=parent_account, limit=limit)
