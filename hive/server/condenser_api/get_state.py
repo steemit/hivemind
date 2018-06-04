@@ -92,8 +92,8 @@ async def get_state(path: str):
         tag = valid_tag(part[1].lower(), allow_empty=True)
         posts = load_posts(cursor.pids_by_query(sort, '', '', 20, tag))
         state['content'] = _keyed_posts(posts)
-        state['discussion_idx'][tag][sort] = list(state['content'].keys())
-        state['tag_idx']['trending'] = await _get_top_trending_tags()
+        state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
+        state['tag_idx'] = {'trending': await _get_top_trending_tags()}
 
     # tag "explorer"
     elif part[0] == "tags":
