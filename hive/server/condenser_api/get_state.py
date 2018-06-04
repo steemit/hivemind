@@ -6,7 +6,7 @@ import collections
 from aiocache import cached
 
 from hive.db.methods import query_one, query_col, query_all
-from hive.utils.normalize import parse_amount
+from hive.utils.normalize import legacy_amount
 
 from hive.server.condenser_api.objects import (
     load_accounts,
@@ -16,7 +16,8 @@ from hive.server.condenser_api.common import (
     valid_permlink,
     valid_sort,
     valid_tag,
-    get_post_id)
+    get_post_id,
+    get_child_ids)
 from hive.server.condenser_api.methods import (
     get_replies_by_last_update,
     get_discussions_by_comments,
@@ -24,30 +25,6 @@ from hive.server.condenser_api.methods import (
     get_discussions_by_feed)
 
 import hive.server.condenser_api.cursor as cursor
-
-def _normalize_path(path):
-    if path[0] == '/':
-        path = path[1:]
-    if not path:
-        path = 'trending'
-    parts = path.split('/')
-    if len(parts) > 3:
-        raise Exception("invalid path %s" % path)
-    while len(parts) < 3:
-        parts.append('')
-    return (path, parts)
-
-def _keyed_posts(posts):
-    out = collections.OrderedDict()
-    for post in posts:
-        ref = post['author'] + '/' + post['permlink']
-        out[ref] = post
-    return out
-
-def _load_posts_accounts(posts):
-    names = set(map(lambda p: p['author'], posts))
-    accounts = load_accounts(names)
-    return {a['name']: a for a in accounts}
 
 async def get_state(path: str):
     """`get_state` reimplementation.
@@ -104,8 +81,9 @@ async def get_state(path: str):
     elif part[1] and part[1][0] == '@':
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
-        state['content'] = _load_discussion_recursive(author, permlink)
-        state['accounts'] = _load_posts_accounts(state['content'].values())
+        post_id = get_post_id(author, permlink)
+        state['content'] = _load_posts_recursive([post_id]) if post_id else {}
+        state['accounts'] = _load_content_accounts(state['content'])
 
     # trending/etc pages
     elif part[0] in ['trending', 'promoted', 'hot', 'created']:
@@ -133,7 +111,6 @@ async def get_state(path: str):
         raise Exception('unknown path %s' % path)
 
     return state
-
 
 
 @cached(ttl=3600)
@@ -169,16 +146,54 @@ async def _get_trending_tags():
 
     return out
 
+def _normalize_path(path):
+    if path[0] == '/':
+        path = path[1:]
+    if not path:
+        path = 'trending'
+    parts = path.split('/')
+    if len(parts) > 3:
+        raise Exception("invalid path %s" % path)
+    while len(parts) < 3:
+        parts.append('')
+    return (path, parts)
 
-def _legacy_amount(value):
-    """Return a steem-style amount string given a (numeric, asset-str)."""
-    if isinstance(value, str):
-        return value # already legacy
-    amount, asset = parse_amount(value)
-    prec = {'SBD': 3, 'STEEM': 3, 'VESTS': 6}[asset]
-    tmpl = ("%%.%df %%s" % prec)
-    return tmpl % (amount, asset)
+def _keyed_posts(posts):
+    out = collections.OrderedDict()
+    for post in posts:
+        ref = post['author'] + '/' + post['permlink']
+        out[ref] = post
+    return out
 
+def _load_content_accounts(content):
+    if not content:
+        return {}
+    posts = content.values()
+    names = set(map(lambda p: p['author'], posts))
+    accounts = load_accounts(names)
+    return {a['name']: a for a in accounts}
+
+def _load_posts_recursive(post_ids):
+    """Recursively load a discussion thread."""
+    out = {}
+    if post_ids:
+        posts = load_posts(post_ids)
+        for post, post_id in zip(posts, post_ids):
+            ref = post['author'] + '/' + post['permlink']
+            out[ref] = post
+
+            child_ids = get_child_ids(post_id)
+            if child_ids:
+                children = _load_posts_recursive(child_ids)
+                post['replies'] = list(children.keys())
+                out = {**out, **children}
+
+    return out
+
+def _get_feed_price():
+    """Get a steemd-style ratio object representing feed price."""
+    price = query_one("SELECT usd_per_steem FROM hive_state")
+    return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
 
 def _get_props_lite():
     """Return a minimal version of get_dynamic_global_properties data."""
@@ -190,7 +205,7 @@ def _get_props_lite():
             'total_vesting_fund_steem', 'total_vesting_shares']
     for k in nais:
         if k in raw:
-            raw[k] = _legacy_amount(raw[k])
+            raw[k] = legacy_amount(raw[k])
 
     return dict(
         time=raw['time'], #*
@@ -201,30 +216,3 @@ def _get_props_lite():
         total_vesting_fund_steem=raw['total_vesting_fund_steem'],
         last_irreversible_block_num=raw['last_irreversible_block_num'], #*
     )
-
-def _get_feed_price():
-    """Get a steemd-style ratio object representing feed price."""
-    price = query_one("SELECT usd_per_steem FROM hive_state")
-    return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
-
-def _load_discussion_recursive(author, permlink):
-    """`get_state`-compatible recursive thread loader."""
-    post_id = get_post_id(author, permlink)
-    return _load_posts_recursive([post_id]) if post_id else {}
-
-def _load_posts_recursive(post_ids):
-    """Recursive post loader used by `_load_discussion_recursive`."""
-    posts = load_posts(post_ids)
-
-    out = {}
-    for post, post_id in zip(posts, post_ids):
-        out[post['author'] + '/' + post['permlink']] = post
-
-        child_ids = query_col("SELECT id FROM hive_posts WHERE parent_id = %d "
-                              "AND is_deleted = '0'" % post_id)
-        if child_ids:
-            children = _load_posts_recursive(child_ids)
-            post['replies'] = list(children.keys())
-            out = {**out, **children}
-
-    return out

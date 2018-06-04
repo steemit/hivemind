@@ -53,6 +53,15 @@ def amount(string):
     """Parse a steemd asset-amount as a Decimal(). Discard asset type."""
     return parse_amount(string)[0]
 
+def legacy_amount(value):
+    """Get a pre-appbase-style amount string given a (numeric, asset-str)."""
+    if isinstance(value, str):
+        return value # already legacy
+    amt, asset = parse_amount(value)
+    prec = {'SBD': 3, 'STEEM': 3, 'VESTS': 6}[asset]
+    tmpl = ("%%.%df %%s" % prec)
+    return tmpl % (amt, asset)
+
 def parse_time(block_time):
     """Convert chain date into datetime object."""
     return datetime.strptime(block_time, '%Y-%m-%dT%H:%M:%S')

@@ -2,10 +2,9 @@
 
 from functools import wraps
 
-from hive.db.methods import query_col
 from hive.server.condenser_api.objects import load_posts
 from hive.server.condenser_api.common import (
-    valid_account, valid_permlink, valid_tag, valid_limit, get_post_id)
+    valid_account, valid_permlink, valid_tag, valid_limit, get_post_id, get_child_ids)
 import hive.server.condenser_api.cursor as cursor
 
 
@@ -61,14 +60,12 @@ async def get_content_replies(parent: str, parent_permlink: str):
     """Get a list of post objects based on parent."""
     valid_account(parent)
     valid_permlink(parent_permlink)
-    post_id = get_post_id(parent, parent_permlink)
-    if not post_id:
-        return []
-    post_ids = query_col("SELECT id FROM hive_posts WHERE "
-                         "parent_id = %d AND is_deleted = '0'" % post_id)
-    if not post_ids:
-        return []
-    return load_posts(post_ids)
+    parent_id = get_post_id(parent, parent_permlink)
+    if parent_id:
+        child_ids = get_child_ids(parent_id)
+        if child_ids:
+            return load_posts(child_ids)
+    return []
 
 
 # Discussion Queries

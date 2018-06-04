@@ -2,7 +2,7 @@
 
 import re
 
-from hive.db.methods import query_row
+from hive.db.methods import query_one, query_col
 
 def valid_account(name, allow_empty=False):
     """Returns validated account name or throws Assert."""
@@ -42,13 +42,11 @@ def valid_limit(limit, ubound=100):
 
 def get_post_id(author, permlink):
     """Given an author/permlink, retrieve the id from db."""
-    sql = "SELECT id, is_deleted FROM hive_posts WHERE author = :a AND permlink = :p"
-    row = query_row(sql, a=author, p=permlink)
-    if not row:
-        print("_get_post_id - post not found: %s/%s" % (author, permlink))
-        return None
-    _id, deleted = row
-    if deleted:
-        print("_get_post_id - post was deleted %s/%s" % (author, permlink))
-        return None
-    return _id
+    sql = ("SELECT id FROM hive_posts WHERE author = :a "
+           "AND permlink = :p AND is_deleted = '0' LIMIT 1")
+    return query_one(sql, a=author, p=permlink)
+
+def get_child_ids(post_id):
+    """Given a parent post id, retrieve all child ids."""
+    sql = "SELECT id FROM hive_posts WHERE parent_id = %d AND is_deleted = '0'"
+    return query_col(sql % post_id)
