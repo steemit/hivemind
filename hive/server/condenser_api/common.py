@@ -30,7 +30,7 @@ def valid_tag(tag, allow_empty=False):
     """Returns validated tag or throws Assert."""
     assert isinstance(tag, str), 'tag must be a string'
     if not (allow_empty and tag == ''):
-        assert re.match('^[a-z0-9-]+$', str), 'invalid tag'
+        assert re.match('^[a-z0-9-]+$', tag), 'invalid tag'
     return tag
 
 def valid_limit(limit, ubound=100):
