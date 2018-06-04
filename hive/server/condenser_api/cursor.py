@@ -195,6 +195,7 @@ def pids_by_account_comments(account: str, start_permlink: str = '', limit: int 
         SELECT id FROM hive_posts
          WHERE author = :account %s
            AND depth > 0
+           AND is_deleted = '0'
       ORDER BY created_at DESC
          LIMIT :limit
     """ % seek
@@ -233,6 +234,7 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
     sql = """
        SELECT id FROM hive_posts
         WHERE parent_id IN (SELECT id FROM hive_posts WHERE author = :parent) %s
+          AND is_deleted = '0'
      ORDER BY created_at DESC
         LIMIT :limit
     """ % seek

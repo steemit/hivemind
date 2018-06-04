@@ -3,7 +3,7 @@
 import json
 import inspect
 
-from hive.db.methods import query_all
+from hive.db.methods import query_all, query_row
 
 # Building of legacy account objects
 
@@ -42,6 +42,9 @@ def load_posts(ids, truncate_body=0):
     if missed:
         print("WARNING: get_posts do not exist in cache: {}".format(missed))
         for _id in missed:
+            sql = ("SELECT id, author, permlink, depth, created_at, is_deleted "
+                   "FROM hive_posts WHERE id = :id")
+            print("missing: {}".format(dict(query_row(sql, id=_id))))
             ids.remove(_id)
 
     return [posts_by_id[_id] for _id in ids]
