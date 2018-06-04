@@ -14,11 +14,13 @@ from jsonrpcserver.async_methods import AsyncMethods
 from hive.conf import Conf
 
 from hive.server.condenser_api import methods as condenser_api
+from hive.server.condenser_api.get_state import get_state as condenser_api_get_state
+from hive.server.condenser_api.call import call as condenser_api_call
 from hive.server import hive_api
 
 
 def build_methods():
-    """Register all supported hive_api/condenser_api calls."""
+    """Register all supported hive_api/condenser_api.calls."""
     # pylint: disable=expression-not-assigned
     methods = AsyncMethods()
 
@@ -42,7 +44,7 @@ def build_methods():
         condenser_api.get_follow_count,
         condenser_api.get_content,
         condenser_api.get_content_replies,
-        condenser_api.get_state,
+        condenser_api_get_state,
         condenser_api.get_discussions_by_trending,
         condenser_api.get_discussions_by_hot,
         condenser_api.get_discussions_by_promoted,
@@ -53,7 +55,7 @@ def build_methods():
         condenser_api.get_replies_by_last_update,
     )]
 
-    methods.add(condenser_api.call)
+    methods.add(condenser_api_call)
 
     return methods
 
