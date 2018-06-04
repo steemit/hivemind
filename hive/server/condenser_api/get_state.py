@@ -49,7 +49,7 @@ async def get_state(path: str):
         assert not part[2], 'unexpected account path[2] %s' % path
 
         account = valid_account(part[0][1:])
-        state['accounts'][account] = load_accounts([account])[0]
+        state['accounts'][account] = _load_account(account)
 
         # dummy paths used by condenser - just need account object
         ignore = ['followed', 'followers', 'permissions',
@@ -172,6 +172,16 @@ def _load_content_accounts(content):
     names = set(map(lambda p: p['author'], posts))
     accounts = load_accounts(names)
     return {a['name']: a for a in accounts}
+
+def _load_account(name):
+    #account = load_accounts([name])[0]
+    #for key in ['recent_replies', 'comments', 'feed', 'blog']:
+    #    account[key] = []
+    # need to audit all assumed condenser keys..
+    from hive.steem.steem_client import SteemClient
+    account = SteemClient.instance().get_accounts([name])[0]
+    return account
+
 
 def _load_posts_recursive(post_ids):
     """Recursively load a discussion thread."""
