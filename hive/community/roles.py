@@ -52,6 +52,7 @@ def is_permitted(account: str, community: str, action: str) -> bool:
 
 
 def get_user_role(account: str, community: str) -> str:
+    """Get user role within a specific community."""
     if account == community:
         return 'owner'
 
@@ -76,6 +77,7 @@ def get_user_role(account: str, community: str) -> str:
 
 
 def get_community_privacy(community: str) -> str:
+    """Load community privacy level"""
     type_id = query_one('SELECT type_id from hive_communities WHERE name = "%s"' % community)
     return PRIVACY_MAP.get(type_id)
 

@@ -15,6 +15,7 @@ class SteemClient:
 
     @classmethod
     def instance(cls):
+        """Get a singleton, lazily initialized"""
         if not cls._instance:
             cls._instance = SteemClient(
                 url=Conf.get('steemd_url'),
@@ -35,13 +36,16 @@ class SteemClient:
               % (url, max_batch, max_workers))
 
     def get_accounts(self, accounts):
+        """Fetch multiple accounts by name."""
         assert accounts, "no accounts passed to get_accounts"
+        assert len(accounts) <= 1000, "max 1000 accounts"
         ret = self.__exec('get_accounts', [accounts])
         assert len(accounts) == len(ret), ("requested %d accounts got %d"
                                            % (len(accounts), len(ret)))
         return ret
 
     def get_content_batch(self, tuples):
+        """Fetch multiple comment objects."""
         posts = self.__exec_batch('get_content', tuples)
         # TODO: how are we ensuring sequential results? need to set and sort id.
         for post in posts: # sanity-checking jussi responses
@@ -141,12 +145,15 @@ class SteemClient:
         return ret
 
     def head_time(self):
+        """Get timestamp of head block"""
         return self._gdgp()['time']
 
     def head_block(self):
+        """Get head block number"""
         return self._gdgp()['head_block_number']
 
     def last_irreversible(self):
+        """Get last irreversible block"""
         return self._gdgp()['last_irreversible_block_num']
 
     def gdgp_extended(self):

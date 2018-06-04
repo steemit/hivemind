@@ -3,6 +3,8 @@
 import atexit
 from hive.utils.system import colorize, peak_usage_mb
 
+# pylint: disable=missing-docstring
+
 class ClientStats:
     """Collects steemd API timing data."""
 

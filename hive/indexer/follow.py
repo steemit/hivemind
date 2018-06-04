@@ -11,6 +11,7 @@ FOLLOWERS = 'followers'
 FOLLOWING = 'following'
 
 class Follow:
+    """Handles processing of incoming follow ups and flushing to db."""
 
     @classmethod
     def follow_op(cls, account, op_json, date):

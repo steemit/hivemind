@@ -5,6 +5,8 @@ import re
 import atexit
 from hive.utils.system import colorize, peak_usage_mb
 
+# pylint: disable=missing-docstring
+
 class QueryStats:
     SLOW_QUERY_MS = 250
 
