@@ -1,8 +1,8 @@
 """Routes then builds a get_state response object"""
 
 import json
-import collections
 
+from collections import OrderedDict
 from aiocache import cached
 
 from hive.db.methods import query_one, query_col, query_all
@@ -121,11 +121,11 @@ async def get_state(path: str):
             state['tags'][tag['name']] = tag
 
     elif part[0] == 'witnesses' or part[0] == '~witnesses':
-        assert not path[1] and not path[2]
+        assert not part[1] and not part[2]
         raise Exception("not implemented: /%s" % path)
 
     elif part[0] in CONDENSER_NOOP_URLS:
-        assert not path[1] and not path[2]
+        assert not part[1] and not part[2]
 
     else:
         print('unhandled path /%s' % path)
@@ -179,11 +179,13 @@ def _normalize_path(path):
     return (path, parts)
 
 def _keyed_posts(posts):
-    out = collections.OrderedDict()
+    out = OrderedDict()
     for post in posts:
-        ref = post['author'] + '/' + post['permlink']
-        out[ref] = post
+        out[_ref(post)] = post
     return out
+
+def _ref(post):
+    return post['author'] + '/' + post['permlink']
 
 def _load_content_accounts(content):
     if not content:
@@ -205,18 +207,17 @@ def _load_account(name):
 
 def _load_posts_recursive(post_ids):
     """Recursively load a discussion thread."""
-    out = {}
-    if post_ids:
-        posts = load_posts(post_ids)
-        for post, post_id in zip(posts, post_ids):
-            ref = post['author'] + '/' + post['permlink']
-            out[ref] = post
+    assert post_ids, 'no posts provided'
 
-            child_ids = get_child_ids(post_id)
-            if child_ids:
-                children = _load_posts_recursive(child_ids)
-                post['replies'] = list(children.keys())
-                out = {**out, **children}
+    out = {}
+    for post in load_posts(post_ids):
+        out[_ref(post)] = post
+
+        child_ids = get_child_ids(post['post_id'])
+        if child_ids:
+            children = _load_posts_recursive(child_ids)
+            post['replies'] = list(children.keys())
+            out = {**out, **children}
 
     return out
 
