@@ -9,6 +9,7 @@ from hive.indexer.posts import Posts
 # community methods
 # -----------------
 def process_json_community_op(account, op_json, date):
+    """Validates community op and apply state changes to db."""
     #pylint: disable=line-too-long
     cmd_name, cmd_op = op_json  # ['flagPost', {community: '', author: '', ...}]
 
@@ -123,4 +124,5 @@ def process_json_community_op(account, op_json, date):
     return True
 
 def is_community(name):
+    """Check if named community exists."""
     return bool(query_one("SELECT 1 FROM hive_communities WHERE name = :name", name=name))

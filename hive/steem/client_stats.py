@@ -77,6 +77,7 @@ class ClientStats:
 
     @classmethod
     def clear(cls):
+        """Reset accumulators"""
         cls.stats = {}
         cls.ttltime = 0
 

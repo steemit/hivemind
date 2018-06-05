@@ -73,7 +73,7 @@ class Timer:
         else:
             total_time = self._end_time - self._start_time
             out += "done in %s, avg rate: %.1f/s" % (
-                self._time(total_time),
+                Timer.secs_to_str(total_time),
                 self._total / total_time)
 
         return out
@@ -87,9 +87,10 @@ class Timer:
         """Time to finish, based on most recent batch."""
         left = self._full_total - self._processed
         secs = (left / self._rate())
-        return self._time(secs)
+        return Timer.secs_to_str(secs)
 
-    def _time(self, secs):
+    @staticmethod
+    def secs_to_str(secs):
         """Given number of seconds returns, e.g., `02h 29m 39s`"""
         units = (('s', 60), ('m', 60), ('h', 24), ('d', 7))
         out = []

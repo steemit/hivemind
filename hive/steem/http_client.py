@@ -100,7 +100,7 @@ def _rpc_body(method, args, _id=0):
     return dict(jsonrpc="2.0", id=_id, method=method, params=args)
 
 class HttpClient(object):
-    """ Simple Steem JSON-HTTP-RPC API """
+    """Simple Steem JSON-HTTP-RPC API"""
 
     METHOD_API = dict(
         get_block='block_api',
@@ -157,24 +157,19 @@ class HttpClient(object):
         logger.setLevel(log_level)
 
     def next_node(self):
-        """ Switch to the next available node.
-
-        This method will change base URL of our requests.
-        Use it when the current node goes down to change to a fallback node. """
+        """Switch to the next available node."""
         self.set_node(next(self.nodes))
 
     def set_node(self, node_url):
-        """ Change current node to provided node URL. """
-        if self.url == node_url:
-            return
-        logger.info("HttpClient using node: %s", node_url)
-        self.url = node_url
-        self.request = partial(self.http.urlopen, 'POST', self.url)
+        """Change current node to provided node URL."""
+        if not self.url == node_url:
+            logger.info("HttpClient using node: %s", node_url)
+            self.url = node_url
+            self.request = partial(self.http.urlopen, 'POST', self.url)
 
     def rpc_body(self, method, args, is_batch=False):
-        """ Build JSON request body for steemd RPC requests."""
-        api = self.METHOD_API[method]
-        fqm = api + '.' + method
+        """Build JSON request body for steemd RPC requests."""
+        fqm = self.METHOD_API[method] + '.' + method
 
         if not is_batch:
             body = _rpc_body(fqm, args, -1)
@@ -184,14 +179,11 @@ class HttpClient(object):
         return json.dumps(body, ensure_ascii=False).encode('utf8')
 
     def exec(self, method, args, is_batch=False):
-        """ Execute a method against steemd RPC.
-
-            Warning: Auto-retry on failure, including broadcasting a tx.
-        """
+        """Execute a steemd RPC method, retrying on failure."""
         body = self.rpc_body(method, args, is_batch)
 
         tries = 0
-        while tries < 50:
+        while tries < 100:
             tries += 1
             try:
                 response = self.request(body=body)
@@ -224,9 +216,8 @@ class HttpClient(object):
             except (AssertionError, RPCErrorFatal) as e:
                 raise e
 
-            except (MaxRetryError, ConnectionResetError, ReadTimeoutError,
-                    RemoteDisconnected, ProtocolError, RPCError,
-                    HTTPError) as e:
+            except (RemoteDisconnected, ConnectionResetError, ReadTimeoutError,
+                    MaxRetryError, ProtocolError, RPCError, HTTPError) as e:
                 logging.error("%s failed, try %d. %s", method, tries, repr(e))
 
             except json.decoder.JSONDecodeError as e:
