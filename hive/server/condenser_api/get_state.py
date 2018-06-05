@@ -26,6 +26,34 @@ from hive.server.condenser_api.methods import (
 
 import hive.server.condenser_api.cursor as cursor
 
+# steemd account 'tabs' - specific post list queries
+ACCOUNT_TAB_KEYS = {
+    '': 'blog',
+    'feed': 'feed',
+    'comments': 'comments',
+    'recent-replies': 'recent_replies'}
+
+# dummy account paths used by condenser - just need account object
+ACCOUNT_TAB_IGNORE = [
+    'followed',
+    'followers',
+    'permissions',
+    'password',
+    'settings']
+
+# misc dummy paths used by condenser - send minimal get_state structure
+CONDENSER_NOOP_URLS = [
+    'recover_account_step_1',
+    'submit.html',
+    'market',
+    'change_password',
+    'login.html',
+    'welcome',
+    'change_password',
+    'tos.html',
+    'privacy.html',
+]
+
 async def get_state(path: str):
     """`get_state` reimplementation.
 
@@ -42,7 +70,7 @@ async def get_state(path: str):
         'tag_idx': {'trending': []},
         'discussion_idx': {"": {}}}
 
-    # account tabs (feed, blog, comments, replies)
+    # account - `/@account/tab` (feed, blog, comments, replies)
     if part[0] and part[0][0] == '@':
         assert not part[1] == 'transfers', 'transfers API not served here'
         assert not part[1] == 'blog', 'canonical blog route is `/@account`'
@@ -51,33 +79,23 @@ async def get_state(path: str):
         account = valid_account(part[0][1:])
         state['accounts'][account] = _load_account(account)
 
-        # dummy paths used by condenser - just need account object
-        ignore = ['followed', 'followers', 'permissions',
-                  'password', 'settings']
+        if part[1] not in ACCOUNT_TAB_IGNORE:
+            assert part[1] in ACCOUNT_TAB_KEYS, "invalid acct path %s" % path
+            key = ACCOUNT_TAB_KEYS[part[1]]
 
-        # steemd account 'tabs' - specific post list queries
-        tabs = {'recent-replies': 'recent_replies',
-                'comments': 'comments',
-                'feed': 'feed',
-                '': 'blog'}
-
-        if part[1] not in ignore:
-            assert part[1] in tabs, "invalid account path %s" % path
-            tab = tabs[part[1]]
-
-            if tab == 'recent_replies':
+            if key == 'recent_replies':
                 posts = await get_replies_by_last_update(account, '', 20)
-            elif tab == 'comments':
+            elif key == 'comments':
                 posts = await get_discussions_by_comments(account, '', 20)
-            elif tab == 'blog':
+            elif key == 'blog':
                 posts = await get_discussions_by_blog(account, '', '', 20)
-            elif tab == 'feed':
+            elif key == 'feed':
                 posts = await get_discussions_by_feed(account, '', '', 20)
 
             state['content'] = _keyed_posts(posts)
-            state['accounts'][account][tab] = list(state['content'].keys())
+            state['accounts'][account][key] = list(state['content'].keys())
 
-    # discussion thread
+    # discussion - `/category/@account/permlink`
     elif part[1] and part[1][0] == '@':
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
@@ -85,7 +103,7 @@ async def get_state(path: str):
         state['content'] = _load_posts_recursive([post_id]) if post_id else {}
         state['accounts'] = _load_content_accounts(state['content'])
 
-    # trending/etc pages
+    # ranked posts - `/sort/category`
     elif part[0] in ['trending', 'promoted', 'hot', 'created']:
         assert not part[2], "unexpected discussion path part[2] %s" % path
         sort = valid_sort(part[0])
@@ -95,20 +113,22 @@ async def get_state(path: str):
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
         state['tag_idx'] = {'trending': await _get_top_trending_tags()}
 
-    # tag "explorer"
+    # tag "explorer" - `/tags`
     elif part[0] == "tags":
-        assert not part[1] and not part[2], 'invalid /tags path'
+        assert not part[1] and not part[2], 'invalid /tags request'
         for tag in await _get_trending_tags():
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
-    # witness list
     elif part[0] == 'witnesses' or part[0] == '~witnesses':
-        raise Exception("not implemented")
+        assert not path[1] and not path[2]
+        raise Exception("not implemented: /%s" % path)
 
-    # non-matching path
+    elif part[0] in CONDENSER_NOOP_URLS:
+        assert not path[1] and not path[2]
+
     else:
-        raise Exception('unknown path %s' % path)
+        print('unhandled path /%s' % path)
 
     return state
 
