@@ -180,6 +180,16 @@ class HttpClient(object):
 
         return json.dumps(body, ensure_ascii=False).encode('utf8')
 
+    def submit(self, body, method):
+        """Submit an RPC request"""
+        start = time.perf_counter()
+        response = self.request(body=body)
+        secs = time.perf_counter() - start
+        if secs > 5:
+            extra = {'jussi-id': response.headers.get('x-jussi-request-id')}
+            logger.warning('%s took %.1fs %s', method, secs, extra)
+        return response
+
     def exec(self, method, args, is_batch=False):
         """Execute a steemd RPC method, retrying on failure."""
         body = self.rpc_body(method, args, is_batch)
@@ -188,7 +198,7 @@ class HttpClient(object):
         while tries < 100:
             tries += 1
             try:
-                response = self.request(body=body)
+                response = self.submit(body, method)
                 if response.status != 200:
                     raise HTTPError(response.status, "non-200 response")
 
