@@ -177,7 +177,13 @@ class DbState:
 
         if cls._ver == 0:
             # first run!
-            cls._set_ver(1)
+            #cls._set_ver(1)
+            cls._set_ver(2)
+
+        if cls._ver == 1:
+            from hive.indexer.follow import Follow
+            Follow.force_recount()
+            cls._set_ver(2)
 
         # Example migration:
         #if cls._ver == 1:

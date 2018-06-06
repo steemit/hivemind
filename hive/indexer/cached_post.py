@@ -352,7 +352,10 @@ class CachedPost:
     @classmethod
     def _ensure_safe_gap(cls, last_id, next_id):
         """Paranoid check of important operating assumption."""
-        sql = "SELECT COUNT(*) FROM hive_posts WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'"
+        sql = """
+            SELECT COUNT(*) FROM hive_posts
+            WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'
+        """
         missing_posts = DB.query_one(sql, x1=(last_id + 1), x2=(next_id - 1))
         if not missing_posts:
             return

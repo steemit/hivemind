@@ -82,6 +82,7 @@ class Sync:
         # TODO: disable indexes during this process
         CachedPost.recover_missing_posts()
         FeedCache.rebuild()
+        Follow.force_recount()
 
 
     @classmethod

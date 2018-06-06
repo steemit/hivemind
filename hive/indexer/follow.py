@@ -140,3 +140,27 @@ class Follow:
              WHERE id IN :ids
         """
         query(sql, ids=tuple(ids))
+
+    @classmethod
+    def force_recount(cls):
+        """Recounts all follows after init sync."""
+        print("[SYNC] query follower counts")
+        sql = """
+            CREATE TEMPORARY TABLE following_counts AS (
+                SELECT follower account_id, COUNT(*) num
+                FROM hive_follows GROUP BY follower);
+            CREATE TEMPORARY TABLE follower_counts AS (
+                SELECT following account_id, COUNT(*) num
+                FROM hive_follows GROUP BY following);
+        """
+        query(sql)
+
+        print("[SYNC] update follower counts")
+        sql = """
+            UPDATE hive_accounts SET followers = num
+            FROM follower_counts WHERE id = account_id;
+
+            UPDATE hive_accounts SET following = num
+            FROM following_counts WHERE id = account_id;
+        """
+        query(sql)
