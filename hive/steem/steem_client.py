@@ -26,7 +26,7 @@ class SteemClient:
     def __init__(self, url, max_batch=500, max_workers=1):
         assert url, 'steem-API endpoint undefined'
         assert max_batch > 0 and max_batch <= 5000
-        assert max_workers > 0 and max_workers <= 500
+        assert max_workers > 0 and max_workers <= 32
 
         self._max_batch = max_batch
         self._max_workers = max_workers
@@ -221,12 +221,13 @@ class SteemClient:
         """Perform batch call. Based on config uses either batch or futures."""
         time_start = time.perf_counter()
 
-        if self._max_workers == 1:
-            result = list(self._client.exec_batch(
-                method, params, batch_size=self._max_batch))
-        else:
-            result = list(self._client.exec_multi_with_futures(
-                method, params, max_workers=self._max_workers))
+        result = []
+        for part in self._client.exec_multi(
+                method,
+                params,
+                max_workers=self._max_workers,
+                batch_size=self._max_batch):
+            result.extend(part)
 
         total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, len(params))
