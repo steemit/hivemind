@@ -15,6 +15,7 @@ class SteemClient:
 
     @classmethod
     def instance(cls):
+        """Get a singleton, lazily initialized"""
         if not cls._instance:
             cls._instance = SteemClient(
                 url=Conf.get('steemd_url'),
@@ -25,7 +26,7 @@ class SteemClient:
     def __init__(self, url, max_batch=500, max_workers=1):
         assert url, 'steem-API endpoint undefined'
         assert max_batch > 0 and max_batch <= 5000
-        assert max_workers > 0 and max_workers <= 500
+        assert max_workers > 0 and max_workers <= 32
 
         self._max_batch = max_batch
         self._max_workers = max_workers
@@ -35,13 +36,16 @@ class SteemClient:
               % (url, max_batch, max_workers))
 
     def get_accounts(self, accounts):
+        """Fetch multiple accounts by name."""
         assert accounts, "no accounts passed to get_accounts"
+        assert len(accounts) <= 1000, "max 1000 accounts"
         ret = self.__exec('get_accounts', [accounts])
         assert len(accounts) == len(ret), ("requested %d accounts got %d"
                                            % (len(accounts), len(ret)))
         return ret
 
     def get_content_batch(self, tuples):
+        """Fetch multiple comment objects."""
         posts = self.__exec_batch('get_content', tuples)
         # TODO: how are we ensuring sequential results? need to set and sort id.
         for post in posts: # sanity-checking jussi responses
@@ -64,7 +68,7 @@ class SteemClient:
                 'date': parse_time(block['timestamp']),
                 'hash': block['block_id']}
 
-    def stream_blocks(self, start_from, trail_blocks=0, max_gap=40):
+    def stream_blocks(self, start_from, trail_blocks=0, max_gap=100):
         """ETA-based block follower."""
         assert trail_blocks >= 0
         assert trail_blocks <= 100
@@ -86,9 +90,9 @@ class SteemClient:
                 next_expected += 3
 
                 # check we're not too far behind
-                gap = (head_num - last['num']) - trail_blocks
+                gap = (head_num - last['num'])
                 print("[LIVE] %d blocks behind..." % gap)
-                if gap > max_gap:
+                if max_gap and gap > max_gap:
                     print("[LIVE] gap too large: %d" % gap)
                     return # abort streaming; return to fast-sync
 
@@ -141,12 +145,15 @@ class SteemClient:
         return ret
 
     def head_time(self):
+        """Get timestamp of head block"""
         return self._gdgp()['time']
 
     def head_block(self):
+        """Get head block number"""
         return self._gdgp()['head_block_number']
 
     def last_irreversible(self):
+        """Get last irreversible block"""
         return self._gdgp()['last_irreversible_block_num']
 
     def gdgp_extended(self):
@@ -214,12 +221,13 @@ class SteemClient:
         """Perform batch call. Based on config uses either batch or futures."""
         time_start = time.perf_counter()
 
-        if self._max_workers == 1:
-            result = list(self._client.exec_batch(
-                method, params, batch_size=self._max_batch))
-        else:
-            result = list(self._client.exec_multi_with_futures(
-                method, params, max_workers=self._max_workers))
+        result = []
+        for part in self._client.exec_multi(
+                method,
+                params,
+                max_workers=self._max_workers,
+                batch_size=self._max_batch):
+            result.extend(part)
 
         total_time = (time.perf_counter() - time_start) * 1000
         ClientStats.log(method, total_time, len(params))

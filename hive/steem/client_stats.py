@@ -3,6 +3,8 @@
 import atexit
 from hive.utils.system import colorize, peak_usage_mb
 
+# pylint: disable=missing-docstring
+
 class ClientStats:
     """Collects steemd API timing data."""
 
@@ -75,6 +77,7 @@ class ClientStats:
 
     @classmethod
     def clear(cls):
+        """Reset accumulators"""
         cls.stats = {}
         cls.ttltime = 0
 

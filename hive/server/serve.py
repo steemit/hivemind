@@ -13,16 +13,21 @@ from jsonrpcserver.async_methods import AsyncMethods
 
 from hive.conf import Conf
 
-from hive.server import condenser_api
+from hive.server.condenser_api import methods as condenser_api
+from hive.server.condenser_api.get_state import get_state as condenser_api_get_state
+from hive.server.condenser_api.call import call as condenser_api_call
 from hive.server import hive_api
 
 
 def build_methods():
-    """Build a map of all supported hive_api/condenser_api calls."""
+    """Register all supported hive_api/condenser_api.calls."""
+    # pylint: disable=expression-not-assigned
     methods = AsyncMethods()
 
-    hive_methods = (
+    [methods.add(method) for method in (
         hive_api.db_head_state,
+        hive_api.payouts_total,
+        hive_api.payouts_last_24h,
         # --- disabled until #92
         #hive_api.get_followers,
         #hive_api.get_following,
@@ -31,19 +36,15 @@ def build_methods():
         #hive_api.get_blog_feed,
         #hive_api.get_discussions_by_sort_and_tag,
         #hive_api.get_related_posts,
-        # ---
-        hive_api.payouts_total,
-        hive_api.payouts_last_24h,
-    )
-    for method in hive_methods:
-        methods.add(method)
-        #methods.add(method, 'hive.' + method.__name__) #test jussi-ns w/o jussi
+    )]
 
-    condenser_methods = (
-        condenser_api.call,
+    [methods.add(method, 'condenser_api.' + method.__name__) for method in (
         condenser_api.get_followers,
         condenser_api.get_following,
         condenser_api.get_follow_count,
+        condenser_api.get_content,
+        condenser_api.get_content_replies,
+        condenser_api_get_state,
         condenser_api.get_discussions_by_trending,
         condenser_api.get_discussions_by_hot,
         condenser_api.get_discussions_by_promoted,
@@ -52,16 +53,9 @@ def build_methods():
         condenser_api.get_discussions_by_feed,
         condenser_api.get_discussions_by_comments,
         condenser_api.get_replies_by_last_update,
-        condenser_api.get_content,
-        condenser_api.get_content_replies,
-        condenser_api.get_state,
-    )
-    for method in condenser_methods:
-        # todo: unclear if appbase uses condenser_api.call vs call.condenser_api
-        methods.add(method, 'condenser_api.' + method.__name__)
+    )]
 
-        # todo: temporary non-appbase endpoint (remove once appbase is in prod)
-        methods.add(method, method.__name__)
+    methods.add(condenser_api_call)
 
     return methods
 
@@ -112,10 +106,13 @@ def run_server():
             if 'the database system is shutting down' in str(e):
                 logging.warning("could not get head state (db shutting down)")
                 return None
+            if 'terminating connection due to administrator command' in str(e):
+                logging.warning("could not get head state (admin terminated)")
+                return None
             raise e
 
     async def head_age(request):
-        """Get hive head block age in seconds. 500 if greater than 15s."""
+        """Get hive head block age in seconds. 500 status if age > 15s."""
         #pylint: disable=unused-argument
         healthy_age = 15 # hive is synced if head block within 15s
         state = await _head_state()
@@ -124,10 +121,10 @@ def run_server():
         return web.Response(status=status, text=str(curr_age))
 
     async def health(request):
-        """Get hive health data. 500 if behind by more than a few secs."""
+        """Get hive health data. 500 if behind by more than 3 blocks."""
         #pylint: disable=unused-argument
         is_syncer = Conf.get('sync_to_s3')
-        max_head_age = (Conf.get('trail_blocks') + 1) * 3
+        max_head_age = (Conf.get('trail_blocks') + 3) * 3
         state = await _head_state()
 
         if not state:
@@ -156,7 +153,8 @@ def run_server():
         """Handles all hive jsonrpc API requests."""
         request = await request.text()
         response = await methods.dispatch(request)
-        return web.json_response(response, status=200, headers={'Access-Control-Allow-Origin': '*'})
+        headers = {'Access-Control-Allow-Origin': '*'}
+        return web.json_response(response, status=200, headers=headers)
 
     app.router.add_get('/.well-known/healthcheck.json', health)
     app.router.add_get('/head_age', head_age)

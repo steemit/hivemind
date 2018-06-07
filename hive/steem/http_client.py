@@ -40,10 +40,12 @@ class RPCError(Exception):
 
         if 'data' not in error:
             name = 'error' # eg db_lock_error
-        elif 'name' not in error['data']:
-            name = 'error2' # eg jussi error
-        else:
+        elif 'name' in error['data']:
             name = error['data']['name']
+        elif 'error_id' in error['data']:
+            name = 'error [jussi:%s]' % error['data']['error_id']
+        else:
+            name = 'error [unspecified:%s]' % str(error)
 
         return "%s: `%s`" % (name, detail)
 
@@ -100,7 +102,7 @@ def _rpc_body(method, args, _id=0):
     return dict(jsonrpc="2.0", id=_id, method=method, params=args)
 
 class HttpClient(object):
-    """ Simple Steem JSON-HTTP-RPC API """
+    """Simple Steem JSON-HTTP-RPC API"""
 
     METHOD_API = dict(
         get_block='block_api',
@@ -109,7 +111,6 @@ class HttpClient(object):
         get_order_book='condenser_api',
         get_feed_history='condenser_api',
         get_dynamic_global_properties='database_api',
-        broadcast_transaction_synchronous='network_broadcast_api', # temporary; for testing condenser_api
     )
 
     def __init__(self, nodes, **kwargs):
@@ -158,24 +159,19 @@ class HttpClient(object):
         logger.setLevel(log_level)
 
     def next_node(self):
-        """ Switch to the next available node.
-
-        This method will change base URL of our requests.
-        Use it when the current node goes down to change to a fallback node. """
+        """Switch to the next available node."""
         self.set_node(next(self.nodes))
 
     def set_node(self, node_url):
-        """ Change current node to provided node URL. """
-        if self.url == node_url:
-            return
-        logger.info("HttpClient using node: %s", node_url)
-        self.url = node_url
-        self.request = partial(self.http.urlopen, 'POST', self.url)
+        """Change current node to provided node URL."""
+        if not self.url == node_url:
+            logger.info("HttpClient using node: %s", node_url)
+            self.url = node_url
+            self.request = partial(self.http.urlopen, 'POST', self.url)
 
     def rpc_body(self, method, args, is_batch=False):
-        """ Build JSON request body for steemd RPC requests."""
-        api = self.METHOD_API[method]
-        fqm = api + '.' + method
+        """Build JSON request body for steemd RPC requests."""
+        fqm = self.METHOD_API[method] + '.' + method
 
         if not is_batch:
             body = _rpc_body(fqm, args, -1)
@@ -184,18 +180,25 @@ class HttpClient(object):
 
         return json.dumps(body, ensure_ascii=False).encode('utf8')
 
-    def exec(self, method, args, is_batch=False):
-        """ Execute a method against steemd RPC.
+    def submit(self, body, method):
+        """Submit an RPC request"""
+        start = time.perf_counter()
+        response = self.request(body=body)
+        secs = time.perf_counter() - start
+        if secs > 5:
+            extra = {'jussi-id': response.headers.get('x-jussi-request-id')}
+            logger.warning('%s took %.1fs %s', method, secs, extra)
+        return response
 
-            Warning: Auto-retry on failure, including broadcasting a tx.
-        """
+    def exec(self, method, args, is_batch=False):
+        """Execute a steemd RPC method, retrying on failure."""
         body = self.rpc_body(method, args, is_batch)
 
         tries = 0
-        while tries < 50:
+        while tries < 100:
             tries += 1
             try:
-                response = self.request(body=body)
+                response = self.submit(body, method)
                 if response.status != 200:
                     raise HTTPError(response.status, "non-200 response")
 
@@ -225,9 +228,8 @@ class HttpClient(object):
             except (AssertionError, RPCErrorFatal) as e:
                 raise e
 
-            except (MaxRetryError, ConnectionResetError, ReadTimeoutError,
-                    RemoteDisconnected, ProtocolError, RPCError,
-                    HTTPError) as e:
+            except (RemoteDisconnected, ConnectionResetError, ReadTimeoutError,
+                    MaxRetryError, ProtocolError, RPCError, HTTPError) as e:
                 logging.error("%s failed, try %d. %s", method, tries, repr(e))
 
             except json.decoder.JSONDecodeError as e:
@@ -242,17 +244,10 @@ class HttpClient(object):
 
         raise Exception("abort %s after %d tries" % (method, tries))
 
-    def exec_multi_with_futures(self, name, params, max_workers=None):
-        """Process a batch as parallel signular requests."""
+    def exec_multi(self, name, params, max_workers, batch_size):
+        """Process a batch as parallel requests."""
+        chunks = [[name, args, True] for args in chunkify(params, batch_size)]
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=max_workers) as executor:
-            futures = (executor.submit(self.exec, name, args)
-                       for args in params)
-            for future in concurrent.futures.as_completed(futures):
-                yield future.result()
-
-    def exec_batch(self, name, params, batch_size):
-        """Chunkify batch requests and return them in order"""
-        for batch_params in chunkify(params, batch_size):
-            for item in self.exec(name, batch_params, is_batch=True):
-                yield item
+            for items in executor.map(lambda tup: self.exec(*tup), chunks):
+                yield list(items) # (use of `map` preserves request order)
