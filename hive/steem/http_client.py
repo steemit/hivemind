@@ -43,7 +43,11 @@ class RPCError(Exception):
         elif 'name' in error['data']:
             name = error['data']['name']
         elif 'error_id' in error['data']:
-            name = 'error [jussi:%s]' % error['data']['error_id']
+            if 'exception' in error['data']:
+                etype = error['data']['exception']
+            else:
+                etype = 'error'
+            name = '%s [jussi:%s]' % (etype, error['data']['error_id'])
         else:
             name = 'error [unspecified:%s]' % str(error)
 
@@ -74,6 +78,10 @@ class RPCError(Exception):
         #    'request': {'amzn_trace_id': 'Root=1-5ad4cb9f-...',
         #      'jussi_request_id': None}}}
         if message == 'Internal Error' and code == -32603:
+            return True
+
+        # jussi error (e.g. Timeout)
+        if message == 'Bad or missing upstream response' and code == 1100:
             return True
 
         return False
