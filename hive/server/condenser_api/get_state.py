@@ -1,11 +1,11 @@
 """Routes then builds a get_state response object"""
 
+#pylint: disable=line-too-long
 import json
 
 from collections import OrderedDict
-from aiocache import cached
 
-from hive.db.methods import query_one, query_col, query_all
+from hive.db.methods import query_one
 from hive.utils.normalize import legacy_amount
 
 from hive.server.condenser_api.objects import (
@@ -23,6 +23,9 @@ from hive.server.condenser_api.methods import (
     get_discussions_by_comments,
     get_discussions_by_blog,
     get_discussions_by_feed)
+from hive.server.condenser_api.tags import (
+    get_trending_tags,
+    get_top_trending_tags_summary)
 
 import hive.server.condenser_api.cursor as cursor
 
@@ -82,16 +85,7 @@ async def get_state(path: str):
         if part[1] not in ACCOUNT_TAB_IGNORE:
             assert part[1] in ACCOUNT_TAB_KEYS, "invalid acct path %s" % path
             key = ACCOUNT_TAB_KEYS[part[1]]
-
-            if key == 'recent_replies':
-                posts = await get_replies_by_last_update(account, '', 20)
-            elif key == 'comments':
-                posts = await get_discussions_by_comments(account, '', 20)
-            elif key == 'blog':
-                posts = await get_discussions_by_blog(account, '', '', 20)
-            elif key == 'feed':
-                posts = await get_discussions_by_feed(account, '', '', 20)
-
+            posts = await _get_account_discussion_by_key(account, key)
             state['content'] = _keyed_posts(posts)
             state['accounts'][account][key] = list(state['content'].keys())
 
@@ -111,12 +105,12 @@ async def get_state(path: str):
         posts = load_posts(cursor.pids_by_query(sort, '', '', 20, tag))
         state['content'] = _keyed_posts(posts)
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-        state['tag_idx'] = {'trending': await _get_top_trending_tags()}
+        state['tag_idx'] = {'trending': await get_top_trending_tags_summary()}
 
     # tag "explorer" - `/tags`
     elif part[0] == "tags":
         assert not part[1] and not part[2], 'invalid /tags request'
-        for tag in await _get_trending_tags():
+        for tag in await get_trending_tags():
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
@@ -132,39 +126,22 @@ async def get_state(path: str):
 
     return state
 
+async def _get_account_discussion_by_key(account, key):
+    assert account, 'account must be specified'
+    assert key, 'discussion key must be specified'
 
-@cached(ttl=3600)
-async def _get_top_trending_tags():
-    """Get top 50 trending tags among pending posts."""
-    sql = """
-        SELECT category FROM hive_posts_cache WHERE is_paidout = '0'
-      GROUP BY category ORDER BY SUM(payout) DESC LIMIT 50
-    """
-    return query_col(sql)
+    if key == 'recent_replies':
+        posts = await get_replies_by_last_update(account, '', 20)
+    elif key == 'comments':
+        posts = await get_discussions_by_comments(account, '', 20)
+    elif key == 'blog':
+        posts = await get_discussions_by_blog(account, '', '', 20)
+    elif key == 'feed':
+        posts = await get_discussions_by_feed(account, '', '', 20)
+    else:
+        raise Exception("unknown account discussion key %s" % key)
 
-@cached(ttl=3600)
-async def _get_trending_tags():
-    """Get top 250 trending tags among pending posts, with stats."""
-    sql = """
-      SELECT category,
-             COUNT(*) AS total_posts,
-             SUM(CASE WHEN depth = 0 THEN 1 ELSE 0 END) AS top_posts,
-             SUM(payout) AS total_payouts
-        FROM hive_posts_cache
-       WHERE is_paidout = '0'
-    GROUP BY category
-    ORDER BY SUM(payout) DESC
-       LIMIT 250
-    """
-    out = []
-    for row in query_all(sql):
-        out.append({
-            'comments': row['total_posts'] - row['top_posts'],
-            'name': row['category'],
-            'top_posts': row['top_posts'],
-            'total_payouts': "%.3f SBD" % row['total_payouts']})
-
-    return out
+    return posts
 
 def _normalize_path(path):
     if path[0] == '/':
