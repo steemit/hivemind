@@ -1,6 +1,8 @@
 """Handles legacy `call` method."""
 
 from hive.server.condenser_api.get_state import get_state
+from hive.server.condenser_api.tags import get_trending_tags
+
 from hive.server.condenser_api.methods import (
     get_followers,
     get_following,
@@ -62,6 +64,10 @@ async def call(api, method, params):
         return await get_content(*_strict_list(params, 2))
     elif method == 'get_content_replies':
         return await get_content_replies(*_strict_list(params, 2))
+
+    # Trending tags
+    elif method == 'get_trending_tags':
+        return await get_trending_tags(*_strict_list(params, 2))
 
     # Content monolith
     elif method == 'get_state':

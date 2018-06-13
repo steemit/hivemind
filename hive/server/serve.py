@@ -14,6 +14,7 @@ from jsonrpcserver.async_methods import AsyncMethods
 from hive.conf import Conf
 
 from hive.server.condenser_api import methods as condenser_api
+from hive.server.condenser_api.tags import get_trending_tags as condenser_api_get_trending_tags
 from hive.server.condenser_api.get_state import get_state as condenser_api_get_state
 from hive.server.condenser_api.call import call as condenser_api_call
 from hive.server import hive_api
@@ -45,6 +46,7 @@ def build_methods():
         condenser_api.get_content,
         condenser_api.get_content_replies,
         condenser_api_get_state,
+        condenser_api_get_trending_tags,
         condenser_api.get_discussions_by_trending,
         condenser_api.get_discussions_by_hot,
         condenser_api.get_discussions_by_promoted,
