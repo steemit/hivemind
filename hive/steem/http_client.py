@@ -151,8 +151,9 @@ class HttpClient(object):
                 if not is_batch:
                     assert isinstance(result, dict), "result was not a dict"
                     assert 'result' in result, "response with no result key"
+                    assert result['id'] == -1, "non-batch response id != -1"
                     if tries > 2:
-                        logging.warning("%s took %d tries", method, tries)
+                        logger.warning("%s took %d tries", method, tries)
                     return result['result']
 
                 # sanity-checking of batch results
@@ -165,7 +166,7 @@ class HttpClient(object):
                         raise RPCError.build(item['error'], method, args[i], i)
                     assert 'result' in item, "batch[%d] result empty" % i
                 if tries > 2:
-                    logging.warning("%s took %d tries", method, tries)
+                    logger.warning("%s took %d tries", method, tries)
                 return [item['result'] for item in result]
 
             except (AssertionError, RPCErrorFatal) as e:
@@ -173,13 +174,13 @@ class HttpClient(object):
 
             except (RemoteDisconnected, ConnectionResetError, ReadTimeoutError,
                     MaxRetryError, ProtocolError, RPCError, HTTPError) as e:
-                logging.error("%s failed, try %d. %s", method, tries, repr(e))
+                logger.error("%s failed, try %d. %s", method, tries, repr(e))
 
             except json.decoder.JSONDecodeError as e:
-                logging.error("invalid JSON returned: %s", response_data)
+                logger.error("invalid JSON returned: %s", response_data)
 
             except Exception as e:
-                logging.error('Unexpected %s: %s', e.__class__.__name__, e)
+                logger.error('Unexpected %s: %s', e.__class__.__name__, e)
 
             if tries % 2 == 0:
                 self.next_node()
