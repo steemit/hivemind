@@ -5,21 +5,58 @@ import concurrent.futures
 import json
 import logging
 import socket
-import time
 from functools import partial
-from http.client import RemoteDisconnected
 from itertools import cycle
+from time import sleep, perf_counter as perf
 
 import certifi
 import urllib3
 
 from urllib3.connection import HTTPConnection
-from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError, HTTPError
+from urllib3.exceptions import HTTPError
 
 from hive.steem.exceptions import RPCError, RPCErrorFatal
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
+
+def validated_json_payload(response):
+    """Asserts that the HTTP response was successful and valid JSON."""
+    if response.status != 200:
+        raise HTTPError(response.status, "non-200 response")
+
+    try:
+        data = response.data.decode('utf-8')
+        payload = json.loads(data)
+    except json.decoder.JSONDecodeError:
+        raise Exception("invalid JSON: %s", data[0:1024])
+
+    return payload
+
+def validated_result(payload, body):
+    """Asserts that the JSON-RPC payload is valid/sane."""
+    assert payload, "response entirely blank"
+    if 'error' in payload:
+        raise RPCError.build(payload['error'], body)
+    if isinstance(body, list):
+        return _validated_batch_result(payload, body)
+
+    assert isinstance(payload, dict), "response was not a dict"
+    assert body['id'] == payload['id'], "response id mismatch"
+    assert 'result' in payload, "response with no result key"
+    return payload['result']
+
+def _validated_batch_result(payload, body):
+    """Asserts that the batch payload, and each item, is valid/sane."""
+    assert isinstance(payload, list), "batch result must be list"
+    assert len(body) == len(payload), "batch result len mismatch"
+    for req, res in zip(body, payload):
+        assert req['id'] == res['id'], "id mismatch: %s -> %s" % (req, res)
+    for idx, item in enumerate(payload):
+        if 'error' in item:
+            raise RPCError.build(item['error'], body, idx)
+        assert 'result' in item, "batch[%d] resp empty" % idx
+    return [item['result'] for item in payload]
 
 def chunkify(iterable, chunksize=3000):
     """Yields chunks of an iterator."""
@@ -117,74 +154,47 @@ class HttpClient(object):
         else:
             body = [_rpc_body(fqm, arg, i+1) for i, arg in enumerate(args)]
 
-        return json.dumps(body, ensure_ascii=False).encode('utf8')
-
-    def submit(self, body, method):
-        """Submit an RPC request"""
-        start = time.perf_counter()
-        response = self.request(body=body)
-        secs = time.perf_counter() - start
-        if secs > 5:
-            extra = {'jussi-id': response.headers.get('x-jussi-request-id')}
-            logger.warning('%s took %.1fs %s', method, secs, extra)
-        return response
+        return body
 
     def exec(self, method, args, is_batch=False):
         """Execute a steemd RPC method, retrying on failure."""
         body = self.rpc_body(method, args, is_batch)
+        body_data = json.dumps(body, ensure_ascii=False).encode('utf8')
 
         tries = 0
         while tries < 100:
             tries += 1
+            secs = -1
+            info = None
             try:
-                response = self.submit(body, method)
-                if response.status != 200:
-                    raise HTTPError(response.status, "non-200 response")
+                start = perf()
+                response = self.request(body=body_data)
+                secs = perf() - start
 
-                response_data = response.data.decode('utf-8')
-                result = json.loads(response_data)
-                assert result, "result entirely blank"
+                info = {'jussi-id': response.headers.get('x-jussi-request-id'),
+                        'secs': '%.3f' % secs,
+                        'try': tries}
 
-                if 'error' in result:
-                    raise RPCError.build(result['error'], method, args)
+                # strict validation/asserts, error check
+                payload = validated_json_payload(response)
+                result = validated_result(payload, body)
 
-                if not is_batch:
-                    assert isinstance(result, dict), "result was not a dict"
-                    assert 'result' in result, "response with no result key"
-                    assert result['id'] == -1, "non-batch response id != -1"
-                    if tries > 2:
-                        logger.warning("%s took %d tries", method, tries)
-                    return result['result']
-
-                # sanity-checking of batch results
-                assert isinstance(result, list), "batch result must be list"
-                assert len(args) == len(result), "batch result len mismatch"
-                for i, item in enumerate(result):
-                    id1, id2 = [i+1, item['id']]
-                    assert id1 == id2, "got id %s, expected %s" % (id2, id1)
-                    if 'error' in item:
-                        raise RPCError.build(item['error'], method, args[i], i)
-                    assert 'result' in item, "batch[%d] result empty" % i
+                if secs > 2:
+                    logger.warning('%s took %.1fs %s', method, secs, info)
                 if tries > 2:
-                    logger.warning("%s took %d tries", method, tries)
-                return [item['result'] for item in result]
+                    logger.warning('%s took %d tries %s', method, tries, info)
+                return result
 
             except (AssertionError, RPCErrorFatal) as e:
                 raise e
 
-            except (RemoteDisconnected, ConnectionResetError, ReadTimeoutError,
-                    MaxRetryError, ProtocolError, RPCError, HTTPError) as e:
-                logger.error("%s failed, try %d. %s", method, tries, repr(e))
-
-            except json.decoder.JSONDecodeError as e:
-                logger.error("invalid JSON returned: %s", response_data)
-
             except Exception as e:
-                logger.error('Unexpected %s: %s', e.__class__.__name__, e)
+                logger.error('%s failed in %.1fs. try %d. %s - %s',
+                             method, secs, tries, info, repr(e))
 
             if tries % 2 == 0:
                 self.next_node()
-            time.sleep(tries / 10)
+            sleep(tries / 10)
 
         raise Exception("abort %s after %d tries" % (method, tries))
 

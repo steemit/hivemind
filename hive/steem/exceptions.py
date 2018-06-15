@@ -1,17 +1,30 @@
 """Defines exceptions which can be thrown by HttpClient."""
 
+def _str_trunc(value, max_length):
+    value = str(value)
+    if len(value) > max_length:
+        value = value[0:max_length] + '...'
+    return value
+
 class RPCError(Exception):
-    """Represents a structured error returned from Steem/Jussi"""
+    """Raised when an error is returned from upstream (jussi/steem)."""
 
     @staticmethod
-    def build(error, method, args, index=None):
+    def build(error, body, index=None):
         """Given an RPC error, builds exception w/ appropriate severity."""
         assert 'message' in error, "missing error msg key: {}".format(error)
         assert 'code' in error, "missing error code key: {}".format(error)
 
-        index = '[%d]' % index if index else ''
+        if isinstance(body, list):
+            item = body[index] if index else body[0]
+            method = item['method'] + ('[%s]' % index if index else '')
+            params = '[%s, (%d more)]' % (item['params'], len(body) - 1)
+        else:
+            method = body['method']
+            params = _str_trunc(body['params'], 1024)
+
         message = RPCError.humanize(error)
-        message += ' in %s%s(%s)' % (method, index, str(args)[0:1024])
+        message += ' in %s(%s)' % (method, params)
 
         #if not RPCError.is_recoverable(error):
         #    return RPCErrorFatal(message)
@@ -34,21 +47,23 @@ class RPCError(Exception):
         message = error['message'] if 'message' in error else str(error)
         code = error['code'] if 'code' in error else -1
 
+        info = ''
         if 'data' not in error: # eg db_lock_error
             name = 'error'
         elif 'name' in error['data']: # steemd errs
             name = error['data']['name']
         elif 'error_id' in error['data']: # jussi errs
             if 'exception' in error['data']:
-                etype = error['data']['exception']
+                name = error['data']['exception']
             else:
-                etype = 'unspecified exception'
-            name = '%s [jussi:%s]' % (etype, error['data']['error_id'])
+                name = 'unspecified exception'
+            info = '[jussi:%s]' % error['data']['error_id']
         else:
-            name = 'error [unspecified:%s]' % str(error)
+            name = 'unspecified error'
+            info = str(error)
 
-        return "%s[%s]: `%s`" % (name, code, message)
+        return "%s[%s]: `%s` %s" % (name, code, message, info)
 
 class RPCErrorFatal(RPCError):
-    """Represents a structured steemd error which is not recoverable."""
+    """Represents a steemd error which is not recoverable."""
     pass
