@@ -38,6 +38,9 @@ class CachedPost:
     # new promoted values, pending write
     _pending_promoted = {}
 
+    # indicates if missing-posts sweep is ongoing
+    _sweeping_missed = False
+
     @classmethod
     def update_promoted_amount(cls, post_id, amount):
         """Set a new pending amount for a post for its next update."""
@@ -279,8 +282,10 @@ class CachedPost:
         """
         gap = cls.dirty_missing()
         print("[INIT] {} missing post cache entries".format(gap))
+        cls._sweeping_missed = True
         while cls.flush(trx=True, full_total=gap)['insert']:
             gap = cls.dirty_missing()
+        cls._sweeping_missed = False
 
     @classmethod
     def _update_batch(cls, tuples, trx=True, full_total=None):
@@ -315,7 +320,11 @@ class CachedPost:
                 if post['author']:
                     buffer.append(cls._sql(pid, post, level=level))
                 else:
-                    print("WARNING: ignoring deleted post {}".format(pid))
+                    # expected to happen when sweeping missed posts as
+                    # part of initial sync or crash recovery routine,
+                    # otherwise indicates potential bug. TODO: assert?
+                    if not cls._sweeping_missed:
+                        print("WARNING: missing/deleted post %d" % pid)
                 cls._bump_last_id(pid)
 
             timer.batch_lap()
