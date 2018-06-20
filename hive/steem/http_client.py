@@ -90,24 +90,19 @@ class HttpClient(object):
     )
 
     def __init__(self, nodes, **kwargs):
-        num_pools = kwargs.get('num_pools', 10)
-        maxsize = kwargs.get('maxsize', 64)
-        timeout = kwargs.get('timeout', 30)
-        tcp_keepalive = kwargs.get('tcp_keepalive', True)
-
-        if tcp_keepalive:
+        if kwargs.get('tcp_keepalive', True):
             socket_options = HTTPConnection.default_socket_options + \
                              [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1), ]
         else:
             socket_options = HTTPConnection.default_socket_options
 
         self.http = urllib3.poolmanager.PoolManager(
-            num_pools=num_pools,
-            maxsize=maxsize,
-            block=False,
-            timeout=timeout,
-            retries=False,
+            num_pools=kwargs.get('num_pools', 10),
+            maxsize=kwargs.get('maxsize', 64),
+            timeout=kwargs.get('timeout', 30),
             socket_options=socket_options,
+            block=False,
+            retries=False,
             headers={
                 'Content-Type': 'application/json',
                 'accept-encoding': 'gzip'},
