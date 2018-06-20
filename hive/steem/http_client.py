@@ -90,13 +90,9 @@ class HttpClient(object):
     )
 
     def __init__(self, nodes, **kwargs):
-        self.max_workers = kwargs.get('max_workers', None)
-
         num_pools = kwargs.get('num_pools', 10)
-        maxsize = kwargs.get('maxsize', 10)
-        timeout = kwargs.get('timeout', 60)
-        retries = kwargs.get('retries', 20)
-        pool_block = kwargs.get('pool_block', False)
+        maxsize = kwargs.get('maxsize', 64)
+        timeout = kwargs.get('timeout', 30)
         tcp_keepalive = kwargs.get('tcp_keepalive', True)
 
         if tcp_keepalive:
@@ -108,23 +104,15 @@ class HttpClient(object):
         self.http = urllib3.poolmanager.PoolManager(
             num_pools=num_pools,
             maxsize=maxsize,
-            block=pool_block,
+            block=False,
             timeout=timeout,
-            retries=retries,
+            retries=False,
             socket_options=socket_options,
             headers={
                 'Content-Type': 'application/json',
-                'accept-encoding': 'gzip'
-
-            },
+                'accept-encoding': 'gzip'},
             cert_reqs='CERT_REQUIRED',
             ca_certs=certifi.where())
-        '''
-            urlopen(method, url, body=None, headers=None, retries=None,
-            redirect=True, assert_same_host=True, timeout=<object object>,
-            pool_timeout=None, release_conn=None, chunked=False, body_pos=None,
-            **response_kw)
-        '''
 
         self.nodes = cycle(nodes)
         self.url = ''
@@ -172,7 +160,7 @@ class HttpClient(object):
                 secs = perf() - start
 
                 info = {'jussi-id': response.headers.get('x-jussi-request-id'),
-                        'secs': '%.3f' % secs,
+                        'secs': round(secs, 3),
                         'try': tries}
 
                 # strict validation/asserts, error check
@@ -192,6 +180,7 @@ class HttpClient(object):
             except (Exception, socket.timeout) as e:
                 if secs < 0: # request failed
                     secs = perf() - start
+                    info = {'secs': round(secs, 3), 'try': tries}
                 logger.error('%s failed in %.1fs. try %d. %s - %s',
                              method, secs, tries, info, repr(e))
 

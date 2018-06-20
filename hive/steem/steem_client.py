@@ -30,7 +30,7 @@ class SteemClient:
 
         self._max_batch = max_batch
         self._max_workers = max_workers
-        self._client = HttpClient(nodes=[url], maxsize=50, num_pools=50)
+        self._client = HttpClient(nodes=[url])
 
         print("[STEEM] init url:%s batch:%s workers:%d"
               % (url, max_batch, max_workers))
