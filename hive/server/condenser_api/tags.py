@@ -21,7 +21,7 @@ async def get_top_trending_tags_summary():
 @cached(ttl=3600)
 async def get_trending_tags(start_tag: str = '', limit: int = 250):
     """Get top 250 trending tags among pending posts, with stats."""
-    assert start_tag == '', 'tags pagination not supported'
+    assert start_tag is None or start_tag == '', 'tags pagination not supported'
     assert limit == 250, 'only returns exactly 250 tags'
     sql = """
       SELECT category,
