@@ -435,7 +435,7 @@ class CachedPost:
                 ('is_paidout',    basic['is_paidout']),
                 ('json',          json.dumps(basic['json_metadata'])),
                 ('raw_json',      json.dumps(post_legacy(post))),
-                ('children',      min(post['children'], 32767))])
+            ])
 
         # update tags if action is insert/update and is root post
         if level in ['insert', 'update'] and not post['depth']:
@@ -462,7 +462,9 @@ class CachedPost:
             ('up_votes',    "%d" % stats['up_votes']),
             ('is_hidden',   "%d" % stats['hide']),
             ('is_grayed',   "%d" % stats['gray']),
-            ('author_rep',  "%f" % stats['author_rep'])])
+            ('author_rep',  "%f" % stats['author_rep']),
+            ('children',    "%d" % min(post['children'], 32767)), # TODO: #115
+        ])
 
         # build the post insert/update SQL, add tag SQLs
         mode = 'insert' if level == 'insert' else 'update'
