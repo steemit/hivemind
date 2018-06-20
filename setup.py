@@ -18,6 +18,7 @@ setup(
                    'pep8',
                    'pytest-pylint',
                    'yapf',
+                   'git-pylint-commit-hook',
                    'pytest-console-scripts'],
 
     install_requires=[

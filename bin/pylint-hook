@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+git-pylint-commit-hook --always-show-violations --limit 10 --pylint-params "-f colorized -r n --disable=R,C,fixme"
