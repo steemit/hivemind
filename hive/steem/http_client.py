@@ -1,7 +1,7 @@
 # coding=utf-8
 """Simple HTTP client for communicating with jussi/steem."""
 
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
 import socket
@@ -183,12 +183,15 @@ class HttpClient(object):
                     logger.warning('%s took %.1fs %s', method, secs, info)
                 if tries > 2:
                     logger.warning('%s took %d tries %s', method, tries, info)
+
                 return result
 
             except (AssertionError, RPCErrorFatal) as e:
                 raise e
 
-            except Exception as e:
+            except (Exception, socket.timeout) as e:
+                if secs < 0: # request failed
+                    secs = perf() - start
                 logger.error('%s failed in %.1fs. try %d. %s - %s',
                              method, secs, tries, info, repr(e))
 
@@ -201,7 +204,14 @@ class HttpClient(object):
     def exec_multi(self, name, params, max_workers, batch_size):
         """Process a batch as parallel requests."""
         chunks = [[name, args, True] for args in chunkify(params, batch_size)]
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for items in executor.map(lambda tup: self.exec(*tup), chunks):
                 yield list(items) # (use of `map` preserves request order)
+
+    def exec_multi_as_completed(self, name, params, max_workers, batch_size):
+        """Process a batch as parallel requests; yields unordered."""
+        chunks = [[name, args, True] for args in chunkify(params, batch_size)]
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = (executor.submit(self.exec, *tup) for tup in chunks)
+            for future in as_completed(futures):
+                yield future.result()
