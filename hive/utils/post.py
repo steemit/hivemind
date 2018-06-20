@@ -93,7 +93,8 @@ def post_payout(post):
     ])
 
     # get total rshares, and create comma-separated vote data blob
-    rshares = sum(int(v['rshares']) for v in post['active_votes'])
+    #rshares = sum(int(v['rshares']) for v in post['active_votes'])
+    rshares = int(post['net_rshares']) # TODO: active_votes missing in dev
     csvotes = "\n".join(map(_vote_csv_row, post['active_votes']))
 
     # trending scores
