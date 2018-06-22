@@ -116,7 +116,9 @@ disable=
     using-cmp-argument,
     setslice-method,
     oct-method,
-    coerce-method
+    coerce-method,
+    #custom
+    fixme
 
 
 [REPORTS]

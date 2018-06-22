@@ -1,8 +1,8 @@
 if [ -z "$1" ]
   then
-    pylint hive/**/*.py -f colorized -r n --disable=fixme
+    pylint hive/**/*.py -f colorized -r n
     grep -r --color=always 'pylint: disable' hive
 else
-    pylint $1 -f colorized -r n --disable=fixme
+    pylint $1 -f colorized -r n
     grep -r --color=always 'pylint: disable' $1
 fi

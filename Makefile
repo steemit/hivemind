@@ -42,7 +42,7 @@ test: test-without-build build
 test-without-build: test-without-lint test-pylint
 
 test-without-lint:
-	py.test tests
+	py.test --cov=hive
 
 test-pylint:
 	py.test --pylint -m pylint $(PROJECT_NAME)

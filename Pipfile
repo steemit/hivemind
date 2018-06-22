@@ -19,11 +19,12 @@ aiomysql = "*"
 
 [dev-packages]
 
-ipython = "*"
+"ipython" = "*"
 "pep8" = "*"
-pytest = "*"
-"pytest-console-scripts" = "*"
+"pytest" = "*"
+"pytest-cov" = "*"
 "pytest-docker" = "*"
 "pytest-pylint" = "*"
-yapf = "*"
+"pytest-console-scripts" = "*"
+"yapf" = "*"
 "autopep8" = "*"
