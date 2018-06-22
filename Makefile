@@ -45,7 +45,7 @@ test-without-lint:
 	py.test --cov=hive
 
 test-pylint:
-	py.test --pylint -m pylint $(PROJECT_NAME)
+	py.test --pylint -m pylint $(PROJECT_NAME) --pylint-error-types WEF
 
 fmt:
 	yapf --recursive --in-place --style pep8 .
