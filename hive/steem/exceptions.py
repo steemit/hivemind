@@ -26,8 +26,8 @@ class RPCError(Exception):
         message = RPCError.humanize(error)
         message += ' in %s(%s)' % (method, params)
 
-        #if not RPCError.is_recoverable(error):
-        #    return RPCErrorFatal(message)
+        if not RPCError.is_recoverable(error):
+            return RPCErrorFatal(message)
         return RPCError(message)
 
     @staticmethod
