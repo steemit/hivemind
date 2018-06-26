@@ -82,12 +82,16 @@ async def get_state(path: str):
         account = valid_account(part[0][1:])
         state['accounts'][account] = _load_account(account)
 
-        if part[1] not in ACCOUNT_TAB_IGNORE:
-            assert part[1] in ACCOUNT_TAB_KEYS, "invalid acct path %s" % path
+        if part[1] in ACCOUNT_TAB_KEYS:
             key = ACCOUNT_TAB_KEYS[part[1]]
             posts = await _get_account_discussion_by_key(account, key)
             state['content'] = _keyed_posts(posts)
             state['accounts'][account][key] = list(state['content'].keys())
+        elif part[1] in ACCOUNT_TAB_IGNORE:
+            pass # condenser no-op URLs
+        else:
+            # invalid/undefined case; probably requesting `@user/permlink`.
+            state['error'] = 'invalid account path requested.'
 
     # discussion - `/category/@account/permlink`
     elif part[1] and part[1][0] == '@':
