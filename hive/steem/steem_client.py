@@ -26,14 +26,11 @@ class SteemClient:
     def __init__(self, url, max_batch=500, max_workers=1):
         assert url, 'steem-API endpoint undefined'
         assert max_batch > 0 and max_batch <= 5000
-        assert max_workers > 0 and max_workers <= 32
+        assert max_workers > 0 and max_workers <= 64
 
         self._max_batch = max_batch
         self._max_workers = max_workers
-        self._client = HttpClient(nodes=[url], maxsize=50, num_pools=50)
-
-        print("[STEEM] init url:%s batch:%s workers:%d"
-              % (url, max_batch, max_workers))
+        self._client = HttpClient(nodes=[url])
 
     def get_accounts(self, accounts):
         """Fetch multiple accounts by name."""

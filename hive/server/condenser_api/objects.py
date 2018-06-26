@@ -1,7 +1,6 @@
 """Handles building condenser_api-compatible response objects."""
 
 import json
-import inspect
 
 from hive.db.methods import query_all, query_row
 
@@ -17,8 +16,6 @@ def load_accounts(names):
 def load_posts(ids, truncate_body=0):
     """Given an array of post ids, returns full objects in the same order."""
     if not ids:
-        caller = inspect.stack()[1][3]
-        print("empty result for %s" % caller)
         return []
 
     sql = """

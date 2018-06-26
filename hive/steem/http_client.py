@@ -1,94 +1,62 @@
 # coding=utf-8
 """Simple HTTP client for communicating with jussi/steem."""
 
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
 import socket
-import time
 from functools import partial
-from http.client import RemoteDisconnected
 from itertools import cycle
+from time import sleep, perf_counter as perf
 
 import certifi
 import urllib3
 
 from urllib3.connection import HTTPConnection
-from urllib3.exceptions import MaxRetryError, ReadTimeoutError, ProtocolError, HTTPError
+from urllib3.exceptions import HTTPError
+
+from hive.steem.exceptions import RPCError, RPCErrorFatal
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
-class RPCError(Exception):
-    """Represents a structured error returned from Steem/Jussi"""
+def validated_json_payload(response):
+    """Asserts that the HTTP response was successful and valid JSON."""
+    if response.status != 200:
+        raise HTTPError(response.status, "non-200 response")
 
-    @staticmethod
-    def build(error, method, args, index=None):
-        """Given an RPC error, builds exception w/ appropriate severity."""
-        index = '[%d]' % index if index else ''
-        message = RPCError.humanize(error)
-        message += ' in %s%s(%s)' % (method, index, args)
+    try:
+        data = response.data.decode('utf-8')
+        payload = json.loads(data)
+    except json.decoder.JSONDecodeError:
+        raise Exception("invalid JSON: %s", data[0:1024])
 
-        if RPCError.is_recoverable(error):
-            return RPCError(message)
-        return RPCErrorFatal(message)
+    return payload
 
-    @staticmethod
-    def humanize(error):
-        """Get friendly error string from steemd RPC response."""
-        detail = error['message'] if 'message' in error else str(error)
+def validated_result(payload, body):
+    """Asserts that the JSON-RPC payload is valid/sane."""
+    assert payload, "response entirely blank"
+    if 'error' in payload:
+        raise RPCError.build(payload['error'], body)
+    if isinstance(body, list):
+        return _validated_batch_result(payload, body)
 
-        if 'data' not in error:
-            name = 'error' # eg db_lock_error
-        elif 'name' in error['data']:
-            name = error['data']['name']
-        elif 'error_id' in error['data']:
-            if 'exception' in error['data']:
-                etype = error['data']['exception']
-            else:
-                etype = 'error'
-            name = '%s [jussi:%s]' % (etype, error['data']['error_id'])
-        else:
-            name = 'error [unspecified:%s]' % str(error)
+    assert isinstance(payload, dict), "response was not a dict"
+    assert body['id'] == payload['id'], "response id mismatch"
+    assert 'result' in payload, "response with no result key"
+    return payload['result']
 
-        return "%s: `%s`" % (name, detail)
-
-    @staticmethod
-    def is_recoverable(error):
-        """Check if error appears recoverable (e.g. network condition)"""
-        assert 'message' in error, "missing error msg key: {}".format(error)
-        assert 'code' in error, "missing error code key: {}".format(error)
-        message = error['message']
-        code = error['code']
-
-        # common steemd error
-        # {"code"=>-32003, "message"=>"Unable to acquire database lock"}
-        if message == 'Unable to acquire database lock':
-            return True
-
-        # rare steemd error
-        # {"code"=>-32000, "message"=>"Unknown exception",
-        #  "data"=>"0 exception: unspecified\nUnknown Exception\n[...]"}
-        if message == 'Unknown exception':
-            return True
-
-        # generic jussi error
-        # {'code': -32603, 'message': 'Internal Error', 'data': {
-        #    'error_id': 'c7a15140-f306-4727-acbd-b5e8f3717e9b',
-        #    'request': {'amzn_trace_id': 'Root=1-5ad4cb9f-...',
-        #      'jussi_request_id': None}}}
-        if message == 'Internal Error' and code == -32603:
-            return True
-
-        # jussi error (e.g. Timeout)
-        if message == 'Bad or missing upstream response' and code == 1100:
-            return True
-
-        return False
-
-class RPCErrorFatal(RPCError):
-    """Represents a structured steemd error which is not recoverable."""
-    pass
+def _validated_batch_result(payload, body):
+    """Asserts that the batch payload, and each item, is valid/sane."""
+    assert isinstance(payload, list), "batch result must be list"
+    assert len(body) == len(payload), "batch result len mismatch"
+    for req, res in zip(body, payload):
+        assert req['id'] == res['id'], "id mismatch: %s -> %s" % (req, res)
+    for idx, item in enumerate(payload):
+        if 'error' in item:
+            raise RPCError.build(item['error'], body, idx)
+        assert 'result' in item, "batch[%d] resp empty" % idx
+    return [item['result'] for item in payload]
 
 def chunkify(iterable, chunksize=3000):
     """Yields chunks of an iterator."""
@@ -122,41 +90,24 @@ class HttpClient(object):
     )
 
     def __init__(self, nodes, **kwargs):
-        self.max_workers = kwargs.get('max_workers', None)
-
-        num_pools = kwargs.get('num_pools', 10)
-        maxsize = kwargs.get('maxsize', 10)
-        timeout = kwargs.get('timeout', 60)
-        retries = kwargs.get('retries', 20)
-        pool_block = kwargs.get('pool_block', False)
-        tcp_keepalive = kwargs.get('tcp_keepalive', True)
-
-        if tcp_keepalive:
+        if kwargs.get('tcp_keepalive', True):
             socket_options = HTTPConnection.default_socket_options + \
                              [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1), ]
         else:
             socket_options = HTTPConnection.default_socket_options
 
         self.http = urllib3.poolmanager.PoolManager(
-            num_pools=num_pools,
-            maxsize=maxsize,
-            block=pool_block,
-            timeout=timeout,
-            retries=retries,
+            num_pools=kwargs.get('num_pools', 10),
+            maxsize=kwargs.get('maxsize', 64),
+            timeout=kwargs.get('timeout', 30),
             socket_options=socket_options,
+            block=False,
+            retries=False,
             headers={
                 'Content-Type': 'application/json',
-                'accept-encoding': 'gzip'
-
-            },
+                'accept-encoding': 'gzip'},
             cert_reqs='CERT_REQUIRED',
             ca_certs=certifi.where())
-        '''
-            urlopen(method, url, body=None, headers=None, retries=None,
-            redirect=True, assert_same_host=True, timeout=<object object>,
-            pool_timeout=None, release_conn=None, chunked=False, body_pos=None,
-            **response_kw)
-        '''
 
         self.nodes = cycle(nodes)
         self.url = ''
@@ -186,76 +137,65 @@ class HttpClient(object):
         else:
             body = [_rpc_body(fqm, arg, i+1) for i, arg in enumerate(args)]
 
-        return json.dumps(body, ensure_ascii=False).encode('utf8')
-
-    def submit(self, body, method):
-        """Submit an RPC request"""
-        start = time.perf_counter()
-        response = self.request(body=body)
-        secs = time.perf_counter() - start
-        if secs > 5:
-            extra = {'jussi-id': response.headers.get('x-jussi-request-id')}
-            logger.warning('%s took %.1fs %s', method, secs, extra)
-        return response
+        return body
 
     def exec(self, method, args, is_batch=False):
         """Execute a steemd RPC method, retrying on failure."""
         body = self.rpc_body(method, args, is_batch)
+        body_data = json.dumps(body, ensure_ascii=False).encode('utf8')
 
         tries = 0
         while tries < 100:
             tries += 1
+            secs = -1
+            info = None
             try:
-                response = self.submit(body, method)
-                if response.status != 200:
-                    raise HTTPError(response.status, "non-200 response")
+                start = perf()
+                response = self.request(body=body_data)
+                secs = perf() - start
 
-                response_data = response.data.decode('utf-8')
-                result = json.loads(response_data)
-                assert result, "result entirely blank"
+                info = {'jussi-id': response.headers.get('x-jussi-request-id'),
+                        'secs': round(secs, 3),
+                        'try': tries}
 
-                if 'error' in result:
-                    raise RPCError.build(result['error'], method, args)
+                # strict validation/asserts, error check
+                payload = validated_json_payload(response)
+                result = validated_result(payload, body)
 
-                if not is_batch:
-                    assert isinstance(result, dict), "result was not a dict"
-                    assert 'result' in result, "response with no result key"
-                    return result['result']
+                if secs > 2:
+                    logger.warning('%s took %.1fs %s', method, secs, info)
+                if tries > 2:
+                    logger.warning('%s took %d tries %s', method, tries, info)
 
-                # sanity-checking of batch results
-                assert isinstance(result, list), "batch result must be list"
-                assert len(args) == len(result), "batch result len mismatch"
-                for i, item in enumerate(result):
-                    id1, id2 = [i+1, item['id']]
-                    assert id1 == id2, "got id %s, expected %s" % (id2, id1)
-                    if 'error' in item:
-                        raise RPCError.build(item['error'], method, args[i], i)
-                    assert 'result' in item, "batch[%d] result empty" % i
-                return [item['result'] for item in result]
+                return result
 
             except (AssertionError, RPCErrorFatal) as e:
                 raise e
 
-            except (RemoteDisconnected, ConnectionResetError, ReadTimeoutError,
-                    MaxRetryError, ProtocolError, RPCError, HTTPError) as e:
-                logging.error("%s failed, try %d. %s", method, tries, repr(e))
-
-            except json.decoder.JSONDecodeError as e:
-                logging.error("invalid JSON returned: %s", response_data)
-
-            except Exception as e:
-                logging.error('Unexpected %s: %s', e.__class__.__name__, e)
+            except (Exception, socket.timeout) as e:
+                if secs < 0: # request failed
+                    secs = perf() - start
+                    info = {'secs': round(secs, 3), 'try': tries}
+                logger.error('%s failed in %.1fs. try %d. %s - %s',
+                             method, secs, tries, info, repr(e))
 
             if tries % 2 == 0:
                 self.next_node()
-            time.sleep(tries / 10)
+            sleep(tries / 10)
 
         raise Exception("abort %s after %d tries" % (method, tries))
 
     def exec_multi(self, name, params, max_workers, batch_size):
         """Process a batch as parallel requests."""
         chunks = [[name, args, True] for args in chunkify(params, batch_size)]
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for items in executor.map(lambda tup: self.exec(*tup), chunks):
                 yield list(items) # (use of `map` preserves request order)
+
+    def exec_multi_as_completed(self, name, params, max_workers, batch_size):
+        """Process a batch as parallel requests; yields unordered."""
+        chunks = [[name, args, True] for args in chunkify(params, batch_size)]
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = (executor.submit(self.exec, *tup) for tup in chunks)
+            for future in as_completed(futures):
+                yield future.result()

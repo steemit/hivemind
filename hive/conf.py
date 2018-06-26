@@ -36,8 +36,7 @@ class Conf():
 
         cls._args = p.parse_args()
 
-        if cls.get('dump_config') or cls.get('log_level') == 'DEBUG':
-            print(p.format_values())
+        print(p.format_values())
 
     @classmethod
     def args(cls):
