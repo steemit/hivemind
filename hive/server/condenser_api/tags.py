@@ -2,6 +2,7 @@
 
 from aiocache import cached
 from hive.db.methods import query_col, query_all
+from hive.server.condenser_api.common import (valid_tag, valid_limit)
 
 @cached(ttl=3600)
 async def get_top_trending_tags_summary():
@@ -21,8 +22,21 @@ async def get_top_trending_tags_summary():
 @cached(ttl=3600)
 async def get_trending_tags(start_tag: str = '', limit: int = 250):
     """Get top 250 trending tags among pending posts, with stats."""
-    assert start_tag is None or start_tag == '', 'tags pagination not supported'
-    assert limit == 250, 'only returns exactly 250 tags'
+
+    limit = valid_limit(limit, ubound=250)
+    start_tag = valid_tag(start_tag or '', allow_empty=True)
+
+    if start_tag:
+        seek = """
+          HAVING SUM(payout) <= (
+            SELECT SUM(payout)
+              FROM hive_posts_cache
+             WHERE is_paidout = '0'
+               AND category = :start_tag)
+        """
+    else:
+        seek = ''
+
     sql = """
       SELECT category,
              COUNT(*) AS total_posts,
@@ -30,15 +44,16 @@ async def get_trending_tags(start_tag: str = '', limit: int = 250):
              SUM(payout) AS total_payouts
         FROM hive_posts_cache
        WHERE is_paidout = '0'
-    GROUP BY category
+    GROUP BY category %s
     ORDER BY SUM(payout) DESC
-       LIMIT 250
-    """
+       LIMIT :limit
+    """ % seek
+
     out = []
-    for row in query_all(sql):
+    for row in query_all(sql, limit=limit, start_tag=start_tag):
         out.append({
-            'comments': row['total_posts'] - row['top_posts'],
             'name': row['category'],
+            'comments': row['total_posts'] - row['top_posts'],
             'top_posts': row['top_posts'],
             'total_payouts': "%.3f SBD" % row['total_payouts']})
 
