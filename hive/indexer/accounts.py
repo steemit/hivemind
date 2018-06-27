@@ -64,7 +64,8 @@ class Accounts:
 
         # pull newly-inserted ids and merge into our map
         sql = "SELECT name, id FROM hive_accounts WHERE name IN :names"
-        cls._ids = {**dict(query_all(sql, names=tuple(new_names))), **cls._ids}
+        for name, _id in query_all(sql, names=tuple(new_names)):
+            cls._ids[name] = _id
 
 
     # account cache methods
@@ -75,9 +76,10 @@ class Accounts:
         """Marks given accounts as needing an update."""
         if not accounts:
             return 0
-        if isinstance(accounts, str):
-            accounts = [accounts]
-        accounts = set(accounts) - set(cls._dirty)
+        assert isinstance(accounts, set)
+        accounts = accounts - set(cls._dirty)
+        if not accounts:
+            return 0
         cls._dirty.extend(accounts)
         return len(accounts)
 
