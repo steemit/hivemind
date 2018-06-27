@@ -14,13 +14,15 @@ setup(
     long_description=open('README.md').read(),
     packages=find_packages(exclude=['scripts']),
     setup_requires=['pytest-runner'],
-    tests_require=['pytest',
-                   'pep8',
-                   'pytest-pylint',
-                   'yapf',
-                   'git-pylint-commit-hook',
-                   'pytest-console-scripts'],
-
+    tests_require=[
+        'pytest',
+        'pytest-cov',
+        'pytest-pylint',
+        'pytest-console-scripts',
+        'git-pylint-commit-hook',
+        'pep8',
+        'yapf',
+    ],
     install_requires=[
         'aiopg',
         'jsonrpcserver',

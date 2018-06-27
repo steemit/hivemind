@@ -6,7 +6,7 @@ import ujson as json
 
 from toolz import partition_all
 from hive.db.adapter import Db
-from hive.steem.steem_client import SteemClient
+from hive.steem.client import SteemClient
 
 from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer

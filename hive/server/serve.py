@@ -82,7 +82,7 @@ def run_server():
 
     #async def init_db(app):
     #    args = app['config']['args']
-    #    db = make_url(args.database_url)
+    #    db = make_url(args['database_url'])
     #    engine = await create_engine(user=db.username,
     #                                 database=db.database,
     #                                 password=db.password,
@@ -163,7 +163,7 @@ def run_server():
     app.router.add_get('/health', health)
     app.router.add_post('/', jsonrpc_handler)
 
-    web.run_app(app, port=app['config']['args'].http_server_port)
+    web.run_app(app, port=app['config']['args']['http_server_port'])
 
 
 if __name__ == '__main__':

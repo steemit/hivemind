@@ -8,35 +8,47 @@ class Conf():
     _args = None
 
     @classmethod
-    def init_argparse(cls):
+    def init_argparse(cls, ignore_unknown=False):
         """Read hive config (CLI arg > ENV var > config)"""
         assert not cls._args, "config already read"
 
-        #pylint: disable=invalid-name,line-too-long
-        p = configargparse.get_arg_parser(default_config_files=['./hive.conf'])
+        #pylint: disable=line-too-long
+        parser = configargparse.get_arg_parser(
+            default_config_files=['./hive.conf'])
+        add = parser.add
 
         # runmodes: sync, server, status
-        p.add('mode', nargs='*', default=['sync'])
+        add('mode', nargs='*', default=['sync'])
 
         # common
-        p.add('--database-url', env_var='DATABASE_URL', required=True, help='database connection url', default='postgresql://user:pass@localhost:5432/hive')
-        p.add('--steemd-url', env_var='STEEMD_URL', required=False, help='steemd/jussi endpoint', default='https://api.steemit.com')
-        p.add('--log-level', env_var='LOG_LEVEL', default='INFO')
-        p.add('--dump-config', type=bool, env_var='DUMP_CONFIG', default=False)
+        add('--database-url', env_var='DATABASE_URL', required=True, help='database connection url', default='postgresql://user:pass@localhost:5432/hive')
+        add('--steemd-url', env_var='STEEMD_URL', required=False, help='steemd/jussi endpoint', default='https://api.steemit.com')
+        add('--log-level', env_var='LOG_LEVEL', default='INFO')
+        add('--dump-config', type=bool, env_var='DUMP_CONFIG', default=False)
 
         # specific to indexer
-        p.add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests', default=4)
-        p.add('--max-batch', type=int, env_var='MAX_BATCH', help='max chunk size for batch requests', default=50)
-        p.add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', help='number of blocks to trail head by', default=2)
-        p.add('--disable-sync', type=bool, env_var='DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
-        p.add('--sync-to-s3', type=bool, env_var='SYNC_TO_S3', help='alternative healthcheck for background sync service', default=False)
+        add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests', default=4)
+        add('--max-batch', type=int, env_var='MAX_BATCH', help='max chunk size for batch requests', default=50)
+        add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', help='number of blocks to trail head by', default=2)
+        add('--disable-sync', type=bool, env_var='DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
+        add('--sync-to-s3', type=bool, env_var='SYNC_TO_S3', help='alternative healthcheck for background sync service', default=False)
 
         # specific to API server
-        p.add('--http-server-port', type=int, env_var='HTTP_SERVER_PORT', default=8080)
+        add('--http-server-port', type=int, env_var='HTTP_SERVER_PORT', default=8080)
 
-        cls._args = p.parse_args()
+        if ignore_unknown:
+            # needed for e.g. tests - other args may be present
+            args, _ = parser.parse_known_args()
+        else:
+            args = parser.parse_args()
 
-        print(p.format_values())
+        cls._args = vars(args)
+        print(parser.format_values())
+
+    @classmethod
+    def init_config(cls, config):
+        """Initialize config directly (do not parse ENV/cli/conf)."""
+        cls._args = config
 
     @classmethod
     def args(cls):
@@ -47,7 +59,7 @@ class Conf():
     def get(cls, param):
         """Reads a single property, e.g. `database_url`."""
         assert cls._args, "run init_argparse()"
-        return getattr(cls._args, param)
+        return cls._args[param]
 
     @classmethod
     def run_mode(cls):

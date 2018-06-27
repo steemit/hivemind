@@ -7,7 +7,7 @@ PROJECT_DOCKER_RUN_ARGS := --link db:db
 
 default: build
 
-.PHONY: test run test-without-lint test-pylint fmt test-without-build build docs
+.PHONY: test run test-only test-lint fmt test-with-build build docs
 
 docs:
 	pdoc --html hive --html-dir docs --overwrite
@@ -37,15 +37,15 @@ db-head-state:
 ipython:
 	docker run -it $(PROJECT_DOCKER_RUN_ARGS) $(PROJECT_DOCKER_TAG) ipython
 
-test: test-without-build build
+test: test-only test-lint
 
-test-without-build: test-without-lint test-pylint
+test-with-build: test build
 
-test-without-lint:
-	py.test tests
+test-only:
+	py.test --cov=hive --capture=sys
 
-test-pylint:
-	py.test --pylint -m pylint $(PROJECT_NAME)
+test-lint:
+	py.test --pylint -m pylint $(PROJECT_NAME) --pylint-error-types WEF
 
 fmt:
 	yapf --recursive --in-place --style pep8 .
