@@ -1,7 +1,7 @@
 """Routes then builds a get_state response object"""
 
 #pylint: disable=line-too-long
-import json
+import ujson as json
 
 from collections import OrderedDict
 

@@ -10,7 +10,7 @@ from hive.indexer.posts import Posts
 # -----------------
 def process_json_community_op(account, op_json, date):
     """Validates community op and apply state changes to db."""
-    #pylint: disable=line-too-long
+    #pylint: disable=line-too-long,unused-variable
     cmd_name, cmd_op = op_json  # ['flagPost', {community: '', author: '', ...}]
 
     commands = list(flatten(PERMISSIONS.values()))

@@ -1,7 +1,7 @@
 """Methods for normalizing/sanitizing steemd account metadata."""
 
-import json
 import re
+import ujson as json
 
 from hive.utils.normalize import trunc
 
