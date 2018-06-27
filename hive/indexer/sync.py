@@ -16,7 +16,7 @@ from hive.db.methods import query
 from hive.db.db_state import DbState
 
 from hive.utils.timer import Timer
-from hive.steem.steem_client import SteemClient
+from hive.steem.client import SteemClient
 
 from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts
