@@ -1,6 +1,6 @@
 """Handles building condenser_api-compatible response objects."""
 
-import json
+import ujson as json
 
 from hive.db.methods import query_all, query_row
 

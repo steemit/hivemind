@@ -1,10 +1,9 @@
 """Methods to parse steemd values and clean strings."""
 
-import json
 import math
 import decimal
-
 from datetime import datetime
+import ujson as json
 
 NAI_MAP = {
     '@@000000013': 'SBD',
@@ -73,7 +72,7 @@ def load_json_key(obj, key):
     ret = {}
     try:
         ret = json.loads(obj[key])
-    except json.decoder.JSONDecodeError:
+    except Exception:
         return {}
     return ret
 

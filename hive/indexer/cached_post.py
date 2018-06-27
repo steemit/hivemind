@@ -1,8 +1,8 @@
 """Manages cached post data."""
 
-import json
-import collections
 import math
+import collections
+import ujson as json
 
 from toolz import partition_all
 from hive.db.adapter import Db

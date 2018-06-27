@@ -1,7 +1,7 @@
 """[WIP] Community op constructor"""
 
-import json
 from typing import Union
+import ujson as json
 
 from hive.community.roles import PERMISSIONS, is_permitted
 from hive.indexer.community import is_community

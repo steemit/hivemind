@@ -1,11 +1,11 @@
 """Hive sync manager."""
 
-import json
 import logging
 import glob
 import time
 import os
 import traceback
+import ujson as json
 
 from funcy.seqs import drop
 from toolz import partition_all
