@@ -2,12 +2,12 @@
 """Simple HTTP client for communicating with jussi/steem."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import json
 import logging
 import socket
 from functools import partial
 from itertools import cycle
 from time import sleep, perf_counter as perf
+import ujson as json
 
 import certifi
 import urllib3
@@ -28,8 +28,8 @@ def validated_json_payload(response):
     try:
         data = response.data.decode('utf-8')
         payload = json.loads(data)
-    except json.decoder.JSONDecodeError:
-        raise Exception("invalid JSON: %s", data[0:1024])
+    except Exception as e:
+        raise Exception("JSON error %s: %s", str(e), data[0:1024])
 
     return payload
 

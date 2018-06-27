@@ -2,8 +2,7 @@
 #pylint: disable=line-too-long
 
 import math
-import json
-
+import ujson as json
 from funcy.seqs import first
 
 from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time
@@ -16,7 +15,7 @@ def post_basic(post):
         md = json.loads(post['json_metadata'])
         if not isinstance(md, dict):
             md = {}
-    except json.decoder.JSONDecodeError:
+    except Exception:
         pass
 
     thumb_url = ''

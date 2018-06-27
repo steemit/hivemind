@@ -1,11 +1,12 @@
 """Accounts indexer."""
 
 import math
-import json
 
 from collections import deque
 from datetime import datetime
 from toolz import partition_all
+
+import ujson as json
 
 from hive.db.methods import query_col, query, query_all
 from hive.steem.client import SteemClient
