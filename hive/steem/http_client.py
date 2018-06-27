@@ -141,6 +141,7 @@ class HttpClient(object):
 
     def exec(self, method, args, is_batch=False):
         """Execute a steemd RPC method, retrying on failure."""
+        what = "%s[%d]" % (method, len(args) if is_batch else 1)
         body = self.rpc_body(method, args, is_batch)
         body_data = json.dumps(body, ensure_ascii=False).encode('utf8')
 
@@ -163,9 +164,9 @@ class HttpClient(object):
                 result = validated_result(payload, body)
 
                 if secs > 2:
-                    logger.warning('%s took %.1fs %s', method, secs, info)
+                    logger.warning('%s took %.1fs %s', what, secs, info)
                 if tries > 2:
-                    logger.warning('%s took %d tries %s', method, tries, info)
+                    logger.warning('%s took %d tries %s', what, tries, info)
 
                 return result
 
@@ -177,7 +178,7 @@ class HttpClient(object):
                     secs = perf() - start
                     info = {'secs': round(secs, 3), 'try': tries}
                 logger.error('%s failed in %.1fs. try %d. %s - %s',
-                             method, secs, tries, info, repr(e))
+                             what, secs, tries, info, repr(e))
 
             if tries % 2 == 0:
                 self.next_node()
