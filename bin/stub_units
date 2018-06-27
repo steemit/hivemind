@@ -9,8 +9,8 @@ def _generate(infile):
     stubs = []
 
     for line in open(infile, 'r'):
-        if line[0:3] == 'def':
-            line = line.strip()
+        line = line.strip()
+        if line[0:4] == 'def ' and line[0:5] != 'def _':
             m = re.match(r'^def\s([^\(]+)\(([^\)]*)\):$', line)
             assert m and m[1], "`%s` no match" % line
             method = m[1]
