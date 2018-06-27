@@ -55,6 +55,7 @@ CONDENSER_NOOP_URLS = [
     'change_password',
     'tos.html',
     'privacy.html',
+    'faq.html',
 ]
 
 async def get_state(path: str):
