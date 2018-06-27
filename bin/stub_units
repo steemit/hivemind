@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+import sys
+import re
+
+def _generate(infile):
+    path = infile.replace('.py', '').split('/')
+
+    methods = []
+    stubs = []
+
+    for line in open(infile, 'r'):
+        if line[0:3] == 'def':
+            line = line.strip()
+            m = re.match(r'^def\s([^\(]+)\(([^\)]*)\):$', line)
+            assert m and m[1], "`%s` no match" % line
+            method = m[1]
+            args = m[2]
+
+            methods.append(method)
+            stub = "def test_%s():\n    assert %s(%s) == expected" % (method, method, args)
+            stubs.append(stub)
+
+    outfile = open('tests/test_' + '_'.join(path[1:]) + '.py', 'w')
+    outfile.write("from %s import (\n" % '.'.join(path))
+    for method in methods:
+        outfile.write("    %s,\n" % method)
+    outfile.write(")\n")
+    outfile.write("\n" + "\n\n".join(stubs))
+    outfile.close()
+
+if __name__ == '__main__':
+    _generate(sys.argv[1])

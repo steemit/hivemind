@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 if [ -z "$1" ]
   then
     pylint hive/**/*.py -f colorized -r n
