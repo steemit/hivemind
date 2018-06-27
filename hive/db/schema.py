@@ -1,7 +1,5 @@
 """Db schema definitions and setup routines."""
 
-#xxxx
-
 import logging
 
 import sqlalchemy as sa
@@ -15,7 +13,7 @@ from sqlalchemy.types import BOOLEAN
 #from hive.conf import Conf
 from hive.db.adapter import Db
 
-#pylint: disable=line-too-long
+#pylint: disable=line-too-long, too-many-lines
 
 logging.basicConfig()
 #if Conf.get('log_level') == 'INFO': # ultra-verbose
@@ -24,6 +22,7 @@ logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
 
 def build_metadata():
+    """Build schema def with SqlAlchemy"""
     metadata = sa.MetaData()
 
     sa.Table(
@@ -312,6 +311,7 @@ def build_metadata():
 
 
 def setup():
+    """Creates all tables and seed data"""
     # initialize schema
     engine = Db.create_engine(echo=False)
     build_metadata().create_all(engine)
@@ -331,6 +331,7 @@ def setup():
         Db.instance().query(sql)
 
 def reset_autovac():
+    """Initializes per-table autovacuum/autoanalyze params"""
     # consider using scale_factor = 0 with flat thresholds:
     #   autovacuum_vacuum_threshold, autovacuum_analyze_threshold
 
@@ -355,6 +356,7 @@ def reset_autovac():
         Db.instance().query(sql % (table, vacuum_sf, analyze_sf))
 
 def teardown():
+    """Drop all tables"""
     engine = Db.create_engine(echo=True)
     metadata = build_metadata()
     metadata.drop_all(engine)
