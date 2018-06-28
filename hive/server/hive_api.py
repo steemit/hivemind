@@ -2,6 +2,7 @@
 import time
 
 from decimal import Decimal
+from aiocache import cached
 from hive.db.methods import query_one, query_col, query_all
 from hive.db.db_state import DbState
 
@@ -12,6 +13,7 @@ async def db_head_state():
 # stats methods
 # -------------
 
+@cached(ttl=7200)
 async def payouts_total():
     """Get total sum of all completed payouts."""
     # memoized historical sum. To update:
@@ -28,6 +30,7 @@ async def payouts_total():
 
     return float(precalc_sum + query_one(sql)) #TODO: decimal
 
+@cached(ttl=3600)
 async def payouts_last_24h():
     """Sum of completed payouts in the last 24 hours."""
     sql = """
