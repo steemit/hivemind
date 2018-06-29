@@ -2,6 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from hive.utils.normalize import (
+    block_num,
+    block_date,
     vests_amount,
     steem_amount,
     sbd_amount,
@@ -14,6 +16,14 @@ from hive.utils.normalize import (
     rep_log10,
     safe_img_url,
 )
+
+def test_block_num():
+    block = dict(block_id='013c33f88c643c92a7352b52efde7237f4d4ee0b')
+    assert block_num(block) == 20722680
+
+def test_block_date():
+    block = dict(timestamp='2018-03-16T10:08:42')
+    assert block_date(block) == datetime(2018, 3, 16, 10, 8, 42)
 
 def test_vests_amount():
     assert vests_amount('4.549292 VESTS') == Decimal('4.549292')
