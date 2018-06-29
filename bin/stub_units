@@ -10,14 +10,15 @@ def _generate(infile):
 
     for line in open(infile, 'r'):
         line = line.strip()
-        if line[0:4] == 'def ' and line[0:5] != 'def _':
-            m = re.match(r'^def\s([^\(]+)\(([^\)]*)\):$', line)
-            assert m and m[1], "`%s` no match" % line
-            method = m[1]
-            args = m[2]
+        m = re.match(r'^(async )?def\s([^_\(][^\(]+)\(([^\)]*)\):$', line)
+        if m:
+            isasync = bool(m[1])
+            method = m[2]
+            args = m[3]
 
             methods.append(method)
-            stub = "def test_%s():\n    assert %s(%s) == expected" % (method, method, args)
+            stub = "def test_%s():\n    assert %s%s(%s) == expected" % (
+                method, 'await ' if isasync else '', method, args)
             stubs.append(stub)
 
     outfile = open('tests/test_' + '_'.join(path[1:]) + '.py', 'w')
