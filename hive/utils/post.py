@@ -97,8 +97,8 @@ def post_payout(post):
 
     # trending scores
     _timestamp = parse_time(post['created']).timestamp()
-    sc_trend = score(rshares, _timestamp, 480000)
-    sc_hot = score(rshares, _timestamp, 10000)
+    sc_trend = _score(rshares, _timestamp, 480000)
+    sc_hot = _score(rshares, _timestamp, 10000)
 
     return {
         'payout': payout,
@@ -113,7 +113,7 @@ def _vote_csv_row(vote):
     rep = rep_log10(vote['reputation'])
     return "%s,%s,%s,%s" % (vote['voter'], vote['rshares'], vote['percent'], rep)
 
-def score(rshares, created_timestamp, timescale=480000):
+def _score(rshares, created_timestamp, timescale=480000):
     """Calculate trending/hot score.
 
     Source: calculate_score - https://github.com/steemit/steem/blob/8cd5f688d75092298bcffaa48a543ed9b01447a6/libraries/plugins/tags/tags_plugin.cpp#L239
