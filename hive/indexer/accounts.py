@@ -84,14 +84,14 @@ class Accounts:
     @classmethod
     def dirty_all(cls):
         """Marks all accounts as dirty. Use to rebuild entire table."""
-        cls.dirty(query_col("SELECT name FROM hive_accounts"))
+        cls.dirty(set(query_col("SELECT name FROM hive_accounts")))
 
     @classmethod
     def dirty_oldest(cls, limit=50000):
         """Flag `limit` least-recently updated accounts for update."""
         print("[HIVE] flagging %d oldest accounts for update" % limit)
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
-        return cls.dirty(query_col(sql, limit=limit))
+        return cls.dirty(set(query_col(sql, limit=limit)))
 
     @classmethod
     def flush(cls, trx=False, spread=1):

@@ -4,9 +4,10 @@ import time
 from decimal import Decimal
 
 from hive.conf import Conf
-from hive.utils.normalize import parse_time, parse_amount, steem_amount, vests_amount
+from hive.utils.normalize import parse_amount, steem_amount, vests_amount
 from hive.steem.http_client import HttpClient
-from hive.steem.client_stats import ClientStats
+from hive.steem.stats import ClientStats
+from hive.steem.block.stream import BlockStream
 
 class SteemClient:
     """Handles upstream calls to jussi/steemd, with batching and retrying."""
@@ -58,83 +59,9 @@ class SteemClient:
         result = self.__exec('get_block', {'block_num': num})
         return result['block'] if 'block' in result else None
 
-    def _get_block_simple(self, block_num):
-        block = self.get_block(block_num)
-        assert block, 'could not load block %d' % block_num
-        return {'num': int(block['block_id'][:8], base=16),
-                'date': parse_time(block['timestamp']),
-                'hash': block['block_id']}
-
     def stream_blocks(self, start_from, trail_blocks=0, max_gap=100):
-        """ETA-based block follower."""
-        assert trail_blocks >= 0
-        assert trail_blocks <= 100
-
-        last = self._get_block_simple(start_from - 1)
-        head_num = self.head_block()
-        next_expected = time.time()
-
-        start_head = head_num
-        lag_secs = 1
-        queue = []
-        while True:
-            assert not last['num'] > head_num
-
-            # if slots missed, advance head block
-            time_now = time.time()
-            while time_now >= next_expected + lag_secs:
-                head_num += 1
-                next_expected += 3
-
-                # check we're not too far behind
-                gap = (head_num - last['num'])
-                print("[LIVE] %d blocks behind..." % gap)
-                if max_gap and gap > max_gap:
-                    print("[LIVE] gap too large: %d" % gap)
-                    return # abort streaming; return to fast-sync
-
-            # if caught up, await head advance.
-            if head_num == last['num']:
-                time.sleep(next_expected + lag_secs - time_now)
-                head_num += 1
-                next_expected += 3
-
-            # get the target block; if DNE, pause and retry
-            block_num = last['num'] + 1
-            block = self.get_block(block_num)
-            if not block:
-                lag_secs = min(3, lag_secs + 0.1) # tune inter-slot timing
-                print("[LIVE] block %d not available. hive:%d steem:%d. lag:%f"
-                      % (block_num, head_num, self.head_block(), lag_secs))
-                time.sleep(0.5)
-                continue
-            lag_secs -= 0.001 # timing forward creep
-            last['num'] = block_num
-
-            # if block doesn't link, we're forked
-            if last['hash'] != block['previous']:
-                if queue: # using trail_blocks, fork might not be in db
-                    print("[FORK] Fork in queue; emptying to retry.")
-                    return
-                raise Exception("[FORK] Fork in db: from %s, %s->%s" % (
-                    last['hash'], block['previous'], block['block_id']))
-            last['hash'] = block['block_id']
-
-            # detect missed blocks, adjust schedule
-            block_date = parse_time(block['timestamp'])
-            miss_secs = (block_date - last['date']).seconds - 3
-            if miss_secs and last['num'] >= start_head:
-                print("[LIVE] %d missed blocks"
-                      % (miss_secs / 3))
-                next_expected += miss_secs
-                lag_secs = 1
-            last['date'] = block_date
-
-            # buffer block yield
-            queue.append(block)
-            if len(queue) > trail_blocks:
-                yield queue.pop(0)
-
+        """Stream blocks. Returns a generator."""
+        return BlockStream.stream(self, start_from, trail_blocks, max_gap)
 
     def _gdgp(self):
         ret = self.__exec('get_dynamic_global_properties')

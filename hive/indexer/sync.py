@@ -17,6 +17,7 @@ from hive.db.db_state import DbState
 
 from hive.utils.timer import Timer
 from hive.steem.client import SteemClient
+from hive.steem.block.stream import MicroForkException
 
 from hive.indexer.blocks import Blocks
 from hive.indexer.accounts import Accounts
@@ -66,8 +67,12 @@ class Sync:
             CachedPost.dirty_paidouts(Blocks.head_date())
             CachedPost.flush(trx=True)
 
-            # listen for new blocks
-            cls.listen()
+            try:
+                # listen for new blocks
+                cls.listen()
+            except MicroForkException as e:
+                # attempt to recover by restarting stream
+                log.warning("micro fork: %s", repr(e))
 
     @classmethod
     def initial(cls):
@@ -176,6 +181,7 @@ class Sync:
 
         steemd = SteemClient.instance()
         hive_head = Blocks.head_num()
+
         for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap):
             start_time = time.perf_counter()
 

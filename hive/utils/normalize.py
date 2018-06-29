@@ -61,6 +61,14 @@ def legacy_amount(value):
     tmpl = ("%%.%df %%s" % prec)
     return tmpl % (amt, asset)
 
+def block_num(block):
+    """Given a block object, returns the block number."""
+    return int(block['block_id'][:8], base=16)
+
+def block_date(block):
+    """Parse block timestamp into datetime object."""
+    return parse_time(block['timestamp'])
+
 def parse_time(block_time):
     """Convert chain date into datetime object."""
     return datetime.strptime(block_time, '%Y-%m-%dT%H:%M:%S')
