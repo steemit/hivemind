@@ -66,14 +66,7 @@ class BlockStream:
 
     def _gap_ok(self, curr, head):
         """Ensures gap between curr and head is within limits (max_gap)."""
-        assert not curr > head + 1
-        gap = head - curr
-        if self._max_gap and gap > self._max_gap:
-            logger.warning("gap too large (%d/%d)", gap, self._max_gap)
-            return False
-        elif gap > 0:
-            logger.warning("%d blocks behind...", gap)
-        return True
+        return not self._max_gap or head - curr < self._max_gap
 
     def start(self, start_block):
         """Stream blocks starting from `start_block`.
@@ -101,3 +94,5 @@ class BlockStream:
                 yield popped
 
             curr += 1
+
+        logger.warning("gap exceeds %d", self._max_gap)

@@ -18,8 +18,8 @@ class BlockSchedule:
     def __init__(self, current_head_block):
         self._start_block = current_head_block
         self._head_num = current_head_block
-        self._next_expected = time() + 1.5
-        self._drift = 1.5
+        self._next_expected = time() + self.BLOCK_INTERVAL / 2
+        self._drift = self.BLOCK_INTERVAL / 2
         self._missed = 0
         self._last_date = None
 
@@ -32,6 +32,9 @@ class BlockSchedule:
         # if slots missed, advance head block
         while head_time >= self._next_expected:
             self._advance()
+            if head_time < self._next_expected:
+                logger.warning("%d blocks behind",
+                               self._head_num - num)
 
         # if head is behind, sleep until ready
         while self._head_num < num:
@@ -68,6 +71,7 @@ class BlockSchedule:
         received block time."""
         if num == self._head_num:
             gap = time() - date.replace(tzinfo=utc).timestamp()
+            assert gap > -60, 'system clock is %ds behind chain' % gap
             if gap > 60:
                 raise StaleHeadException("chain gap is %fs" % gap)
 
@@ -78,6 +82,7 @@ class BlockSchedule:
             return
 
         gap_secs = (next_date - prev_date).seconds
+        assert gap_secs >= self.BLOCK_INTERVAL
         missed = (gap_secs / self.BLOCK_INTERVAL) - 1
         if missed:
             self._add_missed(missed)
