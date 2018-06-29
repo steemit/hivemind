@@ -22,6 +22,7 @@ def _generate(infile):
             stubs.append(stub)
 
     outfile = open('tests/test_' + '_'.join(path[1:]) + '.py', 'w')
+    outfile.write("#pylint: disable=missing-docstring\n")
     outfile.write("from %s import (\n" % '.'.join(path))
     for method in methods:
         outfile.write("    %s,\n" % method)

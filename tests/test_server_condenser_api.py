@@ -1,3 +1,4 @@
+#pylint: disable=missing-docstring
 import pytest
 from hive.server.condenser_api.get_state import get_state
 
@@ -30,4 +31,3 @@ async def test_get_state():
 
     with pytest.raises(Exception):
         await get_state('witnesses')
-

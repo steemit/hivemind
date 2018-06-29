@@ -1,3 +1,4 @@
+#pylint: disable=missing-docstring,line-too-long
 import json
 
 from hive.utils.account import safe_profile_metadata

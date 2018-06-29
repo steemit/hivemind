@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# pylint: disable=unused-import,unused-variable,wildcard-import
+#pylint: disable=unused-import,unused-variable,wildcard-import,missing-docstring
 
 from hive import *
 from hive.db import *
