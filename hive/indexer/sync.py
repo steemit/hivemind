@@ -4,7 +4,6 @@ import logging
 import glob
 import time
 import os
-import traceback
 import ujson as json
 
 from funcy.seqs import drop
@@ -84,7 +83,6 @@ class Sync:
         cls.from_steemd(is_initial_sync=True)
 
         print("[INIT] *** Initial cache build ***")
-        # TODO: disable indexes during this process
         CachedPost.recover_missing_posts()
         FeedCache.rebuild()
         Follow.force_recount()
@@ -129,44 +127,32 @@ class Sync:
         if count < 1:
             return
 
-        _abort = False
-        try:
-            print("[SYNC] start block %d, +%d to sync" % (lbound, count))
-            timer = Timer(count, entity='block', laps=['rps', 'wps'])
-            while lbound < ubound:
-                timer.batch_start()
+        print("[SYNC] start block %d, +%d to sync" % (lbound, count))
+        timer = Timer(count, entity='block', laps=['rps', 'wps'])
+        while lbound < ubound:
+            timer.batch_start()
 
-                # fetch blocks
-                to = min(lbound + chunk_size, ubound)
-                blocks = steemd.get_blocks_range(lbound, to)
-                lbound = to
-                timer.batch_lap()
+            # fetch blocks
+            to = min(lbound + chunk_size, ubound)
+            blocks = steemd.get_blocks_range(lbound, to)
+            lbound = to
+            timer.batch_lap()
 
-                # process blocks
-                Blocks.process_multi(blocks, is_initial_sync)
-                timer.batch_finish(len(blocks))
-                date = blocks[-1]['timestamp']
-                print(timer.batch_status("[SYNC] Got block %d @ %s" % (to-1, date)))
-
-        except KeyboardInterrupt:
-            traceback.print_exc()
-            print("\n\n[SYNC] Aborted.. cleaning up..")
-            _abort = True
+            # process blocks
+            Blocks.process_multi(blocks, is_initial_sync)
+            timer.batch_finish(len(blocks))
+            date = blocks[-1]['timestamp']
+            print(timer.batch_status("[SYNC] Got block %d @ %s" % (to-1, date)))
 
         if not is_initial_sync:
             # This flush is low importance; accounts are swept regularly.
-            if not _abort:
-                Accounts.flush(trx=True)
+            Accounts.flush(trx=True)
 
             # If this flush fails, all that could potentially be lost here is
             # edits and pre-payout votes. If the post has not been paid out yet,
             # then the worst case is it will be synced upon payout. If the post
             # is already paid out, worst case is to lose an edit.
             CachedPost.flush(trx=True)
-
-        if _abort:
-            print("[SYNC] Aborted")
-            exit()
 
 
     @classmethod
