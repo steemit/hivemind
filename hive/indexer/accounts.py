@@ -8,11 +8,13 @@ from toolz import partition_all
 
 import ujson as json
 
-from hive.db.methods import query_col, query, query_all
+from hive.db.adapter import Db
 from hive.steem.client import SteemClient
 from hive.utils.normalize import rep_log10, vests_amount
 from hive.utils.timer import Timer
 from hive.utils.account import safe_profile_metadata
+
+DB = Db.instance()
 
 class Accounts:
     """Manages account id map, dirty queue, and `hive_accounts` table."""
@@ -30,7 +32,7 @@ class Accounts:
     def load_ids(cls):
         """Load a full (name: id) dict into memory."""
         assert not cls._ids, "id map already loaded"
-        cls._ids = dict(query_all("SELECT name, id FROM hive_accounts"))
+        cls._ids = dict(DB.query_all("SELECT name, id FROM hive_accounts"))
 
     @classmethod
     def get_id(cls, name):
@@ -59,12 +61,12 @@ class Accounts:
             return
 
         for name in new_names:
-            query("INSERT INTO hive_accounts (name, created_at) "
-                  "VALUES (:name, :date)", name=name, date=block_date)
+            DB.query("INSERT INTO hive_accounts (name, created_at) "
+                     "VALUES (:name, :date)", name=name, date=block_date)
 
         # pull newly-inserted ids and merge into our map
         sql = "SELECT name, id FROM hive_accounts WHERE name IN :names"
-        for name, _id in query_all(sql, names=tuple(new_names)):
+        for name, _id in DB.query_all(sql, names=tuple(new_names)):
             cls._ids[name] = _id
 
 
@@ -86,14 +88,14 @@ class Accounts:
     @classmethod
     def dirty_all(cls):
         """Marks all accounts as dirty. Use to rebuild entire table."""
-        cls.dirty(set(query_col("SELECT name FROM hive_accounts")))
+        cls.dirty(set(DB.query_col("SELECT name FROM hive_accounts")))
 
     @classmethod
     def dirty_oldest(cls, limit=50000):
         """Flag `limit` least-recently updated accounts for update."""
         print("[HIVE] flagging %d oldest accounts for update" % limit)
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
-        return cls.dirty(set(query_col(sql, limit=limit)))
+        return cls.dirty(set(DB.query_col(sql, limit=limit)))
 
     @classmethod
     def flush(cls, trx=False, spread=1):
@@ -125,7 +127,7 @@ class Accounts:
           FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY vote_weight DESC) as rnk FROM hive_accounts) r
          WHERE hive_accounts.id = r.id AND rank != r.rnk;
         """
-        query(sql)
+        DB.query(sql)
 
     @classmethod
     def _cache_accounts(cls, accounts, trx=True):
@@ -136,21 +138,11 @@ class Accounts:
             timer.batch_start()
             sqls = cls._generate_cache_sqls(batch)
             timer.batch_lap()
-            cls._batch_update(sqls, trx)
+            DB.batch_queries(sqls, trx)
 
             timer.batch_finish(len(batch))
             if trx or len(accounts) > 1000:
                 print(timer.batch_status())
-
-    @classmethod
-    def _batch_update(cls, sqls, trx):
-        """Sends batched of prepared queries to db adapter."""
-        if trx:
-            query("START TRANSACTION")
-        for (sql, params) in sqls:
-            query(sql, **params)
-        if trx:
-            query("COMMIT")
 
     @classmethod
     def _generate_cache_sqls(cls, accounts):

@@ -101,6 +101,19 @@ class Db:
             raise Exception("db engine %s not supported" % engine)
         return engine
 
+    def batch_queries(self, queries, trx):
+        """Process batches of prepared SQL tuples.
+
+        If `trx` is true, the queries will be wrapped in a transaction.
+        The format of queries is `[(sql, {params*}), ...]`
+        """
+        if trx:
+            self.query("START TRANSACTION")
+        for (sql, params) in queries:
+            self.query(sql, **params)
+        if trx:
+            self.query("COMMIT")
+
     @staticmethod
     def build_upsert(table, pk, values):
         """Generates a prepared statement, either INSERT/UPDATE."""

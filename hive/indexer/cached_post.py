@@ -318,17 +318,18 @@ class CachedPost:
             post_levels = [tup[2] for tup in tups]
             for pid, post, level in zip(post_ids, posts, post_levels):
                 if post['author']:
-                    buffer.append(cls._sql(pid, post, level=level))
+                    buffer.extend(cls._sql(pid, post, level=level))
                 else:
-                    # expected to happen when sweeping missed posts as
-                    # part of initial sync or crash recovery routine,
-                    # otherwise indicates potential bug. TODO: assert?
-                    if not cls._sweeping_missed:
-                        print("WARNING: missing/deleted post %d" % pid)
+                    # When a post has been deleted (or otherwise DNE),
+                    # steemd simply returns a blank post  object w/ all
+                    # fields blank. While it's best to not try to cache
+                    # already-deleted posts, it can happen during missed
+                    # post sweep and while using `trail_blocks` > 0.
+                    pass
                 cls._bump_last_id(pid)
 
             timer.batch_lap()
-            cls._batch_queries(buffer, trx)
+            DB.batch_queries(buffer, trx)
 
             timer.batch_finish(len(posts))
             if len(tuples) >= 1000:
@@ -370,17 +371,6 @@ class CachedPost:
             return
         raise Exception("found large cache gap: %d --> %d (%d)"
                         % (last_id, next_id, missing_posts))
-
-    @classmethod
-    def _batch_queries(cls, batches, trx):
-        """Process batches of prepared SQL tuples."""
-        if trx:
-            DB.query("START TRANSACTION")
-        for queries in batches:
-            for (sql, params) in queries:
-                DB.query(sql, **params)
-        if trx:
-            DB.query("COMMIT")
 
     @classmethod
     def _sql(cls, pid, post, level=None):
