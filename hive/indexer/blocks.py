@@ -105,17 +105,6 @@ class Blocks:
         Posts.delete_ops(delete_ops)               # handle post deletion
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops
 
-        if (num > 20000000
-                and not account_names
-                and not voted_authors
-                and not comment_ops
-                and not delete_ops
-                and not json_ops):
-            trxs = len(block['transactions'])
-            print("[WARNING] block %d is no-op with %d trxs" % (num, trxs))
-            if trxs:
-                print("Trxs: {}".format(block['transactions']))
-
         return num
 
     @classmethod

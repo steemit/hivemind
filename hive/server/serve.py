@@ -25,7 +25,7 @@ def build_methods():
     # pylint: disable=expression-not-assigned
     methods = AsyncMethods()
 
-    [methods.add(method) for method in (
+    [methods.add(method, 'hive.' + method.__name__) for method in (
         hive_api.db_head_state,
         hive_api.payouts_total,
         hive_api.payouts_last_24h,
