@@ -6,7 +6,7 @@ from decimal import Decimal
 from hive.conf import Conf
 from hive.utils.normalize import parse_amount, steem_amount, vests_amount
 from hive.steem.http_client import HttpClient
-from hive.steem.stats import ClientStats
+from hive.utils.stats import Stats
 from hive.steem.block.stream import BlockStream
 
 class SteemClient:
@@ -138,7 +138,7 @@ class SteemClient:
         total_time = (time.perf_counter() - time_start) * 1000
 
         batch_size = len(params[0]) if method == 'get_accounts' else 1
-        ClientStats.log(method, total_time, batch_size)
+        Stats.log_steem(method, total_time, batch_size)
         return result
 
     def __exec_batch(self, method, params):
@@ -154,5 +154,5 @@ class SteemClient:
             result.extend(part)
 
         total_time = (time.perf_counter() - time_start) * 1000
-        ClientStats.log(method, total_time, len(params))
+        Stats.log_steem(method, total_time, len(params))
         return result

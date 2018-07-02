@@ -7,7 +7,7 @@ from funcy.seqs import first
 import sqlalchemy
 
 from hive.conf import Conf
-from hive.db.query_stats import QueryStats
+from hive.utils.stats import log_query_stats
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class Db:
 
         return (sql, values)
 
-    @QueryStats()
+    @log_query_stats
     def _query(self, sql, **kwargs):
         """Send a query off to SQLAlchemy."""
         if sql == 'START TRANSACTION':
