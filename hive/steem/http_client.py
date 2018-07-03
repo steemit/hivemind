@@ -17,8 +17,7 @@ from urllib3.exceptions import HTTPError
 
 from hive.steem.exceptions import RPCError, RPCErrorFatal
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
+log = logging.getLogger(__name__)
 
 def validated_json_payload(response):
     """Asserts that the HTTP response was successful and valid JSON."""
@@ -114,8 +113,9 @@ class HttpClient(object):
         self.request = None
         self.next_node()
 
-        log_level = kwargs.get('log_level', logging.WARNING)
-        logger.setLevel(log_level)
+        log_level = kwargs.get('log_level')
+        if log_level:
+            log.setLevel(log_level)
 
     def next_node(self):
         """Switch to the next available node."""
@@ -124,7 +124,7 @@ class HttpClient(object):
     def set_node(self, node_url):
         """Change current node to provided node URL."""
         if not self.url == node_url:
-            logger.info("HttpClient using node: %s", node_url)
+            log.info("using node: %s", node_url)
             self.url = node_url
             self.request = partial(self.http.urlopen, 'POST', self.url)
 
@@ -164,9 +164,9 @@ class HttpClient(object):
                 result = validated_result(payload, body)
 
                 if secs > 2:
-                    logger.warning('%s took %.1fs %s', what, secs, info)
+                    log.warning('%s took %.1fs %s', what, secs, info)
                 if tries > 2:
-                    logger.warning('%s took %d tries %s', what, tries, info)
+                    log.warning('%s took %d tries %s', what, tries, info)
 
                 return result
 
@@ -177,8 +177,8 @@ class HttpClient(object):
                 if secs < 0: # request failed
                     secs = perf() - start
                     info = {'secs': round(secs, 3), 'try': tries}
-                logger.error('%s failed in %.1fs. try %d. %s - %s',
-                             what, secs, tries, info, repr(e))
+                log.error('%s failed in %.1fs. try %d. %s - %s',
+                          what, secs, tries, info, repr(e))
 
             if tries % 2 == 0:
                 self.next_node()

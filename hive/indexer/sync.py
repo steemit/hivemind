@@ -71,7 +71,7 @@ class Sync:
                 cls.listen()
             except MicroForkException as e:
                 # attempt to recover by restarting stream
-                log.warning("micro fork: %s", repr(e))
+                log.error("micro fork: %s", repr(e))
 
     @classmethod
     def initial(cls):

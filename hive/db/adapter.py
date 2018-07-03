@@ -9,7 +9,7 @@ import sqlalchemy
 from hive.conf import Conf
 from hive.utils.stats import log_query_stats
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 class Db:
     """RDBMS adapter for hive. Handles connecting and querying."""
@@ -149,8 +149,8 @@ class Db:
         try:
             return self.conn().execute(query, **kwargs)
         except Exception as e:
-            print("[SQL-ERR] %s in query %s (%s)" % (
-                e.__class__.__name__, sql, kwargs))
+            log.error("[SQL-ERR] %s in query %s (%s)",
+                      e.__class__.__name__, sql, kwargs)
             raise e
 
     @staticmethod

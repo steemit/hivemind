@@ -45,6 +45,8 @@ class Conf():
         cls._args = vars(args)
         print(parser.format_values())
 
+        logging.getLogger().setLevel(cls.log_level())
+
     @classmethod
     def init_config(cls, config):
         """Initialize config directly (do not parse ENV/cli/conf)."""
