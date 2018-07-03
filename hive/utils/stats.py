@@ -115,7 +115,7 @@ class DbStats(StatsAbstract):
 
 class Stats:
     """Collects steemd/db timing data."""
-    PRINT_THRESH_MINS = 0.5
+    PRINT_THRESH_MINS = 5
 
     _db = DbStats()
     _steemd = SteemStats()
