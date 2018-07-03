@@ -1,8 +1,11 @@
 """Maintains feed cache (blogs + reblogs)"""
 
+import logging
 import time
 from hive.db.methods import query
 from hive.db.db_state import DbState
+
+log = logging.getLogger(__name__)
 
 class FeedCache:
     """Maintains `hive_feed_cache`, which merges posts and reports.
@@ -39,7 +42,7 @@ class FeedCache:
     def rebuild(cls, truncate=True):
         """Rebuilds the feed cache upon completion of initial sync."""
 
-        print("[HIVE] Rebuilding feed cache, this will take a few minutes.")
+        log.info("[HIVE] Rebuilding feed cache, this will take a few minutes.")
         query("START TRANSACTION")
         if truncate:
             query("TRUNCATE TABLE hive_feed_cache")
@@ -64,5 +67,5 @@ class FeedCache:
         lap_2 = time.perf_counter()
         query("COMMIT")
 
-        print("[HIVE] Rebuilt hive feed cache in {}s ({}+{})".format(
-            int(lap_2-lap_0), int(lap_1-lap_0), int(lap_2-lap_1)))
+        log.info("[HIVE] Rebuilt hive feed cache in %ds (%d+%d)",
+                 (lap_2 - lap_0), (lap_1 - lap_0), (lap_2 - lap_1))

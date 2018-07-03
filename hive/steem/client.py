@@ -47,7 +47,7 @@ class SteemClient:
         posts = self.__exec_batch('get_content', tuples)
         # TODO: how are we ensuring sequential results? need to set and sort id.
         for post in posts: # sanity-checking jussi responses
-            assert 'author' in post, "invalid post: {}".format(post)
+            assert 'author' in post, "invalid post: %s" % post
         return posts
 
     def get_block(self, num):
@@ -65,7 +65,7 @@ class SteemClient:
 
     def _gdgp(self):
         ret = self.__exec('get_dynamic_global_properties')
-        assert 'time' in ret, "gdgp invalid resp: {}".format(ret)
+        assert 'time' in ret, "gdgp invalid resp: %s" % ret
         return ret
 
     def head_time(self):
@@ -124,7 +124,7 @@ class SteemClient:
 
         batch_params = [{'block_num': i} for i in block_nums]
         for result in self.__exec_batch('get_block', batch_params):
-            assert 'block' in result, "result w/o block key: {}".format(result)
+            assert 'block' in result, "result w/o block key: %s" % result
             block = result['block']
             num = int(block['block_id'][:8], base=16)
             blocks[num] = block

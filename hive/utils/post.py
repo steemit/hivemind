@@ -37,7 +37,6 @@ def post_basic(post):
     body = post['body']
     if body.find('\x00') > -1:
         #url = post['author'] + '/' + post['permlink']
-        #print("bad body chars in {}".format(url))
         body = body.replace('\x00', '[NUL]')
 
     # payout date is last_payout if paid, and cashout_time if pending.

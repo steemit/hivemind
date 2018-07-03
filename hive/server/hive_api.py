@@ -1,10 +1,13 @@
 """[WIP] New and improved discussions API supporting user context."""
 import time
+import logging
 
 from decimal import Decimal
 from aiocache import cached
 from hive.db.methods import query_one, query_col, query_all
 from hive.db.db_state import DbState
+
+log = logging.getLogger(__name__)
 
 async def db_head_state():
     """Status/health check."""
@@ -117,7 +120,7 @@ def _get_posts(ids, context=None):
     # in rare cases of cache inconsistency, recover and warn
     missed = set(ids) - posts_by_id.keys()
     if missed:
-        print("WARNING: _get_posts do not exist in cache: {}".format(missed))
+        log.warning("_get_posts do not exist in cache: %s", repr(missed))
         for _id in missed:
             ids.remove(_id)
 

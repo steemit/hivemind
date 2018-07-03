@@ -1,11 +1,14 @@
 """Handles follow operations."""
 
+import logging
 from time import perf_counter as perf
 
 from funcy.seqs import first
 from hive.db.adapter import Db
 from hive.db.db_state import DbState
 from hive.indexer.accounts import Accounts
+
+log = logging.getLogger(__name__)
 
 DB = Db.instance()
 
@@ -116,7 +119,7 @@ class Follow:
         DB.batch_queries(sqls, trx=trx)
         if trx:
             total = (perf() - start)
-            print("[SYNC] flushed %d follow deltas in %ds" % (len(sqls), total))
+            log.info("[SYNC] flushed %d follow deltas in %ds", len(sqls), total)
 
         cls._delta = {FOLLOWERS: {}, FOLLOWING: {}}
         return len(sqls)
@@ -142,7 +145,7 @@ class Follow:
     @classmethod
     def force_recount(cls):
         """Recounts all follows after init sync."""
-        print("[SYNC] query follower counts")
+        log.info("[SYNC] query follower counts")
         sql = """
             CREATE TEMPORARY TABLE following_counts AS (
                 SELECT follower account_id, COUNT(*) num
@@ -153,7 +156,7 @@ class Follow:
         """
         DB.query(sql)
 
-        print("[SYNC] update follower counts")
+        log.info("[SYNC] update follower counts")
         sql = """
             UPDATE hive_accounts SET followers = num
             FROM follower_counts WHERE id = account_id;

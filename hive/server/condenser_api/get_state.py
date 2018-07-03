@@ -1,9 +1,9 @@
 """Routes then builds a get_state response object"""
 
 #pylint: disable=line-too-long
-import ujson as json
-
+import logging
 from collections import OrderedDict
+import ujson as json
 
 from hive.db.methods import query_one
 from hive.utils.normalize import legacy_amount
@@ -28,6 +28,8 @@ from hive.server.condenser_api.tags import (
     get_top_trending_tags_summary)
 
 import hive.server.condenser_api.cursor as cursor
+
+log = logging.getLogger(__name__)
 
 # steemd account 'tabs' - specific post list queries
 ACCOUNT_TAB_KEYS = {
@@ -127,7 +129,7 @@ async def get_state(path: str):
         assert not part[1] and not part[2]
 
     else:
-        print('unhandled path /%s' % path)
+        log.warning('unhandled path /%s', path)
 
     return state
 

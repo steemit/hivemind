@@ -1,6 +1,7 @@
 """Accounts indexer."""
 
 import math
+import logging
 
 from collections import deque
 from datetime import datetime
@@ -13,6 +14,8 @@ from hive.steem.client import SteemClient
 from hive.utils.normalize import rep_log10, vests_amount
 from hive.utils.timer import Timer
 from hive.utils.account import safe_profile_metadata
+
+log = logging.getLogger(__name__)
 
 DB = Db.instance()
 
@@ -93,7 +96,7 @@ class Accounts:
     @classmethod
     def dirty_oldest(cls, limit=50000):
         """Flag `limit` least-recently updated accounts for update."""
-        print("[HIVE] flagging %d oldest accounts for update" % limit)
+        log.info("[HIVE] flagging %d oldest accounts for update", limit)
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
         return cls.dirty(set(DB.query_col(sql, limit=limit)))
 
@@ -112,7 +115,7 @@ class Accounts:
         if spread > 1:
             count = math.ceil(count / spread)
         if trx:
-            print("[SYNC] update %d accounts" % count)
+            log.info("[SYNC] update %d accounts", count)
 
         accounts = [cls._dirty.popleft() for _ in range(count)]
         cls._cache_accounts(accounts, trx=trx)
@@ -142,7 +145,7 @@ class Accounts:
 
             timer.batch_finish(len(batch))
             if trx or len(accounts) > 1000:
-                print(timer.batch_status())
+                log.info(timer.batch_status())
 
     @classmethod
     def _generate_cache_sqls(cls, accounts):

@@ -4,7 +4,7 @@ from time import time, sleep
 from pytz import utc
 from hive.utils.normalize import block_date
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 class StaleHeadException(Exception):
     """Raised when the head block appears to be too old."""
@@ -33,8 +33,8 @@ class BlockSchedule:
         while head_time >= self._next_expected:
             self._advance()
             if head_time < self._next_expected:
-                logger.warning("%d blocks behind",
-                               self._head_num - num)
+                log.warning("%d blocks behind",
+                            self._head_num - num)
 
         # if head is behind, sleep until ready
         while self._head_num < num:
@@ -59,9 +59,8 @@ class BlockSchedule:
             self._last_date = date
         else:
             self._drift_backward()
-            logger.warning(
-                "block %d was not available. head:%s drift:%fs",
-                num, self._head_num, self._drift)
+            log.warning("block %d not available. head:%s drift:%fs",
+                        num, self._head_num, self._drift)
 
     def _check_head_date(self, num, date):
         """Sanity-checking of head block date.
@@ -86,7 +85,7 @@ class BlockSchedule:
         missed = (gap_secs / self.BLOCK_INTERVAL) - 1
         if missed:
             self._add_missed(missed)
-            logger.warning("%d missed @ block %d", missed, num)
+            log.warning("%d missed @ block %d", missed, num)
 
     def _drift_backward(self, delta=0.1):
         """Delay the schedule by 0.1s when a block fetch failed."""

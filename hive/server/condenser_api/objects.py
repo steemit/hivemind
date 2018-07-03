@@ -1,8 +1,11 @@
 """Handles building condenser_api-compatible response objects."""
 
+import logging
 import ujson as json
 
 from hive.db.methods import query_all, query_row
+
+log = logging.getLogger(__name__)
 
 # Building of legacy account objects
 
@@ -37,11 +40,11 @@ def load_posts(ids, truncate_body=0):
     # in rare cases of cache inconsistency, recover and warn
     missed = set(ids) - posts_by_id.keys()
     if missed:
-        print("WARNING: get_posts do not exist in cache: {}".format(missed))
+        log.warning("get_posts do not exist in cache: %s", repr(missed))
         for _id in missed:
             sql = ("SELECT id, author, permlink, depth, created_at, is_deleted "
                    "FROM hive_posts WHERE id = :id")
-            print("missing: {}".format(dict(query_row(sql, id=_id))))
+            log.warning("missing: %s", dict(query_row(sql, id=_id)))
             ids.remove(_id)
 
     return [posts_by_id[_id] for _id in ids]
