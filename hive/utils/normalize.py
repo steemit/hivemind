@@ -92,6 +92,19 @@ def trunc(string, maxlen):
             string = string[0:(maxlen-3)] + '...'
     return string
 
+def secs_to_str(secs):
+    """Given number of seconds returns, e.g., `02h 29m 39s`"""
+    units = (('s', 60), ('m', 60), ('h', 24), ('d', 7))
+    out = []
+    rem = secs
+    for (unit, cycle) in units:
+        out.append((rem % cycle, unit))
+        rem = int(rem / cycle)
+        if not rem:
+            break
+    if rem: # leftover = weeks
+        out.append((rem, 'w'))
+    return ' '.join(["%02d%s" % tup for tup in out[::-1]])
 
 def rep_log10(rep):
     """Convert raw steemd rep into a UI-ready value centered at 25."""
