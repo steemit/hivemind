@@ -2,7 +2,7 @@
 
 import logging
 import glob
-import time
+from time import perf_counter as perf
 import os
 import ujson as json
 
@@ -78,11 +78,11 @@ class Sync:
         """Initial sync routine."""
         assert DbState.is_initial_sync(), "already synced"
 
-        print("[INIT] *** Initial fast sync ***")
+        log.info("[INIT] *** Initial fast sync ***")
         cls.from_checkpoints()
         cls.from_steemd(is_initial_sync=True)
 
-        print("[INIT] *** Initial cache build ***")
+        log.info("[INIT] *** Initial cache build ***")
         CachedPost.recover_missing_posts()
         FeedCache.rebuild()
         Follow.force_recount()
@@ -106,7 +106,7 @@ class Sync:
         last_read = 0
         for (num, path) in tuples:
             if last_block < num:
-                print("[SYNC] Load %s -- last block: %d" % (path, last_block))
+                log.info("[SYNC] Load %s. Last block: %d", path, last_block)
                 with open(path) as f:
                     # each line in file represents one block
                     # we can skip the blocks we already have
@@ -127,7 +127,7 @@ class Sync:
         if count < 1:
             return
 
-        print("[SYNC] start block %d, +%d to sync" % (lbound, count))
+        log.info("[SYNC] start block %d, +%d to sync", lbound, count)
         timer = Timer(count, entity='block', laps=['rps', 'wps'])
         while lbound < ubound:
             timer.batch_start()
@@ -141,8 +141,10 @@ class Sync:
             # process blocks
             Blocks.process_multi(blocks, is_initial_sync)
             timer.batch_finish(len(blocks))
-            date = blocks[-1]['timestamp']
-            print(timer.batch_status("[SYNC] Got block %d @ %s" % (to-1, date)))
+
+            _prefix = ("[SYNC] Got block %d @ %s" % (
+                to - 1, blocks[-1]['timestamp']))
+            log.info(timer.batch_status(_prefix))
 
         if not is_initial_sync:
             # This flush is low importance; accounts are swept regularly.
@@ -169,7 +171,7 @@ class Sync:
         hive_head = Blocks.head_num()
 
         for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap):
-            start_time = time.perf_counter()
+            start_time = perf()
 
             query("START TRANSACTION")
             num = Blocks.process(block)
@@ -179,12 +181,12 @@ class Sync:
             cnt = CachedPost.flush(trx=False)
             query("COMMIT")
 
-            ms = (time.perf_counter() - start_time) * 1000
-            print("[LIVE] Got block %d at %s --% 4d txs,% 3d posts,% 3d edits,"
-                  "% 3d payouts,% 3d votes,% 3d accounts,% 3d follows --% 5dms%s"
-                  % (num, block['timestamp'], len(block['transactions']),
+            ms = (perf() - start_time) * 1000
+            log.info("[LIVE] Got block %d at %s --% 4d txs,% 3d posts,% 3d edits,"
+                     "% 3d payouts,% 3d votes,% 3d accts,% 3d follows --% 5dms%s",
+                     num, block['timestamp'], len(block['transactions']),
                      cnt['insert'], cnt['update'], cnt['payout'], cnt['upvote'],
-                     accts, follows, int(ms), ' SLOW' if ms > 1000 else ''))
+                     accts, follows, int(ms), ' SLOW' if ms > 1000 else '')
 
             # once per hour, update accounts
             if num % 1200 == 0:
