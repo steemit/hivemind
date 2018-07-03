@@ -12,11 +12,13 @@ import ujson as json
 import certifi
 import urllib3
 
+from urllib3.util import Retry
 from urllib3.connection import HTTPConnection
 from urllib3.exceptions import HTTPError
 
 from hive.steem.exceptions import RPCError, RPCErrorFatal
 
+logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 def validated_json_payload(response):
@@ -101,7 +103,7 @@ class HttpClient(object):
             timeout=kwargs.get('timeout', 30),
             socket_options=socket_options,
             block=False,
-            retries=False,
+            retries=Retry(total=False),
             headers={
                 'Content-Type': 'application/json',
                 'accept-encoding': 'gzip'},
@@ -112,10 +114,6 @@ class HttpClient(object):
         self.url = ''
         self.request = None
         self.next_node()
-
-        log_level = kwargs.get('log_level')
-        if log_level:
-            log.setLevel(log_level)
 
     def next_node(self):
         """Switch to the next available node."""
