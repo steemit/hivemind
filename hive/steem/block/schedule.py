@@ -3,6 +3,7 @@ import logging
 from time import time, sleep
 from pytz import utc
 from hive.utils.normalize import block_date
+from hive.utils.stats import Stats
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +39,9 @@ class BlockSchedule:
 
         # if head is behind, sleep until ready
         while self._head_num < num:
-            sleep(self._next_expected - head_time)
+            wait_secs = self._next_expected - head_time
+            sleep(wait_secs)
+            Stats.log_idle(wait_secs * 1000)
             head_time = self._next_expected
             self._advance()
 

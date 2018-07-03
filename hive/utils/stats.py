@@ -63,7 +63,7 @@ class StatsAbstract:
         if not self._calls:
             return
 
-        log.info("%s: %ds total (%.1f%%)",
+        log.info("Service: %s -- %ds total (%.1f%%)",
                  self._service,
                  round(self._ms / 1000),
                  100 * (self._ms / total_ms))
@@ -136,6 +136,7 @@ class Stats:
     _db = DbStats()
     _steemd = SteemStats()
     _ms = 0.0
+    _idle = 0.0
     _start = perf()
 
     @classmethod
@@ -151,6 +152,11 @@ class Stats:
         cls.add_ms(ms)
 
     @classmethod
+    def log_idle(cls, ms):
+        """Track idle time (e.g. sleeping until next block)"""
+        cls._idle += ms
+
+    @classmethod
     def add_ms(cls, ms):
         """Add to total ms elapsed; print if threshold reached."""
         cls._ms += ms
@@ -163,9 +169,12 @@ class Stats:
     def report(cls):
         """Emit a timing report for tracked services."""
         local = cls._ms / 1000
-        total = perf() - cls._start
-        log.info("cumtime %ds (%.1f%% of %ds). peak mem %dmb.",
-                 local, 100 * local / total, total, peak_usage_mb())
+        idle = cls._idle / 1000
+        total = (perf() - cls._start)
+        non_idle = total - idle
+        log.info("cumtime %ds (%.1f%% of %ds). %.1f%% idle. peak %dmb.",
+                 local, 100 * local / non_idle, non_idle,
+                 100 * idle / total, peak_usage_mb())
         cls._db.report(cls._ms)
         cls._steemd.report(cls._ms)
 
