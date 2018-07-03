@@ -25,8 +25,8 @@ class Payments:
             return
 
         # add payment record
-        insert = DB.build_upsert('hive_payments', 'id', record)
-        DB.query(insert)
+        sql = DB.build_insert('hive_payments', record, pk='id')
+        DB.query(sql)
 
         # read current amount
         sql = "SELECT promoted FROM hive_posts WHERE id = :id"

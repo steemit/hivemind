@@ -1,7 +1,7 @@
 """Wrapper for sqlalchemy, providing a simple interface."""
 
 import logging
-import collections
+from collections import OrderedDict
 from funcy.seqs import first
 
 import sqlalchemy
@@ -118,23 +118,37 @@ class Db:
             self.query("COMMIT")
 
     @staticmethod
-    def build_upsert(table, pk, values):
-        """Generates a prepared statement, either INSERT/UPDATE."""
-        pks = [pk] if isinstance(pk, str) else pk
-        values = collections.OrderedDict(values)
-        fields = list(values.keys())
-        pks_blank = [values[k] is None for k in pks]
+    def build_insert(table, values, pk=None):
+        """Generates an INSERT statement w/ bindings."""
+        values = OrderedDict(values)
 
-        if all(pks_blank):
-            cols = ', '.join([k for k in fields if k not in pks])
-            params = ', '.join([':'+k for k in fields if k not in pks])
-            sql = "INSERT INTO %s (%s) VALUES (%s)"
-            sql = sql % (table, cols, params)
-        else:
-            update = ', '.join([k+" = :"+k for k in fields if k not in pks])
-            where = ' AND '.join([k+" = :"+k for k in fields if k in pks])
-            sql = "UPDATE %s SET %s WHERE %s"
-            sql = sql % (table, update, where)
+        # Delete PK field if blank
+        if pk:
+            pks = [pk] if isinstance(pk, str) else pk
+            for key in pks:
+                if not values[key]:
+                    del values[key]
+
+        fields = list(values.keys())
+        cols = ', '.join([k for k in fields])
+        params = ', '.join([':'+k for k in fields])
+        sql = "INSERT INTO %s (%s) VALUES (%s)"
+        sql = sql % (table, cols, params)
+
+        return (sql, values)
+
+    @staticmethod
+    def build_update(table, values, pk):
+        """Generates an UPDATE statement w/ bindings."""
+        assert pk and isinstance(pk, (str, list))
+        pks = [pk] if isinstance(pk, str) else pk
+        values = OrderedDict(values)
+        fields = list(values.keys())
+
+        update = ', '.join([k+" = :"+k for k in fields if k not in pks])
+        where = ' AND '.join([k+" = :"+k for k in fields if k in pks])
+        sql = "UPDATE %s SET %s WHERE %s"
+        sql = sql % (table, update, where)
 
         return (sql, values)
 
