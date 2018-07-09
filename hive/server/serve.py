@@ -67,9 +67,8 @@ def run_server():
 
     log_level = Conf.log_level()
     config.debug = (log_level == logging.DEBUG)
-    logging.basicConfig(level=log_level)
-    logger = logging.getLogger(__name__)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
+    log = logging.getLogger(__name__)
 
     methods = build_methods()
 
@@ -78,7 +77,7 @@ def run_server():
     app['config']['args'] = Conf.args()
     app['config']['hive.MAX_DB_ROW_RESULTS'] = 100000
     app['config']['hive.DB_QUERY_LIMIT'] = app['config']['hive.MAX_DB_ROW_RESULTS'] + 1
-    app['config']['hive.logger'] = logger
+    #app['config']['hive.logger'] = logger
 
     #async def init_db(app):
     #    args = app['config']['args']
@@ -103,13 +102,13 @@ def run_server():
             return await hive_api.db_head_state()
         except OperationalError as e:
             if 'could not connect to server: Connection refused' in str(e):
-                logging.warning("could not get head state (connection refused)")
+                log.warning("could not get head state (connection refused)")
                 return None
             if 'the database system is shutting down' in str(e):
-                logging.warning("could not get head state (db shutting down)")
+                log.warning("could not get head state (db shutting down)")
                 return None
             if 'terminating connection due to administrator command' in str(e):
-                logging.warning("could not get head state (admin terminated)")
+                log.warning("could not get head state (admin terminated)")
                 return None
             raise e
 

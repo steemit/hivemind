@@ -1,5 +1,7 @@
 """Blocks processor."""
 
+import logging
+
 from hive.db.methods import query_row, query_col, query_one, query
 from hive.steem.client import SteemClient
 
@@ -9,6 +11,8 @@ from hive.indexer.cached_post import CachedPost
 from hive.indexer.custom_op import CustomOp
 from hive.indexer.payments import Payments
 from hive.indexer.follow import Follow
+
+log = logging.getLogger(__name__)
 
 class Blocks:
     """Processes blocks, dispatches work, manages `hive_blocks` table."""
@@ -41,7 +45,7 @@ class Blocks:
             for block in blocks:
                 last_num = cls._process(block, is_initial_sync)
         except Exception as e:
-            print("[FATAL] could not process block %d" % (last_num + 1))
+            log.error("exception encountered block %d", last_num + 1)
             raise e
 
         # Follows flushing needs to be atomic because recounts are
@@ -123,9 +127,9 @@ class Blocks:
             hive_block = cls._get(cursor)
             steem_hash = steemd.get_block(cursor)['block_id']
             match = hive_block['hash'] == steem_hash
-            print("[INIT] fork check. block %d: %s vs %s --- %s"
-                  % (hive_block['num'], hive_block['hash'],
-                     steem_hash, 'ok' if match else 'invalid'))
+            log.info("[INIT] fork check. block %d: %s vs %s --- %s",
+                     hive_block['num'], hive_block['hash'],
+                     steem_hash, 'ok' if match else 'invalid')
             if match:
                 break
             to_pop.append(hive_block)
@@ -134,8 +138,8 @@ class Blocks:
         if hive_head == cursor:
             return # no fork!
 
-        print("[FORK] depth is %d; popping blocks %d - %d"
-              % (hive_head - cursor, cursor + 1, hive_head))
+        log.error("[FORK] depth is %d; popping blocks %d - %d",
+                  hive_head - cursor, cursor + 1, hive_head)
 
         # we should not attempt to recover from fork until it's safe
         fork_limit = steemd.last_irreversible()
@@ -192,7 +196,7 @@ class Blocks:
         for block in blocks:
             num = block['num']
             date = block['date']
-            print("[FORK] popping block %d @ %s" % (num, date))
+            log.warning("[FORK] popping block %d @ %s", num, date)
             assert num == cls.head_num(), "can only pop head block"
 
             # get all affected post_ids in this block
@@ -210,5 +214,5 @@ class Blocks:
             query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
 
         query("COMMIT")
-        print("[FORK] recovery complete")
+        log.warning("[FORK] recovery complete")
         # TODO: manually re-process here the blocks which were just popped.

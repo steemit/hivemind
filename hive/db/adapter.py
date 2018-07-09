@@ -7,9 +7,9 @@ from funcy.seqs import first
 import sqlalchemy
 
 from hive.conf import Conf
-from hive.db.query_stats import QueryStats
+from hive.utils.stats import log_query_stats
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 class Db:
     """RDBMS adapter for hive. Handles connecting and querying."""
@@ -101,6 +101,19 @@ class Db:
             raise Exception("db engine %s not supported" % engine)
         return engine
 
+    def batch_queries(self, queries, trx):
+        """Process batches of prepared SQL tuples.
+
+        If `trx` is true, the queries will be wrapped in a transaction.
+        The format of queries is `[(sql, {params*}), ...]`
+        """
+        if trx:
+            self.query("START TRANSACTION")
+        for (sql, params) in queries:
+            self.query(sql, **params)
+        if trx:
+            self.query("COMMIT")
+
     @staticmethod
     def build_upsert(table, pk, values):
         """Generates a prepared statement, either INSERT/UPDATE."""
@@ -122,7 +135,7 @@ class Db:
 
         return (sql, values)
 
-    @QueryStats()
+    @log_query_stats
     def _query(self, sql, **kwargs):
         """Send a query off to SQLAlchemy."""
         if sql == 'START TRANSACTION':
@@ -136,8 +149,8 @@ class Db:
         try:
             return self.conn().execute(query, **kwargs)
         except Exception as e:
-            print("[SQL-ERR] %s in query %s (%s)" % (
-                e.__class__.__name__, sql, kwargs))
+            log.error("[SQL-ERR] %s in query %s (%s)",
+                      e.__class__.__name__, sql, kwargs)
             raise e
 
     @staticmethod

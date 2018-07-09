@@ -1,5 +1,6 @@
 """Core posts manager."""
 
+import logging
 import collections
 
 from hive.db.adapter import Db
@@ -12,6 +13,7 @@ from hive.indexer.feed_cache import FeedCache
 
 from hive.community.roles import is_community_post_valid
 
+log = logging.getLogger(__name__)
 DB = Db.instance()
 
 class Posts:
@@ -48,8 +50,8 @@ class Posts:
         # cache stats (under 10M every 10K else every 100K)
         total = cls._hits + cls._miss
         if total % 100000 == 0:
-            print("[STATS] posts.id lookups: %d, hits: %d (%.1f%%), entries: %d"
-                  % (total, cls._hits, 100.0*cls._hits/total, len(cls._ids)))
+            log.info("pid lookups: %d, hits: %d (%.1f%%), entries: %d",
+                     total, cls._hits, 100.0*cls._hits/total, len(cls._ids))
 
         return _id
 
@@ -191,8 +193,8 @@ class Posts:
         # check post validity in specified context
         is_valid = date < '2018-07-01' or is_community_post_valid(community, op)
         if not is_valid:
-            url = "@{}/{}".format(op['author'], op['permlink'])
-            print("Invalid post {} in @{}".format(url, community))
+            url = "@%s/%s" % (op['author'], op['permlink'])
+            log.info("Invalid post %s in @%s", url, community)
 
         return dict(author=op['author'], permlink=op['permlink'], id=pid,
                     is_valid=is_valid, parent_id=parent_id, depth=depth,

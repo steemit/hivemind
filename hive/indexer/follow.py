@@ -1,11 +1,16 @@
 """Handles follow operations."""
 
-import time
+import logging
+from time import perf_counter as perf
 
 from funcy.seqs import first
-from hive.db.methods import query, query_one
+from hive.db.adapter import Db
 from hive.db.db_state import DbState
 from hive.indexer.accounts import Accounts
+
+log = logging.getLogger(__name__)
+
+DB = Db.instance()
 
 FOLLOWERS = 'followers'
 FOLLOWING = 'following'
@@ -33,7 +38,7 @@ class Follow:
         else:
             sql = """UPDATE hive_follows SET state = :state
                       WHERE follower = :flr AND following = :flg"""
-        query(sql, **op)
+        DB.query(sql, **op)
 
         # track count deltas
         if not DbState.is_initial_sync():
@@ -73,7 +78,7 @@ class Follow:
         sql = """SELECT state FROM hive_follows
                   WHERE follower = :follower
                     AND following = :following"""
-        return query_one(sql, follower=follower, following=following)
+        return DB.query_one(sql, follower=follower, following=following)
 
 
     # -- stat tracking --
@@ -110,15 +115,11 @@ class Follow:
         if not sqls:
             return 0
 
+        start = perf()
+        DB.batch_queries(sqls, trx=trx)
         if trx:
-            start = time.perf_counter()
-            query("START TRANSACTION")
-        for (sql, params) in sqls:
-            query(sql, **params)
-        if trx:
-            query('COMMIT')
-            total = (time.perf_counter() - start)
-            print("[SYNC] flushed %d follow deltas in %ds" % (len(sqls), total))
+            total = (perf() - start)
+            log.info("[SYNC] flushed %d follow deltas in %ds", len(sqls), total)
 
         cls._delta = {FOLLOWERS: {}, FOLLOWING: {}}
         return len(sqls)
@@ -139,12 +140,12 @@ class Follow:
                    following = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND follower  = hive_accounts.id)
              WHERE id IN :ids
         """
-        query(sql, ids=tuple(ids))
+        DB.query(sql, ids=tuple(ids))
 
     @classmethod
     def force_recount(cls):
         """Recounts all follows after init sync."""
-        print("[SYNC] query follower counts")
+        log.info("[SYNC] query follower counts")
         sql = """
             CREATE TEMPORARY TABLE following_counts AS (
                 SELECT follower account_id, COUNT(*) num
@@ -153,9 +154,9 @@ class Follow:
                 SELECT following account_id, COUNT(*) num
                 FROM hive_follows GROUP BY following);
         """
-        query(sql)
+        DB.query(sql)
 
-        print("[SYNC] update follower counts")
+        log.info("[SYNC] update follower counts")
         sql = """
             UPDATE hive_accounts SET followers = num
             FROM follower_counts WHERE id = account_id;
@@ -163,4 +164,4 @@ class Follow:
             UPDATE hive_accounts SET following = num
             FROM following_counts WHERE id = account_id;
         """
-        query(sql)
+        DB.query(sql)

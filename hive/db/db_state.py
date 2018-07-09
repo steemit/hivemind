@@ -1,9 +1,12 @@
 """Hive db state manager. Check if schema loaded, init synced, etc."""
 
 import time
+import logging
 
 from hive.db.schema import setup, build_metadata # teardown
 from hive.db.adapter import Db
+
+log = logging.getLogger(__name__)
 
 class DbState:
     """Manages database state: sync status, migrations, etc."""
@@ -25,11 +28,11 @@ class DbState:
         3) Check if initial sync has completed
         """
 
-        print("[INIT] Welcome to hive!")
+        log.info("[INIT] Welcome to hive!")
 
         # create db schema if needed
         if not cls._is_schema_loaded():
-            print("[INIT] Create db schema...")
+            log.info("[INIT] Create db schema...")
             setup()
             cls._before_initial_sync()
 
@@ -39,9 +42,9 @@ class DbState:
         # check if initial sync complete
         cls._is_initial_sync = cls._is_feed_cache_empty()
         if cls._is_initial_sync:
-            print("[INIT] Continue with initial sync...")
+            log.info("[INIT] Continue with initial sync...")
         else:
-            print("[INIT] Hive initialized.")
+            log.info("[INIT] Hive initialized.")
 
     @classmethod
     def db(cls):
@@ -56,7 +59,7 @@ class DbState:
         assert cls._is_initial_sync, "initial sync was not started."
         cls._after_initial_sync()
         cls._is_initial_sync = False
-        print("[INIT] Initial sync complete!")
+        log.info("[INIT] Initial sync complete!")
 
     @classmethod
     def is_initial_sync(cls):
@@ -104,18 +107,18 @@ class DbState:
         as foreign key constraints."""
 
         engine = cls.db().create_engine()
-        print("[INIT] Begin pre-initial sync hooks")
+        log.info("[INIT] Begin pre-initial sync hooks")
 
         for index in cls._disableable_indexes():
-            print("Drop index %s.%s" % (index.table, index.name))
+            log.info("Drop index %s.%s", index.table, index.name)
             index.drop(engine)
 
         # TODO: #111
         #for key in cls._all_foreign_keys():
-        #    print("Drop fk %s" % (key.name))
+        #    log.info("Drop fk %s", key.name)
         #    key.drop(engine)
 
-        print("[INIT] Finish pre-initial sync hooks")
+        log.info("[INIT] Finish pre-initial sync hooks")
 
     @classmethod
     def _after_initial_sync(cls):
@@ -125,18 +128,18 @@ class DbState:
         as well as all foreign keys."""
 
         engine = cls.db().create_engine()
-        print("[INIT] Begin post-initial sync hooks")
+        log.info("[INIT] Begin post-initial sync hooks")
 
         for index in cls._disableable_indexes():
-            print("Create index %s.%s" % (index.table, index.name))
+            log.info("Create index %s.%s", index.table, index.name)
             index.create(engine)
 
         # TODO: #111
         #for key in cls._all_foreign_keys():
-        #    print("Create fk %s" % (key.name))
+        #    log.info("Create fk %s", key.name)
         #    key.create(engine)
 
-        print("[INIT] Finish post-initial sync hooks")
+        log.info("[INIT] Finish post-initial sync hooks")
 
     @staticmethod
     def status():
@@ -198,4 +201,4 @@ class DbState:
         assert ver == cls._ver + 1, 'version must follow previous'
         cls.db().query("UPDATE hive_state SET db_version = %d" % ver)
         cls._ver = ver
-        print("[HIVE] db migrated to version: %d" % ver)
+        log.info("[HIVE] db migrated to version: %d", ver)

@@ -4,7 +4,7 @@ import logging
 from time import sleep
 from hive.steem.block.schedule import BlockSchedule
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 class ForkException(Exception):
     """Raised when a non-trivial fork is encountered."""
@@ -95,4 +95,4 @@ class BlockStream:
 
             curr += 1
 
-        logger.warning("gap exceeds %d", self._max_gap)
+        log.warning("gap exceeds %d", self._max_gap)

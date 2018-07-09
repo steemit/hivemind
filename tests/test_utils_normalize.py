@@ -15,7 +15,13 @@ from hive.utils.normalize import (
     trunc,
     rep_log10,
     safe_img_url,
+    secs_to_str,
 )
+
+def test_secs_to_str():
+    assert secs_to_str(0) == '00s'
+    assert secs_to_str(8979) == '02h 29m 39s'
+    assert secs_to_str(12345678) == '20w 02d 21h 21m 18s'
 
 def test_block_num():
     block = dict(block_id='013c33f88c643c92a7352b52efde7237f4d4ee0b')

@@ -1,8 +1,6 @@
 """Methods for normalizing/sanitizing steemd account metadata."""
 
-import re
 import ujson as json
-
 from hive.utils.normalize import trunc
 
 def safe_profile_metadata(account):
@@ -34,12 +32,12 @@ def safe_profile_metadata(account):
         name = None
     if website and len(website) > 100:
         website = None
-    if website and not re.match('^https?://', website):
+    if website and not _valid_url_proto(website):
         website = 'http://' + website
 
-    if profile_image and not re.match('^https?://', profile_image):
+    if profile_image and not _valid_url_proto(profile_image):
         profile_image = None
-    if cover_image and not re.match('^https?://', cover_image):
+    if cover_image and not _valid_url_proto(cover_image):
         cover_image = None
     if profile_image and len(profile_image) > 1024:
         profile_image = None
@@ -55,6 +53,10 @@ def safe_profile_metadata(account):
         cover_image=cover_image or '',
     )
 
+def _valid_url_proto(url):
+    assert url
+    return url[0:7] == 'http://' or url[0:8] == 'https://'
+
 def _char_police(string):
     """If a string has bad chars, ignore it.
 
@@ -64,6 +66,5 @@ def _char_police(string):
     if not string:
         return None
     if string.find('\x00') > -1:
-        print("bad string: {}".format(string))
         return None
     return string

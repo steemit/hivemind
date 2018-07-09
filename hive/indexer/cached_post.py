@@ -2,6 +2,7 @@
 
 import math
 import collections
+import logging
 import ujson as json
 
 from toolz import partition_all
@@ -11,6 +12,8 @@ from hive.steem.client import SteemClient
 from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
+
+log = logging.getLogger(__name__)
 
 DB = Db.instance()
 
@@ -161,7 +164,7 @@ class CachedPost:
             changed = filter(lambda t: t[1], counts.items())
             summary = list(map(lambda group: "%d %ss" % group[::-1], changed))
             summary = ', '.join(summary) if summary else 'none'
-            print("[PREP] posts cache process: %s" % summary)
+            log.info("[PREP] posts cache process: %s", summary)
 
         cls._update_batch(tuples, trx, full_total=full_total)
         for url, _, _ in tuples:
@@ -240,8 +243,8 @@ class CachedPost:
         Accounts.dirty(authors) # force-update accounts on payout
 
         if len(paidout) > 200:
-            print("[PREP] Found {} payouts for {} authors since {}".format(
-                len(paidout), len(authors), date))
+            log.info("[PREP] Found %d payouts for %d authors since %s",
+                     len(paidout), len(authors), date)
         return len(paidout)
 
     @classmethod
@@ -281,7 +284,7 @@ class CachedPost:
         cache records upon launch if hive fast-sync was interrupted.
         """
         gap = cls.dirty_missing()
-        print("[INIT] {} missing post cache entries".format(gap))
+        log.info("[INIT] %d missing post cache entries", gap)
         cls._sweeping_missed = True
         while cls.flush(trx=True, full_total=gap)['insert']:
             gap = cls.dirty_missing()
@@ -318,21 +321,22 @@ class CachedPost:
             post_levels = [tup[2] for tup in tups]
             for pid, post, level in zip(post_ids, posts, post_levels):
                 if post['author']:
-                    buffer.append(cls._sql(pid, post, level=level))
+                    buffer.extend(cls._sql(pid, post, level=level))
                 else:
-                    # expected to happen when sweeping missed posts as
-                    # part of initial sync or crash recovery routine,
-                    # otherwise indicates potential bug. TODO: assert?
-                    if not cls._sweeping_missed:
-                        print("WARNING: missing/deleted post %d" % pid)
+                    # When a post has been deleted (or otherwise DNE),
+                    # steemd simply returns a blank post  object w/ all
+                    # fields blank. While it's best to not try to cache
+                    # already-deleted posts, it can happen during missed
+                    # post sweep and while using `trail_blocks` > 0.
+                    pass
                 cls._bump_last_id(pid)
 
             timer.batch_lap()
-            cls._batch_queries(buffer, trx)
+            DB.batch_queries(buffer, trx)
 
             timer.batch_finish(len(posts))
             if len(tuples) >= 1000:
-                print(timer.batch_status())
+                log.info(timer.batch_status())
 
     @classmethod
     def last_id(cls):
@@ -354,7 +358,7 @@ class CachedPost:
             cls._ensure_safe_gap(last_id, next_id)
             if next_id - last_id > 4:
                 # gap of 2 is common due to deletions. report on larger gaps.
-                print("[WARN] skip post ids: %d -> %d" % (last_id, next_id))
+                log.warning("skipping post ids %d -> %d", last_id, next_id)
 
         cls._last_id = next_id
 
@@ -370,17 +374,6 @@ class CachedPost:
             return
         raise Exception("found large cache gap: %d --> %d (%d)"
                         % (last_id, next_id, missing_posts))
-
-    @classmethod
-    def _batch_queries(cls, batches, trx):
-        """Process batches of prepared SQL tuples."""
-        if trx:
-            DB.query("START TRANSACTION")
-        for queries in batches:
-            for (sql, params) in queries:
-                DB.query(sql, **params)
-        if trx:
-            DB.query("COMMIT")
 
     @classmethod
     def _sql(cls, pid, post, level=None):

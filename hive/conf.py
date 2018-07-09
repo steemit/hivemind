@@ -43,7 +43,10 @@ class Conf():
             args = parser.parse_args()
 
         cls._args = vars(args)
-        print(parser.format_values())
+
+        root = logging.getLogger()
+        root.setLevel(cls.log_level())
+        root.info("loaded configuration:\n%s", parser.format_values())
 
     @classmethod
     def init_config(cls, config):

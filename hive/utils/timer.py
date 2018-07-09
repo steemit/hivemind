@@ -1,6 +1,7 @@
 """Timer for reporting progress on long batch operations."""
 
-import time
+from time import perf_counter as perf
+from hive.utils.normalize import secs_to_str
 
 class Timer:
     """Times long routines, printing status and ETA.
@@ -19,9 +20,7 @@ class Timer:
     _lap_units = []
     _total = None
     _full_total = None
-
     _start_time = None
-    _end_time = None
 
     # Lap checkpoints, # processed, last # processed
     _laps = []
@@ -33,22 +32,20 @@ class Timer:
         self._lap_units = laps or []
         self._total = total
         self._full_total = full_total or total
+        self._start_time = perf()
 
     def batch_start(self):
         """Signal new batch; call at top of loop."""
         self._laps = []
         self.batch_lap()
-        if not self._start_time:
-            self._start_time = time.perf_counter()
 
     def batch_lap(self):
         """Signal movement to next task within batch."""
-        self._laps.append(time.perf_counter())
+        self._laps.append(perf())
 
     def batch_finish(self, ops=None):
         """Signal end of batch."""
         self.batch_lap()
-        self._end_time = time.perf_counter()
         self._last_items = ops
         self._processed += ops
 
@@ -71,9 +68,9 @@ class Timer:
         if self._processed < self._total:
             out += "eta %s" % self._eta()
         else:
-            total_time = self._end_time - self._start_time
+            total_time = self._laps[-1] - self._start_time
             out += "done in %s, avg rate: %.1f/s" % (
-                Timer.secs_to_str(total_time),
+                secs_to_str(total_time),
                 self._total / total_time)
 
         return out
@@ -87,22 +84,7 @@ class Timer:
         """Time to finish, based on most recent batch."""
         left = self._full_total - self._processed
         secs = (left / self._rate())
-        return Timer.secs_to_str(secs)
-
-    @staticmethod
-    def secs_to_str(secs):
-        """Given number of seconds returns, e.g., `02h 29m 39s`"""
-        units = (('s', 60), ('m', 60), ('h', 24), ('d', 7))
-        out = []
-        rem = secs
-        for (unit, cycle) in units:
-            out.append((rem % cycle, unit))
-            rem = int(rem / cycle)
-            if not rem:
-                break
-        if rem: # leftover = weeks
-            out.append((rem, 'w'))
-        return ' '.join(["%02d%s" % tup for tup in out[::-1]])
+        return secs_to_str(secs)
 
     def _elapsed(self, lap_idx=None):
         if not lap_idx:

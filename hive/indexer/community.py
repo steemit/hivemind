@@ -1,10 +1,14 @@
 """[WIP] Process community ops."""
 
+import logging
+
 from funcy.seqs import flatten
 from hive.db.methods import query_one
 from hive.community.roles import PERMISSIONS, is_permitted
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
+
+log = logging.getLogger(__name__)
 
 # community methods
 # -----------------
@@ -17,7 +21,7 @@ def process_json_community_op(account, op_json, date):
     if cmd_name not in commands:
         return
 
-    print("community op from {} @ {} -- {}".format(account, date, op_json))
+    log.warning("community op from %s @ %s -- %s", account, date, op_json)
 
     community = cmd_op['community']
     community_exists = is_community(community)
