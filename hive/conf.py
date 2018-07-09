@@ -46,7 +46,7 @@ class Conf():
 
         root = logging.getLogger()
         root.setLevel(cls.log_level())
-        root.info("loaded configuration:\n" + parser.format_values())
+        root.info("loaded configuration:\n%s", parser.format_values())
 
     @classmethod
     def init_config(cls, config):

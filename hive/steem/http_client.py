@@ -30,7 +30,7 @@ def validated_json_payload(response):
         data = response.data.decode('utf-8')
         payload = json.loads(data)
     except Exception as e:
-        raise Exception("JSON error %s: %s", str(e), data[0:1024])
+        raise Exception("JSON error %s: %s" % (str(e), data[0:1024]))
 
     return payload
 
