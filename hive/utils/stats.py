@@ -163,11 +163,14 @@ class Stats:
         if cls._ms > cls.PRINT_THRESH_MINS * 60 * 1000:
             cls.report()
             cls._ms = 0
+            cls._idle = 0
             cls._start = perf()
 
     @classmethod
     def report(cls):
         """Emit a timing report for tracked services."""
+        if not cls._ms:
+            return # nothing to report
         local = cls._ms / 1000
         idle = cls._idle / 1000
         total = (perf() - cls._start)
