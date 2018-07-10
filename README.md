@@ -41,6 +41,19 @@ $ curl --data '{"jsonrpc":"2.0","id":0,"method":"db_head_state"}' http://localho
 {"jsonrpc": "2.0", "result": {"db_head_block": 19930795, "db_head_time": "2018-02-16 21:35:42", "db_head_age": 10}, "id": 0}
 ```
 
+## Testing.
+
+Testing has the following dependencies, if installing on Linux, use `sudo` to install `pip` and python dependencies generally.:
+```
+sudo apt-get install python3-pip
+sudo pip3 install -e . // Run from within hivemind dir.
+sudo pip3 install pytest pytest-cov pytest-pylint
+```
+
+Test suite can then be run with the following command:
+```
+sudo DATABASE_URL=postgresql://user:pass@localhost:5432/hive make test
+```
 
 ## Production Environment
 
