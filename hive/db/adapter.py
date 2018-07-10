@@ -48,9 +48,12 @@ class Db:
     @staticmethod
     def create_engine(echo=False):
         """Create a new SA db engine. Use echo=True for ultra verbose."""
+        db_url = Conf.get('database_url')
+        assert db_url, ('--database-url (or DATABASE_URL env) not specified; '
+                        'e.g. postgresql://user:pass@localhost:5432/hive')
         engine = sqlalchemy.create_engine(
-            Conf.get('database_url'),
-            isolation_level="READ UNCOMMITTED", # only works in mysql
+            db_url,
+            isolation_level="READ UNCOMMITTED", # only supported in mysql
             pool_recycle=3600,
             echo=echo)
         return engine
