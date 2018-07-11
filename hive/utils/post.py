@@ -90,9 +90,12 @@ def post_payout(post):
         sbd_amount(post['pending_payout_value']),
     ])
 
+    # `active_votes` was temporarily missing in dev -- ensure this condition
+    # is caught ASAP. if no active_votes then rshares MUST be 0. ref: steem#2568
+    assert post['active_votes'] or int(post['net_rshares']) == 0
+
     # get total rshares, and create comma-separated vote data blob
-    #rshares = sum(int(v['rshares']) for v in post['active_votes'])
-    rshares = int(post['net_rshares']) # TODO: active_votes missing in dev
+    rshares = sum(int(v['rshares']) for v in post['active_votes'])
     csvotes = "\n".join(map(_vote_csv_row, post['active_votes']))
 
     # trending scores
