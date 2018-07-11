@@ -3,6 +3,7 @@
 import math
 import decimal
 from datetime import datetime
+from pytz import utc
 import ujson as json
 
 NAI_MAP = {
@@ -72,6 +73,10 @@ def block_date(block):
 def parse_time(block_time):
     """Convert chain date into datetime object."""
     return datetime.strptime(block_time, '%Y-%m-%dT%H:%M:%S')
+
+def utc_timestamp(date):
+    """Convert datetime to UTC unix timestamp."""
+    return date.replace(tzinfo=utc).timestamp()
 
 def load_json_key(obj, key):
     """Given a dict, parse JSON in `key`. Blank dict on failure."""

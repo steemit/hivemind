@@ -12,6 +12,7 @@ from hive.utils.normalize import (
     amount,
     legacy_amount,
     parse_time,
+    utc_timestamp,
     load_json_key,
     trunc,
     rep_log10,
@@ -55,6 +56,15 @@ def test_legacy_amount():
 def test_parse_time():
     block_time = '2018-06-22T20:34:30'
     assert parse_time(block_time) == datetime(2018, 6, 22, 20, 34, 30)
+
+def test_utc_timestamp():
+    assert utc_timestamp(parse_time('1970-01-01T00:00:00')) == 0
+    assert utc_timestamp(parse_time('1970-01-01T00:00:01')) == 1
+
+    block_time = '2018-06-22T20:34:30'
+    date = parse_time(block_time)
+    timestamp = utc_timestamp(date)
+    assert timestamp == 1529699670
 
 def test_load_json_key():
     obj = {'profile':'{"foo":"bar"}'}

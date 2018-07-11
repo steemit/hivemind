@@ -5,7 +5,7 @@ import math
 import ujson as json
 from funcy.seqs import first
 
-from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time
+from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time, utc_timestamp
 
 
 def post_basic(post):
@@ -99,7 +99,7 @@ def post_payout(post):
     csvotes = "\n".join(map(_vote_csv_row, post['active_votes']))
 
     # trending scores
-    _timestamp = parse_time(post['created']).timestamp()
+    _timestamp = utc_timestamp(parse_time(post['created']))
     sc_trend = _score(rshares, _timestamp, 480000)
     sc_hot = _score(rshares, _timestamp, 10000)
 

@@ -1,8 +1,7 @@
 """Block scheduler."""
 import logging
 from time import time, sleep
-from pytz import utc
-from hive.utils.normalize import block_date
+from hive.utils.normalize import block_date, utc_timestamp
 from hive.utils.stats import Stats
 
 log = logging.getLogger(__name__)
@@ -72,7 +71,7 @@ class BlockSchedule:
         we can identify this case by comparing current time to latest
         received block time."""
         if num == self._head_num:
-            gap = time() - date.replace(tzinfo=utc).timestamp()
+            gap = time() - utc_timestamp(date)
             assert gap > -60, 'system clock is %ds behind chain' % gap
             if gap > 60:
                 raise StaleHeadException("chain gap is %fs" % gap)
