@@ -1,6 +1,23 @@
 #pylint: disable=missing-docstring
 import pytest
 from hive.server.condenser_api.get_state import get_state
+from hive.server.condenser_api.tags import get_trending_tags
+from hive.server.condenser_api.call import call
+
+#from hive.server.condenser_api import methods as condenser_api
+#condenser_api.get_followers,
+#condenser_api.get_following,
+#condenser_api.get_follow_count,
+#condenser_api.get_content,
+#condenser_api.get_content_replies,
+#condenser_api.get_discussions_by_trending,
+#condenser_api.get_discussions_by_hot,
+#condenser_api.get_discussions_by_promoted,
+#condenser_api.get_discussions_by_created,
+#condenser_api.get_discussions_by_blog,
+#condenser_api.get_discussions_by_feed,
+#condenser_api.get_discussions_by_comments,
+#condenser_api.get_replies_by_last_update,
 
 @pytest.mark.asyncio
 async def test_get_state():
@@ -18,6 +35,7 @@ async def test_get_state():
     assert await get_state('@test-safari/recent-replies')
 
     assert await get_state('spam/@test-safari/1ncq2-may-spam')
+    assert await get_state('spam/@test-safari/october-spam')
 
     assert await get_state('trending/blockchain')
 
@@ -31,3 +49,28 @@ async def test_get_state():
 
     with pytest.raises(Exception):
         await get_state('witnesses')
+
+@pytest.mark.asyncio
+async def test_call():
+    assert await call('condenser_api',
+                      'get_followers',
+                      ['test-safari', '', 'blog', 10])
+    assert await call('condenser_api',
+                      'get_discussions_by_blog',
+                      [{"tag": "test-safari",
+                        "start_author": "",
+                        "start_permlink": "",
+                        "limit": 10}])
+
+@pytest.mark.asyncio
+async def test_get_trending_tags():
+    full = await get_trending_tags()
+    assert full
+
+    # blank params should result in same order
+    short = await get_trending_tags('', 10)
+    assert full[3] == short[3]
+
+    # ensure pagination works
+    paged = await get_trending_tags(full[2], 2)
+    assert full[3] == paged[1]
