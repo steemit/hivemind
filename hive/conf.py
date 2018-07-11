@@ -21,7 +21,7 @@ class Conf():
         add('mode', nargs='*', default=['sync'])
 
         # common
-        add('--database-url', env_var='DATABASE_URL', required=True, help='database connection url', default='postgresql://user:pass@localhost:5432/hive')
+        add('--database-url', env_var='DATABASE_URL', required=False, help='database connection url', default='')
         add('--steemd-url', env_var='STEEMD_URL', required=False, help='steemd/jussi endpoint', default='https://api.steemit.com')
         add('--log-level', env_var='LOG_LEVEL', default='INFO')
         add('--dump-config', type=bool, env_var='DUMP_CONFIG', default=False)

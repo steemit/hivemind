@@ -7,8 +7,14 @@ Hive is a "consensus interpretation" layer for the Steem blockchain, maintaining
 
 ## Development Environment
 
+Dependencies:
+
+ - OSX: `$ brew install python3 postgresql`
+ - Ubuntu: `$ sudo apt-get install python3 python3-pip`
+
+Installation:
+
 ```bash
-$ brew install python3 postgresql
 $ createdb hive
 $ export DATABASE_URL=postgresql://user:pass@localhost:5432/hive
 ```
@@ -16,7 +22,7 @@ $ export DATABASE_URL=postgresql://user:pass@localhost:5432/hive
 ```bash
 $ git clone https://github.com/steemit/hivemind.git
 $ cd hivemind
-$ pip3 install -e .
+$ pip3 install -e .[test]
 ```
 
 Start the indexer:
@@ -39,6 +45,12 @@ $ hive server
 ```bash
 $ curl --data '{"jsonrpc":"2.0","id":0,"method":"db_head_state"}' http://localhost:8080
 {"jsonrpc": "2.0", "result": {"db_head_block": 19930795, "db_head_time": "2018-02-16 21:35:42", "db_head_age": 10}, "id": 0}
+```
+
+Run tests:
+
+```bash
+$ make test
 ```
 
 
@@ -200,14 +212,11 @@ The easiest way to avoid forks is to only index up to the last irreversible bloc
 7. A separate service with a greater follow distance creates periodic snapshots
 
 
-
 ## Documentation
 
 ```bash
 $ make docs && open docs/hive/index.html
 ```
-
-Note: Hive currently does not support MySQL; take a look at the old `mysql2` branch for insight into what would need to be changed.
 
 ## License
 
