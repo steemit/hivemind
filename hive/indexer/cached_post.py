@@ -109,6 +109,8 @@ class CachedPost:
         url = author+'/'+permlink
         if url in cls._queue:
             del cls._queue[url]
+            if url in cls._ids:
+                del cls._ids[url]
 
     @classmethod
     def undelete(cls, post_id, author, permlink):
@@ -169,6 +171,8 @@ class CachedPost:
         cls._update_batch(tuples, trx, full_total=full_total)
         for url, _, _ in tuples:
             del cls._queue[url]
+            if url in cls._ids:
+                del cls._ids[url]
 
         # TODO: ideal place to update reps of authors whos posts were modified.
         # potentially could be triggered in vote(). remove the Accounts.dirty
