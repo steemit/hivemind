@@ -19,7 +19,7 @@ DB = Db.instance()
 class Posts:
     """Handles critical/core post ops and data."""
 
-    # LRU cache for (author-permlink -> id) lookup (~500mb per 1M entries)
+    # LRU cache for (author-permlink -> id) lookup (~400mb per 1M entries)
     CACHE_SIZE = 2000000
     _ids = collections.OrderedDict()
     _hits = 0
