@@ -69,6 +69,13 @@ class CachedPost:
             cls._noids.add(url)
 
     @classmethod
+    def _dequeue(cls, url):
+        """Removes a post from the dirty queue and id map."""
+        del cls._queue[url]
+        if url in cls._ids:
+            del cls._ids[url]
+
+    @classmethod
     def _get_id(cls, url):
         """Given a post url, get its id."""
         if url in cls._ids:
@@ -105,9 +112,7 @@ class CachedPost:
         # if it was queued for a write, remove it
         url = author+'/'+permlink
         if url in cls._queue:
-            del cls._queue[url]
-            if url in cls._ids:
-                del cls._ids[url]
+            cls._dequeue(url)
 
     @classmethod
     def undelete(cls, post_id, author, permlink):
@@ -166,9 +171,7 @@ class CachedPost:
 
         cls._update_batch(tuples, trx, full_total=full_total)
         for url, _, _ in tuples:
-            del cls._queue[url]
-            if url in cls._ids:
-                del cls._ids[url]
+            cls._dequeue(url)
 
         # TODO: ideal place to update reps of authors whos posts were modified.
         # potentially could be triggered in vote(). remove the Accounts.dirty
