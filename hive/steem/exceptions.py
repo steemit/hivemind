@@ -12,8 +12,8 @@ class RPCError(Exception):
     @staticmethod
     def build(error, body, index=None):
         """Given an RPC error, builds exception w/ appropriate severity."""
-        assert 'message' in error, "missing error msg key: {}".format(error)
-        assert 'code' in error, "missing error code key: {}".format(error)
+        assert 'message' in error, "missing error msg key: %s" % error
+        assert 'code' in error, "missing error code key: %s" % error
 
         if isinstance(body, list):
             item = body[index] if index else body[0]

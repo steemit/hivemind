@@ -93,4 +93,4 @@ async def call(api, method, params):
     elif method == 'get_replies_by_last_update':
         return await get_replies_by_last_update(*_strict_list(params, 3))
 
-    raise Exception("unknown method: {}.{}({})".format(api, method, params))
+    raise Exception("unknown method: %s.%s(%s)" % (api, method, params))

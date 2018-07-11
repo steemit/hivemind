@@ -49,7 +49,7 @@ class CachedPost:
     @classmethod
     def _dirty(cls, level, author, permlink, pid=None):
         """Mark a post as dirty."""
-        assert level in LEVELS, "invalid level {}".format(level)
+        assert level in LEVELS, "invalid level %s" % level
         mode = LEVELS.index(level)
         url = author + '/' + permlink
 
@@ -385,7 +385,7 @@ class CachedPost:
         """
 
         #pylint: disable=bad-whitespace
-        assert post['author'], "post {} is blank".format(pid)
+        assert post['author'], "post %d is blank" % pid
 
         # last-minute sanity check to ensure `pid` is correct #78
         pid2 = cls._get_id(post['author']+'/'+post['permlink'])

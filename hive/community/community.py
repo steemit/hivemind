@@ -82,7 +82,7 @@ class Community:
         if role not in self._roles:
             raise ValueError('Invalid role `%s`. options: %s' % (role, ', '.join(self._roles)))
 
-        action_name = '{0}_{1}s'.format(action, role)
+        action_name = action + '_' + role
         assert self._has_permissions(action_name), 'Insufficient Community Permissions'
         op = self._op(action=action_name, accounts=account_names)
         return self._commit(op)

@@ -181,4 +181,4 @@ class Db:
         if action in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START',
                       'ALTER', 'TRUNCA', 'CREATE']:
             return True
-        raise Exception("unknown action: {}".format(sql))
+        raise Exception("unknown action: %s" % sql)

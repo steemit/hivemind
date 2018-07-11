@@ -96,7 +96,7 @@ class DbState:
                 to_return.append(index)
 
         # ensure we found all the items we expected
-        assert not to_locate, "indexes not located: {}".format(to_locate)
+        assert not to_locate, "indexes not located: %s" % to_locate
         return to_return
 
     @classmethod
