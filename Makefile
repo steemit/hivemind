@@ -7,7 +7,7 @@ PROJECT_DOCKER_RUN_ARGS := --link db:db
 
 default: build
 
-.PHONY: test run test-only test-lint fmt test-with-build build docs
+.PHONY: test run test-all test-utils test-server test-steem test-lint fmt test-with-build build docs
 
 docs:
 	pdoc --html hive --html-dir docs --overwrite
@@ -37,12 +37,21 @@ db-head-state:
 ipython:
 	docker run -it $(PROJECT_DOCKER_RUN_ARGS) $(PROJECT_DOCKER_TAG) ipython
 
-test: test-only test-lint
+test: test-all test-lint
 
 test-with-build: test build
 
-test-only:
+test-all:
 	py.test --cov=hive --capture=sys
+
+test-utils:
+	py.test tests/utils --cov=hive/utils --capture=sys
+
+test-steem:
+	py.test tests/steem --cov=hive/steem --capture=sys
+
+test-server:
+	py.test tests/server --cov=hive/server --capture=sys
 
 test-lint:
 	py.test --pylint -m pylint $(PROJECT_NAME) --pylint-error-types WEF
