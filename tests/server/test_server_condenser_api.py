@@ -4,21 +4,6 @@ from hive.server.condenser_api.get_state import get_state
 from hive.server.condenser_api.tags import get_trending_tags
 from hive.server.condenser_api.call import call
 
-#from hive.server.condenser_api import methods as condenser_api
-#condenser_api.get_followers,
-#condenser_api.get_following,
-#condenser_api.get_follow_count,
-#condenser_api.get_content,
-#condenser_api.get_content_replies,
-#condenser_api.get_discussions_by_trending,
-#condenser_api.get_discussions_by_hot,
-#condenser_api.get_discussions_by_promoted,
-#condenser_api.get_discussions_by_created,
-#condenser_api.get_discussions_by_blog,
-#condenser_api.get_discussions_by_feed,
-#condenser_api.get_discussions_by_comments,
-#condenser_api.get_replies_by_last_update,
-
 @pytest.mark.asyncio
 async def test_get_state():
     ret = await get_state('/trending')
