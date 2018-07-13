@@ -3,6 +3,21 @@
 import logging
 import configargparse
 
+def strtobool(val):
+    """Convert a booleany str to a bool.
+
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+    """
+    val = val.lower()
+    if val in ('y', 'yes', 't', 'true', 'on', '1'):
+        return True
+    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
+        return False
+    else:
+        raise ValueError("not booleany: %r" % (val,))
+
 class Conf():
     """ Manages sync/server configuration via args, ENVs, and hive.conf. """
     _args = None
@@ -25,14 +40,13 @@ class Conf():
         add('--database-url', env_var='DATABASE_URL', required=False, help='database connection url', default='')
         add('--steemd-url', env_var='STEEMD_URL', required=False, help='steemd/jussi endpoint', default='https://api.steemit.com')
         add('--log-level', env_var='LOG_LEVEL', default='INFO')
-        add('--dump-config', type=bool, env_var='DUMP_CONFIG', default=False)
 
         # specific to indexer
         add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests', default=4)
         add('--max-batch', type=int, env_var='MAX_BATCH', help='max chunk size for batch requests', default=50)
         add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', help='number of blocks to trail head by', default=2)
-        add('--disable-sync', type=bool, env_var='DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
-        add('--sync-to-s3', type=bool, env_var='SYNC_TO_S3', help='alternative healthcheck for background sync service', default=False)
+        add('--disable-sync', type=strtobool, env_var='DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
+        add('--sync-to-s3', type=strtobool, env_var='SYNC_TO_S3', help='alternative healthcheck for background sync service', default=False)
 
         # specific to API server
         add('--http-server-port', type=int, env_var='HTTP_SERVER_PORT', default=8080)
