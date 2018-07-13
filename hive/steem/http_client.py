@@ -161,7 +161,7 @@ class HttpClient(object):
                 payload = validated_json_payload(response)
                 result = validated_result(payload, body)
 
-                if secs > 2:
+                if secs > 5:
                     log.warning('%s took %.1fs %s', what, secs, info)
                 if tries > 2:
                     log.warning('%s took %d tries %s', what, tries, info)
