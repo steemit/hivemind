@@ -163,8 +163,3 @@ def run_server():
     app.router.add_post('/', jsonrpc_handler)
 
     web.run_app(app, port=app['config']['args']['http_server_port'])
-
-
-if __name__ == '__main__':
-    Conf.init_argparse()
-    run_server()

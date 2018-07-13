@@ -1,7 +1,5 @@
 """Db schema definitions and setup routines."""
 
-import logging
-
 import sqlalchemy as sa
 from sqlalchemy.sql import text as sql_text
 from sqlalchemy.types import SMALLINT
@@ -10,16 +8,9 @@ from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
 from sqlalchemy.types import BOOLEAN
 
-#from hive.conf import Conf
 from hive.db.adapter import Db
 
 #pylint: disable=line-too-long, too-many-lines
-
-logging.basicConfig()
-#if Conf.get('log_level') == 'INFO': # ultra-verbose
-#    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
-logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
-
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
