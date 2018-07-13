@@ -3,7 +3,6 @@
 import math
 import logging
 
-from collections import deque
 from datetime import datetime
 from toolz import partition_all
 
@@ -26,7 +25,8 @@ class Accounts:
     _ids = {}
 
     # fifo queue
-    _dirty = deque()
+    _dirty = []
+    _dirty_set = set()
 
     # account core methods
     # --------------------
@@ -82,10 +82,11 @@ class Accounts:
         if not accounts:
             return 0
         assert isinstance(accounts, set)
-        accounts = accounts - set(cls._dirty)
+        accounts = accounts - cls._dirty_set
         if not accounts:
             return 0
         cls._dirty.extend(accounts)
+        cls._dirty_set |= set(accounts)
         return len(accounts)
 
     @classmethod
@@ -117,7 +118,12 @@ class Accounts:
         if trx:
             log.info("[SYNC] update %d accounts", count)
 
-        accounts = [cls._dirty.popleft() for _ in range(count)]
+        # shift _dirty by `count` items
+        accounts = cls._dirty[0:count]
+        cls._dirty = cls._dirty[count:None]
+        for name in accounts:
+            cls._dirty_set.remove(name)
+
         cls._cache_accounts(accounts, trx=trx)
         return count
 
