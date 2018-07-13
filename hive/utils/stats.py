@@ -1,6 +1,5 @@
 """Tracks SQL timing stats and prints results periodically or on exit."""
 
-import re
 import atexit
 import logging
 
@@ -9,10 +8,15 @@ from hive.utils.system import colorize, peak_usage_mb
 
 log = logging.getLogger(__name__)
 
-def _normalize_sql(sql):
-    nsql = ' '.join(sql[0:512].split())[0:256]
-    nsql = re.sub(r'VALUES (\s*\([^)]+\),?)+', 'VALUES (...)', nsql)
-    return nsql
+def _normalize_sql(sql, maxlen=150):
+    """Collapse whitespace and middle-truncate if needed."""
+    out = ' '.join(sql.split())
+    if len(out) > maxlen:
+        i = int(maxlen / 2 - 4)
+        out = (out[0:i] +
+               ' . . . ' +
+               out[-i:None])
+    return out
 
 def log_query_stats(fn):
     """Decorator for hive.db.adapter::query()"""
@@ -71,7 +75,7 @@ class StatsAbstract:
         log.info('%7s %9s %9s %9s', '-pct-', '-ttl-', '-avg-', '-cnt-')
         for call, ms, reqs in self.table(40):
             log.info("% 6.1f%% % 7dms % 9.2f % 8dx -- %s",
-                     100 * ms/self._ms, ms, ms/reqs, reqs, call[0:150])
+                     100 * ms/self._ms, ms, ms/reqs, reqs, call)
         self.clear()
 
 

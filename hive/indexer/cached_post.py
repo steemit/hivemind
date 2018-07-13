@@ -41,9 +41,6 @@ class CachedPost:
     # new promoted values, pending write
     _pending_promoted = {}
 
-    # indicates if missing-posts sweep is ongoing
-    _sweeping_missed = False
-
     @classmethod
     def update_promoted_amount(cls, post_id, amount):
         """Set a new pending amount for a post for its next update."""
@@ -142,11 +139,10 @@ class CachedPost:
         # force-create dummy row to ensure cache is aware. only needed when
         # cache already spans this id, in case in-mem buffer is lost. default
         # value for payout_at ensures that it will get picked up for update.
-        cls._write({
+        DB.query(cls._insert({
             'post_id': post_id,
             'author': author,
-            'permlink': permlink},
-                   mode='insert')
+            'permlink': permlink}))
         cls.update(author, permlink, post_id)
 
     @classmethod
@@ -289,10 +285,8 @@ class CachedPost:
         """
         gap = cls.dirty_missing()
         log.info("[INIT] %d missing post cache entries", gap)
-        cls._sweeping_missed = True
         while cls.flush(trx=True, full_total=gap)['insert']:
             gap = cls.dirty_missing()
-        cls._sweeping_missed = False
 
     @classmethod
     def _update_batch(cls, tuples, trx=True, full_total=None):
@@ -464,8 +458,11 @@ class CachedPost:
         ])
 
         # build the post insert/update SQL, add tag SQLs
-        mode = 'insert' if level == 'insert' else 'update'
-        return [cls._write_sql(values, mode)] + tag_sqls
+        if level == 'insert':
+            sql = cls._insert(values)
+        else:
+            sql = cls._update(values)
+        return [sql] + tag_sqls
 
     @classmethod
     def _tag_sqls(cls, pid, tags, diff=True):
@@ -489,32 +486,9 @@ class CachedPost:
             yield (sql % ','.join(vals), {'id': pid, **params})
 
     @classmethod
-    def _write(cls, values, mode='insert'):
-        """Given row `values`, write to our table."""
-        tup = cls._write_sql(values, mode)
-        return DB.query(tup[0], **tup[1])
+    def _insert(cls, values):
+        return DB.build_insert('hive_posts_cache', values, pk='post_id')
 
     @classmethod
-    def _write_sql(cls, values, mode='insert'):
-        """SQL builder for writing to hive_posts_cache table."""
-        _pk = ['post_id']
-        _table = 'hive_posts_cache'
-        assert _pk, "primary key not defined"
-        assert _table, "table not defined"
-        assert mode in ['insert', 'update'], "invalid mode %s" % mode
-
-        values = collections.OrderedDict(values)
-        fields = values.keys()
-
-        if mode == 'insert':
-            cols = ', '.join(fields)
-            params = ', '.join([':'+k for k in fields])
-            sql = "INSERT INTO %s (%s) VALUES (%s)"
-            sql = sql % (_table, cols, params)
-        elif mode == 'update':
-            update = ', '.join([k+" = :"+k for k in fields if k not in _pk])
-            where = ' AND '.join([k+" = :"+k for k in fields if k in _pk])
-            sql = "UPDATE %s SET %s WHERE %s"
-            sql = sql % (_table, update, where)
-
-        return (sql, values)
+    def _update(cls, values):
+        return DB.build_update('hive_posts_cache', values, pk='post_id')

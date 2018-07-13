@@ -5,7 +5,7 @@ import math
 import ujson as json
 from funcy.seqs import first
 
-from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time
+from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time, utc_timestamp
 
 
 def post_basic(post):
@@ -90,15 +90,18 @@ def post_payout(post):
         sbd_amount(post['pending_payout_value']),
     ])
 
+    # `active_votes` was temporarily missing in dev -- ensure this condition
+    # is caught ASAP. if no active_votes then rshares MUST be 0. ref: steem#2568
+    assert post['active_votes'] or int(post['net_rshares']) == 0
+
     # get total rshares, and create comma-separated vote data blob
-    #rshares = sum(int(v['rshares']) for v in post['active_votes'])
-    rshares = int(post['net_rshares']) # TODO: active_votes missing in dev
+    rshares = sum(int(v['rshares']) for v in post['active_votes'])
     csvotes = "\n".join(map(_vote_csv_row, post['active_votes']))
 
     # trending scores
-    _timestamp = parse_time(post['created']).timestamp()
-    sc_trend = score(rshares, _timestamp, 480000)
-    sc_hot = score(rshares, _timestamp, 10000)
+    _timestamp = utc_timestamp(parse_time(post['created']))
+    sc_trend = _score(rshares, _timestamp, 480000)
+    sc_hot = _score(rshares, _timestamp, 10000)
 
     return {
         'payout': payout,
@@ -113,7 +116,7 @@ def _vote_csv_row(vote):
     rep = rep_log10(vote['reputation'])
     return "%s,%s,%s,%s" % (vote['voter'], vote['rshares'], vote['percent'], rep)
 
-def score(rshares, created_timestamp, timescale=480000):
+def _score(rshares, created_timestamp, timescale=480000):
     """Calculate trending/hot score.
 
     Source: calculate_score - https://github.com/steemit/steem/blob/8cd5f688d75092298bcffaa48a543ed9b01447a6/libraries/plugins/tags/tags_plugin.cpp#L239

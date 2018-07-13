@@ -10,6 +10,7 @@ tests_require = [
     'pytest',
     'pytest-cov',
     'pytest-pylint',
+    'pytest-asyncio',
     'pytest-console-scripts',
     'git-pylint-commit-hook',
     'pep8',
@@ -20,7 +21,7 @@ tests_require = [
 setup(
     name='hivemind',
     version='0.0.1',
-    description='Community consensus layer for the Steem blockchain',
+    description='Developer-friendly microservice powering social networks on the Steem blockchain.',
     long_description=open('README.md').read(),
     packages=find_packages(exclude=['scripts']),
     setup_requires=['pytest-runner'],

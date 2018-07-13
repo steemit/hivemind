@@ -1,11 +1,9 @@
+#pylint: disable=missing-docstring
 import datetime
 import pytest
 
 from hive.steem.client import SteemClient
 from hive.utils.normalize import parse_time
-from hive.conf import Conf
-
-Conf.init_argparse(ignore_unknown=True)
 
 def test_instance():
     assert isinstance(SteemClient.instance(), SteemClient)

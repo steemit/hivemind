@@ -6,6 +6,7 @@ import configargparse
 class Conf():
     """ Manages sync/server configuration via args, ENVs, and hive.conf. """
     _args = None
+    _env = None
 
     @classmethod
     def init_argparse(cls, ignore_unknown=False):
@@ -47,6 +48,15 @@ class Conf():
         root = logging.getLogger()
         root.setLevel(cls.log_level())
         root.info("loaded configuration:\n%s", parser.format_values())
+
+    @classmethod
+    def init_test(cls):
+        """Initialize hive config for testing."""
+        if cls._args:
+            assert cls._env == 'test'
+            return # config already read
+        cls._env = 'test'
+        cls.init_argparse(ignore_unknown=True)
 
     @classmethod
     def init_config(cls, config):

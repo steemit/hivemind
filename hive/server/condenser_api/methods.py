@@ -38,7 +38,7 @@ async def get_following(account: str, start: str, follow_type: str, limit: int):
 
 async def get_follow_count(account: str):
     """Get follow count stats. (EOL)"""
-    count = cursor.get_follow_counts(account)
+    count = cursor.get_follow_counts(valid_account(account))
     return dict(account=account,
                 following_count=count['following'],
                 follower_count=count['followers'])
