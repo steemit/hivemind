@@ -1,13 +1,13 @@
 """Wrapper for sqlalchemy, providing a simple interface."""
 
 import logging
+from time import perf_counter as perf
 from collections import OrderedDict
 from funcy.seqs import first
-
 import sqlalchemy
 
 from hive.conf import Conf
-from hive.utils.stats import log_query_stats
+from hive.utils.stats import Stats
 
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
@@ -32,6 +32,7 @@ class Db:
         """
         self._conn = None
         self._trx_active = False
+        self._prep_sql = {}
 
     def conn(self):
         """Get the lazily-initialized db connection."""
@@ -95,9 +96,8 @@ class Db:
 
     def query_one(self, sql, **kwargs):
         """Perform a `SELECT 1*1`"""
-        row = self.query_row(sql, **kwargs)
-        if row:
-            return first(row)
+        row = first(self._query(sql, **kwargs))
+        return first(row) if row else None
 
     def engine_name(self):
         """Get the name of the engine (e.g. `postgresql`, `mysql`)."""
@@ -154,7 +154,14 @@ class Db:
 
         return (sql, values)
 
-    @log_query_stats
+    def _sql_text(self, sql):
+        if sql in self._prep_sql:
+            query = self._prep_sql[sql]
+        else:
+            query = sqlalchemy.text(sql).execution_options(autocommit=False)
+            self._prep_sql[sql] = query
+        return query
+
     def _query(self, sql, **kwargs):
         """Send a query off to SQLAlchemy."""
         if sql == 'START TRANSACTION':
@@ -164,9 +171,13 @@ class Db:
             assert self._trx_active
             self._trx_active = False
 
-        query = sqlalchemy.text(sql).execution_options(autocommit=False)
+        query = self._sql_text(sql)
+
         try:
-            return self.conn().execute(query, **kwargs)
+            start = perf()
+            result = self.conn().execute(query, **kwargs)
+            Stats.log_db(sql, perf() - start)
+            return result
         except Exception as e:
             log.error("[SQL-ERR] %s in query %s (%s)",
                       e.__class__.__name__, sql, kwargs)
