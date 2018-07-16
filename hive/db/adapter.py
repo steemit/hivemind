@@ -9,6 +9,8 @@ import sqlalchemy
 from hive.conf import Conf
 from hive.utils.stats import log_query_stats
 
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+
 log = logging.getLogger(__name__)
 
 class Db:
