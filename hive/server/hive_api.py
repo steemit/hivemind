@@ -5,7 +5,6 @@ import logging
 from decimal import Decimal
 from aiocache import cached
 from hive.db.adapter import Db
-from hive.db.db_state import DbState
 
 log = logging.getLogger(__name__)
 
@@ -13,7 +12,13 @@ DB = Db.instance()
 
 async def db_head_state():
     """Status/health check."""
-    return DbState.status()
+    sql = ("SELECT num, created_at, extract(epoch from created_at) ts "
+           "FROM hive_blocks ORDER BY num DESC LIMIT 1")
+    row = DB.query_row(sql)
+    return dict(db_head_block=row['num'],
+                db_head_time=str(row['created_at']),
+                db_head_age=int(time.time() - row['ts']))
+
 
 # stats methods
 # -------------
@@ -48,13 +53,13 @@ async def payouts_last_24h():
 # discussion apis
 # ---------------
 
-async def get_blog_feed(account: str, skip: int, limit: int, context: str = None):
+async def get_blog_feed(account: str, skip: int, limit: int, ctx: str = None):
     """Get a blog feed (posts and reblogs from the specified account)"""
     account_id = _get_account_id(account)
     sql = ("SELECT post_id FROM hive_feed_cache WHERE account_id = :account_id "
            "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
     post_ids = DB.query_col(sql, account_id=account_id, skip=skip, limit=limit)
-    return _get_posts(post_ids, context)
+    return _get_posts(post_ids, ctx)
 
 
 async def get_related_posts(account: str, permlink: str):
@@ -82,7 +87,7 @@ def _get_account_id(name):
     return DB.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
 
 # given an array of post ids, returns full metadata in the same order
-def _get_posts(ids, context=None):
+def _get_posts(ids, ctx=None):
     sql = """
     SELECT post_id, author, permlink, title, preview, img_url, payout,
            promoted, created_at, payout_at, is_nsfw, rshares, votes, json
@@ -90,21 +95,21 @@ def _get_posts(ids, context=None):
     """
 
     reblogged_ids = []
-    if context:
+    if ctx:
         reblogged_ids = DB.query_col("SELECT post_id FROM hive_reblogs "
                                      "WHERE account = :a AND post_id IN :ids",
-                                     a=context, ids=tuple(ids))
+                                     a=ctx, ids=tuple(ids))
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
     for row in DB.query_all(sql, ids=tuple(ids)):
         obj = dict(row)
 
-        if context:
+        if ctx:
             voters = [csa.split(",")[0] for csa in obj['votes'].split("\n")]
             obj['user_state'] = {
                 'reblogged': row['post_id'] in reblogged_ids,
-                'voted': context in voters
+                'voted': ctx in voters
             }
 
         # TODO: Object of type 'Decimal' is not JSON serializable

@@ -11,6 +11,9 @@ from aiohttp import web
 from jsonrpcserver import config
 from jsonrpcserver.async_methods import AsyncMethods
 
+#from hive.db.adapter import Db
+#context = dict(db=Db.instance())
+
 from hive.conf import Conf
 
 from hive.server.condenser_api import methods as condenser_api
