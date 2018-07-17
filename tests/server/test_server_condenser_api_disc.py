@@ -19,28 +19,28 @@ from hive.server.condenser_api.methods import (
 
 @pytest.mark.asyncio
 async def test_get_followers():
-    assert await get_followers('test-safari', '', 'blog', 10)
+    assert await get_followers('xeroc', '', 'blog', 10)
 
 @pytest.mark.asyncio
 async def test_get_following():
-    assert await get_following('test-safari', '', 'blog', 10)
+    assert await get_following('xeroc', '', 'blog', 10)
 
 @pytest.mark.asyncio
 async def test_get_follow_count():
-    assert await get_follow_count('test-safari')
+    assert await get_follow_count('xeroc')
 
 @pytest.mark.asyncio
 async def test_get_content():
-    post = await get_content('test-safari', 'december-spam')
+    post = await get_content('xeroc', 'python-steem-0-1')
     assert post
-    assert post['author'] == 'test-safari'
+    assert post['author'] == 'xeroc'
 
 @pytest.mark.asyncio
 async def test_get_content_replies():
-    replies = await get_content_replies('test-safari', 'december-spam')
+    replies = await get_content_replies('xeroc', 'python-steem-0-1')
     assert replies
-    assert len(replies) > 3
-    assert replies[0]['author']
+    assert len(replies) > 0
+    assert replies[0]['author'] == 'puppies'
 
 @pytest.mark.asyncio
 async def test_nested_query_compat():
@@ -73,17 +73,17 @@ async def test_get_discussions_by_created():
 @pytest.mark.asyncio
 async def test_get_discussions_by_blog():
     assert await get_discussions_by_blog(
-        tag='test-safari', start_author='', start_permlink='', limit=20, truncate_body=0)
+        tag='xeroc', start_author='', start_permlink='', limit=20, truncate_body=0)
 
 @pytest.mark.asyncio
 async def test_get_discussions_by_feed():
     assert await get_discussions_by_feed(
-        tag='test-safari', start_author='', start_permlink='', limit=20, truncate_body=0)
+        tag='xeroc', start_author='', start_permlink='', limit=20, truncate_body=0)
 
 @pytest.mark.asyncio
 async def test_get_discussions_by_comments():
     assert await get_discussions_by_comments(
-        start_author='test-safari',
+        start_author='xeroc',
         start_permlink='',
         limit=20,
         truncate_body=0)
@@ -91,7 +91,7 @@ async def test_get_discussions_by_comments():
 @pytest.mark.asyncio
 async def test_get_replies_by_last_update():
     assert await get_replies_by_last_update(
-        start_author='test-safari',
+        start_author='xeroc',
         start_permlink='',
         limit=20,
         truncate_body=0)

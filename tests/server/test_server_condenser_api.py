@@ -14,13 +14,13 @@ async def test_get_state():
     assert await get_state('created')
     assert await get_state('hot')
 
-    assert await get_state('@test-safari')
-    assert await get_state('@test-safari/feed')
-    assert await get_state('@test-safari/comments')
-    assert await get_state('@test-safari/recent-replies')
+    assert await get_state('@xeroc')
+    assert await get_state('@xeroc/feed')
+    assert await get_state('@xeroc/comments')
+    assert await get_state('@xeroc/recent-replies')
 
-    assert await get_state('spam/@test-safari/1ncq2-may-spam')
-    assert await get_state('spam/@test-safari/october-spam')
+    assert await get_state('steem/@xeroc/python-steem-v0-1-1')
+    assert await get_state('steem/@xeroc/re-dercoco-re-xeroc-python-steem-v0-1-1-20160802t073430189z')
 
     assert await get_state('trending/blockchain')
 
@@ -39,10 +39,10 @@ async def test_get_state():
 async def test_call():
     assert await call('condenser_api',
                       'get_followers',
-                      ['test-safari', '', 'blog', 10])
+                      ['xeroc', '', 'blog', 10])
     assert await call('condenser_api',
                       'get_discussions_by_blog',
-                      [{"tag": "test-safari",
+                      [{"tag": "xeroc",
                         "start_author": "",
                         "start_permlink": "",
                         "limit": 10}])
