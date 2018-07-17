@@ -21,7 +21,7 @@ def run():
         run_server()
 
     elif mode == 'sync':
-        Sync.run()
+        Sync().run()
 
     elif mode == 'status':
         print(DbState.status())

@@ -11,7 +11,7 @@ from toolz import partition_all
 
 from hive.conf import Conf
 
-from hive.db.methods import query
+from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
 from hive.utils.timer import Timer
@@ -32,8 +32,10 @@ class Sync:
     Responsible for initial sync, fast sync, and listen (block-follow).
     """
 
-    @classmethod
-    def run(cls):
+    def __init__(self):
+        self._db = Db.instance()
+
+    def run(self):
         """Initialize state; setup/recovery checks; sync and runloop."""
 
         # ensure db schema up to date, check app status
@@ -44,7 +46,7 @@ class Sync:
 
         if DbState.is_initial_sync():
             # resume initial sync
-            cls.initial()
+            self.initial()
             DbState.finish_initial_sync()
 
         else:
@@ -54,13 +56,16 @@ class Sync:
             # perform cleanup if process did not exit cleanly
             CachedPost.recover_missing_posts()
 
-        # debug mode: no sync, just stream
-        if Conf.get('disable_sync'):
-            return cls.listen()
+        if Conf.get('test_max_block'):
+            # debug mode: partial sync
+            return self.from_steemd()
+        elif Conf.get('test_disable_sync'):
+            # debug mode: no sync, just stream
+            return self.listen()
 
         while True:
             # sync up to irreversible block
-            cls.from_steemd()
+            self.from_steemd()
 
             # take care of payout backlog
             CachedPost.dirty_paidouts(Blocks.head_date())
@@ -68,34 +73,32 @@ class Sync:
 
             try:
                 # listen for new blocks
-                cls.listen()
+                self.listen()
             except MicroForkException as e:
                 # attempt to recover by restarting stream
                 log.error("micro fork: %s", repr(e))
 
-    @classmethod
-    def initial(cls):
+    def initial(self):
         """Initial sync routine."""
         assert DbState.is_initial_sync(), "already synced"
 
         log.info("[INIT] *** Initial fast sync ***")
-        cls.from_checkpoints()
-        cls.from_steemd(is_initial_sync=True)
+        self.from_checkpoints()
+        self.from_steemd(is_initial_sync=True)
 
         log.info("[INIT] *** Initial cache build ***")
         CachedPost.recover_missing_posts()
         FeedCache.rebuild()
         Follow.force_recount()
 
-
-    @classmethod
-    def from_checkpoints(cls, chunk_size=1000):
+    def from_checkpoints(self, chunk_size=1000):
         """Initial sync strategy: read from blocks on disk.
 
         This methods scans for files matching ./checkpoints/*.json.lst
         and uses them for hive's initial sync. Each line must contain
         exactly one block in JSON format.
         """
+        # pylint: disable=no-self-use
         last_block = Blocks.head_num()
 
         tuplize = lambda path: [int(path.split('/')[-1].split('.')[0]), path]
@@ -117,12 +120,13 @@ class Sync:
                 last_block = num
             last_read = num
 
-    @classmethod
-    def from_steemd(cls, is_initial_sync=False, chunk_size=1000):
+    def from_steemd(self, is_initial_sync=False, chunk_size=1000):
         """Fast sync strategy: read/process blocks in batches."""
+        # pylint: disable=no-self-use
         steemd = SteemClient.instance()
         lbound = Blocks.head_num() + 1
-        ubound = steemd.last_irreversible()
+        ubound = Conf.get('test_max_block') or steemd.last_irreversible()
+
         count = ubound - lbound
         if count < 1:
             return
@@ -156,16 +160,14 @@ class Sync:
             # is already paid out, worst case is to lose an edit.
             CachedPost.flush(trx=True)
 
-
-    @classmethod
-    def listen(cls):
+    def listen(self):
         """Live (block following) mode."""
         trail_blocks = Conf.get('trail_blocks')
         assert trail_blocks >= 0
         assert trail_blocks <= 100
 
         # debug: no max gap if disable_sync in effect
-        max_gap = None if Conf.get('disable_sync') else 100
+        max_gap = None if Conf.get('test_disable_sync') else 100
 
         steemd = SteemClient.instance()
         hive_head = Blocks.head_num()
@@ -173,13 +175,13 @@ class Sync:
         for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap):
             start_time = perf()
 
-            query("START TRANSACTION")
+            self._db.query("START TRANSACTION")
             num = Blocks.process(block)
             follows = Follow.flush(trx=False)
             accts = Accounts.flush(trx=False, spread=8)
             CachedPost.dirty_paidouts(block['timestamp'])
             cnt = CachedPost.flush(trx=False)
-            query("COMMIT")
+            self._db.query("COMMIT")
 
             ms = (perf() - start_time) * 1000
             log.info("[LIVE] Got block %d at %s --% 4d txs,% 3d posts,% 3d edits,"
@@ -196,19 +198,18 @@ class Sync:
 
             # once a minute, update chain props
             if num % 20 == 0:
-                cls._update_chain_state(steemd)
+                self._update_chain_state(steemd)
 
     # refetch dynamic_global_properties, feed price, etc
-    @classmethod
-    def _update_chain_state(cls, adapter):
+    def _update_chain_state(self, adapter):
         """Update basic state props (head block, feed price) in db."""
         state = adapter.gdgp_extended()
-        query("""UPDATE hive_state SET block_num = :block_num,
-                 steem_per_mvest = :spm, usd_per_steem = :ups,
-                 sbd_per_steem = :sps, dgpo = :dgpo""",
-              block_num=state['dgpo']['head_block_number'],
-              spm=state['steem_per_mvest'],
-              ups=state['usd_per_steem'],
-              sps=state['sbd_per_steem'],
-              dgpo=json.dumps(state['dgpo']))
+        self._db.query("""UPDATE hive_state SET block_num = :block_num,
+                       steem_per_mvest = :spm, usd_per_steem = :ups,
+                       sbd_per_steem = :sps, dgpo = :dgpo""",
+                       block_num=state['dgpo']['head_block_number'],
+                       spm=state['steem_per_mvest'],
+                       ups=state['usd_per_steem'],
+                       sps=state['sbd_per_steem'],
+                       dgpo=json.dumps(state['dgpo']))
         return state['dgpo']['head_block_number']

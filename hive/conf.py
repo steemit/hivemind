@@ -45,11 +45,14 @@ class Conf():
         add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests', default=4)
         add('--max-batch', type=int, env_var='MAX_BATCH', help='max chunk size for batch requests', default=50)
         add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', help='number of blocks to trail head by', default=2)
-        add('--disable-sync', type=strtobool, env_var='DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
         add('--sync-to-s3', type=strtobool, env_var='SYNC_TO_S3', help='alternative healthcheck for background sync service', default=False)
 
         # specific to API server
         add('--http-server-port', type=int, env_var='HTTP_SERVER_PORT', default=8080)
+
+        # testing and debug
+        add('--test-disable-sync', type=strtobool, env_var='TEST_DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
+        add('--test-max-block', type=int, env_var='TEST_MAX_BLOCK', help='(debug) only sync to given block, for running sync test', default=None)
 
         if ignore_unknown:
             # needed for e.g. tests - other args may be present
