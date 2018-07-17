@@ -2,7 +2,7 @@
 
 import logging
 
-from hive.db.methods import query_row, query_col, query_one, query
+from hive.db.adapter import Db
 from hive.steem.client import SteemClient
 
 from hive.indexer.accounts import Accounts
@@ -14,6 +14,8 @@ from hive.indexer.follow import Follow
 
 log = logging.getLogger(__name__)
 
+DB = Db.instance()
+
 class Blocks:
     """Processes blocks, dispatches work, manages `hive_blocks` table."""
 
@@ -21,13 +23,13 @@ class Blocks:
     def head_num(cls):
         """Get hive's head block number."""
         sql = "SELECT num FROM hive_blocks ORDER BY num DESC LIMIT 1"
-        return query_one(sql) or 0
+        return DB.query_one(sql) or 0
 
     @classmethod
     def head_date(cls):
         """Get hive's head block date."""
         sql = "SELECT created_at FROM hive_blocks ORDER BY num DESC LIMIT 1"
-        return str(query_one(sql) or '')
+        return str(DB.query_one(sql) or '')
 
     @classmethod
     def process(cls, block):
@@ -38,7 +40,7 @@ class Blocks:
     @classmethod
     def process_multi(cls, blocks, is_initial_sync=False):
         """Batch-process blocks; wrapped in a transaction."""
-        query("START TRANSACTION")
+        DB.query("START TRANSACTION")
 
         last_num = 0
         try:
@@ -53,7 +55,7 @@ class Blocks:
         # deltas in memory and update follow/er counts in bulk.
         Follow.flush(trx=False)
 
-        query("COMMIT")
+        DB.query("COMMIT")
 
     @classmethod
     def _process(cls, block, is_initial_sync=False):
@@ -152,21 +154,21 @@ class Blocks:
         """Fetch a specific block."""
         sql = """SELECT num, created_at date, hash
                  FROM hive_blocks WHERE num = :num LIMIT 1"""
-        return dict(query_row(sql, num=num))
+        return dict(DB.query_row(sql, num=num))
 
     @classmethod
     def _push(cls, block):
         """Insert a row in `hive_blocks`."""
         num = int(block['block_id'][:8], base=16)
         txs = block['transactions']
-        query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
-              "VALUES (:num, :hash, :prev, :txs, :ops, :date)", **{
-                  'num': num,
-                  'hash': block['block_id'],
-                  'prev': block['previous'],
-                  'txs': len(txs),
-                  'ops': sum([len(tx['operations']) for tx in txs]),
-                  'date': block['timestamp']})
+        DB.query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
+                 "VALUES (:num, :hash, :prev, :txs, :ops, :date)", **{
+                     'num': num,
+                     'hash': block['block_id'],
+                     'prev': block['previous'],
+                     'txs': len(txs),
+                     'ops': sum([len(tx['operations']) for tx in txs]),
+                     'date': block['timestamp']})
         return num
 
     @classmethod
@@ -191,7 +193,7 @@ class Blocks:
          - hive_flags
          - hive_modlog
         """
-        query("START TRANSACTION")
+        DB.query("START TRANSACTION")
 
         for block in blocks:
             num = block['num']
@@ -201,18 +203,18 @@ class Blocks:
 
             # get all affected post_ids in this block
             sql = "SELECT id FROM hive_posts WHERE created_at >= :date"
-            post_ids = tuple(query_col(sql, date=date))
+            post_ids = tuple(DB.query_col(sql, date=date))
 
             # remove all recent records
-            query("DELETE FROM hive_posts_cache WHERE post_id IN :ids", ids=post_ids)
-            query("DELETE FROM hive_feed_cache  WHERE created_at >= :date", date=date)
-            query("DELETE FROM hive_reblogs     WHERE created_at >= :date", date=date)
-            query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
-            query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
-            query("DELETE FROM hive_posts       WHERE id IN :ids", ids=post_ids)
-            query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
-            query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
+            DB.query("DELETE FROM hive_posts_cache WHERE post_id IN :ids", ids=post_ids)
+            DB.query("DELETE FROM hive_feed_cache  WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_reblogs     WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
+            DB.query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
+            DB.query("DELETE FROM hive_posts       WHERE id IN :ids", ids=post_ids)
+            DB.query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
+            DB.query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
 
-        query("COMMIT")
+        DB.query("COMMIT")
         log.warning("[FORK] recovery complete")
         # TODO: manually re-process here the blocks which were just popped.

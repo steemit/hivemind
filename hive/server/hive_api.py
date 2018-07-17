@@ -4,10 +4,12 @@ import logging
 
 from decimal import Decimal
 from aiocache import cached
-from hive.db.methods import query_one, query_col, query_all
+from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
 log = logging.getLogger(__name__)
+
+DB = Db.instance()
 
 async def db_head_state():
     """Status/health check."""
@@ -31,7 +33,7 @@ async def payouts_total():
       WHERE is_paidout = '1' AND payout_at > '%s'
     """ % (precalc_date)
 
-    return float(precalc_sum + query_one(sql)) #TODO: decimal
+    return float(precalc_sum + DB.query_one(sql)) #TODO: decimal
 
 @cached(ttl=3600)
 async def payouts_last_24h():
@@ -40,7 +42,7 @@ async def payouts_last_24h():
       SELECT SUM(payout) FROM hive_posts_cache WHERE is_paidout = '1'
       AND payout_at > (NOW() AT TIME ZONE 'utc') - INTERVAL '24 HOUR'
     """
-    return float(query_one(sql)) # TODO: decimal
+    return float(DB.query_one(sql)) # TODO: decimal
 
 
 # discussion apis
@@ -51,7 +53,7 @@ async def get_blog_feed(account: str, skip: int, limit: int, context: str = None
     account_id = _get_account_id(account)
     sql = ("SELECT post_id FROM hive_feed_cache WHERE account_id = :account_id "
            "ORDER BY created_at DESC LIMIT :limit OFFSET :skip")
-    post_ids = query_col(sql, account_id=account_id, skip=skip, limit=limit)
+    post_ids = DB.query_col(sql, account_id=account_id, skip=skip, limit=limit)
     return _get_posts(post_ids, context)
 
 
@@ -70,14 +72,14 @@ async def get_related_posts(account: str, permlink: str):
     ORDER BY sc_trend DESC LIMIT 5
     """
     thresh = time.time() / 480000
-    post_ids = query_col(sql, a=account, p=permlink, t=thresh)
+    post_ids = DB.query_col(sql, a=account, p=permlink, t=thresh)
     return _get_posts(post_ids)
 
 
 # ---
 
 def _get_account_id(name):
-    return query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
+    return DB.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
 
 # given an array of post ids, returns full metadata in the same order
 def _get_posts(ids, context=None):
@@ -89,13 +91,13 @@ def _get_posts(ids, context=None):
 
     reblogged_ids = []
     if context:
-        reblogged_ids = query_col("SELECT post_id FROM hive_reblogs "
-                                  "WHERE account = :a AND post_id IN :ids",
-                                  a=context, ids=tuple(ids))
+        reblogged_ids = DB.query_col("SELECT post_id FROM hive_reblogs "
+                                     "WHERE account = :a AND post_id IN :ids",
+                                     a=context, ids=tuple(ids))
 
     # key by id so we can return sorted by input order
     posts_by_id = {}
-    for row in query_all(sql, ids=tuple(ids)):
+    for row in DB.query_all(sql, ids=tuple(ids)):
         obj = dict(row)
 
         if context:

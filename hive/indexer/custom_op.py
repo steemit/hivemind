@@ -2,7 +2,7 @@
 import logging
 
 from funcy.seqs import first, second
-from hive.db.methods import query
+from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
 from hive.indexer.accounts import Accounts
@@ -12,6 +12,8 @@ from hive.indexer.follow import Follow
 
 from hive.indexer.community import process_json_community_op
 from hive.utils.normalize import load_json_key
+
+DB = Db.instance()
 
 log = logging.getLogger(__name__)
 
@@ -85,14 +87,14 @@ class CustomOp:
             return
 
         if 'delete' in op_json and op_json['delete'] == 'delete':
-            query("DELETE FROM hive_reblogs WHERE account = :a AND "
-                  "post_id = :pid LIMIT 1", a=blogger, pid=post_id)
+            DB.query("DELETE FROM hive_reblogs WHERE account = :a AND "
+                     "post_id = :pid LIMIT 1", a=blogger, pid=post_id)
             if not DbState.is_initial_sync():
                 FeedCache.delete(post_id, Accounts.get_id(blogger))
 
         else:
             sql = ("INSERT INTO hive_reblogs (account, post_id, created_at) "
                    "VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING")
-            query(sql, a=blogger, pid=post_id, date=block_date)
+            DB.query(sql, a=blogger, pid=post_id, date=block_date)
             if not DbState.is_initial_sync():
                 FeedCache.insert(post_id, Accounts.get_id(blogger), block_date)
