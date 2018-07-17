@@ -171,10 +171,9 @@ class Db:
             assert self._trx_active
             self._trx_active = False
 
-        query = self._sql_text(sql)
-
         try:
             start = perf()
+            query = self._sql_text(sql)
             result = self.conn().execute(query, **kwargs)
             Stats.log_db(sql, perf() - start)
             return result

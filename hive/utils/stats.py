@@ -170,7 +170,8 @@ class Stats:
         log.info("cumtime %ds (%.1f%% of %ds). %.1f%% idle. peak %dmb.",
                  local, 100 * local / non_idle, non_idle,
                  100 * idle / total, peak_usage_mb())
-        cls._db.report(cls._ms)
-        cls._steemd.report(cls._ms)
+        if local > 1:
+            cls._db.report(cls._ms)
+            cls._steemd.report(cls._ms)
 
 atexit.register(Stats.report)
