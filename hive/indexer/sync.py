@@ -34,6 +34,7 @@ class Sync:
 
     def __init__(self):
         self._db = Db.instance()
+        self._steem = SteemClient.instance()
 
     def run(self):
         """Initialize state; setup/recovery checks; sync and runloop."""
@@ -55,6 +56,8 @@ class Sync:
 
             # perform cleanup if process did not exit cleanly
             CachedPost.recover_missing_posts()
+
+        self._update_chain_state()
 
         if Conf.get('test_max_block'):
             # debug mode: partial sync
@@ -123,7 +126,7 @@ class Sync:
     def from_steemd(self, is_initial_sync=False, chunk_size=1000):
         """Fast sync strategy: read/process blocks in batches."""
         # pylint: disable=no-self-use
-        steemd = SteemClient.instance()
+        steemd = self._steem
         lbound = Blocks.head_num() + 1
         ubound = Conf.get('test_max_block') or steemd.last_irreversible()
 
@@ -169,7 +172,7 @@ class Sync:
         # debug: no max gap if disable_sync in effect
         max_gap = None if Conf.get('test_disable_sync') else 100
 
-        steemd = SteemClient.instance()
+        steemd = self._steem
         hive_head = Blocks.head_num()
 
         for block in steemd.stream_blocks(hive_head + 1, trail_blocks, max_gap):
@@ -198,12 +201,12 @@ class Sync:
 
             # once a minute, update chain props
             if num % 20 == 0:
-                self._update_chain_state(steemd)
+                self._update_chain_state()
 
     # refetch dynamic_global_properties, feed price, etc
-    def _update_chain_state(self, adapter):
+    def _update_chain_state(self):
         """Update basic state props (head block, feed price) in db."""
-        state = adapter.gdgp_extended()
+        state = self._steem.gdgp_extended()
         self._db.query("""UPDATE hive_state SET block_num = :block_num,
                        steem_per_mvest = :spm, usd_per_steem = :ups,
                        sbd_per_steem = :sps, dgpo = :dgpo""",
