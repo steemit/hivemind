@@ -1,6 +1,5 @@
 """Accounts indexer."""
 
-import math
 import logging
 
 from datetime import datetime
@@ -13,6 +12,7 @@ from hive.steem.client import SteemClient
 from hive.utils.normalize import rep_log10, vests_amount
 from hive.utils.timer import Timer
 from hive.utils.account import safe_profile_metadata
+from hive.utils.unique_fifo import UniqueFIFO
 
 log = logging.getLogger(__name__)
 
@@ -25,8 +25,7 @@ class Accounts:
     _ids = {}
 
     # fifo queue
-    _dirty = []
-    _dirty_set = set()
+    _dirty = UniqueFIFO()
 
     # account core methods
     # --------------------
@@ -79,15 +78,7 @@ class Accounts:
     @classmethod
     def dirty(cls, accounts):
         """Marks given accounts as needing an update."""
-        if not accounts:
-            return 0
-        assert isinstance(accounts, set)
-        accounts = accounts - cls._dirty_set
-        if not accounts:
-            return 0
-        cls._dirty.extend(accounts)
-        cls._dirty_set |= set(accounts)
-        return len(accounts)
+        return cls._dirty.extend(accounts)
 
     @classmethod
     def dirty_all(cls):
@@ -108,21 +99,14 @@ class Accounts:
          - trx: bool - wrap the update in a transaction
          - spread: int - spread writes over a period of `n` calls
         """
-        assert spread >= 1
-        if not cls._dirty:
+        accounts = cls._dirty.shift_portion(spread)
+
+        count = len(accounts)
+        if not count:
             return 0
 
-        count = len(cls._dirty)
-        if spread > 1:
-            count = math.ceil(count / spread)
         if trx:
             log.info("[SYNC] update %d accounts", count)
-
-        # shift _dirty by `count` items
-        accounts = cls._dirty[0:count]
-        cls._dirty = cls._dirty[count:None]
-        for name in accounts:
-            cls._dirty_set.remove(name)
 
         cls._cache_accounts(accounts, trx=trx)
         return count
