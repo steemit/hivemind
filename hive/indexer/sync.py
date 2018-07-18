@@ -183,19 +183,17 @@ class Sync:
 
             ms = (perf() - start_time) * 1000
             log.info("[LIVE] Got block %d at %s --% 4d txs,% 3d posts,% 3d edits,"
-                     "% 3d payouts,% 3d votes,% 3d accts,% 3d follows --% 5dms%s",
-                     num, block['timestamp'], len(block['transactions']),
+                     "% 3d payouts,% 3d votes,% 3d counts,% 3d accts,% 3d follows"
+                     " --% 5dms%s", num, block['timestamp'], len(block['transactions']),
                      cnt['insert'], cnt['update'], cnt['payout'], cnt['upvote'],
-                     accts, follows, int(ms), ' SLOW' if ms > 1000 else '')
+                     cnt['recount'], accts, follows, ms, ' SLOW' if ms > 1000 else '')
 
-            # once per hour, update accounts
-            if num % 1200 == 0:
-                Accounts.dirty_oldest(10000)
+            #if num % 1200 == 0: #1hr
+            #    Accounts.update_ranks() #144
+            if num % 100 == 0: #5min
+                Accounts.dirty_oldest(500)
                 Accounts.flush(trx=True)
-                #Accounts.update_ranks()
-
-            # once a minute, update chain props
-            if num % 20 == 0:
+            if num % 20 == 0: #1min
                 cls._update_chain_state(steemd)
 
     # refetch dynamic_global_properties, feed price, etc
