@@ -67,7 +67,6 @@ class Blocks:
         comment_ops = []
         json_ops = []
         delete_ops = []
-        voted_authors = set()
         for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
                 op_type = operation['type']
@@ -91,7 +90,6 @@ class Blocks:
                 elif op_type == 'vote_operation':
                     if not is_initial_sync:
                         CachedPost.vote(op['author'], op['permlink'])
-                        voted_authors.add(op['author']) # TODO: move to cachedpost
 
                 # misc ops
                 elif op_type == 'transfer_operation':
@@ -100,7 +98,6 @@ class Blocks:
                     json_ops.append(op)
 
         Accounts.register(account_names, date)     # register any new names
-        Accounts.dirty(voted_authors)              # update rep of voted authors
         Posts.comment_ops(comment_ops, date)       # handle inserts, edits
         Posts.delete_ops(delete_ops)               # handle post deletion
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops

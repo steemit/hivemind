@@ -79,6 +79,7 @@ class CachedPost:
     def vote(cls, author, permlink, pid=None):
         """Handle a post dirtied by a `vote` op."""
         cls._dirty('upvote', author, permlink, pid)
+        Accounts.dirty(set([author])) # rep changed
 
     @classmethod
     def insert(cls, author, permlink, pid):
@@ -169,10 +170,6 @@ class CachedPost:
             del cls._queue[url]
             if url in cls._ids:
                 del cls._ids[url]
-
-        # TODO: ideal place to update reps of authors whos posts were modified.
-        # potentially could be triggered in vote(). remove the Accounts.dirty
-        # from hive.indexer.blocks which follows CachedPost.vote.
 
         return counts
 
