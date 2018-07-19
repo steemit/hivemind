@@ -184,8 +184,8 @@ def _load_account(name):
     #for key in ['recent_replies', 'comments', 'feed', 'blog']:
     #    account[key] = []
     # need to audit all assumed condenser keys..
-    from hive.steem.client import SteemClient
-    account = SteemClient.instance().get_accounts([name])[0]
+    from hive.conf import Conf
+    account = Conf.steem().get_accounts([name])[0]
     return account
 
 

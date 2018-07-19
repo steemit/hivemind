@@ -7,7 +7,6 @@ import ujson as json
 
 from toolz import partition_all
 from hive.db.adapter import Db
-from hive.steem.client import SteemClient
 
 from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer
@@ -147,7 +146,7 @@ class CachedPost:
         cls.update(author, permlink, post_id)
 
     @classmethod
-    def flush(cls, trx=False, spread=1, full_total=None):
+    def flush(cls, steem, trx=False, spread=1, full_total=None):
         """Process all posts which have been marked as dirty."""
         cls._load_noids() # load missing ids
         assert spread == 1, "not fully tested, use with caution"
@@ -165,7 +164,7 @@ class CachedPost:
             summary = ', '.join(summary) if summary else 'none'
             log.info("[PREP] posts cache process: %s", summary)
 
-        cls._update_batch(tuples, trx, full_total=full_total)
+        cls._update_batch(steem, tuples, trx, full_total=full_total)
         for url, _, _ in tuples:
             del cls._queue[url]
             if url in cls._ids:
@@ -274,7 +273,7 @@ class CachedPost:
         return gap
 
     @classmethod
-    def recover_missing_posts(cls):
+    def recover_missing_posts(cls, steem):
         """Startup routine that cycles through missing posts.
 
         This is used for (1) initial sync, and (2) recovering missing
@@ -282,11 +281,11 @@ class CachedPost:
         """
         gap = cls.dirty_missing()
         log.info("[INIT] %d missing post cache entries", gap)
-        while cls.flush(trx=True, full_total=gap)['insert']:
+        while cls.flush(steem, trx=True, full_total=gap)['insert']:
             gap = cls.dirty_missing()
 
     @classmethod
-    def _update_batch(cls, tuples, trx=True, full_total=None):
+    def _update_batch(cls, steem, tuples, trx=True, full_total=None):
         """Fetch, process, and write a batch of posts.
 
         Given a set of posts, fetch from steemd and write them to the
@@ -301,7 +300,6 @@ class CachedPost:
         because this cursor is used to deduce any missing cache entries.
         """
 
-        steemd = SteemClient.instance()
         timer = Timer(total=len(tuples), entity='post',
                       laps=['rps', 'wps'], full_total=full_total)
         tuples = sorted(tuples, key=lambda x: x[1]) # enforce ASC id's
@@ -311,7 +309,7 @@ class CachedPost:
             buffer = []
 
             post_args = [tup[0].split('/') for tup in tups]
-            posts = steemd.get_content_batch(post_args)
+            posts = steem.get_content_batch(post_args)
             post_ids = [tup[1] for tup in tups]
             post_levels = [tup[2] for tup in tups]
             for pid, post, level in zip(post_ids, posts, post_levels):

@@ -21,15 +21,19 @@ class Db:
     def instance(cls):
         """Get a lazily-initialized singleton."""
         if not cls._instance:
-            cls._instance = Db()
+            url = Conf.get('database_url')
+            assert url, ('--database-url (or DATABASE_URL env) not specified; '
+                         'e.g. postgresql://user:pass@localhost:5432/hive')
+            cls._instance = Db(url)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, url):
         """Initialize an instance.
 
         No work is performed here. Some modues might initialize an
         instance before config is loaded.
         """
+        self._url = url
         self._conn = None
         self._trx_active = False
         self._prep_sql = {}
@@ -37,7 +41,7 @@ class Db:
     def conn(self):
         """Get the lazily-initialized db connection."""
         if not self._conn:
-            self._conn = Db.create_engine(echo=False).connect()
+            self._conn = self.create_engine(echo=False).connect()
             # It seems as though sqlalchemy tries to take over transactions
             # and handle them itself; seems to issue a START TRANSACTION on
             # connect, which makes postgres complain when we start our own:
@@ -48,14 +52,10 @@ class Db:
             self._conn.execute(sqlalchemy.text("COMMIT"))
         return self._conn
 
-    @staticmethod
-    def create_engine(echo=False):
+    def create_engine(self, echo=False):
         """Create a new SA db engine. Use echo=True for ultra verbose."""
-        db_url = Conf.get('database_url')
-        assert db_url, ('--database-url (or DATABASE_URL env) not specified; '
-                        'e.g. postgresql://user:pass@localhost:5432/hive')
         engine = sqlalchemy.create_engine(
-            db_url,
+            self._url,
             isolation_level="READ UNCOMMITTED", # only supported in mysql
             pool_recycle=3600,
             echo=echo)

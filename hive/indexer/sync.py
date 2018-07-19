@@ -15,7 +15,6 @@ from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
 from hive.utils.timer import Timer
-from hive.steem.client import SteemClient
 from hive.steem.block.stream import MicroForkException
 
 from hive.indexer.blocks import Blocks
@@ -34,7 +33,7 @@ class Sync:
 
     def __init__(self):
         self._db = Db.instance()
-        self._steem = SteemClient.instance()
+        self._steem = Conf.steem()
 
     def run(self):
         """Initialize state; setup/recovery checks; sync and runloop."""
@@ -52,10 +51,10 @@ class Sync:
 
         else:
             # recover from fork
-            Blocks.verify_head()
+            Blocks.verify_head(self._steem)
 
             # perform cleanup if process did not exit cleanly
-            CachedPost.recover_missing_posts()
+            CachedPost.recover_missing_posts(self._steem)
 
         self._update_chain_state()
 
@@ -72,7 +71,7 @@ class Sync:
 
             # take care of payout backlog
             CachedPost.dirty_paidouts(Blocks.head_date())
-            CachedPost.flush(trx=True)
+            CachedPost.flush(self._steem, trx=True)
 
             try:
                 # listen for new blocks
@@ -90,7 +89,7 @@ class Sync:
         self.from_steemd(is_initial_sync=True)
 
         log.info("[INIT] *** Initial cache build ***")
-        CachedPost.recover_missing_posts()
+        CachedPost.recover_missing_posts(self._steem)
         FeedCache.rebuild()
         Follow.force_recount()
 
@@ -155,13 +154,13 @@ class Sync:
 
         if not is_initial_sync:
             # This flush is low importance; accounts are swept regularly.
-            Accounts.flush(trx=True)
+            Accounts.flush(steemd, trx=True)
 
             # If this flush fails, all that could potentially be lost here is
             # edits and pre-payout votes. If the post has not been paid out yet,
             # then the worst case is it will be synced upon payout. If the post
             # is already paid out, worst case is to lose an edit.
-            CachedPost.flush(trx=True)
+            CachedPost.flush(steemd, trx=True)
 
     def listen(self):
         """Live (block following) mode."""
@@ -181,9 +180,9 @@ class Sync:
             self._db.query("START TRANSACTION")
             num = Blocks.process(block)
             follows = Follow.flush(trx=False)
-            accts = Accounts.flush(trx=False, spread=8)
+            accts = Accounts.flush(steemd, trx=False, spread=8)
             CachedPost.dirty_paidouts(block['timestamp'])
-            cnt = CachedPost.flush(trx=False)
+            cnt = CachedPost.flush(steemd, trx=False)
             self._db.query("COMMIT")
 
             ms = (perf() - start_time) * 1000
@@ -194,9 +193,9 @@ class Sync:
                      accts, follows, int(ms), ' SLOW' if ms > 1000 else '')
 
             # once per hour, update accounts
-            if num % 1200 == 0:
+            if num % 120 == 0:
                 Accounts.dirty_oldest(10000)
-                Accounts.flush(trx=True)
+                Accounts.flush(steemd, trx=True)
                 #Accounts.update_ranks()
 
             # once a minute, update chain props

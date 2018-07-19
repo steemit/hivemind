@@ -3,12 +3,7 @@
 """CLI service router"""
 
 import logging
-
 from hive.conf import Conf
-from hive.db.db_state import DbState
-from hive.indexer.sync import Sync
-from hive.server.serve import run_server
-
 logging.basicConfig()
 
 def run():
@@ -18,12 +13,15 @@ def run():
     mode = Conf.run_mode()
 
     if mode == 'server':
+        from hive.server.serve import run_server
         run_server()
 
     elif mode == 'sync':
+        from hive.indexer.sync import Sync
         Sync().run()
 
     elif mode == 'status':
+        from hive.db.db_state import DbState
         print(DbState.status())
 
     else:

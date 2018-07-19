@@ -3,7 +3,6 @@
 import logging
 
 from hive.db.adapter import Db
-from hive.steem.client import SteemClient
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -105,7 +104,7 @@ class Blocks:
         return num
 
     @classmethod
-    def verify_head(cls):
+    def verify_head(cls, steem):
         """Perform a fork recovery check on startup."""
         hive_head = cls.head_num()
         if not hive_head:
@@ -114,11 +113,10 @@ class Blocks:
         # move backwards from head until hive/steem agree
         to_pop = []
         cursor = hive_head
-        steemd = SteemClient.instance()
         while True:
             assert hive_head - cursor < 25, "fork too deep"
             hive_block = cls._get(cursor)
-            steem_hash = steemd.get_block(cursor)['block_id']
+            steem_hash = steem.get_block(cursor)['block_id']
             match = hive_block['hash'] == steem_hash
             log.info("[INIT] fork check. block %d: %s vs %s --- %s",
                      hive_block['num'], hive_block['hash'],
@@ -135,7 +133,7 @@ class Blocks:
                   hive_head - cursor, cursor + 1, hive_head)
 
         # we should not attempt to recover from fork until it's safe
-        fork_limit = steemd.last_irreversible()
+        fork_limit = steem.last_irreversible()
         assert cursor < fork_limit, "not proceeding until head is irreversible"
 
         cls._pop(to_pop)

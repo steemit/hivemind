@@ -10,6 +10,8 @@ from sqlalchemy.types import BOOLEAN
 
 from hive.db.adapter import Db
 
+DB = Db.instance()
+
 #pylint: disable=line-too-long, too-many-lines
 
 def build_metadata():
@@ -304,7 +306,7 @@ def build_metadata():
 def setup():
     """Creates all tables and seed data"""
     # initialize schema
-    engine = Db.create_engine(echo=False)
+    engine = DB.create_engine(echo=False)
     build_metadata().create_all(engine)
 
     # tune auto vacuum/analyze
@@ -319,7 +321,7 @@ def setup():
         "INSERT INTO hive_accounts (name, created_at) VALUES ('temp',      '2016-03-24 16:05:00')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('initminer', '2016-03-24 16:05:00')"]
     for sql in sqls:
-        Db.instance().query(sql)
+        DB.query(sql)
 
 def reset_autovac():
     """Initializes per-table autovacuum/autoanalyze params"""
@@ -344,10 +346,10 @@ def reset_autovac():
     for table, (vacuum_sf, analyze_sf) in autovac_config.items():
         sql = """ALTER TABLE %s SET (autovacuum_vacuum_scale_factor = %s,
                                      autovacuum_analyze_scale_factor = %s)"""
-        Db.instance().query(sql % (table, vacuum_sf, analyze_sf))
+        DB.query(sql % (table, vacuum_sf, analyze_sf))
 
 def teardown():
     """Drop all tables"""
-    engine = Db.create_engine(echo=True)
+    engine = DB.create_engine(echo=True)
     metadata = build_metadata()
     metadata.drop_all(engine)
