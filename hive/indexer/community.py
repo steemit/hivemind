@@ -16,7 +16,7 @@ DB = Db.instance()
 # -----------------
 def process_json_community_op(account, op_json, date):
     """Validates community op and apply state changes to db."""
-    #pylint: disable=line-too-long,unused-variable
+    #pylint: disable=line-too-long,unused-variable,too-many-branches
     cmd_name, cmd_op = op_json  # ['flagPost', {community: '', author: '', ...}]
 
     commands = list(flatten(PERMISSIONS.values()))
