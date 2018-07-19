@@ -60,7 +60,6 @@ class Blocks:
     @classmethod
     def _process(cls, block, is_initial_sync=False):
         """Process a single block. Assumes a trx is open."""
-        # pylint: disable=too-many-boolean-expressions,too-many-branches
         num = cls._push(block)
         date = block['timestamp']
 
@@ -71,38 +70,33 @@ class Blocks:
         voted_authors = set()
         for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
-                if isinstance(operation, dict):
-                    op_type = operation['type'].split('_operation')[0]
-                    op = operation['value']
-                else: # pre-appbase-style. remove after deploy. #APPBASE
-                    op_type, op = operation
+                op_type = operation['type']
+                op = operation['value']
 
                 # account ops
-                if op_type == 'pow':
+                if op_type == 'pow_operation':
                     account_names.add(op['worker_account'])
-                elif op_type == 'pow2':
-                    # old style. remove after #APPBASE
-                    #account_names.add(op['work'][1]['input']['worker_account'])
+                elif op_type == 'pow2_operation':
                     account_names.add(op['work']['value']['input']['worker_account'])
-                elif op_type == 'account_create':
+                elif op_type == 'account_create_operation':
                     account_names.add(op['new_account_name'])
-                elif op_type == 'account_create_with_delegation':
+                elif op_type == 'account_create_with_delegation_operation':
                     account_names.add(op['new_account_name'])
 
                 # post ops
-                elif op_type == 'comment':
+                elif op_type == 'comment_operation':
                     comment_ops.append(op)
-                elif op_type == 'delete_comment':
+                elif op_type == 'delete_comment_operation':
                     delete_ops.append(op)
-                elif op_type == 'vote':
+                elif op_type == 'vote_operation':
                     if not is_initial_sync:
                         CachedPost.vote(op['author'], op['permlink'])
                         voted_authors.add(op['author']) # TODO: move to cachedpost
 
                 # misc ops
-                elif op_type == 'transfer':
+                elif op_type == 'transfer_operation':
                     Payments.op_transfer(op, tx_idx, num, date)
-                elif op_type == 'custom_json':
+                elif op_type == 'custom_json_operation':
                     json_ops.append(op)
 
         Accounts.register(account_names, date)     # register any new names
