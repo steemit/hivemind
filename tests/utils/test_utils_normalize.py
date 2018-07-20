@@ -21,6 +21,7 @@ from hive.utils.normalize import (
     safe_img_url,
     secs_to_str,
     strtobool,
+    int_log_level,
 )
 
 def test_secs_to_str():
@@ -105,3 +106,15 @@ def test_strtobool():
 
     with pytest.raises(ValueError):
         strtobool('foo')
+
+def test_int_log_level():
+    assert int_log_level('debug') == 10
+    assert int_log_level('DEBUG') == 10
+    assert int_log_level('info') == 20
+    assert int_log_level('warning') == 30
+    with pytest.raises(ValueError):
+        int_log_level('foo')
+    with pytest.raises(ValueError):
+        int_log_level(None)
+    with pytest.raises(ValueError):
+        int_log_level('')

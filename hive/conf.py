@@ -5,7 +5,7 @@ import configargparse
 
 from hive.steem.client import SteemClient
 from hive.db.adapter import Db
-from hive.utils.normalize import strtobool
+from hive.utils.normalize import strtobool, int_log_level
 
 class Conf():
     """ Manages sync/server configuration via args, ENVs, and hive.conf. """
@@ -94,8 +94,4 @@ class Conf():
 
     def log_level(self):
         """Get `logger`s internal int level from config string."""
-        str_log_level = self.get('log_level')
-        log_level = getattr(logging, str_log_level.upper(), None)
-        if not isinstance(log_level, int):
-            raise ValueError('Invalid log level: %s' % str_log_level)
-        return log_level
+        return int_log_level(self.get('log_level'))

@@ -1,5 +1,6 @@
 """Methods to parse steemd values and clean strings."""
 
+import logging
 import math
 import decimal
 from datetime import datetime
@@ -155,3 +156,12 @@ def strtobool(val):
         return False
     else:
         raise ValueError("not booleany: %r" % (val,))
+
+def int_log_level(str_log_level):
+    """Get `logger`s internal int level from config string."""
+    if not str_log_level:
+        raise ValueError('Empty log level passed')
+    log_level = getattr(logging, str_log_level.upper(), None)
+    if not isinstance(log_level, int):
+        raise ValueError('Invalid log level: %s' % str_log_level)
+    return log_level
