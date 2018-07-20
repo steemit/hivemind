@@ -6,7 +6,6 @@ from collections import OrderedDict
 from funcy.seqs import first
 import sqlalchemy
 
-from hive.conf import Conf
 from hive.utils.stats import Stats
 
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
@@ -21,6 +20,7 @@ class Db:
     def instance(cls):
         """Get a lazily-initialized singleton."""
         if not cls._instance:
+            from hive.conf import Conf
             url = Conf.get('database_url')
             assert url, ('--database-url (or DATABASE_URL env) not specified; '
                          'e.g. postgresql://user:pass@localhost:5432/hive')

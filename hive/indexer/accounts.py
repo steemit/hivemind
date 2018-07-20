@@ -124,7 +124,7 @@ class Accounts:
     @classmethod
     def _cache_accounts(cls, accounts, steem, trx=True):
         """Fetch all `accounts` and write to db."""
-        timer = Timer(len(accounts), 'account', ['rps', 'pps', 'wps'])
+        timer = Timer(len(accounts), 'account', ['rps', 'wps'])
         for name_batch in partition_all(1000, accounts):
             cached_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 

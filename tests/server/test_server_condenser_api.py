@@ -57,5 +57,5 @@ async def test_get_trending_tags():
     assert full[3] == short[3]
 
     # ensure pagination works
-    paged = await get_trending_tags(full[2], 2)
+    paged = await get_trending_tags(full[2]['name'], 2)
     assert full[3] == paged[1]

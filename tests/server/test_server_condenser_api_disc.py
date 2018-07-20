@@ -40,7 +40,7 @@ async def test_get_content_replies():
     replies = await get_content_replies('xeroc', 'python-steem-0-1')
     assert replies
     assert len(replies) > 0
-    assert replies[0]['author'] == 'puppies'
+    assert 'puppies' in [r['author'] for r in replies]
 
 @pytest.mark.asyncio
 async def test_nested_query_compat():
