@@ -5,21 +5,7 @@ import configargparse
 
 from hive.steem.client import SteemClient
 from hive.db.adapter import Db
-
-def strtobool(val):
-    """Convert a booleany str to a bool.
-
-    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
-    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
-    'val' is anything else.
-    """
-    val = val.lower()
-    if val in ('y', 'yes', 't', 'true', 'on', '1'):
-        return True
-    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
-        return False
-    else:
-        raise ValueError("not booleany: %r" % (val,))
+from hive.utils.normalize import strtobool
 
 class Conf():
     """ Manages sync/server configuration via args, ENVs, and hive.conf. """
