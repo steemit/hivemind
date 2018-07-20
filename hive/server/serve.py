@@ -11,9 +11,6 @@ from aiohttp import web
 from jsonrpcserver import config
 from jsonrpcserver.async_methods import AsyncMethods
 
-#from hive.db.adapter import Db
-#context = dict(db=Db.instance())
-
 from hive.server.condenser_api import methods as condenser_api
 from hive.server.condenser_api.tags import get_trending_tags as condenser_api_get_trending_tags
 from hive.server.condenser_api.get_state import get_state as condenser_api_get_state
@@ -72,6 +69,8 @@ def run_server(conf):
     log = logging.getLogger(__name__)
 
     methods = build_methods()
+
+    #context = dict(db=conf.db())
 
     app = web.Application()
     app['config'] = dict()

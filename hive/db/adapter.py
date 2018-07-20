@@ -16,16 +16,17 @@ class Db:
     """RDBMS adapter for hive. Handles connecting and querying."""
 
     _instance = None
+
     @classmethod
     def instance(cls):
-        """Get a lazily-initialized singleton."""
-        if not cls._instance:
-            from hive.conf import Conf
-            url = Conf.get('database_url')
-            assert url, ('--database-url (or DATABASE_URL env) not specified; '
-                         'e.g. postgresql://user:pass@localhost:5432/hive')
-            cls._instance = Db(url)
+        """Get the shared instance."""
+        assert cls._instance, 'set_shared_instance was never called'
         return cls._instance
+
+    @classmethod
+    def set_shared_instance(cls, db):
+        """Set the global/shared db instance. Do not use."""
+        cls._instance = db
 
     def __init__(self, url):
         """Initialize an instance.
@@ -33,6 +34,8 @@ class Db:
         No work is performed here. Some modues might initialize an
         instance before config is loaded.
         """
+        assert url, ('--database-url (or DATABASE_URL env) not specified; '
+                     'e.g. postgresql://user:pass@localhost:5432/hive')
         self._url = url
         self._conn = None
         self._engine = None

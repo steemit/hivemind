@@ -5,6 +5,7 @@ import logging
 from collections import OrderedDict
 import ujson as json
 
+from hive.steem.client import SteemClient
 from hive.db.methods import query_one
 from hive.utils.normalize import legacy_amount
 
@@ -30,6 +31,8 @@ from hive.server.condenser_api.tags import (
 import hive.server.condenser_api.cursor as cursor
 
 log = logging.getLogger(__name__)
+
+TMP_STEEM = SteemClient()
 
 # steemd account 'tabs' - specific post list queries
 ACCOUNT_TAB_KEYS = {
@@ -184,8 +187,7 @@ def _load_account(name):
     #for key in ['recent_replies', 'comments', 'feed', 'blog']:
     #    account[key] = []
     # need to audit all assumed condenser keys..
-    from hive.conf import Conf
-    account = Conf.steem().get_accounts([name])[0]
+    account = TMP_STEEM.get_accounts([name])[0]
     return account
 
 
