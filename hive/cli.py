@@ -14,11 +14,11 @@ def run():
 
     if mode == 'server':
         from hive.server.serve import run_server
-        run_server()
+        run_server(Conf)
 
     elif mode == 'sync':
         from hive.indexer.sync import Sync
-        Sync().run()
+        Sync(Conf).run()
 
     elif mode == 'status':
         from hive.db.db_state import DbState

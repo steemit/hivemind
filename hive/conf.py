@@ -4,6 +4,7 @@ import logging
 import configargparse
 
 from hive.steem.client import SteemClient
+from hive.db.adapter import Db
 
 def strtobool(val):
     """Convert a booleany str to a bool.
@@ -25,15 +26,17 @@ class Conf():
     _args = None
     _env = None
     _steem = None
+    _db = None
 
     @classmethod
-    def init_argparse(cls, ignore_unknown=False):
+    def init_argparse(cls, ignore_unknown=False, **kwargs):
         """Read hive config (CLI arg > ENV var > config)"""
         assert not cls._args, "config already read"
 
         #pylint: disable=line-too-long
         parser = configargparse.get_arg_parser(
-            default_config_files=['./hive.conf'])
+            default_config_files=['./hive.conf'],
+            **kwargs)
         add = parser.add
 
         # runmodes: sync, server, status
@@ -97,6 +100,15 @@ class Conf():
                 max_batch=cls.get('max_batch'),
                 max_workers=cls.get('max_workers'))
         return cls._steem
+
+    @classmethod
+    def db(cls):
+        if not cls._db:
+            url = cls.get('database_url')
+            assert url, ('--database-url (or DATABASE_URL env) not specified; '
+                         'e.g. postgresql://user:pass@localhost:5432/hive')
+            cls._db = Db(url)
+        return cls._db
 
     @classmethod
     def get(cls, param):

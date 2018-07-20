@@ -14,8 +14,6 @@ from jsonrpcserver.async_methods import AsyncMethods
 #from hive.db.adapter import Db
 #context = dict(db=Db.instance())
 
-from hive.conf import Conf
-
 from hive.server.condenser_api import methods as condenser_api
 from hive.server.condenser_api.tags import get_trending_tags as condenser_api_get_trending_tags
 from hive.server.condenser_api.get_state import get_state as condenser_api_get_state
@@ -65,10 +63,10 @@ def build_methods():
     return methods
 
 
-def run_server():
+def run_server(conf):
     """Configure and launch the API server."""
 
-    log_level = Conf.log_level()
+    log_level = conf.log_level()
     config.debug = (log_level == logging.DEBUG)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
     log = logging.getLogger(__name__)
@@ -77,7 +75,7 @@ def run_server():
 
     app = web.Application()
     app['config'] = dict()
-    app['config']['args'] = Conf.args()
+    app['config']['args'] = conf.args()
     app['config']['hive.MAX_DB_ROW_RESULTS'] = 100000
     app['config']['hive.DB_QUERY_LIMIT'] = app['config']['hive.MAX_DB_ROW_RESULTS'] + 1
     #app['config']['hive.logger'] = logger
@@ -127,8 +125,8 @@ def run_server():
     async def health(request):
         """Get hive health data. 500 if behind by more than 3 blocks."""
         #pylint: disable=unused-argument
-        is_syncer = Conf.get('sync_to_s3')
-        max_head_age = (Conf.get('trail_blocks') + 3) * 3
+        is_syncer = conf.get('sync_to_s3')
+        max_head_age = (conf.get('trail_blocks') + 3) * 3
         state = await _head_state()
 
         if not state:

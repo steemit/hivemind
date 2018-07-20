@@ -9,9 +9,6 @@ import ujson as json
 from funcy.seqs import drop
 from toolz import partition_all
 
-from hive.conf import Conf
-
-from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
 from hive.utils.timer import Timer
@@ -31,9 +28,10 @@ class Sync:
     Responsible for initial sync, fast sync, and listen (block-follow).
     """
 
-    def __init__(self):
-        self._db = Db.instance()
-        self._steem = Conf.steem()
+    def __init__(self, conf):
+        self._conf = conf
+        self._db = conf.db()
+        self._steem = conf.steem()
 
     def run(self):
         """Initialize state; setup/recovery checks; sync and runloop."""
@@ -58,10 +56,10 @@ class Sync:
 
         self._update_chain_state()
 
-        if Conf.get('test_max_block'):
+        if self._conf.get('test_max_block'):
             # debug mode: partial sync
             return self.from_steemd()
-        elif Conf.get('test_disable_sync'):
+        elif self._conf.get('test_disable_sync'):
             # debug mode: no sync, just stream
             return self.listen()
 
@@ -127,7 +125,7 @@ class Sync:
         # pylint: disable=no-self-use
         steemd = self._steem
         lbound = Blocks.head_num() + 1
-        ubound = Conf.get('test_max_block') or steemd.last_irreversible()
+        ubound = self._conf.get('test_max_block') or steemd.last_irreversible()
 
         count = ubound - lbound
         if count < 1:
@@ -164,12 +162,12 @@ class Sync:
 
     def listen(self):
         """Live (block following) mode."""
-        trail_blocks = Conf.get('trail_blocks')
+        trail_blocks = self._conf.get('trail_blocks')
         assert trail_blocks >= 0
         assert trail_blocks <= 100
 
         # debug: no max gap if disable_sync in effect
-        max_gap = None if Conf.get('test_disable_sync') else 100
+        max_gap = None if self._conf.get('test_disable_sync') else 100
 
         steemd = self._steem
         hive_head = Blocks.head_num()
