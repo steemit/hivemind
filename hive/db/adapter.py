@@ -35,31 +35,30 @@ class Db:
         """
         self._url = url
         self._conn = None
+        self._engine = None
         self._trx_active = False
         self._prep_sql = {}
 
     def conn(self):
         """Get the lazily-initialized db connection."""
         if not self._conn:
-            self._conn = self.create_engine(echo=False).connect()
-            # It seems as though sqlalchemy tries to take over transactions
-            # and handle them itself; seems to issue a START TRANSACTION on
-            # connect, which makes postgres complain when we start our own:
-            #
-            # > WARNING:  there is already a transaction in progress
-            #
-            # TODO: handle this behavior properly. In the meantime,
+            self._conn = self.engine().connect()
+            # Since we need to manage transactions ourselves, yet the
+            # core behavior of DBAPI (per PEP-0249) is that a transaction
+            # is always in progress, this COMMIT is a workaround to get
+            # back control (and used with autocommit=False query exec).
             self._conn.execute(sqlalchemy.text("COMMIT"))
         return self._conn
 
-    def create_engine(self, echo=False):
-        """Create a new SA db engine. Use echo=True for ultra verbose."""
-        engine = sqlalchemy.create_engine(
-            self._url,
-            isolation_level="READ UNCOMMITTED", # only supported in mysql
-            pool_recycle=3600,
-            echo=echo)
-        return engine
+    def engine(self):
+        """Lazy-loaded SQLAlchemy engine."""
+        if not self._engine:
+            self._engine = sqlalchemy.create_engine(
+                self._url,
+                isolation_level="READ UNCOMMITTED", # only supported in mysql
+                pool_recycle=3600,
+                echo=False)
+        return self._engine
 
     def is_trx_active(self):
         """Check if a transaction is in progress."""
