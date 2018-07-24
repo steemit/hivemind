@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 DB = Db.instance()
 
 # levels of post dirtiness, in order of decreasing priority
-LEVELS = ['insert', 'payout', 'update', 'upvote']
+LEVELS = ['insert', 'payout', 'update', 'upvote', 'recount']
 
 def _keyify(items):
     return dict(map(lambda x: ("val_%d" % x[0], x[1]), enumerate(items)))
@@ -73,6 +73,11 @@ class CachedPost:
         if url in cls._ids:
             return cls._ids[url]
         raise Exception("requested id for %s not in map" % url)
+
+    @classmethod
+    def recount(cls, author, permlink, pid=None):
+        """Force a child re-count."""
+        cls._dirty('recount', author, permlink, pid)
 
     @classmethod
     def vote(cls, author, permlink, pid=None):
@@ -451,6 +456,10 @@ class CachedPost:
             ('author_rep',  "%f" % stats['author_rep']),
             ('children',    "%d" % min(post['children'], 32767)), # TODO: #115
         ])
+
+        # if recounting, update the parent next pass.
+        if level == 'recount' and post['depth']:
+            cls.recount(post['parent_author'], post['parent_permlink'])
 
         # build the post insert/update SQL, add tag SQLs
         if level == 'insert':
