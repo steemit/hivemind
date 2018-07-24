@@ -1,3 +1,5 @@
 """Hive server and API tests."""
 from hive.conf import Conf
-Conf.init_test()
+from hive.db.adapter import Db
+
+Db.set_shared_instance(Conf.init_test().db())

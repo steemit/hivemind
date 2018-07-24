@@ -3,28 +3,15 @@
 import time
 from decimal import Decimal
 
-from hive.conf import Conf
+from hive.utils.stats import Stats
 from hive.utils.normalize import parse_amount, steem_amount, vests_amount
 from hive.steem.http_client import HttpClient
-from hive.utils.stats import Stats
 from hive.steem.block.stream import BlockStream
 
 class SteemClient:
     """Handles upstream calls to jussi/steemd, with batching and retrying."""
 
-    _instance = None
-
-    @classmethod
-    def instance(cls):
-        """Get a singleton, lazily initialized"""
-        if not cls._instance:
-            cls._instance = SteemClient(
-                url=Conf.get('steemd_url'),
-                max_batch=Conf.get('max_batch'),
-                max_workers=Conf.get('max_workers'))
-        return cls._instance
-
-    def __init__(self, url, max_batch=500, max_workers=1):
+    def __init__(self, url='https://api.steemit.com', max_batch=50, max_workers=1):
         assert url, 'steem-API endpoint undefined'
         assert max_batch > 0 and max_batch <= 5000
         assert max_workers > 0 and max_workers <= 64

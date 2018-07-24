@@ -3,7 +3,7 @@
 import time
 import logging
 
-from hive.db.schema import setup, build_metadata # teardown
+from hive.db.schema import setup, build_metadata, teardown
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class DbState:
         # create db schema if needed
         if not cls._is_schema_loaded():
             log.info("[INIT] Create db schema...")
-            setup()
+            setup(cls.db())
             cls._before_initial_sync()
 
         # perform db migrations
@@ -45,6 +45,11 @@ class DbState:
             log.info("[INIT] Continue with initial sync...")
         else:
             log.info("[INIT] Hive initialized.")
+
+    @classmethod
+    def teardown(cls):
+        """Drop all tables in db."""
+        teardown(cls.db())
 
     @classmethod
     def db(cls):
@@ -106,7 +111,7 @@ class DbState:
         Disables non-critical indexes for faster initial sync, as well
         as foreign key constraints."""
 
-        engine = cls.db().create_engine()
+        engine = cls.db().engine()
         log.info("[INIT] Begin pre-initial sync hooks")
 
         for index in cls._disableable_indexes():
@@ -127,7 +132,7 @@ class DbState:
         Re-creates non-core indexes for serving APIs after init sync,
         as well as all foreign keys."""
 
-        engine = cls.db().create_engine()
+        engine = cls.db().engine()
         log.info("[INIT] Begin post-initial sync hooks")
 
         for index in cls._disableable_indexes():

@@ -8,8 +8,6 @@ from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
 from sqlalchemy.types import BOOLEAN
 
-from hive.db.adapter import Db
-
 #pylint: disable=line-too-long, too-many-lines
 
 def build_metadata():
@@ -300,15 +298,17 @@ def build_metadata():
 
     return metadata
 
+def teardown(db):
+    """Drop all tables"""
+    build_metadata().drop_all(db.engine())
 
-def setup():
+def setup(db):
     """Creates all tables and seed data"""
     # initialize schema
-    engine = Db.create_engine(echo=False)
-    build_metadata().create_all(engine)
+    build_metadata().create_all(db.engine())
 
     # tune auto vacuum/analyze
-    reset_autovac()
+    reset_autovac(db)
 
     # default rows
     sqls = [
@@ -319,9 +319,9 @@ def setup():
         "INSERT INTO hive_accounts (name, created_at) VALUES ('temp',      '2016-03-24 16:05:00')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('initminer', '2016-03-24 16:05:00')"]
     for sql in sqls:
-        Db.instance().query(sql)
+        db.query(sql)
 
-def reset_autovac():
+def reset_autovac(db):
     """Initializes per-table autovacuum/autoanalyze params"""
     # consider using scale_factor = 0 with flat thresholds:
     #   autovacuum_vacuum_threshold, autovacuum_analyze_threshold
@@ -344,10 +344,4 @@ def reset_autovac():
     for table, (vacuum_sf, analyze_sf) in autovac_config.items():
         sql = """ALTER TABLE %s SET (autovacuum_vacuum_scale_factor = %s,
                                      autovacuum_analyze_scale_factor = %s)"""
-        Db.instance().query(sql % (table, vacuum_sf, analyze_sf))
-
-def teardown():
-    """Drop all tables"""
-    engine = Db.create_engine(echo=True)
-    metadata = build_metadata()
-    metadata.drop_all(engine)
+        db.query(sql % (table, vacuum_sf, analyze_sf))

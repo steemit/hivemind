@@ -18,26 +18,16 @@ def _normalize_sql(sql, maxlen=150):
                out[-i:None])
     return out
 
-def log_query_stats(fn):
-    """Decorator for hive.db.adapter::query()"""
-    def _wrap(*args, **kwargs):
-        time_start = perf()
-        result = fn(*args, **kwargs)
-        time_end = perf()
-        Stats.log_db(args[1], (time_end - time_start) * 1000)
-        return result
-    return _wrap
-
 class StatsAbstract:
     """Tracks service call timings"""
     def __init__(self, service):
-        self._calls = {}
-        self._ms = 0.0
         self._service = service
+        self.clear()
 
     def add(self, call, ms, batch_size=1):
         """Record a call's duration."""
-        if call not in self._calls:
+        if call not in self._initd:
+            self._initd.add(call)
             self._calls[call] = [0, 0]
         self._calls[call][0] += ms
         self._calls[call][1] += batch_size
@@ -56,6 +46,7 @@ class StatsAbstract:
         """Clear accumulators"""
         self._calls = {}
         self._ms = 0.0
+        self._initd = set()
 
     def table(self, count=40):
         """Generate a desc list of (call, total_ms, call_count) tuples."""
@@ -122,10 +113,6 @@ class DbStats(StatsAbstract):
     def __init__(self):
         super().__init__('db')
 
-    def add(self, call, ms, batch_size=1):
-        """Record SQL query timing. Incoming SQL is normalized."""
-        super().add(_normalize_sql(call), ms, batch_size)
-
     def check_timing(self, call, ms, batch_size):
         """Warn if any query is slower than defined threshold."""
         if ms > self.SLOW_QUERY_MS:
@@ -144,9 +131,10 @@ class Stats:
     _start = perf()
 
     @classmethod
-    def log_db(cls, sql, ms):
-        """Log a database query."""
-        cls._db.add(sql, ms)
+    def log_db(cls, sql, secs):
+        """Log a database query. Incoming SQL is normalized."""
+        ms = secs * 1000
+        cls._db.add(_normalize_sql(sql), ms)
         cls.add_ms(ms)
 
     @classmethod
@@ -182,7 +170,8 @@ class Stats:
         log.info("cumtime %ds (%.1f%% of %ds). %.1f%% idle. peak %dmb.",
                  local, 100 * local / non_idle, non_idle,
                  100 * idle / total, peak_usage_mb())
-        cls._db.report(cls._ms)
-        cls._steemd.report(cls._ms)
+        if local > 1:
+            cls._db.report(cls._ms)
+            cls._steemd.report(cls._ms)
 
 atexit.register(Stats.report)

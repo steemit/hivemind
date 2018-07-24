@@ -1,4 +1,6 @@
 #pylint: disable=missing-docstring
+import pytest
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -18,6 +20,8 @@ from hive.utils.normalize import (
     rep_log10,
     safe_img_url,
     secs_to_str,
+    strtobool,
+    int_log_level,
 )
 
 def test_secs_to_str():
@@ -85,3 +89,32 @@ def test_safe_img_url():
     max_size = len(url) + 1
     assert safe_img_url(url, max_size) == url
     assert safe_img_url(url + 'x', max_size) is None
+
+def test_strtobool():
+    assert strtobool('t') == True
+    assert strtobool('T') == True
+    assert strtobool('1') == True
+    assert strtobool('true') == True
+    assert strtobool('yes') == True
+
+    assert strtobool('f') == False
+    assert strtobool('F') == False
+    assert strtobool('0') == False
+    assert strtobool('false') == False
+    assert strtobool('n') == False
+    assert strtobool('no') == False
+
+    with pytest.raises(ValueError):
+        strtobool('foo')
+
+def test_int_log_level():
+    assert int_log_level('debug') == 10
+    assert int_log_level('DEBUG') == 10
+    assert int_log_level('info') == 20
+    assert int_log_level('warning') == 30
+    with pytest.raises(ValueError):
+        int_log_level('foo')
+    with pytest.raises(ValueError):
+        int_log_level(None)
+    with pytest.raises(ValueError):
+        int_log_level('')

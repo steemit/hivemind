@@ -2,10 +2,12 @@
 
 import logging
 import time
-from hive.db.methods import query
+from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
 log = logging.getLogger(__name__)
+
+DB = Db.instance()
 
 class FeedCache:
     """Maintains `hive_feed_cache`, which merges posts and reports.
@@ -21,7 +23,7 @@ class FeedCache:
         sql = """INSERT INTO hive_feed_cache (account_id, post_id, created_at)
                       VALUES (:account_id, :id, :created_at)
                  ON CONFLICT (account_id, post_id) DO NOTHING"""
-        query(sql, account_id=account_id, id=post_id, created_at=created_at)
+        DB.query(sql, account_id=account_id, id=post_id, created_at=created_at)
 
     @classmethod
     def delete(cls, post_id, account_id=None):
@@ -36,19 +38,19 @@ class FeedCache:
         sql = "DELETE FROM hive_feed_cache WHERE post_id = :id"
         if account_id:
             sql = sql + " AND account_id = :account_id"
-        query(sql, account_id=account_id, id=post_id)
+        DB.query(sql, account_id=account_id, id=post_id)
 
     @classmethod
     def rebuild(cls, truncate=True):
         """Rebuilds the feed cache upon completion of initial sync."""
 
         log.info("[HIVE] Rebuilding feed cache, this will take a few minutes.")
-        query("START TRANSACTION")
+        DB.query("START TRANSACTION")
         if truncate:
-            query("TRUNCATE TABLE hive_feed_cache")
+            DB.query("TRUNCATE TABLE hive_feed_cache")
 
         lap_0 = time.perf_counter()
-        query("""
+        DB.query("""
             INSERT INTO hive_feed_cache (account_id, post_id, created_at)
                  SELECT hive_accounts.id, hive_posts.id, hive_posts.created_at
                    FROM hive_posts
@@ -57,7 +59,7 @@ class FeedCache:
             ON CONFLICT DO NOTHING
         """)
         lap_1 = time.perf_counter()
-        query("""
+        DB.query("""
             INSERT INTO hive_feed_cache (account_id, post_id, created_at)
                  SELECT hive_accounts.id, post_id, hive_reblogs.created_at
                    FROM hive_reblogs
@@ -65,7 +67,7 @@ class FeedCache:
             ON CONFLICT DO NOTHING
         """)
         lap_2 = time.perf_counter()
-        query("COMMIT")
+        DB.query("COMMIT")
 
         log.info("[HIVE] Rebuilt hive feed cache in %ds (%d+%d)",
                  (lap_2 - lap_0), (lap_1 - lap_0), (lap_2 - lap_1))

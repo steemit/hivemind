@@ -3,18 +3,20 @@
 import logging
 
 from funcy.seqs import flatten
-from hive.db.methods import query_one
+from hive.db.adapter import Db
 from hive.community.roles import PERMISSIONS, is_permitted
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 
 log = logging.getLogger(__name__)
 
+DB = Db.instance()
+
 # community methods
 # -----------------
 def process_json_community_op(account, op_json, date):
     """Validates community op and apply state changes to db."""
-    #pylint: disable=line-too-long,unused-variable
+    #pylint: disable=line-too-long,unused-variable,too-many-branches
     cmd_name, cmd_op = op_json  # ['flagPost', {community: '', author: '', ...}]
 
     commands = list(flatten(PERMISSIONS.values()))
@@ -129,4 +131,4 @@ def process_json_community_op(account, op_json, date):
 
 def is_community(name):
     """Check if named community exists."""
-    return bool(query_one("SELECT 1 FROM hive_communities WHERE name = :name", name=name))
+    return bool(DB.query_one("SELECT 1 FROM hive_communities WHERE name = :name", name=name))

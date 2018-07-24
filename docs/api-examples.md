@@ -40,8 +40,8 @@ http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=hive.get_following pa
 
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=hive.get_follow_count params:='{"account":"test-safari"}'
 
-http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=hive.get_user_feed params:='{"account":"test-safari","skip":0,"limit":20,"context":"test-safari"}'
-http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=hive.get_blog_feed params:='{"account":"test-safari","skip":0,"limit":20,"context":"test-safari"}'
+http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=hive.get_user_feed params:='{"account":"test-safari","skip":0,"limit":20,"ctx":"test-safari"}'
+http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=hive.get_blog_feed params:='{"account":"test-safari","skip":0,"limit":20,"ctx":"test-safari"}'
 
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=hive.get_related_posts params:='{"account":"test-safari","permlink":"tps-report-4-calm-before-the-storm"}'
 
