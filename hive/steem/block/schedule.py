@@ -61,8 +61,8 @@ class BlockSchedule:
             self._last_date = date
         else:
             self._drift_backward()
-            log.warning("block %d not available. head:%s drift:%fs",
-                        num, self._head_num, self._drift)
+            log.info("block %d not available. head:%s drift:%fs",
+                     num, self._head_num, self._drift)
 
     def _check_head_date(self, num, date):
         """Sanity-checking of head block date.

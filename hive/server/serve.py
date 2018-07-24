@@ -102,14 +102,8 @@ def run_server(conf):
         try:
             return await hive_api.db_head_state()
         except OperationalError as e:
-            if 'could not connect to server: Connection refused' in str(e):
-                log.warning("could not get head state (connection refused)")
-                return None
-            if 'the database system is shutting down' in str(e):
-                log.warning("could not get head state (db shutting down)")
-                return None
-            if 'terminating connection due to administrator command' in str(e):
-                log.warning("could not get head state (admin terminated)")
+            if conf.get('sync_to_s3'):
+                log.info("could not get head state (%s)", e)
                 return None
             raise e
 
