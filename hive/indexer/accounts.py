@@ -1,19 +1,17 @@
 """Accounts indexer."""
 
-import math
 import logging
 
-from collections import deque
 from datetime import datetime
 from toolz import partition_all
 
 import ujson as json
 
 from hive.db.adapter import Db
-from hive.steem.client import SteemClient
 from hive.utils.normalize import rep_log10, vests_amount
 from hive.utils.timer import Timer
 from hive.utils.account import safe_profile_metadata
+from hive.utils.unique_fifo import UniqueFIFO
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +24,7 @@ class Accounts:
     _ids = {}
 
     # fifo queue
-    _dirty = deque()
+    _dirty = UniqueFIFO()
 
     # account core methods
     # --------------------
@@ -79,14 +77,7 @@ class Accounts:
     @classmethod
     def dirty(cls, accounts):
         """Marks given accounts as needing an update."""
-        if not accounts:
-            return 0
-        assert isinstance(accounts, set)
-        accounts = accounts - set(cls._dirty)
-        if not accounts:
-            return 0
-        cls._dirty.extend(accounts)
-        return len(accounts)
+        return cls._dirty.extend(accounts)
 
     @classmethod
     def dirty_all(cls):
@@ -101,24 +92,22 @@ class Accounts:
         return cls.dirty(set(DB.query_col(sql, limit=limit)))
 
     @classmethod
-    def flush(cls, trx=False, spread=1):
+    def flush(cls, steem, trx=False, spread=1):
         """Process all accounts flagged for update.
 
          - trx: bool - wrap the update in a transaction
          - spread: int - spread writes over a period of `n` calls
         """
-        assert spread >= 1
-        if not cls._dirty:
+        accounts = cls._dirty.shift_portion(spread)
+
+        count = len(accounts)
+        if not count:
             return 0
 
-        count = len(cls._dirty)
-        if spread > 1:
-            count = math.ceil(count / spread)
         if trx:
             log.info("[SYNC] update %d accounts", count)
 
-        accounts = [cls._dirty.popleft() for _ in range(count)]
-        cls._cache_accounts(accounts, trx=trx)
+        cls._cache_accounts(accounts, steem, trx=trx)
         return count
 
     @classmethod
@@ -133,14 +122,17 @@ class Accounts:
         DB.query(sql)
 
     @classmethod
-    def _cache_accounts(cls, accounts, trx=True):
+    def _cache_accounts(cls, accounts, steem, trx=True):
         """Fetch all `accounts` and write to db."""
         timer = Timer(len(accounts), 'account', ['rps', 'wps'])
-        for batch in partition_all(1000, accounts):
+        for name_batch in partition_all(1000, accounts):
+            cached_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
             timer.batch_start()
-            sqls = cls._generate_cache_sqls(batch)
+            batch = steem.get_accounts(name_batch)
+
             timer.batch_lap()
+            sqls = [cls._sql(acct, cached_at) for acct in batch]
             DB.batch_queries(sqls, trx)
 
             timer.batch_finish(len(batch))
@@ -148,53 +140,42 @@ class Accounts:
                 log.info(timer.batch_status())
 
     @classmethod
-    def _generate_cache_sqls(cls, accounts):
+    def _sql(cls, account, cached_at):
         """Prepare a SQL query from a steemd account."""
-        cached_at = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-        sqls = []
-        for account in SteemClient.instance().get_accounts(accounts):
-            vote_weight = (vests_amount(account['vesting_shares'])
-                           + vests_amount(account['received_vesting_shares'])
-                           - vests_amount(account['delegated_vesting_shares']))
+        vote_weight = (vests_amount(account['vesting_shares'])
+                       + vests_amount(account['received_vesting_shares'])
+                       - vests_amount(account['delegated_vesting_shares']))
 
-            # remove empty keys
-            useless = ['transfer_history', 'market_history', 'post_history',
-                       'vote_history', 'other_history', 'tags_usage',
-                       'guest_bloggers']
-            for key in useless:
-                del account[key]
+        # remove empty keys
+        useless = ['transfer_history', 'market_history', 'post_history',
+                   'vote_history', 'other_history', 'tags_usage',
+                   'guest_bloggers']
+        for key in useless:
+            del account[key]
 
-            # pull out valid profile md and delete the key
-            profile = safe_profile_metadata(account)
-            del account['json_metadata']
+        # pull out valid profile md and delete the key
+        profile = safe_profile_metadata(account)
+        del account['json_metadata']
 
-            values = {
-                'name': account['name'],
-                'proxy': account['proxy'],
-                'post_count': account['post_count'],
-                'reputation': rep_log10(account['reputation']),
-                'proxy_weight': vests_amount(account['vesting_shares']),
-                'vote_weight': vote_weight,
-                'kb_used': int(account['lifetime_bandwidth']) / 1e6 / 1024,
-                'active_at': account['last_bandwidth_update'],
-                'cached_at': cached_at,
+        values = {
+            'name':         account['name'],
+            'proxy':        account['proxy'],
+            'post_count':   account['post_count'],
+            'reputation':   rep_log10(account['reputation']),
+            'proxy_weight': vests_amount(account['vesting_shares']),
+            'vote_weight':  vote_weight,
+            'kb_used':      int(account['lifetime_bandwidth']) / 1e6 / 1024,
+            'active_at':    account['last_bandwidth_update'],
+            'cached_at':    cached_at,
 
-                'display_name': profile['name'],
-                'about': profile['about'],
-                'location': profile['location'],
-                'website': profile['website'],
-                'profile_image': profile['profile_image'],
-                'cover_image': profile['cover_image'],
+            'display_name':  profile['name'],
+            'about':         profile['about'],
+            'location':      profile['location'],
+            'website':       profile['website'],
+            'profile_image': profile['profile_image'],
+            'cover_image':   profile['cover_image'],
 
-                'raw_json': json.dumps(account)
-            }
+            'raw_json': json.dumps(account)}
 
-            update = ', '.join([k+" = :"+k for k in list(values.keys())][1:])
-            sql = "UPDATE hive_accounts SET %s WHERE name = :name" % (update)
-            sqls.append((sql, values))
-        return sqls
-
-if __name__ == '__main__':
-    Accounts.update_ranks()
-    #Accounts.dirty_all()
-    #Accounts.flush()
+        bind = ', '.join([k+" = :"+k for k in list(values.keys())][1:])
+        return ("UPDATE hive_accounts SET %s WHERE name = :name" % bind, values)

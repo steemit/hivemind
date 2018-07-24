@@ -1,5 +1,6 @@
 """Methods to parse steemd values and clean strings."""
 
+import logging
 import math
 import decimal
 from datetime import datetime
@@ -140,3 +141,27 @@ def safe_img_url(url, max_size=1024):
             and url[0:4] == 'http'):
         return url.strip()
     return None
+
+def strtobool(val):
+    """Convert a booleany str to a bool.
+
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+    """
+    val = val.lower()
+    if val in ('y', 'yes', 't', 'true', 'on', '1'):
+        return True
+    elif val in ('n', 'no', 'f', 'false', 'off', '0'):
+        return False
+    else:
+        raise ValueError("not booleany: %r" % (val,))
+
+def int_log_level(str_log_level):
+    """Get `logger`s internal int level from config string."""
+    if not str_log_level:
+        raise ValueError('Empty log level passed')
+    log_level = getattr(logging, str_log_level.upper(), None)
+    if not isinstance(log_level, int):
+        raise ValueError('Invalid log level: %s' % str_log_level)
+    return log_level

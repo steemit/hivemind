@@ -2,8 +2,7 @@
 
 import logging
 
-from hive.db.methods import query_row, query_col, query_one, query
-from hive.steem.client import SteemClient
+from hive.db.adapter import Db
 
 from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
@@ -14,6 +13,8 @@ from hive.indexer.follow import Follow
 
 log = logging.getLogger(__name__)
 
+DB = Db.instance()
+
 class Blocks:
     """Processes blocks, dispatches work, manages `hive_blocks` table."""
 
@@ -21,13 +22,13 @@ class Blocks:
     def head_num(cls):
         """Get hive's head block number."""
         sql = "SELECT num FROM hive_blocks ORDER BY num DESC LIMIT 1"
-        return query_one(sql) or 0
+        return DB.query_one(sql) or 0
 
     @classmethod
     def head_date(cls):
         """Get hive's head block date."""
         sql = "SELECT created_at FROM hive_blocks ORDER BY num DESC LIMIT 1"
-        return str(query_one(sql) or '')
+        return str(DB.query_one(sql) or '')
 
     @classmethod
     def process(cls, block):
@@ -38,7 +39,7 @@ class Blocks:
     @classmethod
     def process_multi(cls, blocks, is_initial_sync=False):
         """Batch-process blocks; wrapped in a transaction."""
-        query("START TRANSACTION")
+        DB.query("START TRANSACTION")
 
         last_num = 0
         try:
@@ -53,12 +54,11 @@ class Blocks:
         # deltas in memory and update follow/er counts in bulk.
         Follow.flush(trx=False)
 
-        query("COMMIT")
+        DB.query("COMMIT")
 
     @classmethod
     def _process(cls, block, is_initial_sync=False):
         """Process a single block. Assumes a trx is open."""
-        # pylint: disable=too-many-boolean-expressions,too-many-branches
         num = cls._push(block)
         date = block['timestamp']
 
@@ -66,45 +66,37 @@ class Blocks:
         comment_ops = []
         json_ops = []
         delete_ops = []
-        voted_authors = set()
         for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
-                if isinstance(operation, dict):
-                    op_type = operation['type'].split('_operation')[0]
-                    op = operation['value']
-                else: # pre-appbase-style. remove after deploy. #APPBASE
-                    op_type, op = operation
+                op_type = operation['type']
+                op = operation['value']
 
                 # account ops
-                if op_type == 'pow':
+                if op_type == 'pow_operation':
                     account_names.add(op['worker_account'])
-                elif op_type == 'pow2':
-                    # old style. remove after #APPBASE
-                    #account_names.add(op['work'][1]['input']['worker_account'])
+                elif op_type == 'pow2_operation':
                     account_names.add(op['work']['value']['input']['worker_account'])
-                elif op_type == 'account_create':
+                elif op_type == 'account_create_operation':
                     account_names.add(op['new_account_name'])
-                elif op_type == 'account_create_with_delegation':
+                elif op_type == 'account_create_with_delegation_operation':
                     account_names.add(op['new_account_name'])
 
                 # post ops
-                elif op_type == 'comment':
+                elif op_type == 'comment_operation':
                     comment_ops.append(op)
-                elif op_type == 'delete_comment':
+                elif op_type == 'delete_comment_operation':
                     delete_ops.append(op)
-                elif op_type == 'vote':
+                elif op_type == 'vote_operation':
                     if not is_initial_sync:
                         CachedPost.vote(op['author'], op['permlink'])
-                        voted_authors.add(op['author']) # TODO: move to cachedpost
 
                 # misc ops
-                elif op_type == 'transfer':
+                elif op_type == 'transfer_operation':
                     Payments.op_transfer(op, tx_idx, num, date)
-                elif op_type == 'custom_json':
+                elif op_type == 'custom_json_operation':
                     json_ops.append(op)
 
         Accounts.register(account_names, date)     # register any new names
-        Accounts.dirty(voted_authors)              # update rep of voted authors
         Posts.comment_ops(comment_ops, date)       # handle inserts, edits
         Posts.delete_ops(delete_ops)               # handle post deletion
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops
@@ -112,7 +104,7 @@ class Blocks:
         return num
 
     @classmethod
-    def verify_head(cls):
+    def verify_head(cls, steem):
         """Perform a fork recovery check on startup."""
         hive_head = cls.head_num()
         if not hive_head:
@@ -121,11 +113,10 @@ class Blocks:
         # move backwards from head until hive/steem agree
         to_pop = []
         cursor = hive_head
-        steemd = SteemClient.instance()
         while True:
             assert hive_head - cursor < 25, "fork too deep"
             hive_block = cls._get(cursor)
-            steem_hash = steemd.get_block(cursor)['block_id']
+            steem_hash = steem.get_block(cursor)['block_id']
             match = hive_block['hash'] == steem_hash
             log.info("[INIT] fork check. block %d: %s vs %s --- %s",
                      hive_block['num'], hive_block['hash'],
@@ -142,7 +133,7 @@ class Blocks:
                   hive_head - cursor, cursor + 1, hive_head)
 
         # we should not attempt to recover from fork until it's safe
-        fork_limit = steemd.last_irreversible()
+        fork_limit = steem.last_irreversible()
         assert cursor < fork_limit, "not proceeding until head is irreversible"
 
         cls._pop(to_pop)
@@ -152,21 +143,21 @@ class Blocks:
         """Fetch a specific block."""
         sql = """SELECT num, created_at date, hash
                  FROM hive_blocks WHERE num = :num LIMIT 1"""
-        return dict(query_row(sql, num=num))
+        return dict(DB.query_row(sql, num=num))
 
     @classmethod
     def _push(cls, block):
         """Insert a row in `hive_blocks`."""
         num = int(block['block_id'][:8], base=16)
         txs = block['transactions']
-        query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
-              "VALUES (:num, :hash, :prev, :txs, :ops, :date)", **{
-                  'num': num,
-                  'hash': block['block_id'],
-                  'prev': block['previous'],
-                  'txs': len(txs),
-                  'ops': sum([len(tx['operations']) for tx in txs]),
-                  'date': block['timestamp']})
+        DB.query("INSERT INTO hive_blocks (num, hash, prev, txs, ops, created_at) "
+                 "VALUES (:num, :hash, :prev, :txs, :ops, :date)", **{
+                     'num': num,
+                     'hash': block['block_id'],
+                     'prev': block['previous'],
+                     'txs': len(txs),
+                     'ops': sum([len(tx['operations']) for tx in txs]),
+                     'date': block['timestamp']})
         return num
 
     @classmethod
@@ -191,7 +182,7 @@ class Blocks:
          - hive_flags
          - hive_modlog
         """
-        query("START TRANSACTION")
+        DB.query("START TRANSACTION")
 
         for block in blocks:
             num = block['num']
@@ -201,18 +192,18 @@ class Blocks:
 
             # get all affected post_ids in this block
             sql = "SELECT id FROM hive_posts WHERE created_at >= :date"
-            post_ids = tuple(query_col(sql, date=date))
+            post_ids = tuple(DB.query_col(sql, date=date))
 
             # remove all recent records
-            query("DELETE FROM hive_posts_cache WHERE post_id IN :ids", ids=post_ids)
-            query("DELETE FROM hive_feed_cache  WHERE created_at >= :date", date=date)
-            query("DELETE FROM hive_reblogs     WHERE created_at >= :date", date=date)
-            query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
-            query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
-            query("DELETE FROM hive_posts       WHERE id IN :ids", ids=post_ids)
-            query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
-            query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
+            DB.query("DELETE FROM hive_posts_cache WHERE post_id IN :ids", ids=post_ids)
+            DB.query("DELETE FROM hive_feed_cache  WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_reblogs     WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
+            DB.query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
+            DB.query("DELETE FROM hive_posts       WHERE id IN :ids", ids=post_ids)
+            DB.query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
+            DB.query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
 
-        query("COMMIT")
+        DB.query("COMMIT")
         log.warning("[FORK] recovery complete")
         # TODO: manually re-process here the blocks which were just popped.

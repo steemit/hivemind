@@ -5,9 +5,9 @@ import resource
 
 USE_COLOR = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
 
-def colorize(string, color='93'):
+def colorize(string, color='93', force=False):
     """Colorizes a string for stdout, if attached to terminal"""
-    if not USE_COLOR:
+    if not USE_COLOR and not force:
         return string
     return "\033[%sm%s\033[0m" % (color, string)
 

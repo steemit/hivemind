@@ -2,10 +2,15 @@
 
 from functools import wraps
 
+import hive.server.condenser_api.cursor as cursor
 from hive.server.condenser_api.objects import load_posts
 from hive.server.condenser_api.common import (
-    valid_account, valid_permlink, valid_tag, valid_limit, get_post_id, get_child_ids)
-import hive.server.condenser_api.cursor as cursor
+    valid_account,
+    valid_permlink,
+    valid_tag,
+    valid_limit,
+    get_post_id,
+    get_child_ids)
 
 
 # Follows Queries

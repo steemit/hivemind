@@ -1,13 +1,12 @@
 """Wrapper for sqlalchemy, providing a simple interface."""
 
 import logging
+from time import perf_counter as perf
 from collections import OrderedDict
 from funcy.seqs import first
-
 import sqlalchemy
 
-from hive.conf import Conf
-from hive.utils.stats import log_query_stats
+from hive.utils.stats import Stats
 
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 
@@ -17,48 +16,52 @@ class Db:
     """RDBMS adapter for hive. Handles connecting and querying."""
 
     _instance = None
+
     @classmethod
     def instance(cls):
-        """Get a lazily-initialized singleton."""
-        if not cls._instance:
-            cls._instance = Db()
+        """Get the shared instance."""
+        assert cls._instance, 'set_shared_instance was never called'
         return cls._instance
 
-    def __init__(self):
+    @classmethod
+    def set_shared_instance(cls, db):
+        """Set the global/shared db instance. Do not use."""
+        cls._instance = db
+
+    def __init__(self, url):
         """Initialize an instance.
 
         No work is performed here. Some modues might initialize an
         instance before config is loaded.
         """
+        assert url, ('--database-url (or DATABASE_URL env) not specified; '
+                     'e.g. postgresql://user:pass@localhost:5432/hive')
+        self._url = url
         self._conn = None
+        self._engine = None
         self._trx_active = False
+        self._prep_sql = {}
 
     def conn(self):
         """Get the lazily-initialized db connection."""
         if not self._conn:
-            self._conn = Db.create_engine(echo=False).connect()
-            # It seems as though sqlalchemy tries to take over transactions
-            # and handle them itself; seems to issue a START TRANSACTION on
-            # connect, which makes postgres complain when we start our own:
-            #
-            # > WARNING:  there is already a transaction in progress
-            #
-            # TODO: handle this behavior properly. In the meantime,
+            self._conn = self.engine().connect()
+            # Since we need to manage transactions ourselves, yet the
+            # core behavior of DBAPI (per PEP-0249) is that a transaction
+            # is always in progress, this COMMIT is a workaround to get
+            # back control (and used with autocommit=False query exec).
             self._conn.execute(sqlalchemy.text("COMMIT"))
         return self._conn
 
-    @staticmethod
-    def create_engine(echo=False):
-        """Create a new SA db engine. Use echo=True for ultra verbose."""
-        db_url = Conf.get('database_url')
-        assert db_url, ('--database-url (or DATABASE_URL env) not specified; '
-                        'e.g. postgresql://user:pass@localhost:5432/hive')
-        engine = sqlalchemy.create_engine(
-            db_url,
-            isolation_level="READ UNCOMMITTED", # only supported in mysql
-            pool_recycle=3600,
-            echo=echo)
-        return engine
+    def engine(self):
+        """Lazy-loaded SQLAlchemy engine."""
+        if not self._engine:
+            self._engine = sqlalchemy.create_engine(
+                self._url,
+                isolation_level="READ UNCOMMITTED", # only supported in mysql
+                pool_recycle=3600,
+                echo=False)
+        return self._engine
 
     def is_trx_active(self):
         """Check if a transaction is in progress."""
@@ -95,9 +98,8 @@ class Db:
 
     def query_one(self, sql, **kwargs):
         """Perform a `SELECT 1*1`"""
-        row = self.query_row(sql, **kwargs)
-        if row:
-            return first(row)
+        row = first(self._query(sql, **kwargs))
+        return first(row) if row else None
 
     def engine_name(self):
         """Get the name of the engine (e.g. `postgresql`, `mysql`)."""
@@ -154,7 +156,14 @@ class Db:
 
         return (sql, values)
 
-    @log_query_stats
+    def _sql_text(self, sql):
+        if sql in self._prep_sql:
+            query = self._prep_sql[sql]
+        else:
+            query = sqlalchemy.text(sql).execution_options(autocommit=False)
+            self._prep_sql[sql] = query
+        return query
+
     def _query(self, sql, **kwargs):
         """Send a query off to SQLAlchemy."""
         if sql == 'START TRANSACTION':
@@ -164,9 +173,12 @@ class Db:
             assert self._trx_active
             self._trx_active = False
 
-        query = sqlalchemy.text(sql).execution_options(autocommit=False)
         try:
-            return self.conn().execute(query, **kwargs)
+            start = perf()
+            query = self._sql_text(sql)
+            result = self.conn().execute(query, **kwargs)
+            Stats.log_db(sql, perf() - start)
+            return result
         except Exception as e:
             log.error("[SQL-ERR] %s in query %s (%s)",
                       e.__class__.__name__, sql, kwargs)
