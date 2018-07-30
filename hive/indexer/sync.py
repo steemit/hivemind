@@ -122,7 +122,6 @@ class Sync:
 
     def from_steemd(self, is_initial_sync=False, chunk_size=1000):
         """Fast sync strategy: read/process blocks in batches."""
-        # pylint: disable=no-self-use
         steemd = self._steem
         lbound = Blocks.head_num() + 1
         ubound = self._conf.get('test_max_block') or steemd.last_irreversible()

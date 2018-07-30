@@ -16,6 +16,7 @@ DB = Db.instance()
 
 class Payments:
     """Handles payments to update post promotion values."""
+    #pylint: disable=too-few-public-methods
 
     @classmethod
     def op_transfer(cls, op, tx_idx, num, date):

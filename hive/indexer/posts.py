@@ -129,7 +129,7 @@ class Posts:
             CachedPost.insert(op['author'], op['permlink'], post['id'])
             if op['parent_author']: # update parent's child count
                 CachedPost.recount(op['parent_author'],
-                    op['parent_permlink'], post['parent_id'])
+                                   op['parent_permlink'], post['parent_id'])
             cls._insert_feed_cache(post)
 
     @classmethod
