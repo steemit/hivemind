@@ -26,11 +26,12 @@ class StatsAbstract:
 
     def add(self, call, ms, batch_size=1):
         """Record a call's duration."""
-        if call not in self._initd:
-            self._initd.add(call)
-            self._calls[call] = [0, 0]
-        self._calls[call][0] += ms
-        self._calls[call][1] += batch_size
+        try:
+            key = self._calls[call]
+            key[0] += ms
+            key[1] += batch_size
+        except KeyError:
+            self._calls[call] = [ms, batch_size]
         self.check_timing(call, ms, batch_size)
         self._ms += ms
 
@@ -46,18 +47,18 @@ class StatsAbstract:
         """Clear accumulators"""
         self._calls = {}
         self._ms = 0.0
-        self._initd = set()
 
     def table(self, count=40):
         """Generate a desc list of (call, total_ms, call_count) tuples."""
         top = sorted(self._calls.items(), key=lambda x: -x[1][0])
         return [(call, *vals) for (call, vals) in top[:count]]
 
-    def report(self, total_ms):
+    def report(self, parent_secs):
         """Emit a table showing top calls by time spent."""
         if not self._calls:
             return
 
+        total_ms = parent_secs * 1000
         log.info("Service: %s -- %ds total (%.1f%%)",
                  self._service,
                  round(self._ms / 1000),
@@ -126,52 +127,49 @@ class Stats:
 
     _db = DbStats()
     _steemd = SteemStats()
-    _ms = 0.0
+    _secs = 0.0
     _idle = 0.0
     _start = perf()
 
     @classmethod
     def log_db(cls, sql, secs):
         """Log a database query. Incoming SQL is normalized."""
-        ms = secs * 1000
-        cls._db.add(_normalize_sql(sql), ms)
-        cls.add_ms(ms)
+        cls._db.add(_normalize_sql(sql), secs * 1000)
+        cls.add_secs(secs)
 
     @classmethod
-    def log_steem(cls, method, ms, batch_size=1):
+    def log_steem(cls, method, secs, batch_size=1):
         """Log a steemd call."""
-        cls._steemd.add(method, ms, batch_size)
-        cls.add_ms(ms)
+        cls._steemd.add(method, secs * 1000, batch_size)
+        cls.add_secs(secs)
 
     @classmethod
-    def log_idle(cls, ms):
+    def log_idle(cls, secs):
         """Track idle time (e.g. sleeping until next block)"""
-        cls._idle += ms
+        cls._idle += secs
 
     @classmethod
-    def add_ms(cls, ms):
+    def add_secs(cls, secs):
         """Add to total ms elapsed; print if threshold reached."""
-        cls._ms += ms
-        if cls._ms > cls.PRINT_THRESH_MINS * 60 * 1000:
+        cls._secs += secs
+        if cls._secs > cls.PRINT_THRESH_MINS * 60:
             cls.report()
-            cls._ms = 0
+            cls._secs = 0
             cls._idle = 0
             cls._start = perf()
 
     @classmethod
     def report(cls):
         """Emit a timing report for tracked services."""
-        if not cls._ms:
+        if not cls._secs:
             return # nothing to report
-        local = cls._ms / 1000
-        idle = cls._idle / 1000
-        total = (perf() - cls._start)
-        non_idle = total - idle
+        total = perf() - cls._start
+        non_idle = total - cls._idle
         log.info("cumtime %ds (%.1f%% of %ds). %.1f%% idle. peak %dmb.",
-                 local, 100 * local / non_idle, non_idle,
-                 100 * idle / total, peak_usage_mb())
-        if local > 1:
-            cls._db.report(cls._ms)
-            cls._steemd.report(cls._ms)
+                 cls._secs, 100 * cls._secs / non_idle, non_idle,
+                 100 * cls._idle / total, peak_usage_mb())
+        if cls._secs > 1:
+            cls._db.report(cls._secs)
+            cls._steemd.report(cls._secs)
 
 atexit.register(Stats.report)
