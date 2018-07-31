@@ -42,16 +42,13 @@ class Db:
         self._trx_active = False
         self._prep_sql = {}
 
-    def conn(self):
-        """Get the lazily-initialized db connection."""
-        if not self._conn:
-            self._conn = self.engine().connect()
-            # Since we need to manage transactions ourselves, yet the
-            # core behavior of DBAPI (per PEP-0249) is that a transaction
-            # is always in progress, this COMMIT is a workaround to get
-            # back control (and used with autocommit=False query exec).
-            self._conn.execute(sqlalchemy.text("COMMIT"))
-        return self._conn
+        self._conn = self.engine().connect()
+        # Since we need to manage transactions ourselves, yet the
+        # core behavior of DBAPI (per PEP-0249) is that a transaction
+        # is always in progress, this COMMIT is a workaround to get
+        # back control (and used with autocommit=False query exec).
+        self._exec = self._conn.execute
+        self._exec(sqlalchemy.text("COMMIT"))
 
     def engine(self):
         """Lazy-loaded SQLAlchemy engine."""
@@ -103,7 +100,7 @@ class Db:
 
     def engine_name(self):
         """Get the name of the engine (e.g. `postgresql`, `mysql`)."""
-        engine = self.conn().dialect.name
+        engine = self._conn.dialect.name
         if engine not in ['postgresql', 'mysql']:
             raise Exception("db engine %s not supported" % engine)
         return engine
@@ -176,7 +173,7 @@ class Db:
         try:
             start = perf()
             query = self._sql_text(sql)
-            result = self.conn().execute(query, **kwargs)
+            result = self._exec(query, **kwargs)
             Stats.log_db(sql, perf() - start)
             return result
         except Exception as e:
