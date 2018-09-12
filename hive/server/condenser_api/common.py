@@ -9,6 +9,7 @@ def valid_account(name, allow_empty=False):
     assert isinstance(name, str), "account must be string; received: %s" % name
     if not (allow_empty and name == ''):
         assert len(name) >= 3 and len(name) <= 16, "invalid account: %s" % name
+        assert re.match(r'^[a-z0-9-\.]+$', name), 'invalid account char'
     return name
 
 def valid_permlink(permlink, allow_empty=False):

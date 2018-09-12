@@ -1,0 +1,1 @@
+"""Hive JSON-RPC server."""

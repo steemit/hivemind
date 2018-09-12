@@ -27,6 +27,8 @@ def build_methods():
         hive_api.db_head_state,
         hive_api.payouts_total,
         hive_api.payouts_last_24h,
+        hive_api.get_accounts,
+        hive_api.get_accounts_ac,
         # --- disabled until #92
         #hive_api.get_followers,
         #hive_api.get_following,
