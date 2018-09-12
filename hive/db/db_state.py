@@ -89,6 +89,7 @@ class DbState:
             'hive_reblogs_ix1', # (post_id, account, created_at)
             'hive_posts_cache_ix6', # (sc_trend, post_id)
             'hive_posts_cache_ix7', # (sc_hot, post_id)
+            'hive_accounts_ix3', # (vote_weight, name VPO)
         ]
 
         to_return = []
@@ -184,14 +185,19 @@ class DbState:
         assert cls._ver is not None, 'could not load state record'
 
         if cls._ver == 0:
-            # first run!
-            #cls._set_ver(1)
-            cls._set_ver(2)
+            raise Exception("dbv cannot be 0; reindex required")
 
         if cls._ver == 1:
-            from hive.indexer.follow import Follow
-            Follow.force_recount()
             cls._set_ver(2)
+
+        if cls._ver == 2:
+            cls._set_ver(3)
+
+        if cls._ver == 3:
+            sql = """CREATE INDEX hive_accounts_ix3 ON hive_accounts
+                      USING btree (vote_weight, name varchar_pattern_ops)"""
+            cls.db().query(sql)
+            cls._set_ver(4)
 
         # Example migration:
         #if cls._ver == 1:
