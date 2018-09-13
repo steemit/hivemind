@@ -35,7 +35,7 @@ async def get_accounts_ac(query, ctx):
     """Basic account lookup."""
     ctx = valid_account(ctx)
     query = query.strip().lower()
-    query = re.match(r'^[a-z0-9-\.]*', query)[0] if query else ""
+    query = re.match(r'^[a-z0-9-\.]*', query).group(0) if query else ""
     return await get_accounts_ac_impl(query, ctx)
 
 
