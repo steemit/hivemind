@@ -61,6 +61,7 @@ def build_metadata():
         sa.UniqueConstraint('name', name='hive_accounts_ux1'),
         sa.Index('hive_accounts_ix1', 'vote_weight', 'id'), # core: quick ranks
         sa.Index('hive_accounts_ix2', 'name', 'id'), # core: quick id map
+        sa.Index('hive_accounts_ix3', 'vote_weight', 'name', postgresql_ops=dict(name='varchar_pattern_ops')), # API: lookup
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
@@ -312,7 +313,7 @@ def setup(db):
 
     # default rows
     sqls = [
-        "INSERT INTO hive_state (block_num, db_version, steem_per_mvest, usd_per_steem, sbd_per_steem, dgpo) VALUES (0, 3, 0, 0, 0, '')",
+        "INSERT INTO hive_state (block_num, db_version, steem_per_mvest, usd_per_steem, sbd_per_steem, dgpo) VALUES (0, 4, 0, 0, 0, '')",
         "INSERT INTO hive_blocks (num, hash, created_at) VALUES (0, '0000000000000000000000000000000000000000', '2016-03-24 16:04:57')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('miners',    '2016-03-24 16:05:00')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('null',      '2016-03-24 16:05:00')",
