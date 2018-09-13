@@ -1,10 +1,14 @@
 """[WIP] New and improved discussions API supporting user context."""
 import time
 import logging
+import re
 
 from decimal import Decimal
 from aiocache import cached
 from hive.db.adapter import Db
+
+from hive.server.condenser_api.common import valid_account
+from hive.server.common.accounts import get_accounts_impl, get_accounts_ac_impl
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +22,21 @@ async def db_head_state():
     return dict(db_head_block=row['num'],
                 db_head_time=str(row['created_at']),
                 db_head_age=int(time.time() - row['ts']))
+
+# account lookup
+# --------------
+
+async def get_accounts(names):
+    """Fetch basic account data; order preserved."""
+    names = [valid_account(n) for n in names]
+    return await get_accounts_impl(names)
+
+async def get_accounts_ac(query, ctx):
+    """Basic account lookup."""
+    ctx = valid_account(ctx)
+    query = query.strip().lower()
+    query = re.match(r'^[a-z0-9-\.]*', query)[0] if query else ""
+    return await get_accounts_ac_impl(query, ctx)
 
 
 # stats methods
