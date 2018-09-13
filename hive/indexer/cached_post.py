@@ -435,9 +435,8 @@ class CachedPost:
 
         # if there's a pending promoted value to write, pull it out
         if pid in cls._pending_promoted:
-            bal = cls._pending_promoted[pid]
+            bal = cls._pending_promoted.pop(pid)
             values.append(('promoted', bal))
-            del cls._pending_promoted[pid]
 
         # update unconditionally
         payout = post_payout(post)

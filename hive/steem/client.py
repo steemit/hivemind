@@ -1,6 +1,6 @@
 """Tight and reliable steem API client for hive indexer."""
 
-import time
+from time import perf_counter as perf
 from decimal import Decimal
 
 from hive.utils.stats import Stats
@@ -120,17 +120,15 @@ class SteemClient:
 
     def __exec(self, method, params=None):
         """Perform a single steemd call."""
-        time_start = time.perf_counter()
+        start = perf()
         result = self._client.exec(method, params)
-        total_time = (time.perf_counter() - time_start) * 1000
-
-        batch_size = len(params[0]) if method == 'get_accounts' else 1
-        Stats.log_steem(method, total_time, batch_size)
+        items = len(params[0]) if method == 'get_accounts' else 1
+        Stats.log_steem(method, perf() - start, items)
         return result
 
     def __exec_batch(self, method, params):
         """Perform batch call. Based on config uses either batch or futures."""
-        time_start = time.perf_counter()
+        start = perf()
 
         result = []
         for part in self._client.exec_multi(
@@ -140,6 +138,5 @@ class SteemClient:
                 batch_size=self._max_batch):
             result.extend(part)
 
-        total_time = (time.perf_counter() - time_start) * 1000
-        Stats.log_steem(method, total_time, len(params))
+        Stats.log_steem(method, perf() - start, len(params))
         return result

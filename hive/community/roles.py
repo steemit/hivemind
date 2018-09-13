@@ -2,7 +2,9 @@
 
 from collections import OrderedDict
 
-from hive.db.methods import query_one, query_row
+from hive.db.adapter import Db
+
+DB = Db.instance()
 
 PRIVACY_MAP = {0: 'open', 1: 'restricted', 2: 'closed'}
 
@@ -56,7 +58,7 @@ def get_user_role(account: str, community: str) -> str:
     if account == community:
         return 'owner'
 
-    roles = query_one(
+    roles = DB.query_one(
         "SELECT is_admin, is_mod, is_approved, is_muted "
         "FROM hive_members"
         "WHERE community = '%s' AND account = '%s' LIMIT 1" % (community, account)
@@ -78,7 +80,7 @@ def get_user_role(account: str, community: str) -> str:
 
 def get_community_privacy(community: str) -> str:
     """Load community privacy level"""
-    type_id = query_one('SELECT type_id from hive_communities WHERE name = "%s"' % community)
+    type_id = DB.query_one('SELECT type_id from hive_communities WHERE name = "%s"' % community)
     return PRIVACY_MAP.get(type_id)
 
 
@@ -107,7 +109,7 @@ def is_community_post_valid(community, comment_op: dict) -> str:
         return True
 
     sql = "SELECT * FROM hive_communities WHERE name = :name LIMIT 1"
-    community_props = query_row(sql, name=community)
+    community_props = DB.query_row(sql, name=community)
     if not community_props:
         # if this is not a defined community, it's free to post in.
         return True

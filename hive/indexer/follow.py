@@ -15,6 +15,16 @@ DB = Db.instance()
 FOLLOWERS = 'followers'
 FOLLOWING = 'following'
 
+def _flip_dict(dict_to_flip):
+    """Swap keys/values. Returned dict values are array of keys."""
+    flipped = {}
+    for key, value in dict_to_flip.items():
+        if value in flipped:
+            flipped[value].append(key)
+        else:
+            flipped[value] = [key]
+    return flipped
+
 class Follow:
     """Handles processing of incoming follow ups and flushing to db."""
 
@@ -107,22 +117,26 @@ class Follow:
     @classmethod
     def flush(cls, trx=True):
         """Flushes pending follow count deltas."""
+
+        updated = 0
         sqls = []
         for col, deltas in cls._delta.items():
-            for name, delta in deltas.items():
-                sql = "UPDATE hive_accounts SET %s = %s + :mag WHERE id = :id"
-                sqls.append((sql % (col, col), dict(mag=delta, id=name)))
-        if not sqls:
+            for delta, names in _flip_dict(deltas).items():
+                updated += len(names)
+                sql = "UPDATE hive_accounts SET %s = %s + :mag WHERE id IN :ids"
+                sqls.append((sql % (col, col), dict(mag=delta, ids=tuple(names))))
+
+        if not updated:
             return 0
 
         start = perf()
         DB.batch_queries(sqls, trx=trx)
         if trx:
-            total = (perf() - start)
-            log.info("[SYNC] flushed %d follow deltas in %ds", len(sqls), total)
+            log.info("[SYNC] flushed %d follow deltas in %ds",
+                     updated, perf() - start)
 
         cls._delta = {FOLLOWERS: {}, FOLLOWING: {}}
-        return len(sqls)
+        return updated
 
     @classmethod
     def flush_recount(cls):

@@ -40,7 +40,7 @@ class BlockSchedule:
         while self._head_num < num:
             wait_secs = self._next_expected - head_time
             sleep(wait_secs)
-            Stats.log_idle(wait_secs * 1000)
+            Stats.log_idle(wait_secs)
             head_time = self._next_expected
             self._advance()
 
@@ -61,8 +61,8 @@ class BlockSchedule:
             self._last_date = date
         else:
             self._drift_backward()
-            log.warning("block %d not available. head:%s drift:%fs",
-                        num, self._head_num, self._drift)
+            log.info("block %d not available. head:%s drift:%fs",
+                     num, self._head_num, self._drift)
 
     def _check_head_date(self, num, date):
         """Sanity-checking of head block date.

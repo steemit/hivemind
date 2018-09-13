@@ -77,7 +77,7 @@ echo hivemind: starting server
 if [[ ! "$SYNC_TO_S3" ]]; then
     exec "${POPULATE_CMD}" server
 else
-    exec "${POPULATE_CMD}" server 2>&1&
+    exec "${POPULATE_CMD}" server --log-level=warning 2>&1&
     mkdir -p /etc/service/hivesync
     cp /usr/local/bin/hivesync.sh /etc/service/hivesync/run
     chmod +x /etc/service/hivesync/run

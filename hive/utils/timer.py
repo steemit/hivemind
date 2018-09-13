@@ -14,6 +14,7 @@ class Timer:
     `full_total` - total items to process, outside of
                    (and including) this invocation. [optional]
     """
+    #pylint: disable=too-many-instance-attributes
 
     # Name of entity, lap units (e.g. rps, wps), total items in job
     _entity = []

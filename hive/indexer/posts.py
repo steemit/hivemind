@@ -129,7 +129,7 @@ class Posts:
             CachedPost.insert(op['author'], op['permlink'], post['id'])
             if op['parent_author']: # update parent's child count
                 CachedPost.recount(op['parent_author'],
-                    op['parent_permlink'], post['parent_id'])
+                                   op['parent_permlink'], post['parent_id'])
             cls._insert_feed_cache(post)
 
     @classmethod
@@ -194,7 +194,7 @@ class Posts:
             depth = parent_depth + 1
 
         # check post validity in specified context
-        is_valid = date < '2018-07-01' or is_community_post_valid(community, op)
+        is_valid = date < '2020-01-01' or is_community_post_valid(community, op)
         if not is_valid:
             url = "@%s/%s" % (op['author'], op['permlink'])
             log.info("Invalid post %s in @%s", url, community)
