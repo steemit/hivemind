@@ -80,6 +80,8 @@ class Blocks:
                     account_names.add(op['new_account_name'])
                 elif op_type == 'account_create_with_delegation_operation':
                     account_names.add(op['new_account_name'])
+                elif op_type == 'create_claimed_account':
+                    account_names.add(op['new_account_name'])
 
                 # post ops
                 elif op_type == 'comment_operation':
