@@ -86,6 +86,7 @@ class Blocks:
                 # post ops
                 elif op_type == 'comment_operation':
                     comment_ops.append(op)
+                    account_names.add(op['author']) # temp: HF20 missing account bug
                 elif op_type == 'delete_comment_operation':
                     delete_ops.append(op)
                 elif op_type == 'vote_operation':
