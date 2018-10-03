@@ -25,6 +25,7 @@ def _legacy_follower(follower, following, follow_type):
 
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
     """Get all accounts following `account`. (EOL)"""
+    assert follow_type != 'ignore', 'no index for ignored-by'
     followers = cursor.get_followers(
         valid_account(account),
         valid_account(start or '', allow_empty=True),

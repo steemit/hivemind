@@ -10,6 +10,8 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines
 
+DB_VERSION = 5
+
 def build_metadata():
     """Build schema def with SqlAlchemy"""
     metadata = sa.MetaData()
@@ -121,6 +123,7 @@ def build_metadata():
         sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'), # core
         sa.Index('hive_follows_ix2', 'following', 'follower', postgresql_where=sql_text("state = 1")), # API
         sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where=sql_text("state = 1")), # API
+        sa.Index('hive_follows_ix4', 'follower', 'following', postgresql_where=sql_text("state = 2")), # API
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
@@ -313,7 +316,7 @@ def setup(db):
 
     # default rows
     sqls = [
-        "INSERT INTO hive_state (block_num, db_version, steem_per_mvest, usd_per_steem, sbd_per_steem, dgpo) VALUES (0, 4, 0, 0, 0, '')",
+        "INSERT INTO hive_state (block_num, db_version, steem_per_mvest, usd_per_steem, sbd_per_steem, dgpo) VALUES (0, %d, 0, 0, 0, '')" % DB_VERSION,
         "INSERT INTO hive_blocks (num, hash, created_at) VALUES (0, '0000000000000000000000000000000000000000', '2016-03-24 16:04:57')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('miners',    '2016-03-24 16:05:00')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('null',      '2016-03-24 16:05:00')",

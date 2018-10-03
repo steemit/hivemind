@@ -3,7 +3,7 @@
 import time
 import logging
 
-from hive.db.schema import setup, build_metadata, teardown
+from hive.db.schema import setup, build_metadata, teardown, DB_VERSION
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -199,6 +199,13 @@ class DbState:
             cls.db().query(sql)
             cls._set_ver(4)
 
+        if cls._ver == 4:
+            sql = """CREATE INDEX hive_follows_ix4 ON public.hive_follows
+                      USING btree (follower, following) WHERE state = 2;"""
+            cls.db().query(sql)
+            cls._set_ver(5)
+
+        assert cls._ver == DB_VERSION, "migration missing or invalid DB_VERSION"
         # Example migration:
         #if cls._ver == 1:
         #    cls.db().query("ALTER TABLE hive_posts ALTER COLUMN author SET DEFAULT ''")
