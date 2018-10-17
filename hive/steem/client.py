@@ -29,6 +29,15 @@ class SteemClient:
                                            % (len(accounts), len(ret)))
         return ret
 
+    def get_all_account_names(self):
+        """Fetch all account names."""
+        ret = []
+        names = self.__exec('lookup_accounts', ['', 1000])
+        while names:
+            ret.extend(names)
+            names = self.__exec('lookup_accounts', [names[-1], 1000])[1:]
+        return ret
+
     def get_content_batch(self, tuples):
         """Fetch multiple comment objects."""
         posts = self.__exec_batch('get_content', tuples)

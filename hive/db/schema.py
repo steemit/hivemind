@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines
 
-DB_VERSION = 5
+DB_VERSION = 6
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -53,7 +53,7 @@ def build_metadata():
         sa.Column('post_count', sa.Integer, nullable=False, server_default='0'),
         sa.Column('proxy_weight', sa.Float(precision=6), nullable=False, server_default='0'),
         sa.Column('vote_weight', sa.Float(precision=6), nullable=False, server_default='0'),
-        sa.Column('kb_used', sa.Integer, nullable=False, server_default='0'),
+        sa.Column('kb_used', sa.Integer, nullable=False, server_default='0'), # deprecated
         sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
 
         sa.Column('active_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),

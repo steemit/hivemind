@@ -205,6 +205,16 @@ class DbState:
             cls.db().query(sql)
             cls._set_ver(5)
 
+        if cls._ver == 5:
+            # recover acct names lost to issue #151
+            from hive.steem.client import SteemClient
+            from hive.indexer.accounts import Accounts
+            names = SteemClient().get_all_account_names()
+            Accounts.load_ids()
+            Accounts.register(names, '1970-01-01T00:00:00')
+            Accounts.clear_ids()
+            cls._set_ver(6)
+
         assert cls._ver == DB_VERSION, "migration missing or invalid DB_VERSION"
         # Example migration:
         #if cls._ver == 1:

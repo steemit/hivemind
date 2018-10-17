@@ -36,6 +36,11 @@ class Accounts:
         cls._ids = dict(DB.query_all("SELECT name, id FROM hive_accounts"))
 
     @classmethod
+    def clear_ids(cls):
+        """Wipe id map. Only used for db migration #5."""
+        cls._ids = None
+
+    @classmethod
     def get_id(cls, name):
         """Get account id by name. Throw if not found."""
         assert name in cls._ids, "account does not exist or was not registered"
@@ -157,15 +162,19 @@ class Accounts:
         profile = safe_profile_metadata(account)
         del account['json_metadata']
 
+        active_at = max(account['created'],
+                        account['last_post'],
+                        account['last_vote_time'])
+
         values = {
             'name':         account['name'],
+            'created_at':   account['created'],
             'proxy':        account['proxy'],
             'post_count':   account['post_count'],
             'reputation':   rep_log10(account['reputation']),
             'proxy_weight': vests_amount(account['vesting_shares']),
             'vote_weight':  vote_weight,
-            'kb_used':      int(account['lifetime_bandwidth']) / 1e6 / 1024,
-            'active_at':    account['last_bandwidth_update'],
+            'active_at':    active_at,
             'cached_at':    cached_at,
 
             'display_name':  profile['name'],
