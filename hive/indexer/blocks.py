@@ -80,13 +80,12 @@ class Blocks:
                     account_names.add(op['new_account_name'])
                 elif op_type == 'account_create_with_delegation_operation':
                     account_names.add(op['new_account_name'])
-                elif op_type == 'create_claimed_account':
+                elif op_type == 'create_claimed_account_operation':
                     account_names.add(op['new_account_name'])
 
                 # post ops
                 elif op_type == 'comment_operation':
                     comment_ops.append(op)
-                    account_names.add(op['author']) # temp: HF20 missing account bug
                 elif op_type == 'delete_comment_operation':
                     delete_ops.append(op)
                 elif op_type == 'vote_operation':

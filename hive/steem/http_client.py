@@ -82,6 +82,7 @@ class HttpClient(object):
     """Simple Steem JSON-HTTP-RPC API"""
 
     METHOD_API = dict(
+        lookup_accounts='condenser_api',
         get_block='block_api',
         get_content='condenser_api',
         get_accounts='condenser_api',

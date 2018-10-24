@@ -89,6 +89,7 @@ class SteemStats(StatsAbstract):
         'get_content': 4,
         'get_order_book': 20,
         'get_feed_history': 20,
+        'lookup_accounts': 1000,
     }
 
     def __init__(self):
