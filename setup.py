@@ -28,7 +28,7 @@ setup(
     tests_require=tests_require,
     install_requires=[
         'aiopg',
-        'jsonrpcserver',
+        'jsonrpcserver==3.5.6',
         'aiohttp',
         'certifi',
         'sqlalchemy',
