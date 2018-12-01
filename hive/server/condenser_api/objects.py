@@ -11,7 +11,9 @@ log = logging.getLogger(__name__)
 
 def load_accounts(names):
     """`get_accounts`-style lookup for `get_state` compat layer."""
-    sql = """SELECT id, name, display_name, about, reputation, vote_weight
+    sql = """SELECT id, name, display_name, about, reputation, vote_weight,
+                    created_at, post_count, profile_image, location, website,
+                    cover_image
                FROM hive_accounts WHERE name IN :names"""
     rows = query_all(sql, names=tuple(names))
     return [_condenser_account_object(row) for row in rows]
@@ -54,11 +56,19 @@ def _condenser_account_object(row):
     """Convert an internal account record into legacy-steemd style."""
     return {
         'name': row['name'],
+        'created': str(row['created_at']),
+        'post_count': row['post_count'],
         'reputation': _rep_to_raw(row['reputation']),
         'net_vesting_shares': row['vote_weight'],
+        'transfer_history': [],
         'json_metadata': json.dumps({
             'profile': {'name': row['display_name'],
-                        'about': row['about']}})}
+                        'about': row['about'],
+                        'website': row['website'],
+                        'location': row['location'],
+                        'cover_image': row['cover_image'],
+                        'profile_image': row['profile_image'],
+                       }})}
 
 def _condenser_post_object(row, truncate_body=0):
     """Given a hive_posts_cache row, create a legacy-style post object."""

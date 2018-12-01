@@ -5,7 +5,6 @@ import logging
 from collections import OrderedDict
 import ujson as json
 
-from hive.steem.client import SteemClient
 from hive.db.methods import query_one
 from hive.utils.normalize import legacy_amount
 
@@ -31,8 +30,6 @@ from hive.server.condenser_api.tags import (
 import hive.server.condenser_api.cursor as cursor
 
 log = logging.getLogger(__name__)
-
-TMP_STEEM = SteemClient()
 
 # steemd account 'tabs' - specific post list queries
 ACCOUNT_TAB_KEYS = {
@@ -183,11 +180,10 @@ def _load_content_accounts(content):
     return {a['name']: a for a in accounts}
 
 def _load_account(name):
-    #account = load_accounts([name])[0]
-    #for key in ['recent_replies', 'comments', 'feed', 'blog']:
-    #    account[key] = []
+    account = load_accounts([name])[0]
+    for key in ACCOUNT_TAB_KEYS.values():
+        account[key] = []
     # need to audit all assumed condenser keys..
-    account = TMP_STEEM.get_accounts([name])[0]
     return account
 
 
@@ -201,8 +197,10 @@ def _load_posts_recursive(post_ids):
 
         child_ids = get_child_ids(post['post_id'])
         if child_ids:
+            # TODO: rename `children` to `descendants`
             children = _load_posts_recursive(child_ids)
-            post['replies'] = list(children.keys())
+            post['replies'] = [k for k, v in children.items()
+                               if v['post_id'] in child_ids]
             out = {**out, **children}
 
     return out
