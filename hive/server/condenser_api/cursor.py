@@ -130,6 +130,29 @@ def pids_by_blog(account: str, start_author: str = '',
     return query_col(sql, account_id=account_id, limit=limit)
 
 
+def pids_by_blog_without_reblog(account: str, start_permlink: str = '', limit: int = 20):
+    """Get a list of post_ids for an author's blog without reblogs."""
+
+    seek = ''
+    if start_permlink:
+        start_id = _get_post_id(account, start_permlink)
+        if not start_id:
+            return []
+        seek = "AND id <= %d" % start_id
+
+    sql = """
+        SELECT id
+          FROM hive_posts
+         WHERE author = :account %s
+           AND is_deleted = '0'
+           AND depth = 0
+      ORDER BY id DESC
+         LIMIT :limit
+    """ % seek
+
+    return query_col(sql, account=account, limit=limit)
+
+
 def pids_by_feed_with_reblog(account: str, start_author: str = '',
                              start_permlink: str = '', limit: int = 20):
     """Get a list of [post_id, reblogged_by_str] for an account's feed."""

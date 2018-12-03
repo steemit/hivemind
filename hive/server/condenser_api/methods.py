@@ -157,7 +157,7 @@ async def get_discussions_by_created(start_author: str = '', start_permlink: str
 async def get_discussions_by_blog(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
                                   truncate_body: int = 0):
-    """Retrieve account's blog posts."""
+    """Retrieve account's blog posts, including reblogs."""
     ids = cursor.pids_by_blog(
         valid_account(tag),
         valid_account(start_author, allow_empty=True),
@@ -210,3 +210,20 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 50))
     return load_posts(ids, truncate_body=truncate_body)
+
+
+@nested_query_compat
+async def get_discussions_by_author_before_date(author: str, start_permlink: str = '',
+                                                before_date: str = '', limit: int = 10):
+    """Retrieve account's blog posts, without reblogs.
+
+    NOTE: before_date is completely ignored, and it appears to be broken and/or
+    completely ignored in steemd as well. This call is similar to
+    get_discussions_by_blog but does NOT serve reblogs.
+    """
+    # pylint: disable=invalid-name,unused-argument
+    ids = cursor.pids_by_blog_without_reblog(
+        valid_account(author),
+        valid_permlink(start_permlink, allow_empty=True),
+        valid_limit(limit, 100))
+    return load_posts(ids)

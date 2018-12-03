@@ -16,7 +16,9 @@ from hive.server.condenser_api.methods import (
     get_discussions_by_blog,
     get_discussions_by_feed,
     get_discussions_by_comments,
-    get_replies_by_last_update)
+    get_replies_by_last_update,
+
+    get_discussions_by_author_before_date)
 
 def _strict_list(params, expected_len):
     assert isinstance(params, list), "params not a list"
@@ -92,5 +94,9 @@ async def call(api, method, params):
         return await get_discussions_by_comments(**_strict_query(params, 'tag'))
     elif method == 'get_replies_by_last_update':
         return await get_replies_by_last_update(*_strict_list(params, 3))
+
+    # Misc account discussion queries
+    elif method == 'get_discussions_by_author_before_date':
+        return await get_discussions_by_author_before_date(*_strict_list(params, 4))
 
     raise Exception("unknown method: {}.{}({})".format(api, method, params))

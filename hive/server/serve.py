@@ -55,6 +55,8 @@ def build_methods():
         condenser_api.get_discussions_by_feed,
         condenser_api.get_discussions_by_comments,
         condenser_api.get_replies_by_last_update,
+
+        condenser_api.get_discussions_by_author_before_date,
     )]
 
     methods.add(condenser_api_call)
