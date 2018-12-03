@@ -106,7 +106,7 @@ async def get_discussions_by_trending(start_author: str = '', start_permlink: st
         'trending',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 20),
+        valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
     return load_posts(ids, truncate_body=truncate_body)
 
@@ -120,7 +120,7 @@ async def get_discussions_by_hot(start_author: str = '', start_permlink: str = '
         'hot',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 20),
+        valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
     return load_posts(ids, truncate_body=truncate_body)
 
@@ -134,7 +134,7 @@ async def get_discussions_by_promoted(start_author: str = '', start_permlink: st
         'promoted',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 20),
+        valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
     return load_posts(ids, truncate_body=truncate_body)
 
@@ -148,7 +148,7 @@ async def get_discussions_by_created(start_author: str = '', start_permlink: str
         'created',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 20),
+        valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
     return load_posts(ids, truncate_body=truncate_body)
 
@@ -162,7 +162,7 @@ async def get_discussions_by_blog(tag: str, start_author: str = '',
         valid_account(tag),
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 20))
+        valid_limit(limit, 100))
     return load_posts(ids, truncate_body=truncate_body)
 
 
@@ -175,7 +175,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
         valid_account(tag),
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 20))
+        valid_limit(limit, 100))
 
     reblogged_by = dict(res)
     posts = load_posts([r[0] for r in res], truncate_body=truncate_body)
@@ -197,7 +197,7 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
     ids = cursor.pids_by_account_comments(
         valid_account(start_author),
         valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 20))
+        valid_limit(limit, 100))
     return load_posts(ids, truncate_body=truncate_body)
 
 
@@ -208,7 +208,7 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
     ids = cursor.pids_by_replies_to_account(
         valid_account(start_author),
         valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 50))
+        valid_limit(limit, 100))
     return load_posts(ids, truncate_body=truncate_body)
 
 
