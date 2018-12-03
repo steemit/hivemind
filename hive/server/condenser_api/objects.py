@@ -79,8 +79,6 @@ def _condenser_post_object(row, truncate_body=0):
     post['author'] = row['author']
     post['permlink'] = row['permlink']
     post['category'] = row['category']
-    post['parent_permlink'] = ''
-    post['parent_author'] = ''
 
     post['title'] = row['title']
     post['body'] = row['body'][0:truncate_body] if truncate_body else row['body']
@@ -108,21 +106,23 @@ def _condenser_post_object(row, truncate_body=0):
     assert len(row['raw_json']) > 32
     raw_json = json.loads(row['raw_json'])
 
+    post['parent_permlink'] = ''
+    post['parent_author'] = ''
     if row['depth'] > 0:
         post['parent_permlink'] = raw_json['parent_permlink']
         post['parent_author'] = raw_json['parent_author']
 
+    post['url'] = raw_json['url']
     post['root_title'] = raw_json['root_title']
+    post['beneficiaries'] = raw_json['beneficiaries']
     post['max_accepted_payout'] = raw_json['max_accepted_payout']
     post['percent_steem_dollars'] = raw_json['percent_steem_dollars']
-    post['url'] = raw_json['url']
 
     # not used by condenser, but may be useful
     #post['net_votes'] = post['total_votes'] - row['up_votes']
     #post['allow_replies'] = raw_json['allow_replies']
     #post['allow_votes'] = raw_json['allow_votes']
     #post['allow_curation_rewards'] = raw_json['allow_curation_rewards']
-    #post['beneficiaries'] = raw_json['beneficiaries']
     #post['curator_payout_value'] = raw_json['curator_payout_value'] if paid else _amount(0)
     #curator_payout = amount(raw_json['curator_payout_value'])
     #post['total_payout_value'] = _amount(row['payout'] - curator_payout) if paid else _amount(0)
