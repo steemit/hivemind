@@ -152,7 +152,8 @@ def run_server(conf):
     async def jsonrpc_handler(request):
         """Handles all hive jsonrpc API requests."""
         request = await request.text()
-        response = await methods.dispatch(request)
+        # debug=True refs https://github.com/bcb/jsonrpcserver/issues/71
+        response = await methods.dispatch(request, debug=True)
         headers = {'Access-Control-Allow-Origin': '*'}
         return web.json_response(response, status=200, headers=headers)
 
