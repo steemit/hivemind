@@ -1,8 +1,22 @@
 """Helpers for condenser_api calls."""
 
 import re
+from functools import wraps
 
 from hive.db.methods import query_one, query_col
+
+def return_error_info(function):
+    @wraps(function)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await function(*args, **kwargs)
+        except Exception as e:
+            return {
+                "error": {
+                    "code": -32000,
+                    "message": str(e) + " (hivemind-alpha)"}}
+    return wrapper
+
 
 def valid_account(name, allow_empty=False):
     """Returns validated account name or throws Assert."""

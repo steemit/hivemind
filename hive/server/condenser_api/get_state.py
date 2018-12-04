@@ -13,6 +13,7 @@ from hive.server.condenser_api.objects import (
     load_posts,
     load_posts_reblogs)
 from hive.server.condenser_api.common import (
+    return_error_info,
     valid_account,
     valid_permlink,
     valid_sort,
@@ -56,6 +57,7 @@ CONDENSER_NOOP_URLS = [
     'faq.html',
 ]
 
+@return_error_info
 async def get_state(path: str):
     """`get_state` reimplementation.
 

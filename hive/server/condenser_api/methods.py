@@ -5,6 +5,7 @@ from functools import wraps
 import hive.server.condenser_api.cursor as cursor
 from hive.server.condenser_api.objects import load_posts, load_posts_reblogs
 from hive.server.condenser_api.common import (
+    return_error_info,
     valid_account,
     valid_permlink,
     valid_tag,
@@ -23,6 +24,7 @@ def _follow_type_to_int(follow_type: str):
 def _legacy_follower(follower, following, follow_type):
     return dict(follower=follower, following=following, what=[follow_type])
 
+@return_error_info
 async def get_followers(account: str, start: str, follow_type: str, limit: int):
     """Get all accounts following `account`. (EOL)"""
     assert follow_type != 'ignore', 'no index for ignored-by'
@@ -33,6 +35,7 @@ async def get_followers(account: str, start: str, follow_type: str, limit: int):
         valid_limit(limit, 1000))
     return [_legacy_follower(name, account, follow_type) for name in followers]
 
+@return_error_info
 async def get_following(account: str, start: str, follow_type: str, limit: int):
     """Get all accounts `account` follows. (EOL)"""
     following = cursor.get_following(
@@ -42,6 +45,7 @@ async def get_following(account: str, start: str, follow_type: str, limit: int):
         valid_limit(limit, 1000))
     return [_legacy_follower(account, name, follow_type) for name in following]
 
+@return_error_info
 async def get_follow_count(account: str):
     """Get follow count stats. (EOL)"""
     count = cursor.get_follow_counts(valid_account(account))
@@ -52,6 +56,7 @@ async def get_follow_count(account: str):
 
 # Content Primitives
 
+@return_error_info
 async def get_content(author: str, permlink: str):
     """Get a single post object."""
     valid_account(author)
@@ -62,6 +67,7 @@ async def get_content(author: str, permlink: str):
     return load_posts([post_id])[0]
 
 
+@return_error_info
 async def get_content_replies(parent: str, parent_permlink: str):
     """Get a list of post objects based on parent."""
     valid_account(parent)
@@ -97,6 +103,7 @@ def nested_query_compat(function):
     return wrapper
 
 
+@return_error_info
 @nested_query_compat
 async def get_discussions_by_trending(start_author: str = '', start_permlink: str = '',
                                       limit: int = 20, tag: str = None,
@@ -111,6 +118,7 @@ async def get_discussions_by_trending(start_author: str = '', start_permlink: st
     return load_posts(ids, truncate_body=truncate_body)
 
 
+@return_error_info
 @nested_query_compat
 async def get_discussions_by_hot(start_author: str = '', start_permlink: str = '',
                                  limit: int = 20, tag: str = None,
@@ -125,6 +133,7 @@ async def get_discussions_by_hot(start_author: str = '', start_permlink: str = '
     return load_posts(ids, truncate_body=truncate_body)
 
 
+@return_error_info
 @nested_query_compat
 async def get_discussions_by_promoted(start_author: str = '', start_permlink: str = '',
                                       limit: int = 20, tag: str = None,
@@ -139,6 +148,7 @@ async def get_discussions_by_promoted(start_author: str = '', start_permlink: st
     return load_posts(ids, truncate_body=truncate_body)
 
 
+@return_error_info
 @nested_query_compat
 async def get_discussions_by_created(start_author: str = '', start_permlink: str = '',
                                      limit: int = 20, tag: str = None,
@@ -153,6 +163,7 @@ async def get_discussions_by_created(start_author: str = '', start_permlink: str
     return load_posts(ids, truncate_body=truncate_body)
 
 
+@return_error_info
 @nested_query_compat
 async def get_discussions_by_blog(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
@@ -166,6 +177,7 @@ async def get_discussions_by_blog(tag: str, start_author: str = '',
     return load_posts(ids, truncate_body=truncate_body)
 
 
+@return_error_info
 @nested_query_compat
 async def get_discussions_by_feed(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
@@ -179,6 +191,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
     return load_posts_reblogs(res, truncate_body=truncate_body)
 
 
+@return_error_info
 @nested_query_compat
 async def get_discussions_by_comments(start_author: str, start_permlink: str = '',
                                       limit: int = 20, truncate_body: int = 0):
@@ -190,6 +203,7 @@ async def get_discussions_by_comments(start_author: str, start_permlink: str = '
     return load_posts(ids, truncate_body=truncate_body)
 
 
+@return_error_info
 @nested_query_compat
 async def get_replies_by_last_update(start_author: str, start_permlink: str = '',
                                      limit: int = 20, truncate_body: int = 0):
@@ -201,6 +215,7 @@ async def get_replies_by_last_update(start_author: str, start_permlink: str = ''
     return load_posts(ids, truncate_body=truncate_body)
 
 
+@return_error_info
 @nested_query_compat
 async def get_discussions_by_author_before_date(author: str, start_permlink: str = '',
                                                 before_date: str = '', limit: int = 10):

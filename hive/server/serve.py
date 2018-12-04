@@ -71,6 +71,7 @@ def run_server(conf):
     config.debug = (log_level == logging.DEBUG)
     #config.debug = logging.getLogger().isEnabledFor(logging.DEBUG)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
+    #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
     log = logging.getLogger(__name__)
 
     methods = build_methods()
