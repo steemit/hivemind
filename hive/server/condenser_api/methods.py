@@ -3,7 +3,7 @@
 from functools import wraps
 
 import hive.server.condenser_api.cursor as cursor
-from hive.server.condenser_api.objects import load_posts
+from hive.server.condenser_api.objects import load_posts, load_posts_reblogs
 from hive.server.condenser_api.common import (
     valid_account,
     valid_permlink,
@@ -176,18 +176,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100))
-
-    reblogged_by = dict(res)
-    posts = load_posts([r[0] for r in res], truncate_body=truncate_body)
-
-    # Merge reblogged_by data into result set
-    for post in posts:
-        rby = set(reblogged_by[post['post_id']].split(','))
-        rby.discard(post['author'])
-        if rby:
-            post['reblogged_by'] = list(rby)
-
-    return posts
+    return load_posts_reblogs(res, truncate_body=truncate_body)
 
 
 @nested_query_compat

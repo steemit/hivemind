@@ -10,7 +10,8 @@ from hive.utils.normalize import legacy_amount
 
 from hive.server.condenser_api.objects import (
     load_accounts,
-    load_posts)
+    load_posts,
+    load_posts_reblogs)
 from hive.server.condenser_api.common import (
     valid_account,
     valid_permlink,
@@ -18,11 +19,6 @@ from hive.server.condenser_api.common import (
     valid_tag,
     get_post_id,
     get_child_ids)
-from hive.server.condenser_api.methods import (
-    get_replies_by_last_update,
-    get_discussions_by_comments,
-    get_discussions_by_blog,
-    get_discussions_by_feed)
 from hive.server.condenser_api.tags import (
     get_trending_tags,
     get_top_trending_tags_summary)
@@ -85,7 +81,9 @@ async def get_state(path: str):
         account = valid_account(part[0][1:])
         state['accounts'][account] = _load_account(account)
 
-        if part[1] in ACCOUNT_TAB_KEYS:
+        if not account:
+            state['error'] = 'account not found'
+        elif part[1] in ACCOUNT_TAB_KEYS:
             key = ACCOUNT_TAB_KEYS[part[1]]
             posts = await _get_account_discussion_by_key(account, key)
             state['content'] = _keyed_posts(posts)
@@ -138,13 +136,14 @@ async def _get_account_discussion_by_key(account, key):
     assert key, 'discussion key must be specified'
 
     if key == 'recent_replies':
-        posts = await get_replies_by_last_update(account, '', 20)
+        posts = load_posts(cursor.pids_by_replies_to_account(account, '', 20))
     elif key == 'comments':
-        posts = await get_discussions_by_comments(account, '', 20)
+        posts = load_posts(cursor.pids_by_account_comments(account, '', 20))
     elif key == 'blog':
-        posts = await get_discussions_by_blog(account, '', '', 20)
+        posts = load_posts(cursor.pids_by_blog(account, '', '', 20))
     elif key == 'feed':
-        posts = await get_discussions_by_feed(account, '', '', 20)
+        res = cursor.pids_by_feed_with_reblog(account, '', '', 20)
+        posts = load_posts_reblogs(res)
     else:
         raise Exception("unknown account discussion key %s" % key)
 

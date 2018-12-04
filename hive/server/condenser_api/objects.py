@@ -18,6 +18,21 @@ def load_accounts(names):
     rows = query_all(sql, names=tuple(names))
     return [_condenser_account_object(row) for row in rows]
 
+def load_posts_reblogs(ids_with_reblogs, truncate_body=0):
+    """Given a list of (id, reblogged_by) tuples, return posts w/ reblog key."""
+    post_ids = [r[0] for r in ids_with_reblogs]
+    reblog_by = dict(ids_with_reblogs)
+    posts = load_posts(post_ids, truncate_body=truncate_body)
+
+    # Merge reblogged_by data into result set
+    for post in posts:
+        rby = set(reblog_by[post['post_id']].split(','))
+        rby.discard(post['author'])
+        if rby:
+            post['reblogged_by'] = list(rby)
+
+    return posts
+
 def load_posts(ids, truncate_body=0):
     """Given an array of post ids, returns full objects in the same order."""
     if not ids:
