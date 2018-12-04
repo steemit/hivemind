@@ -29,8 +29,8 @@ def _strict_query(params, ignore_key=None):
     query = _strict_list(params, 1)[0]
     assert isinstance(query, dict), "query must be dict"
 
-    optional_keys = set(['truncate_body'])
-    expected_keys = set(['start_author', 'start_permlink', 'limit', 'tag'])
+    optional_keys = set(['truncate_body', 'start_author', 'start_permlink'])
+    expected_keys = set(['limit', 'tag'])
     if ignore_key: # e.g. `tag` unused by get_discussion_by_comments
         expected_keys = expected_keys - set([ignore_key])
 
