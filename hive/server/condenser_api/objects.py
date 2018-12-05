@@ -121,11 +121,12 @@ def _condenser_post_object(row, truncate_body=0):
     assert len(row['raw_json']) > 32
     raw_json = json.loads(row['raw_json'])
 
-    post['parent_permlink'] = ''
-    post['parent_author'] = ''
     if row['depth'] > 0:
-        post['parent_permlink'] = raw_json['parent_permlink']
         post['parent_author'] = raw_json['parent_author']
+        post['parent_permlink'] = raw_json['parent_permlink']
+    else:
+        post['parent_author'] = ''
+        post['parent_permlink'] = row['category']
 
     post['url'] = raw_json['url']
     post['root_title'] = raw_json['root_title']
