@@ -9,8 +9,9 @@ def _get_post_id(author, permlink):
 
 def _get_account_id(name):
     """Get account id from hive db."""
+    assert name, 'no account name specified'
     _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
-    assert _id, "invalid account `%s`" % name
+    assert _id, "account `%s` not found" % name
     return _id
 
 

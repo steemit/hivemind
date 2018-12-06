@@ -13,6 +13,7 @@ from hive.server.condenser_api.objects import (
     load_posts,
     load_posts_reblogs)
 from hive.server.condenser_api.common import (
+    ApiError,
     return_error_info,
     valid_account,
     valid_permlink,
@@ -123,7 +124,7 @@ async def get_state(path: str):
 
     elif part[0] == 'witnesses' or part[0] == '~witnesses':
         assert not part[1] and not part[2]
-        raise Exception("not implemented: /%s" % path)
+        raise ApiError("not implemented: /%s" % path)
 
     elif part[0] in CONDENSER_NOOP_URLS:
         assert not part[1] and not part[2]
@@ -147,7 +148,7 @@ async def _get_account_discussion_by_key(account, key):
         res = cursor.pids_by_feed_with_reblog(account, '', '', 20)
         posts = load_posts_reblogs(res)
     else:
-        raise Exception("unknown account discussion key %s" % key)
+        raise ApiError("unknown account discussion key %s" % key)
 
     return posts
 
@@ -157,8 +158,7 @@ def _normalize_path(path):
     if not path:
         path = 'trending'
     parts = path.split('/')
-    if len(parts) > 3:
-        raise Exception("invalid path %s" % path)
+    assert len(parts) < 4, 'too many parts in path'
     while len(parts) < 3:
         parts.append('')
     return (path, parts)

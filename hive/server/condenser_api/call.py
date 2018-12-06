@@ -1,8 +1,8 @@
 """Handles legacy `call` method."""
 
+from hive.server.condenser_api.common import ApiError
 from hive.server.condenser_api.get_state import get_state
 from hive.server.condenser_api.tags import get_trending_tags
-
 from hive.server.condenser_api.methods import (
     get_followers,
     get_following,
@@ -99,4 +99,4 @@ async def call(api, method, params):
     elif method == 'get_discussions_by_author_before_date':
         return await get_discussions_by_author_before_date(*_strict_list(params, 4))
 
-    raise Exception("unknown method: {}.{}({})".format(api, method, params))
+    raise ApiError("unknown method: %s.%s" % (api, method))

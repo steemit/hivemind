@@ -147,9 +147,8 @@ def _condenser_post_object(row, truncate_body=0):
 
 def _amount(amount, asset='SBD'):
     """Return a steem-style amount string given a (numeric, asset-str)."""
-    if asset == 'SBD':
-        return "%.3f SBD" % amount
-    raise Exception("unexpected %s" % asset)
+    assert asset == 'SBD', 'unhandled asset %s' % asset
+    return "%.3f SBD" % amount
 
 def _hydrate_active_votes(vote_csv):
     """Convert minimal CSV representation into steemd-style object."""

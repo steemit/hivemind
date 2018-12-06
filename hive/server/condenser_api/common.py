@@ -5,23 +5,28 @@ from functools import wraps
 
 from hive.db.methods import query_one, query_col
 
+class ApiError(Exception):
+    """API-specific errors: unimplemented/bad params. Pass back to client."""
+    pass
+
 def return_error_info(function):
     @wraps(function)
     async def wrapper(*args, **kwargs):
         try:
             return await function(*args, **kwargs)
-        except Exception as e:
+        except (ApiError, AssertionError) as e:
             return {
                 "error": {
                     "code": -32000,
                     "message": str(e) + " (hivemind-alpha)"}}
     return wrapper
 
-
 def valid_account(name, allow_empty=False):
     """Returns validated account name or throws Assert."""
     assert isinstance(name, str), "account must be string; received: %s" % name
-    if not (allow_empty and name == ''):
+    if name == '':
+        assert allow_empty, 'account must be specified'
+    else:
         assert len(name) >= 3 and len(name) <= 16, "invalid account: %s" % name
         assert re.match(r'^[a-z0-9-\.]+$', name), 'invalid account char'
     return name
