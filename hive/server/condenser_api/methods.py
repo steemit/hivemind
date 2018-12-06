@@ -9,6 +9,7 @@ from hive.server.condenser_api.common import (
     valid_account,
     valid_permlink,
     valid_tag,
+    valid_offset,
     valid_limit,
     get_post_id,
     get_child_ids)
@@ -183,7 +184,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
                                   truncate_body: int = 0):
     """Retrieve account's personalized feed."""
-    res = cursor.pids_by_feed_with_reblog(
+    res = cursor.pids_by_feed(
         valid_account(tag),
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
@@ -231,3 +232,61 @@ async def get_discussions_by_author_before_date(author: str, start_permlink: str
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100))
     return load_posts(ids)
+
+@return_error_info
+@nested_query_compat
+async def get_blog(account: str, start_index: int, limit: int = None):
+    """Get posts for an author's blog (w/ reblogs), paged by index/limit.
+
+    Equivalent to get_discussions_by_blog, but uses offset-based pagination.
+    """
+    return _get_blog(account, start_index, limit)
+
+@return_error_info
+@nested_query_compat
+async def get_blog_entries(account: str, start_index: int, limit: int = None):
+    """Get 'entries' for an author's blog (w/ reblogs), paged by index/limit.
+
+    Interface identical to get_blog, but returns minimalistic post references.
+    """
+
+    entries = _get_blog(account, start_index, limit)
+    for entry in entries:
+        # replace the comment body with just author/permlink
+        post = entry.pop('comment')
+        entry['author'] = post['author']
+        entry['permlink'] = post['permlink']
+
+    return entries
+
+def _get_blog(account: str, start_index: int, limit: int = None):
+    """Get posts for an author's blog (w/ reblogs), paged by index/limit.
+
+    Examples:
+    (acct, 2) = returns blog entries 0 up to 2 (3 oldest)
+    (acct, 0) = returns all blog entries (limit 0 means return all?)
+    (acct, 2, 1) = returns 1 post starting at idx 2
+    (acct, 2, 3) = returns 3 posts: idxs (2,1,0)
+    """
+
+    if not limit:
+        limit = start_index + 1
+
+    ids = cursor.pids_by_blog_by_index(
+        valid_account(account),
+        valid_offset(start_index),
+        valid_limit(limit, 500))
+
+    out = []
+
+    idx = int(start_index)
+    for post in load_posts(ids):
+        reblog = post['author'] != account
+        reblog_on = post['created'] if reblog else "1970-01-01T00"
+        out.append({"blog": account,
+                    "entry_id": idx,
+                    "comment": post,
+                    "reblog_on": reblog_on})
+        idx -= 1
+
+    return out

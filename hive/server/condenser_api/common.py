@@ -68,6 +68,14 @@ def valid_limit(limit, ubound=100):
     assert limit <= ubound, "limit exceeds max"
     return limit
 
+def valid_offset(offset, ubound=None):
+    """Given a user-provided offset, return a valid int, or raise."""
+    offset = int(offset)
+    assert offset >= 0, "offset cannot be negative"
+    if ubound is not None:
+        assert offset <= ubound, "offset too large"
+    return offset
+
 def get_post_id(author, permlink):
     """Given an author/permlink, retrieve the id from db."""
     sql = ("SELECT id FROM hive_posts WHERE author = :a "

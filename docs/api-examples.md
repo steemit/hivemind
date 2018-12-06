@@ -27,6 +27,11 @@ http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_con
 
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_state params:='{"path":"spam/@test-safari/34gfex-december-spam"}'
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_state params:='{"path":"trending"}'
+
+http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_discussions_by_author_before_date params:='["test-safari","","2128-03-20T20:27:30",10]'
+http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_blog params:='["test-safari", 5, 3]'
+http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_blog_entries params:='["test-safari", 5, 3]'
+
 ```
 
 
