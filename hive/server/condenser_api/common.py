@@ -10,8 +10,10 @@ class ApiError(Exception):
     pass
 
 def return_error_info(function):
+    """Async API method decorator which catches and formats exceptions."""
     @wraps(function)
     async def wrapper(*args, **kwargs):
+        """Catch ApiError and AssersionError (always due to user error)."""
         try:
             return await function(*args, **kwargs)
         except (ApiError, AssertionError) as e:
@@ -23,34 +25,40 @@ def return_error_info(function):
 
 def valid_account(name, allow_empty=False):
     """Returns validated account name or throws Assert."""
-    assert isinstance(name, str), "account must be string; received: %s" % name
-    if name == '':
+    if not name:
         assert allow_empty, 'account must be specified'
-    else:
-        assert len(name) >= 3 and len(name) <= 16, "invalid account: %s" % name
-        assert re.match(r'^[a-z0-9-\.]+$', name), 'invalid account char'
+        return ""
+    assert isinstance(name, str), "account must be string; received: %s" % name
+    assert len(name) >= 3 and len(name) <= 16, "invalid account: %s" % name
+    assert re.match(r'^[a-z0-9-\.]+$', name), 'invalid account char'
     return name
 
 def valid_permlink(permlink, allow_empty=False):
     """Returns validated permlink or throws Assert."""
-    assert isinstance(permlink, str), "permlink must be string: %s" % permlink
-    if not (allow_empty and permlink == ''):
-        assert permlink and len(permlink) <= 256, "invalid permlink"
+    if not permlink:
+        assert allow_empty, 'permlink cannot be blank'
+        return ""
+    assert isinstance(permlink, str), 'permlink must be string'
+    assert len(permlink) <= 256, "invalid permlink length"
     return permlink
 
 def valid_sort(sort, allow_empty=False):
     """Returns validated sort name or throws Assert."""
+    if not sort:
+        assert allow_empty, 'sort must be specified'
+        return ""
     assert isinstance(sort, str), 'sort must be a string'
-    if not (allow_empty and sort == ''):
-        valid_sorts = ['trending', 'promoted', 'hot', 'created']
-        assert sort in valid_sorts, 'invalid sort'
+    valid_sorts = ['trending', 'promoted', 'hot', 'created']
+    assert sort in valid_sorts, 'invalid sort'
     return sort
 
 def valid_tag(tag, allow_empty=False):
     """Returns validated tag or throws Assert."""
+    if not tag:
+        assert allow_empty, 'tag was blank'
+        return ""
     assert isinstance(tag, str), 'tag must be a string'
-    if not (allow_empty and tag == ''):
-        assert re.match('^[a-z0-9-]+$', tag), 'invalid tag'
+    assert re.match('^[a-z0-9-]+$', tag), 'invalid tag'
     return tag
 
 def valid_limit(limit, ubound=100):
