@@ -184,7 +184,7 @@ async def get_discussions_by_feed(tag: str, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
                                   truncate_body: int = 0):
     """Retrieve account's personalized feed."""
-    res = cursor.pids_by_feed(
+    res = cursor.pids_by_feed_with_reblog(
         valid_account(tag),
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),

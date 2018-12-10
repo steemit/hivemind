@@ -183,8 +183,8 @@ def pids_by_blog_without_reblog(account: str, start_permlink: str = '', limit: i
     return query_col(sql, account=account, limit=limit)
 
 
-def pids_by_feed(account: str, start_author: str = '',
-                 start_permlink: str = '', limit: int = 20):
+def pids_by_feed_with_reblog(account: str, start_author: str = '',
+                             start_permlink: str = '', limit: int = 20):
     """Get a list of [post_id, reblogged_by_str] for an account's feed."""
     account_id = _get_account_id(account)
 
