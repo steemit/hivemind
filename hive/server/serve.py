@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Hive JSON-RPC API server."""
 import os
+import sys
 import logging
 
 from datetime import datetime
@@ -65,6 +66,20 @@ def build_methods():
 
     return methods
 
+def truncate_response_log(logger):
+    """Overwrite jsonrpcserver resp logger to truncate output.
+
+    https://github.com/bcb/jsonrpcserver/issues/65 was one native
+    attempt but helps little for more complex response structs.
+
+    See also https://github.com/bcb/jsonrpcserver/issues/73.
+    """
+    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message).2048s')
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+
+    logger.propagate = False
+    logger.addHandler(handler)
 
 def run_server(conf):
     """Configure and launch the API server."""
@@ -73,6 +88,7 @@ def run_server(conf):
     config.debug = (log_level == logging.DEBUG)
     #config.debug = logging.getLogger().isEnabledFor(logging.DEBUG)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
+    truncate_response_log(logging.getLogger('jsonrpcserver.dispatcher.response'))
     #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
     log = logging.getLogger(__name__)
 
