@@ -100,6 +100,7 @@ def _condenser_post_object(row, truncate_body=0):
     post['json_metadata'] = row['json']
 
     post['created'] = _json_date(row['created_at'])
+    post['last_updated'] = _json_date(row['updated_at'])
     post['depth'] = row['depth']
     post['children'] = row['children']
     post['net_rshares'] = row['rshares']
