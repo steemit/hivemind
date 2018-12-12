@@ -1,6 +1,13 @@
 """Cursor-based pagination queries, mostly supporting condenser_api."""
 
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
 from hive.db.methods import query_one, query_col, query_row, query_all
+
+def last_month():
+    """Get the date 1 month ago."""
+    return datetime.now() + relativedelta(months=-1)
 
 def _get_post_id(author, permlink):
     """Get post_id from hive db."""
@@ -22,7 +29,7 @@ def get_followers(account: str, start: str, state: int, limit: int):
 
     sql = """
         SELECT name FROM hive_follows hf
-          JOIN hive_accounts ON hf.follower = id
+     LEFT JOIN hive_accounts ON hf.follower = id
          WHERE hf.following = :account_id
            AND state = :state %s
       ORDER BY name ASC
@@ -39,7 +46,7 @@ def get_following(account: str, start: str, state: int, limit: int):
 
     sql = """
         SELECT name FROM hive_follows hf
-          JOIN hive_accounts ON hf.following = id
+     LEFT JOIN hive_accounts ON hf.following = id
          WHERE hf.follower = :account_id
            AND state = :state %s
       ORDER BY name ASC
@@ -207,11 +214,12 @@ def pids_by_feed_with_reblog(account: str, start_author: str = '',
           JOIN hive_follows ON account_id = hive_follows.following AND state = 1
           JOIN hive_accounts ON hive_follows.following = hive_accounts.id
          WHERE hive_follows.follower = :account
+           AND hive_feed_cache.created_at > :cutoff
       GROUP BY post_id %s
       ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit
     """ % seek
 
-    return query_all(sql, account=account_id, limit=limit)
+    return query_all(sql, account=account_id, limit=limit, cutoff=last_month())
 
 
 def pids_by_account_comments(account: str, start_permlink: str = '', limit: int = 20):
