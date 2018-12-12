@@ -41,7 +41,7 @@ def load_posts(ids, truncate_body=0):
     sql = """
     SELECT post_id, author, permlink, title, body, promoted, payout, created_at,
            payout_at, is_paidout, rshares, raw_json, category, depth, json,
-           children, votes, author_rep,
+           children, votes, author_rep, updated_at,
 
            preview, img_url, is_nsfw
       FROM hive_posts_cache WHERE post_id IN :ids
