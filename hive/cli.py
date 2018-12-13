@@ -13,7 +13,7 @@ def run():
 
     conf = Conf.init_argparse()
     Db.set_shared_instance(conf.db())
-    mode = '/'.join(conf.get('mode'))
+    mode = conf.mode()
 
     if mode == 'server':
         from hive.server.serve import run_server
