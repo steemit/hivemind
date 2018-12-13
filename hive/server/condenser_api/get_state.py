@@ -5,25 +5,22 @@ import logging
 from collections import OrderedDict
 import ujson as json
 
-from hive.steem.client import SteemClient
 from hive.db.methods import query_one
 from hive.utils.normalize import legacy_amount
 
 from hive.server.condenser_api.objects import (
     load_accounts,
-    load_posts)
+    load_posts,
+    load_posts_reblogs)
 from hive.server.condenser_api.common import (
+    ApiError,
+    return_error_info,
     valid_account,
     valid_permlink,
     valid_sort,
     valid_tag,
     get_post_id,
     get_child_ids)
-from hive.server.condenser_api.methods import (
-    get_replies_by_last_update,
-    get_discussions_by_comments,
-    get_discussions_by_blog,
-    get_discussions_by_feed)
 from hive.server.condenser_api.tags import (
     get_trending_tags,
     get_top_trending_tags_summary)
@@ -31,8 +28,6 @@ from hive.server.condenser_api.tags import (
 import hive.server.condenser_api.cursor as cursor
 
 log = logging.getLogger(__name__)
-
-TMP_STEEM = SteemClient()
 
 # steemd account 'tabs' - specific post list queries
 ACCOUNT_TAB_KEYS = {
@@ -63,6 +58,7 @@ CONDENSER_NOOP_URLS = [
     'faq.html',
 ]
 
+@return_error_info
 async def get_state(path: str):
     """`get_state` reimplementation.
 
@@ -88,7 +84,9 @@ async def get_state(path: str):
         account = valid_account(part[0][1:])
         state['accounts'][account] = _load_account(account)
 
-        if part[1] in ACCOUNT_TAB_KEYS:
+        if not account:
+            state['error'] = 'account not found'
+        elif part[1] in ACCOUNT_TAB_KEYS:
             key = ACCOUNT_TAB_KEYS[part[1]]
             posts = await _get_account_discussion_by_key(account, key)
             state['content'] = _keyed_posts(posts)
@@ -103,8 +101,7 @@ async def get_state(path: str):
     elif part[1] and part[1][0] == '@':
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
-        post_id = get_post_id(author, permlink)
-        state['content'] = _load_posts_recursive([post_id]) if post_id else {}
+        state['content'] = _load_discussion(author, permlink)
         state['accounts'] = _load_content_accounts(state['content'])
 
     # ranked posts - `/sort/category`
@@ -126,7 +123,7 @@ async def get_state(path: str):
 
     elif part[0] == 'witnesses' or part[0] == '~witnesses':
         assert not part[1] and not part[2]
-        raise Exception("not implemented: /%s" % path)
+        raise ApiError("not implemented: /%s" % path)
 
     elif part[0] in CONDENSER_NOOP_URLS:
         assert not part[1] and not part[2]
@@ -141,15 +138,16 @@ async def _get_account_discussion_by_key(account, key):
     assert key, 'discussion key must be specified'
 
     if key == 'recent_replies':
-        posts = await get_replies_by_last_update(account, '', 20)
+        posts = load_posts(cursor.pids_by_replies_to_account(account, '', 20))
     elif key == 'comments':
-        posts = await get_discussions_by_comments(account, '', 20)
+        posts = load_posts(cursor.pids_by_account_comments(account, '', 20))
     elif key == 'blog':
-        posts = await get_discussions_by_blog(account, '', '', 20)
+        posts = load_posts(cursor.pids_by_blog(account, '', '', 20))
     elif key == 'feed':
-        posts = await get_discussions_by_feed(account, '', '', 20)
+        res = cursor.pids_by_feed_with_reblog(account, '', '', 20)
+        posts = load_posts_reblogs(res)
     else:
-        raise Exception("unknown account discussion key %s" % key)
+        raise ApiError("unknown account discussion key %s" % key)
 
     return posts
 
@@ -159,8 +157,7 @@ def _normalize_path(path):
     if not path:
         path = 'trending'
     parts = path.split('/')
-    if len(parts) > 3:
-        raise Exception("invalid path %s" % path)
+    assert len(parts) < 4, 'too many parts in path'
     while len(parts) < 3:
         parts.append('')
     return (path, parts)
@@ -183,29 +180,30 @@ def _load_content_accounts(content):
     return {a['name']: a for a in accounts}
 
 def _load_account(name):
-    #account = load_accounts([name])[0]
-    #for key in ['recent_replies', 'comments', 'feed', 'blog']:
-    #    account[key] = []
-    # need to audit all assumed condenser keys..
-    account = TMP_STEEM.get_accounts([name])[0]
+    account = load_accounts([name])[0]
+    for key in ACCOUNT_TAB_KEYS.values():
+        account[key] = []
     return account
 
 
-def _load_posts_recursive(post_ids):
-    """Recursively load a discussion thread."""
-    assert post_ids, 'no posts provided'
+def _load_discussion(author, permlink):
+    """Load a full discussion thread."""
+    post_id = get_post_id(author, permlink)
+    if not post_id:
+        return {}
 
-    out = {}
-    for post in load_posts(post_ids):
-        out[_ref(post)] = post
+    ret = []
+    queue = load_posts([post_id])
+    while queue:
+        parent = queue.pop()
 
-        child_ids = get_child_ids(post['post_id'])
-        if child_ids:
-            children = _load_posts_recursive(child_ids)
-            post['replies'] = list(children.keys())
-            out = {**out, **children}
+        children = load_posts(get_child_ids(parent['post_id']))
+        parent['replies'] = list(map(_ref, children))
 
-    return out
+        queue.extend(children)
+        ret.append(parent)
+
+    return {_ref(post): post for post in ret}
 
 def _get_feed_price():
     """Get a steemd-style ratio object representing feed price."""

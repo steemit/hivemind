@@ -2,8 +2,9 @@
 
 from aiocache import cached
 from hive.db.methods import query_col, query_all
-from hive.server.condenser_api.common import (valid_tag, valid_limit)
+from hive.server.condenser_api.common import (return_error_info, valid_tag, valid_limit)
 
+@return_error_info
 @cached(ttl=3600)
 async def get_top_trending_tags_summary():
     """Get top 50 trending tags among pending posts."""
@@ -19,6 +20,7 @@ async def get_top_trending_tags_summary():
     """
     return query_col(sql)
 
+@return_error_info
 @cached(ttl=3600)
 async def get_trending_tags(start_tag: str = '', limit: int = 250):
     """Get top 250 trending tags among pending posts, with stats."""

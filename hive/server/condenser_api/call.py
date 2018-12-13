@@ -1,8 +1,8 @@
 """Handles legacy `call` method."""
 
+from hive.server.condenser_api.common import ApiError
 from hive.server.condenser_api.get_state import get_state
 from hive.server.condenser_api.tags import get_trending_tags
-
 from hive.server.condenser_api.methods import (
     get_followers,
     get_following,
@@ -16,19 +16,28 @@ from hive.server.condenser_api.methods import (
     get_discussions_by_blog,
     get_discussions_by_feed,
     get_discussions_by_comments,
-    get_replies_by_last_update)
+    get_replies_by_last_update,
 
-def _strict_list(params, expected_len):
+    get_discussions_by_author_before_date,
+    get_blog,
+    get_blog_entries,
+)
+
+def _strict_list(params, expected_len, min_len = None):
     assert isinstance(params, list), "params not a list"
-    assert len(params) == expected_len, "expected %d params" % expected_len
+    if min_len is None:
+        assert len(params) == expected_len, "expected %d params" % expected_len
+    else:
+        assert (len(params) <= expected_len and
+                len(params) >= min_len), "expected %d params" % expected_len
     return params
 
 def _strict_query(params, ignore_key=None):
     query = _strict_list(params, 1)[0]
     assert isinstance(query, dict), "query must be dict"
 
-    optional_keys = set(['truncate_body'])
-    expected_keys = set(['start_author', 'start_permlink', 'limit', 'tag'])
+    optional_keys = set(['truncate_body', 'start_author', 'start_permlink'])
+    expected_keys = set(['limit', 'tag'])
     if ignore_key: # e.g. `tag` unused by get_discussion_by_comments
         expected_keys = expected_keys - set([ignore_key])
 
@@ -93,4 +102,12 @@ async def call(api, method, params):
     elif method == 'get_replies_by_last_update':
         return await get_replies_by_last_update(*_strict_list(params, 3))
 
-    raise Exception("unknown method: {}.{}({})".format(api, method, params))
+    # Exotic account discussion queries
+    elif method == 'get_discussions_by_author_before_date':
+        return await get_discussions_by_author_before_date(*_strict_list(params, 4))
+    elif method == 'get_blog':
+        return await get_blog(*_strict_list(params, 3, 2))
+    elif method == 'get_blog_entries':
+        return await get_blog_entries(*_strict_list(params, 3, 2))
+
+    raise ApiError("unknown method: %s.%s" % (api, method))

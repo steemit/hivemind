@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Hive JSON-RPC API server."""
 import os
+import sys
 import logging
 
 from datetime import datetime
@@ -55,12 +56,30 @@ def build_methods():
         condenser_api.get_discussions_by_feed,
         condenser_api.get_discussions_by_comments,
         condenser_api.get_replies_by_last_update,
+
+        condenser_api.get_discussions_by_author_before_date,
+        condenser_api.get_blog,
+        condenser_api.get_blog_entries,
     )]
 
     methods.add(condenser_api_call)
 
     return methods
 
+def truncate_response_log(logger):
+    """Overwrite jsonrpcserver resp logger to truncate output.
+
+    https://github.com/bcb/jsonrpcserver/issues/65 was one native
+    attempt but helps little for more complex response structs.
+
+    See also https://github.com/bcb/jsonrpcserver/issues/73.
+    """
+    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message).2048s')
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+
+    logger.propagate = False
+    logger.addHandler(handler)
 
 def run_server(conf):
     """Configure and launch the API server."""
@@ -69,6 +88,8 @@ def run_server(conf):
     config.debug = (log_level == logging.DEBUG)
     #config.debug = logging.getLogger().isEnabledFor(logging.DEBUG)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
+    truncate_response_log(logging.getLogger('jsonrpcserver.dispatcher.response'))
+    #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
     log = logging.getLogger(__name__)
 
     methods = build_methods()
@@ -150,7 +171,8 @@ def run_server(conf):
     async def jsonrpc_handler(request):
         """Handles all hive jsonrpc API requests."""
         request = await request.text()
-        response = await methods.dispatch(request)
+        # debug=True refs https://github.com/bcb/jsonrpcserver/issues/71
+        response = await methods.dispatch(request, debug=True)
         headers = {'Access-Control-Allow-Origin': '*'}
         return web.json_response(response, status=200, headers=headers)
 

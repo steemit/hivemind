@@ -6,6 +6,7 @@ import configargparse
 from hive.steem.client import SteemClient
 from hive.db.adapter import Db
 from hive.utils.normalize import strtobool, int_log_level
+from hive.utils.stats import Stats
 
 class Conf():
     """ Manages sync/server configuration via args, ENVs, and hive.conf. """
@@ -52,6 +53,10 @@ class Conf():
         root.info("loaded configuration:\n%s",
                   parser.format_values())
 
+        # for API server, dump SQL report often
+        if conf.mode() == 'server':
+            Stats.PRINT_THRESH_MINS = 1
+
         return conf
 
     @classmethod
@@ -91,6 +96,15 @@ class Conf():
         """Reads a single property, e.g. `database_url`."""
         assert self._args, "run init_argparse()"
         return self._args[param]
+
+    def mode(self):
+        """Get the CLI runmode.
+
+        - `server`: API server
+        - `sync`: db sync process
+        - `status`: status info dump
+        """
+        return '/'.join(self.get('mode'))
 
     def log_level(self):
         """Get `logger`s internal int level from config string."""
