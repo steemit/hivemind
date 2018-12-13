@@ -101,8 +101,7 @@ async def get_state(path: str):
     elif part[1] and part[1][0] == '@':
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
-        post_id = get_post_id(author, permlink)
-        state['content'] = _load_posts_recursive([post_id]) if post_id else {}
+        state['content'] = _load_discussion(author, permlink)
         state['accounts'] = _load_content_accounts(state['content'])
 
     # ranked posts - `/sort/category`
@@ -184,27 +183,27 @@ def _load_account(name):
     account = load_accounts([name])[0]
     for key in ACCOUNT_TAB_KEYS.values():
         account[key] = []
-    # need to audit all assumed condenser keys..
     return account
 
 
-def _load_posts_recursive(post_ids):
-    """Recursively load a discussion thread."""
-    assert post_ids, 'no posts provided'
+def _load_discussion(author, permlink):
+    """Load a full discussion thread."""
+    post_id = get_post_id(author, permlink)
+    if not post_id:
+        return {}
 
-    out = {}
-    for post in load_posts(post_ids):
-        out[_ref(post)] = post
+    ret = []
+    queue = load_posts([post_id])
+    while queue:
+        parent = queue.pop()
 
-        child_ids = get_child_ids(post['post_id'])
-        if child_ids:
-            # TODO: rename `children` to `descendants`
-            children = _load_posts_recursive(child_ids)
-            post['replies'] = [k for k, v in children.items()
-                               if v['post_id'] in child_ids]
-            out = {**out, **children}
+        children = load_posts(get_child_ids(parent['post_id']))
+        parent['replies'] = list(map(_ref, children))
 
-    return out
+        queue.extend(children)
+        ret.append(parent)
+
+    return {_ref(post): post for post in ret}
 
 def _get_feed_price():
     """Get a steemd-style ratio object representing feed price."""
