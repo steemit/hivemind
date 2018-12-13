@@ -92,6 +92,8 @@ class DbState:
             'hive_posts_cache_ix6b', # (post_id, sc_trend, paidout=0)
             'hive_posts_cache_ix7b', # (post_id, sc_hot, paidout=0)
             'hive_accounts_ix3', # (vote_weight, name VPO)
+            'hive_accounts_ix4', # (id, name)
+            'hive_accounts_ix5', # (cached_at, name)
         ]
 
         to_return = []
@@ -225,6 +227,13 @@ class DbState:
                       USING btree (post_id, sc_hot) WHERE is_paidout = '0';"""
             cls.db().query(sql)
             cls._set_ver(7)
+
+        if cls._ver == 7:
+            sql = "CREATE INDEX hive_accounts_ix4 ON hive_accounts (id, name)"
+            cls.db().query(sql)
+            sql = "CREATE INDEX hive_accounts_ix5 ON hive_accounts (cached_at, name)"
+            cls.db().query(sql)
+            cls._set_ver(8)
 
         assert cls._ver == DB_VERSION, "migration missing or invalid DB_VERSION"
         # Example migration:

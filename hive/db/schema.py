@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines
 
-DB_VERSION = 7
+DB_VERSION = 8
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -64,6 +64,8 @@ def build_metadata():
         sa.Index('hive_accounts_ix1', 'vote_weight', 'id'), # core: quick ranks
         sa.Index('hive_accounts_ix2', 'name', 'id'), # core: quick id map
         sa.Index('hive_accounts_ix3', 'vote_weight', 'name', postgresql_ops=dict(name='varchar_pattern_ops')), # API: lookup
+        sa.Index('hive_accounts_ix4', 'id', 'name'), # API: quick filter/sort
+        sa.Index('hive_accounts_ix5', 'cached_at', 'name'), # core/listen sweep
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
