@@ -89,6 +89,8 @@ class DbState:
             'hive_reblogs_ix1', # (post_id, account, created_at)
             'hive_posts_cache_ix6', # (sc_trend, post_id)
             'hive_posts_cache_ix7', # (sc_hot, post_id)
+            'hive_posts_cache_ix6b', # (post_id, sc_trend, paidout=0)
+            'hive_posts_cache_ix7b', # (post_id, sc_hot, paidout=0)
             'hive_accounts_ix3', # (vote_weight, name VPO)
         ]
 
@@ -214,6 +216,15 @@ class DbState:
             Accounts.register(names, '1970-01-01T00:00:00')
             Accounts.clear_ids()
             cls._set_ver(6)
+
+        if cls._ver == 6:
+            sql = """CREATE INDEX hive_posts_cache_ix6b ON hive_posts_cache
+                      USING btree (post_id, sc_trend) WHERE is_paidout = '0';"""
+            cls.db().query(sql)
+            sql = """CREATE INDEX hive_posts_cache_ix7b ON hive_posts_cache
+                      USING btree (post_id, sc_hot) WHERE is_paidout = '0';"""
+            cls.db().query(sql)
+            cls._set_ver(7)
 
         assert cls._ver == DB_VERSION, "migration missing or invalid DB_VERSION"
         # Example migration:

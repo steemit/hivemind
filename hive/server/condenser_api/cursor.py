@@ -75,8 +75,10 @@ def pids_by_query(sort, start_author, start_permlink, limit, tag):
     where = []
     if sort == 'trending':
         col = 'sc_trend'
+        where.append("is_paidout = '0'")
     elif sort == 'hot':
         col = 'sc_hot'
+        where.append("is_paidout = '0'")
     elif sort == 'created':
         col = 'post_id'
         where.append('depth = 0')

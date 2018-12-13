@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines
 
-DB_VERSION = 6
+DB_VERSION = 7
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -121,9 +121,9 @@ def build_metadata():
         sa.Column('created_at', sa.DateTime, nullable=False),
 
         sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'), # core
-        sa.Index('hive_follows_ix2', 'following', 'follower', postgresql_where=sql_text("state = 1")), # API
-        sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where=sql_text("state = 1")), # API
-        sa.Index('hive_follows_ix4', 'follower', 'following', postgresql_where=sql_text("state = 2")), # API
+        sa.Index('hive_follows_ix2', 'following', 'follower', postgresql_where=sql_text("state = 1")), # API: get account followers
+        sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where=sql_text("state = 1")), # API: get account following
+        sa.Index('hive_follows_ix4', 'follower', 'following', postgresql_where=sql_text("state = 2")), # API: get account mutes
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
@@ -281,8 +281,10 @@ def build_metadata():
 
         sa.Index('hive_posts_cache_ix2', 'promoted', postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")), # API
         sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # core
-        sa.Index('hive_posts_cache_ix6', 'sc_trend', 'post_id'), # API
-        sa.Index('hive_posts_cache_ix7', 'sc_hot', 'post_id'), # API
+        sa.Index('hive_posts_cache_ix6', 'sc_trend', 'post_id'), # API: global trending
+        sa.Index('hive_posts_cache_ix7', 'sc_hot', 'post_id'), # API: global hot
+        sa.Index('hive_posts_cache_ix6b', 'post_id', 'sc_trend', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered trending
+        sa.Index('hive_posts_cache_ix7b', 'post_id', 'sc_hot', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered hot
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
