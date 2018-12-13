@@ -235,6 +235,11 @@ class DbState:
             cls.db().query(sql)
             cls._set_ver(8)
 
+        if cls._ver == 8:
+            from hive.indexer.follow import Follow
+            Follow.force_recount()
+            cls._set_ver(9)
+
         assert cls._ver == DB_VERSION, "migration missing or invalid DB_VERSION"
         # Example migration:
         #if cls._ver == 1:
