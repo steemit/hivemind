@@ -163,10 +163,12 @@ class Follow:
         sql = """
             CREATE TEMPORARY TABLE following_counts AS (
                 SELECT follower account_id, COUNT(*) num
-                FROM hive_follows GROUP BY follower);
+                FROM hive_follows WHERE state = 1
+                GROUP BY follower);
             CREATE TEMPORARY TABLE follower_counts AS (
                 SELECT following account_id, COUNT(*) num
-                FROM hive_follows GROUP BY following);
+                FROM hive_follows WHERE state = 1
+                GROUP BY following);
         """
         DB.query(sql)
 
