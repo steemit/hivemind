@@ -1,6 +1,9 @@
 """Handles legacy `call` method."""
 
-from hive.server.condenser_api.common import ApiError
+from hive.server.condenser_api.common import (
+    ApiError,
+    return_error_info,
+)
 from hive.server.condenser_api.get_state import get_state
 from hive.server.condenser_api.tags import get_trending_tags
 from hive.server.condenser_api.methods import (
@@ -23,7 +26,7 @@ from hive.server.condenser_api.methods import (
     get_blog_entries,
 )
 
-def _strict_list(params, expected_len, min_len = None):
+def _strict_list(params, expected_len, min_len=None):
     assert isinstance(params, list), "params not a list"
     if min_len is None:
         assert len(params) == expected_len, "expected %d params" % expected_len
@@ -49,6 +52,7 @@ def _strict_query(params, ignore_key=None):
 
     return query
 
+@return_error_info
 async def call(api, method, params):
     """Routes legacy-style `call` method requests.
 
