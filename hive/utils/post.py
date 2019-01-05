@@ -5,10 +5,10 @@ import math
 import ujson as json
 from funcy.seqs import first
 
-from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time, utc_timestamp
+from hive.utils.normalize import debt_amount, rep_log10, safe_img_url, parse_time, utc_timestamp
 
 
-def post_basic(post):
+def post_basic(post, chain='mainnet'):
     """Basic post normalization: json-md, tags, and flags."""
     md = {}
     try:
@@ -45,7 +45,7 @@ def post_basic(post):
 
     # payout is declined if max_payout = 0, or if 100% is burned
     is_payout_declined = False
-    if sbd_amount(post['max_accepted_payout']) == 0:
+    if chain == 'mainnet' and debt_amount(post['max_accepted_payout'], chain) == 0:
         is_payout_declined = True
     elif len(post['beneficiaries']) == 1:
         benny = first(post['beneficiaries'])
@@ -81,13 +81,13 @@ def post_legacy(post):
                'allow_curation_rewards', 'beneficiaries']
     return {k: v for k, v in post.items() if k in _legacy}
 
-def post_payout(post):
+def post_payout(post, chain='mainnet'):
     """Get current vote/payout data and recalculate trend/hot score."""
     # total payout (completed and/or pending)
     payout = sum([
-        sbd_amount(post['total_payout_value']),
-        sbd_amount(post['curator_payout_value']),
-        sbd_amount(post['pending_payout_value']),
+        debt_amount(post['total_payout_value'], chain),
+        debt_amount(post['curator_payout_value'], chain),
+        debt_amount(post['pending_payout_value'], chain),
     ])
 
     # `active_votes` was temporarily missing in dev -- ensure this condition
@@ -126,7 +126,7 @@ def _score(rshares, created_timestamp, timescale=480000):
     sign = 1 if mod_score > 0 else -1
     return sign * order + created_timestamp / timescale
 
-def post_stats(post):
+def post_stats(post, chain='mainnet'):
     """Get post statistics and derived properties.
 
     Source: contentStats - https://github.com/steemit/condenser/blob/master/src/app/utils/StateFunctions.js#L109
@@ -159,7 +159,7 @@ def post_stats(post):
 
     author_rep = rep_log10(post['author_reputation'])
     is_low_value = net_rshares_adj < -9999999999
-    has_pending_payout = sbd_amount(post['pending_payout_value']) >= 0.02
+    has_pending_payout = debt_amount(post['pending_payout_value'], chain) >= 0.02
 
     return {
         'hide': not has_pending_payout and (author_rep < 0),

@@ -8,8 +8,8 @@ from hive.utils.normalize import (
     block_num,
     block_date,
     vests_amount,
-    steem_amount,
-    sbd_amount,
+    base_amount,
+    debt_amount,
     parse_amount,
     amount,
     legacy_amount,
@@ -41,17 +41,31 @@ def test_vests_amount():
     assert vests_amount('4.549292 VESTS') == Decimal('4.549292')
 
 def test_steem_amount():
-    assert steem_amount('1.234567 STEEM') == Decimal('1.234567')
+    assert base_amount('1.234567 STEEM', 'mainnet') == Decimal('1.234567')
+
+def test_tests_amount():
+    assert base_amount('1.234567 TESTS', 'testnet') == Decimal('1.234567')
 
 def test_sbd_amount():
-    assert sbd_amount('1.001 SBD') == Decimal('1.001')
+    assert debt_amount('1.001 SBD', 'mainnet') == Decimal('1.001')
+
+def test_tbs_amount():
+    assert debt_amount('1.001 TBD', 'testnet') == Decimal('1.001')
 
 def test_parse_amount():
     nai = [1231121, 6, '@@000000037']
     assert parse_amount(nai, 'VESTS') == Decimal('1.231121')
 
+def test_parse_mainnet_amount():
+    nai = [1231121, 6, '@@000000037']
+    assert parse_amount(nai, 'VESTS', 'mainnet') == Decimal('1.231121')
+
+def test_parse_testnet_amount():
+    nai = [1231121, 6, '@@000000037']
+    assert parse_amount(nai, 'VESTS', 'testnet') == Decimal('1.231121')
+
 def test_amount():
-    assert amount('3.432 FOO') == Decimal('3.432')
+    assert amount('3.432 FOO', 'mainnet') == Decimal('3.432')
 
 def test_legacy_amount():
     nai = [1231121, 6, '@@000000037']

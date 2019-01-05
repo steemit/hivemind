@@ -4,7 +4,7 @@ from time import perf_counter as perf
 from decimal import Decimal
 
 from hive.utils.stats import Stats
-from hive.utils.normalize import parse_amount, steem_amount, vests_amount
+from hive.utils.normalize import parse_amount, base_amount, vests_amount
 from hive.steem.http_client import HttpClient
 from hive.steem.block.stream import BlockStream
 
@@ -64,6 +64,11 @@ class SteemClient:
         assert 'time' in ret, "gdgp invalid resp: %s" % ret
         return ret
 
+    def _gconfig(self):
+        ret = self.__exec('get_config')
+        assert 'IS_TEST_NET' in ret, "get_config invalid resp: %s" % ret
+        return ret
+
     def head_time(self):
         """Get timestamp of head block"""
         return self._gdgp()['time']
@@ -76,7 +81,12 @@ class SteemClient:
         """Get last irreversible block"""
         return self._gdgp()['last_irreversible_block_num']
 
+    def is_testnet(self):
+        """Get last irreversible block"""
+        return self._gconfig()['IS_TEST_NET']
+
     def gdgp_extended(self):
+        chain = 'testnet' if self.is_testnet() else 'mainnet'
         """Get dynamic global props without the cruft plus useful bits."""
         dgpo = self._gdgp()
 
@@ -87,31 +97,48 @@ class SteemClient:
         for key in unused:
             del dgpo[key]
 
-        return {
-            'dgpo': dgpo,
-            'usd_per_steem': self._get_feed_price(),
-            'sbd_per_steem': self._get_steem_price(),
-            'steem_per_mvest': SteemClient._get_steem_per_mvest(dgpo)}
+        if chain == 'mainnet':
+            return {
+                'dgpo': dgpo,
+                'usd_per_steem': self._get_feed_price(chain),
+                'sbd_per_steem': self._get_base_price(),
+                'steem_per_mvest': SteemClient._get_base_per_mvest(dgpo, chain)}
+        elif chain == 'testnet':
+            return {
+                'dgpo': dgpo,
+                'usd_per_steem': self._get_feed_price(chain),
+                'tbd_per_steem': self._get_base_price(),
+                'tests_per_mvest': SteemClient._get_base_per_mvest(dgpo, chain)}
 
     @staticmethod
-    def _get_steem_per_mvest(dgpo):
-        steem = steem_amount(dgpo['total_vesting_fund_steem'])
+    def _get_base_per_mvest(dgpo, chain):
+        base = base_amount(dgpo['total_vesting_fund_steem'], chain)
         mvests = vests_amount(dgpo['total_vesting_shares']) / Decimal(1e6)
-        return "%.6f" % (steem / mvests)
+        return "%.6f" % (base / mvests)
 
-    def _get_feed_price(self):
+    def _get_feed_price(self, chain):
         # TODO: add latest feed price: get_feed_history.price_history[0]
         feed = self.__exec('get_feed_history')['current_median_history']
-        units = dict([parse_amount(feed[k])[::-1] for k in ['base', 'quote']])
-        price = units['SBD'] / units['STEEM']
+        units = dict([parse_amount(feed[k], None, chain)[::-1] for k in ['base', 'quote']])
+        price = None
+        if chain == 'mainnet':
+            price = units['SBD'] / units['STEEM']
+        elif chain == 'testnet':
+            if not units.get('TBD', None):
+                return '0.000'
+            
+            price = units['TBD'] / units['TESTS']
         return "%.6f" % price
 
-    def _get_steem_price(self):
+    def _get_base_price(self):
         orders = self.__exec('get_order_book', [1])
-        ask = Decimal(orders['asks'][0]['real_price'])
-        bid = Decimal(orders['bids'][0]['real_price'])
-        price = (ask + bid) / 2
-        return "%.6f" % price
+        if len(orders['asks']) == 0 :
+            return '0.000'
+        else:
+            ask = Decimal(orders['asks'][0]['real_price'])
+            bid = Decimal(orders['bids'][0]['real_price'])
+            price = (ask + bid) / 2
+            return "%.6f" % price
 
     def get_blocks_range(self, lbound, ubound):
         """Retrieves blocks in the range of [lbound, ubound)."""
