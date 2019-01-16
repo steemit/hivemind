@@ -283,6 +283,37 @@ async def get_discussions_by_author_before_date(author: str = None, start_permli
         valid_limit(limit, 100))
     return load_posts(ids)
 
+
+@return_error_info
+@nested_query_compat
+async def get_post_discussions_by_payout(start_author: str = '', start_permlink: str = '',
+                                         limit: int = 20, tag: str = None,
+                                         truncate_body: int = 0):
+    """Query top-level posts, sorted by payout."""
+    ids = cursor.pids_by_query(
+        'payout',
+        valid_account(start_author, allow_empty=True),
+        valid_permlink(start_permlink, allow_empty=True),
+        valid_limit(limit, 100),
+        valid_tag(tag, allow_empty=True))
+    return load_posts(ids, truncate_body=truncate_body)
+
+
+@return_error_info
+@nested_query_compat
+async def get_comment_discussions_by_payout(start_author: str = '', start_permlink: str = '',
+                                            limit: int = 20, tag: str = None,
+                                            truncate_body: int = 0):
+    """Query comments, sorted by payout."""
+    ids = cursor.pids_by_query(
+        'payout_comments',
+        valid_account(start_author, allow_empty=True),
+        valid_permlink(start_permlink, allow_empty=True),
+        valid_limit(limit, 100),
+        valid_tag(tag, allow_empty=True))
+    return load_posts(ids, truncate_body=truncate_body)
+
+
 @return_error_info
 @nested_query_compat
 async def get_blog(account: str, start_entry_id: int = 0, limit: int = None):

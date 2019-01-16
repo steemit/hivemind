@@ -58,6 +58,8 @@ def build_methods():
         condenser_api.get_replies_by_last_update,
 
         condenser_api.get_discussions_by_author_before_date,
+        condenser_api.get_post_discussions_by_payout,
+        condenser_api.get_comment_discussions_by_payout,
         condenser_api.get_blog,
         condenser_api.get_blog_entries,
         condenser_api.get_account_reputations,

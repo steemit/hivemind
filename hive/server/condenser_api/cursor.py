@@ -94,30 +94,43 @@ def get_account_reputations(account_lower_bound, limit):
 def pids_by_query(sort, start_author, start_permlink, limit, tag):
     """Get a list of post_ids for a given posts query.
 
-    `sort` can be trending, hot, new, promoted.
+    `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
-    assert sort in ['trending', 'hot', 'created', 'promoted']
+    assert sort in ['trending', 'hot', 'created', 'promoted',
+                    'payout', 'payout_comments']
 
-    col = ''
+    table = 'hive_posts_cache'
+    field = ''
     where = []
+
     if sort == 'trending':
-        col = 'sc_trend'
+        field = 'sc_trend'
+        where.append("is_paidout = '0'")
     elif sort == 'hot':
-        col = 'sc_hot'
+        field = 'sc_hot'
+        where.append("is_paidout = '0'")
     elif sort == 'created':
-        col = 'post_id'
+        field = 'post_id'
         where.append('depth = 0')
     elif sort == 'promoted':
-        col = 'promoted'
+        field = 'promoted'
         where.append("is_paidout = '0'")
         where.append('promoted > 0')
+    elif sort == 'payout':
+        field = 'payout'
+        where.append("is_paidout = '0'")
+        where.append('depth = 0')
+    elif sort == 'payout_comments':
+        field = 'payout'
+        where.append("is_paidout = '0'")
+        where.append('depth > 0')
 
     if tag:
-        tagged_pids = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
-        where.append("post_id IN (%s)" % tagged_pids)
-
-    def _where(conditions):
-        return 'WHERE ' + ' AND '.join(conditions) if conditions else ''
+        if sort in ['payout', 'payout_comments']:
+            where.append('category = :tag')
+        else:
+            sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
+            where.append("post_id IN (%s)" % sql)
 
     start_id = None
     if start_permlink:
@@ -125,12 +138,11 @@ def pids_by_query(sort, start_author, start_permlink, limit, tag):
         if not start_id:
             return []
 
-        sql = ("SELECT %s FROM hive_posts_cache %s ORDER BY %s DESC LIMIT 1"
-               % (col, _where([*where, "post_id = :start_id"]), col))
-        where.append("%s <= (%s)" % (col, sql))
+        sql = "%s <= (SELECT %s FROM %s WHERE post_id = :start_id)"
+        where.append(sql % (field, field, table))
 
-    sql = ("SELECT post_id FROM hive_posts_cache %s ORDER BY %s DESC LIMIT :limit"
-           % (_where(where), col))
+    sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
+           % (table, ' AND '.join(where), field))
 
     return query_col(sql, tag=tag, start_id=start_id, limit=limit)
 
