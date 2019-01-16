@@ -1,12 +1,18 @@
 """Conf handles reading run-time config and app-level settings."""
 
+import re
 import logging
 import configargparse
 
 from hive.steem.client import SteemClient
 from hive.db.adapter import Db
 from hive.utils.normalize import strtobool, int_log_level
-from hive.utils.stats import Stats
+from hive.utils.stats import DbStats
+
+def _sanitized_conf(parser):
+    """Formats parser config, redacting database url password."""
+    out = parser.format_values()
+    return re.sub(r'(?<=:)\w+(?=@)', '<redacted>', out)
 
 class Conf():
     """ Manages sync/server configuration via args, ENVs, and hive.conf. """
@@ -51,11 +57,10 @@ class Conf():
         root = logging.getLogger()
         root.setLevel(conf.log_level())
         root.info("loaded configuration:\n%s",
-                  parser.format_values())
+                  _sanitized_conf(parser))
 
-        # for API server, dump SQL report often
         if conf.mode() == 'server':
-            Stats.PRINT_THRESH_MINS = 1
+            DbStats.SLOW_QUERY_MS = 750
 
         return conf
 
