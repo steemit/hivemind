@@ -172,6 +172,7 @@ def pids_by_blog(account: str, start_author: str = '',
     account_id = _get_account_id(account)
 
     seek = ''
+    start_id = None
     if start_permlink:
         start_id = _get_post_id(start_author, start_permlink)
         if not start_id:
@@ -182,8 +183,8 @@ def pids_by_blog(account: str, start_author: str = '',
             SELECT created_at
               FROM hive_feed_cache
              WHERE account_id = :account_id
-               AND post_id = %d)
-        """ % start_id
+               AND post_id = :start_id)
+        """
 
     sql = """
         SELECT post_id
@@ -193,7 +194,7 @@ def pids_by_blog(account: str, start_author: str = '',
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account_id=account_id, limit=limit)
+    return query_col(sql, account_id=account_id, start_id=start_id, limit=limit)
 
 
 def pids_by_blog_by_index(account: str, start_index: int, limit: int = 20):
@@ -237,11 +238,12 @@ def pids_by_blog_without_reblog(account: str, start_permlink: str = '', limit: i
     """Get a list of post_ids for an author's blog without reblogs."""
 
     seek = ''
+    start_id = None
     if start_permlink:
         start_id = _get_post_id(account, start_permlink)
         if not start_id:
             return []
-        seek = "AND id <= %d" % start_id
+        seek = "AND id <= :start_id"
 
     sql = """
         SELECT id
@@ -253,7 +255,7 @@ def pids_by_blog_without_reblog(account: str, start_permlink: str = '', limit: i
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account=account, limit=limit)
+    return query_col(sql, account=account, start_id=start_id, limit=limit)
 
 
 def pids_by_feed_with_reblog(account: str, start_author: str = '',
@@ -262,6 +264,7 @@ def pids_by_feed_with_reblog(account: str, start_author: str = '',
     account_id = _get_account_id(account)
 
     seek = ''
+    start_id = None
     if start_permlink:
         start_id = _get_post_id(start_author, start_permlink)
         if not start_id:
@@ -269,10 +272,10 @@ def pids_by_feed_with_reblog(account: str, start_author: str = '',
 
         seek = """
           HAVING MIN(hive_feed_cache.created_at) <= (
-            SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = %d
+            SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = :start_id
                AND account_id IN (SELECT following FROM hive_follows
                                   WHERE follower = :account AND state = 1))
-        """ % start_id
+        """
 
     sql = """
         SELECT post_id, string_agg(name, ',') accounts
@@ -285,31 +288,30 @@ def pids_by_feed_with_reblog(account: str, start_author: str = '',
       ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit
     """ % seek
 
-    return query_all(sql, account=account_id, limit=limit, cutoff=last_month())
+    return query_all(sql, account=account_id, start_id=start_id, limit=limit, cutoff=last_month())
 
 
 def pids_by_account_comments(account: str, start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids representing comments by an author."""
     seek = ''
+    start_id = None
     if start_permlink:
         start_id = _get_post_id(account, start_permlink)
         if not start_id:
             return []
 
-        seek = """
-          AND created_at <= (SELECT created_at FROM hive_posts WHERE id = %d)
-        """ % start_id
+        seek = "AND id <= :start_id"
 
     sql = """
         SELECT id FROM hive_posts
          WHERE author = :account %s
            AND depth > 0
            AND is_deleted = '0'
-      ORDER BY created_at DESC
+      ORDER BY id DESC
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account=account, limit=limit)
+    return query_col(sql, account=account, start_id=start_id, limit=limit)
 
 
 def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limit: int = 20):
@@ -320,10 +322,11 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
     last loaded reply's author/permlink.
     """
     seek = ''
+    start_id = None
     if start_permlink:
         sql = """
           SELECT parent.author,
-                 child.created_at
+                 child.id
             FROM hive_posts child
             JOIN hive_posts parent
               ON child.parent_id = parent.id
@@ -336,16 +339,19 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
             return []
 
         parent_account = row[0]
-        seek = "AND created_at <= '%s'" % row[1]
+        start_id = row[1]
+        seek = "AND id <= :start_id"
     else:
         parent_account = start_author
 
     sql = """
        SELECT id FROM hive_posts
-        WHERE parent_id IN (SELECT id FROM hive_posts WHERE author = :parent) %s
+        WHERE parent_id IN (SELECT id FROM hive_posts
+                             WHERE author = :parent
+                               AND is_deleted = '0') %s
           AND is_deleted = '0'
-     ORDER BY created_at DESC
+     ORDER BY id DESC
         LIMIT :limit
     """ % seek
 
-    return query_col(sql, parent=parent_account, limit=limit)
+    return query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
