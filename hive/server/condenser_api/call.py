@@ -36,14 +36,30 @@ def _strict_list(params, expected_len, min_len=None):
                 len(params) >= min_len), "expected %d params" % expected_len
     return params
 
-def _strict_query(params, ignore_key=None):
+def _strict_query(params):
     query = _strict_list(params, 1)[0]
     assert isinstance(query, dict), "query must be dict"
 
-    optional_keys = set(['truncate_body', 'start_author', 'start_permlink'])
-    expected_keys = set(['limit', 'tag'])
-    if ignore_key: # e.g. `tag` unused by get_discussion_by_comments
-        expected_keys = expected_keys - set([ignore_key])
+    # remove optional-yet-blank param keys -- some clients include every key
+    # possible, and steemd seems to ignore them silently. need to strip
+    # them here, if blank, to avoid argument mismatch errors.
+    all_keys = ['filter_tags', 'select_tags', 'select_authors', 'author',
+                'start_author', 'start_permlink', 'start_tag', 'parent_author',
+                'parent_permlink', 'start_parent_author', 'before_date', 'tag']
+    for key in all_keys:
+        if key in query and not query[key]:
+            del query[key]
+
+    # unsupported but seen in the wild
+    assert not 'filter_tags' in query, 'filter_tags not supported'
+    assert not 'select_tags' in query, 'select_tags not supported'
+
+    # unsupported but seen in the wild (blank or matching `tag`; noop)
+    if 'select_authors' in query:
+        del query['select_authors']
+
+    optional_keys = set(['truncate_body', 'start_author', 'start_permlink', 'tag'])
+    expected_keys = set(['limit'])
 
     provided_keys = query.keys()
     missing = expected_keys - provided_keys
@@ -103,7 +119,7 @@ async def call(api, method, params):
     elif method == 'get_discussions_by_feed':
         return await get_discussions_by_feed(**_strict_query(params))
     elif method == 'get_discussions_by_comments':
-        return await get_discussions_by_comments(**_strict_query(params, 'tag'))
+        return await get_discussions_by_comments(**_strict_query(params))
     elif method == 'get_replies_by_last_update':
         return await get_replies_by_last_update(*_strict_list(params, 3))
 
