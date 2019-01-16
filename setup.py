@@ -4,7 +4,7 @@ import sys
 from setuptools import find_packages
 from setuptools import setup
 
-assert sys.version_info[0] == 3 and sys.version_info[1] >= 5, "hive requires Python 3.5 or newer"
+assert sys.version_info[0] == 3 and sys.version_info[1] >= 6, "hive requires Python 3.6 or newer"
 
 tests_require = [
     'pytest',
@@ -27,8 +27,8 @@ setup(
     setup_requires=['pytest-runner'],
     tests_require=tests_require,
     install_requires=[
-        'aiopg',
-        'jsonrpcserver==3.5.6',
+        'aiopg @ https://github.com/aio-libs/aiopg/tarball/862fff97e4ae465333451a4af2a838bfaa3dd0bc',
+        'jsonrpcserver==4.0.1',
         'aiohttp',
         'certifi',
         'sqlalchemy',

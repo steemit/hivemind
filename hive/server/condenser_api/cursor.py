@@ -4,29 +4,28 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 from hive.utils.normalize import rep_to_raw
-from hive.db.methods import query_one, query_col, query_row, query_all
 
 def last_month():
     """Get the date 1 month ago."""
     return datetime.now() + relativedelta(months=-1)
 
-def _get_post_id(author, permlink):
+async def _get_post_id(db, author, permlink):
     """Get post_id from hive db."""
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    return query_one(sql, a=author, p=permlink)
+    return await db.query_one(sql, a=author, p=permlink)
 
-def _get_account_id(name):
+async def _get_account_id(db, name):
     """Get account id from hive db."""
     assert name, 'no account name specified'
-    _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
+    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
     assert _id, "account not found: `%s`" % name
     return _id
 
 
-def get_followers(account: str, start: str, follow_type: str, limit: int):
+async def get_followers(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts following a given account."""
-    account_id = _get_account_id(account)
-    start_id = _get_account_id(start) if start else None
+    account_id = await _get_account_id(db, account)
+    start_id = await _get_account_id(db, start) if start else None
     state = 2 if follow_type == 'ignore' else 1
 
     seek = ''
@@ -45,14 +44,14 @@ def get_followers(account: str, start: str, follow_type: str, limit: int):
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account_id=account_id, start_id=start_id,
-                     state=state, limit=limit)
+    return await db.query_col(sql, account_id=account_id, start_id=start_id,
+                              state=state, limit=limit)
 
 
-def get_following(account: str, start: str, follow_type: str, limit: int):
+async def get_following(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
-    account_id = _get_account_id(account)
-    start_id = _get_account_id(start) if start else None
+    account_id = await _get_account_id(db, account)
+    start_id = await _get_account_id(db, start) if start else None
     state = 2 if follow_type == 'ignore' else 1
 
     seek = ''
@@ -71,32 +70,32 @@ def get_following(account: str, start: str, follow_type: str, limit: int):
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account_id=account_id, start_id=start_id,
-                     state=state, limit=limit)
+    return await db.query_col(sql, account_id=account_id, start_id=start_id,
+                              state=state, limit=limit)
 
 
-def get_follow_counts(account: str):
+async def get_follow_counts(db, account: str):
     """Return following/followers count for `account`."""
-    account_id = _get_account_id(account)
+    account_id = await _get_account_id(db, account)
     sql = """SELECT following, followers
                FROM hive_accounts
               WHERE id = :account_id"""
-    return dict(query_row(sql, account_id=account_id))
+    return dict(await db.query_row(sql, account_id=account_id))
 
 
-def get_reblogged_by(author: str, permlink: str):
+async def get_reblogged_by(db, author: str, permlink: str):
     """Return all rebloggers of a post."""
-    post_id = _get_post_id(author, permlink)
+    post_id = await _get_post_id(db, author, permlink)
     assert post_id, "post not found"
     sql = """SELECT name FROM hive_accounts
                JOIN hive_feed_cache ON id = account_id
               WHERE post_id = :post_id"""
-    names = query_col(sql, post_id=post_id)
+    names = await db.query_col(sql, post_id=post_id)
     names.remove(author)
     return names
 
 
-def get_account_reputations(account_lower_bound, limit):
+async def get_account_reputations(db, account_lower_bound, limit):
     """Enumerate account reputations."""
     seek = ''
     if account_lower_bound:
@@ -106,11 +105,11 @@ def get_account_reputations(account_lower_bound, limit):
                FROM hive_accounts %s
            ORDER BY name
               LIMIT :limit""" % seek
-    rows = query_all(sql, start=account_lower_bound, limit=limit)
-    return [dict(name=name, reputation=rep_to_raw(rep)) for name, rep in rows]
+    rows = await db.query_all(sql, start=account_lower_bound, limit=limit)
+    return [dict(name=r[0], reputation=rep_to_raw(r[1])) for r in rows]
 
 
-def pids_by_query(sort, start_author, start_permlink, limit, tag):
+async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
@@ -153,7 +152,7 @@ def pids_by_query(sort, start_author, start_permlink, limit, tag):
 
     start_id = None
     if start_permlink:
-        start_id = _get_post_id(start_author, start_permlink)
+        start_id = await _get_post_id(db, start_author, start_permlink)
         if not start_id:
             return []
 
@@ -163,18 +162,18 @@ def pids_by_query(sort, start_author, start_permlink, limit, tag):
     sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
            % (table, ' AND '.join(where), field))
 
-    return query_col(sql, tag=tag, start_id=start_id, limit=limit)
+    return await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
 
 
-def pids_by_blog(account: str, start_author: str = '',
-                 start_permlink: str = '', limit: int = 20):
+async def pids_by_blog(db, account: str, start_author: str = '',
+                       start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids for an author's blog."""
-    account_id = _get_account_id(account)
+    account_id = await _get_account_id(db, account)
 
     seek = ''
     start_id = None
     if start_permlink:
-        start_id = _get_post_id(start_author, start_permlink)
+        start_id = await _get_post_id(db, start_author, start_permlink)
         if not start_id:
             return []
 
@@ -194,10 +193,10 @@ def pids_by_blog(account: str, start_author: str = '',
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account_id=account_id, start_id=start_id, limit=limit)
+    return await db.query_col(sql, account_id=account_id, start_id=start_id, limit=limit)
 
 
-def pids_by_blog_by_index(account: str, start_index: int, limit: int = 20):
+async def pids_by_blog_by_index(db, account: str, start_index: int, limit: int = 20):
     """Get post_ids for an author's blog (w/ reblogs), paged by index/limit.
 
     Examples:
@@ -208,6 +207,19 @@ def pids_by_blog_by_index(account: str, start_index: int, limit: int = 20):
     """
 
 
+    account_id = await _get_account_id(db, account)
+
+    if start_index == -1 or start_index == 0:
+        sql = """SELECT COUNT(*) - 1 FROM hive_feed_cache
+                  WHERE account_id = :account_id"""
+        start_index = await db.query_one(sql, account_id=account_id)
+        if start_index < 0:
+            return []
+
+    offset = start_index - limit + 1
+    assert offset >= 0, ('start_index and limit combination is invalid (%d, %d)'
+                         % (start_index, limit))
+
     sql = """
         SELECT post_id
           FROM hive_feed_cache
@@ -217,30 +229,17 @@ def pids_by_blog_by_index(account: str, start_index: int, limit: int = 20):
         OFFSET :offset
     """
 
-    account_id = _get_account_id(account)
-
-    if start_index == -1 or start_index == 0:
-        start_index = query_one("""SELECT COUNT(*)-1 FROM hive_feed_cache
-                                    WHERE account_id = :account_id""",
-                                account_id=account_id)
-        if start_index < 0:
-            return []
-
-    offset = start_index - limit + 1
-    assert offset >= 0, ('start_index and limit combination is invalid (%d, %d)'
-                         % (start_index, limit))
-
-    ids = query_col(sql, account_id=account_id, limit=limit, offset=offset)
+    ids = await db.query_col(sql, account_id=account_id, limit=limit, offset=offset)
     return list(reversed(ids))
 
 
-def pids_by_blog_without_reblog(account: str, start_permlink: str = '', limit: int = 20):
+async def pids_by_blog_without_reblog(db, account: str, start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids for an author's blog without reblogs."""
 
     seek = ''
     start_id = None
     if start_permlink:
-        start_id = _get_post_id(account, start_permlink)
+        start_id = await _get_post_id(db, account, start_permlink)
         if not start_id:
             return []
         seek = "AND id <= :start_id"
@@ -255,18 +254,18 @@ def pids_by_blog_without_reblog(account: str, start_permlink: str = '', limit: i
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account=account, start_id=start_id, limit=limit)
+    return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
 
 
-def pids_by_feed_with_reblog(account: str, start_author: str = '',
-                             start_permlink: str = '', limit: int = 20):
+async def pids_by_feed_with_reblog(db, account: str, start_author: str = '',
+                                   start_permlink: str = '', limit: int = 20):
     """Get a list of [post_id, reblogged_by_str] for an account's feed."""
-    account_id = _get_account_id(account)
+    account_id = await _get_account_id(db, account)
 
     seek = ''
     start_id = None
     if start_permlink:
-        start_id = _get_post_id(start_author, start_permlink)
+        start_id = await _get_post_id(db, start_author, start_permlink)
         if not start_id:
             return []
 
@@ -288,15 +287,17 @@ def pids_by_feed_with_reblog(account: str, start_author: str = '',
       ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit
     """ % seek
 
-    return query_all(sql, account=account_id, start_id=start_id, limit=limit, cutoff=last_month())
+    result = await db.query_all(sql, account=account_id, start_id=start_id,
+                                limit=limit, cutoff=last_month())
+    return [(row[0], row[1]) for row in result]
 
 
-def pids_by_account_comments(account: str, start_permlink: str = '', limit: int = 20):
+async def pids_by_account_comments(db, account: str, start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids representing comments by an author."""
     seek = ''
     start_id = None
     if start_permlink:
-        start_id = _get_post_id(account, start_permlink)
+        start_id = await _get_post_id(db, account, start_permlink)
         if not start_id:
             return []
 
@@ -311,10 +312,10 @@ def pids_by_account_comments(account: str, start_permlink: str = '', limit: int 
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account=account, start_id=start_id, limit=limit)
+    return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
 
 
-def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limit: int = 20):
+async def pids_by_replies_to_account(db, start_author: str, start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids representing replies to an author.
 
     To get the first page of results, specify `start_author` as the
@@ -334,7 +335,7 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
              AND child.permlink = :permlink
         """
 
-        row = query_row(sql, author=start_author, permlink=start_permlink)
+        row = await db.query_row(sql, author=start_author, permlink=start_permlink)
         if not row:
             return []
 
@@ -354,4 +355,4 @@ def pids_by_replies_to_account(start_author: str, start_permlink: str = '', limi
         LIMIT :limit
     """ % seek
 
-    return query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
+    return await db.query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
