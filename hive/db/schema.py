@@ -314,7 +314,7 @@ def build_metadata(chain='mainnet'):
             sa.Column('db_version', sa.Integer, nullable=False),
             sa.Column('tests_per_mvest', sa.types.DECIMAL(8, 3), nullable=False),
             sa.Column('usd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
-            sa.Column('sbd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
+            sa.Column('tbd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
             sa.Column('dgpo', sa.Text, nullable=False),
 
             mysql_engine='InnoDB',
@@ -348,7 +348,7 @@ def setup(db, chain='mainnet'):
         "INSERT INTO hive_accounts (name, created_at) VALUES ('initminer', '2016-03-24 16:05:00')"]
     elif chain == 'testnet':
         sqls = [
-        "INSERT INTO hive_state (block_num, db_version, tests_per_mvest, usd_per_steem, sbd_per_steem, dgpo) VALUES (0, %d, 0, 0, 0, '')" % DB_VERSION,
+        "INSERT INTO hive_state (block_num, db_version, tests_per_mvest, usd_per_steem, tbd_per_steem, dgpo) VALUES (0, %d, 0, 0, 0, '')" % DB_VERSION,
         "INSERT INTO hive_blocks (num, hash, created_at) VALUES (0, '0000000000000000000000000000000000000000', '2016-03-24 16:04:57')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('miners',    '2016-03-24 16:05:00')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('null',      '2016-03-24 16:05:00')",
