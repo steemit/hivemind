@@ -5,12 +5,10 @@ import sys
 import logging
 
 from datetime import datetime
-#from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError
 from aiohttp import web
-#from aiopg.sa import create_engine
-from jsonrpcserver import config
-from jsonrpcserver.async_methods import AsyncMethods
+from jsonrpcserver.methods import Methods
+from jsonrpcserver import async_dispatch as dispatch
 
 from hive.server.condenser_api import methods as condenser_api
 from hive.server.condenser_api.tags import get_trending_tags as condenser_api_get_trending_tags
@@ -18,29 +16,22 @@ from hive.server.condenser_api.get_state import get_state as condenser_api_get_s
 from hive.server.condenser_api.call import call as condenser_api_call
 from hive.server import hive_api
 
+from hive.server.db import Db
 
 def build_methods():
     """Register all supported hive_api/condenser_api.calls."""
     # pylint: disable=expression-not-assigned
-    methods = AsyncMethods()
+    methods = Methods()
 
-    [methods.add(method, 'hive.' + method.__name__) for method in (
+    methods.add(**{'hive.' + method.__name__: method for method in (
         hive_api.db_head_state,
         #hive_api.payouts_total,
         #hive_api.payouts_last_24h,
         #hive_api.get_accounts,
         #hive_api.get_accounts_ac,
-        # --- disabled until #92
-        #hive_api.get_followers,
-        #hive_api.get_following,
-        #hive_api.get_follow_count,
-        #hive_api.get_user_feed,
-        #hive_api.get_blog_feed,
-        #hive_api.get_discussions_by_sort_and_tag,
-        #hive_api.get_related_posts,
-    )]
+    )})
 
-    [methods.add(method, 'condenser_api.' + method.__name__) for method in (
+    methods.add(**{'condenser_api.' + method.__name__: method for method in (
         condenser_api.get_followers,
         condenser_api.get_following,
         condenser_api.get_follow_count,
@@ -64,35 +55,44 @@ def build_methods():
         condenser_api.get_blog_entries,
         condenser_api.get_account_reputations,
         condenser_api.get_reblogged_by,
-    )]
+    )})
 
     # dummy methods -- serve informational error
-    methods.add(condenser_api.get_account_votes, 'condenser_api.get_account_votes')
-    methods.add(condenser_api.get_account_votes, 'tags_api.get_account_votes')
+    methods.add(**{
+        'condenser_api.get_account_votes': condenser_api.get_account_votes,
+        'tags_api.get_account_votes': condenser_api.get_account_votes,
+    })
 
     # follow_api aliases
-    methods.add(condenser_api.get_followers, 'follow_api.get_followers')
-    methods.add(condenser_api.get_following, 'follow_api.get_following')
-    methods.add(condenser_api.get_follow_count, 'follow_api.get_follow_count')
-    methods.add(condenser_api.get_account_reputations, 'follow_api.get_account_reputations')
-    methods.add(condenser_api.get_blog, 'follow_api.get_blog')
-    methods.add(condenser_api.get_blog_entries, 'follow_api.get_blog_entries')
-    methods.add(condenser_api.get_reblogged_by, 'follow_api.get_reblogged_by')
+    methods.add(**{
+        'follow_api.get_followers': condenser_api.get_followers,
+        'follow_api.get_following': condenser_api.get_following,
+        'follow_api.get_follow_count': condenser_api.get_follow_count,
+        'follow_api.get_account_reputations': condenser_api.get_account_reputations,
+        'follow_api.get_blog': condenser_api.get_blog,
+        'follow_api.get_blog_entries': condenser_api.get_blog_entries,
+        'follow_api.get_reblogged_by': condenser_api.get_reblogged_by,
+    })
 
     # tags_api aliases
-    methods.add(condenser_api.get_content, 'tags_api.get_discussion')
-    methods.add(condenser_api.get_content_replies, 'tags_api.get_content_replies')
-    methods.add(condenser_api.get_discussions_by_trending, 'tags_api.get_discussions_by_trending')
-    methods.add(condenser_api.get_discussions_by_hot, 'tags_api.get_discussions_by_hot')
-    methods.add(condenser_api.get_discussions_by_promoted, 'tags_api.get_discussions_by_promoted')
-    methods.add(condenser_api.get_discussions_by_created, 'tags_api.get_discussions_by_created')
-    methods.add(condenser_api.get_discussions_by_blog, 'tags_api.get_discussions_by_blog')
-    methods.add(condenser_api.get_discussions_by_comments, 'tags_api.get_discussions_by_comments')
-    methods.add(condenser_api.get_discussions_by_author_before_date, 'tags_api.get_discussions_by_author_before_date')
-    methods.add(condenser_api.get_post_discussions_by_payout, 'tags_api.get_post_discussions_by_payout')
-    methods.add(condenser_api.get_comment_discussions_by_payout, 'tags_api.get_comment_discussions_by_payout')
+    methods.add(**{
+        'tags_api.get_discussion': condenser_api.get_content,
+        'tags_api.get_content_replies': condenser_api.get_content_replies,
+        'tags_api.get_discussions_by_trending': condenser_api.get_discussions_by_trending,
+        'tags_api.get_discussions_by_hot': condenser_api.get_discussions_by_hot,
+        'tags_api.get_discussions_by_promoted': condenser_api.get_discussions_by_promoted,
+        'tags_api.get_discussions_by_created': condenser_api.get_discussions_by_created,
+        'tags_api.get_discussions_by_blog': condenser_api.get_discussions_by_blog,
+        'tags_api.get_discussions_by_comments': condenser_api.get_discussions_by_comments,
+        'tags_api.get_discussions_by_author_before_date': condenser_api.get_discussions_by_author_before_date,
+        'tags_api.get_post_discussions_by_payout': condenser_api.get_post_discussions_by_payout,
+        'tags_api.get_comment_discussions_by_payout': condenser_api.get_comment_discussions_by_payout,
+    })
 
-    methods.add(condenser_api_call)
+    # legacy `call` style adapter
+    methods.add(**{
+        'call': condenser_api_call
+    })
 
     return methods
 
@@ -116,7 +116,6 @@ def run_server(conf):
 
     # configure jsonrpcserver logging
     log_level = conf.log_level()
-    config.debug = (log_level == logging.DEBUG)
     #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
     truncate_response_log(logging.getLogger('jsonrpcserver.dispatcher.response'))
@@ -124,7 +123,6 @@ def run_server(conf):
     # init
     log = logging.getLogger(__name__)
     methods = build_methods()
-    #context = dict(db=conf.db())
 
     app = web.Application()
     app['config'] = dict()
@@ -132,23 +130,16 @@ def run_server(conf):
     app['config']['hive.MAX_DB_ROW_RESULTS'] = 100000
     #app['config']['hive.logger'] = logger
 
-    #async def init_db(app):
-    #    args = app['config']['args']
-    #    db = make_url(args['database_url'])
-    #    engine = await create_engine(user=db.username,
-    #                                 database=db.database,
-    #                                 password=db.password,
-    #                                 host=db.host,
-    #                                 port=db.port,
-    #                                 **db.query)
-    #    app['db'] = engine
-    #
-    #async def close_db(app):
-    #    app['db'].close()
-    #    await app['db'].wait_closed()
-    #
-    #app.on_startup.append(init_db)
-    #app.on_cleanup.append(close_db)
+    async def init_db(app):
+        args = app['config']['args']
+        app['db'] = await Db.create(args['database_url'])
+
+    async def close_db(app):
+        app['db'].close()
+        await app['db'].wait_closed()
+
+    app.on_startup.append(init_db)
+    app.on_cleanup.append(close_db)
 
     async def _head_state():
         try:
@@ -201,9 +192,12 @@ def run_server(conf):
         """Handles all hive jsonrpc API requests."""
         request = await request.text()
         # debug=True refs https://github.com/bcb/jsonrpcserver/issues/71
-        response = await methods.dispatch(request, debug=True)
-        headers = {'Access-Control-Allow-Origin': '*'}
-        return web.json_response(response, status=200, headers=headers)
+        response = await dispatch(request, methods=methods, debug=True)
+        if response.wanted:
+            headers = {'Access-Control-Allow-Origin': '*'}
+            return web.json_response(response.deserialized(), status=200, headers=headers)
+        else:
+            return web.Response()
 
     app.router.add_get('/.well-known/healthcheck.json', health)
     app.router.add_get('/head_age', head_age)
