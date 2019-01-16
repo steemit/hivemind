@@ -3,6 +3,7 @@
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
+from hive.utils.normalize import rep_to_raw
 from hive.db.methods import query_one, query_col, query_row, query_all
 
 def last_month():
@@ -62,6 +63,32 @@ def get_follow_counts(account: str):
                FROM hive_accounts
               WHERE name = :account"""
     return dict(query_row(sql, account=account))
+
+
+def get_reblogged_by(author: str, permlink: str):
+    """Return all rebloggers of a post."""
+    post_id = _get_post_id(author, permlink)
+    assert post_id, "post not found"
+    sql = """SELECT name FROM hive_accounts
+               JOIN hive_feed_cache ON id = account_id
+              WHERE post_id = :post_id"""
+    names = query_col(sql, post_id=post_id)
+    names.remove(author)
+    return names
+
+
+def get_account_reputations(account_lower_bound, limit):
+    """Enumerate account reputations."""
+    seek = ''
+    if account_lower_bound:
+        seek = "WHERE name >= :start"
+
+    sql = """SELECT name, reputation
+               FROM hive_accounts %s
+           ORDER BY name
+              LIMIT :limit""" % seek
+    rows = query_all(sql, start=account_lower_bound, limit=limit)
+    return [dict(name=name, reputation=rep_to_raw(rep)) for name, rep in rows]
 
 
 def pids_by_query(sort, start_author, start_permlink, limit, tag):

@@ -64,6 +64,20 @@ async def get_follow_count(account: str):
                 following_count=count['following'],
                 follower_count=count['followers'])
 
+@return_error_info
+async def get_reblogged_by(author: str, permlink: str):
+    """Get all rebloggers of a post."""
+    return cursor.get_reblogged_by(
+        valid_account(author),
+        valid_permlink(permlink))
+
+@return_error_info
+async def get_account_reputations(account_lower_bound: str = None, limit: int = None):
+    """List account reputations"""
+    return dict(reputations=cursor.get_account_reputations(
+        account_lower_bound,
+        valid_limit(limit, 1000)))
+
 
 # Content Primitives
 
