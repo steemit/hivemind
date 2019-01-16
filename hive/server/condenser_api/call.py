@@ -70,7 +70,7 @@ def _strict_query(params):
     return query
 
 @return_error_info
-async def call(api, method, params):
+async def call(context, api, method, params):
     """Routes legacy-style `call` method requests.
 
     Example:
@@ -83,56 +83,56 @@ async def call(api, method, params):
 
     # Follows
     if method == 'get_followers':
-        return await get_followers(*_strict_list(params, 4))
+        return await get_followers(context, *_strict_list(params, 4))
     elif method == 'get_following':
-        return await get_following(*_strict_list(params, 4))
+        return await get_following(context, *_strict_list(params, 4))
     elif method == 'get_follow_count':
-        return await get_follow_count(*_strict_list(params, 1))
+        return await get_follow_count(context, *_strict_list(params, 1))
 
     # Content primitives
     elif method == 'get_content':
-        return await get_content(*_strict_list(params, 2))
+        return await get_content(context, *_strict_list(params, 2))
     elif method == 'get_content_replies':
-        return await get_content_replies(*_strict_list(params, 2))
+        return await get_content_replies(context, *_strict_list(params, 2))
 
     # Trending tags
     elif method == 'get_trending_tags':
-        return await get_trending_tags(*_strict_list(params, 2))
+        return await get_trending_tags(context, *_strict_list(params, 2))
 
     # Content monolith
     elif method == 'get_state':
-        return await get_state(*_strict_list(params, 1))
+        return await get_state(context, *_strict_list(params, 1))
 
     # Global discussion queries
     elif method == 'get_discussions_by_trending':
-        return await get_discussions_by_trending(**_strict_query(params))
+        return await get_discussions_by_trending(context, **_strict_query(params))
     elif method == 'get_discussions_by_hot':
-        return await get_discussions_by_hot(**_strict_query(params))
+        return await get_discussions_by_hot(context, **_strict_query(params))
     elif method == 'get_discussions_by_promoted':
-        return await get_discussions_by_promoted(**_strict_query(params))
+        return await get_discussions_by_promoted(context, **_strict_query(params))
     elif method == 'get_discussions_by_created':
-        return await get_discussions_by_created(**_strict_query(params))
+        return await get_discussions_by_created(context, **_strict_query(params))
 
     # Account discussion queries
     elif method == 'get_discussions_by_blog':
-        return await get_discussions_by_blog(**_strict_query(params))
+        return await get_discussions_by_blog(context, **_strict_query(params))
     elif method == 'get_discussions_by_feed':
-        return await get_discussions_by_feed(**_strict_query(params))
+        return await get_discussions_by_feed(context, **_strict_query(params))
     elif method == 'get_discussions_by_comments':
-        return await get_discussions_by_comments(**_strict_query(params))
+        return await get_discussions_by_comments(context, **_strict_query(params))
     elif method == 'get_replies_by_last_update':
-        return await get_replies_by_last_update(*_strict_list(params, 3))
+        return await get_replies_by_last_update(context, *_strict_list(params, 3))
 
     # Exotic account discussion queries
     elif method == 'get_discussions_by_author_before_date':
-        return await get_discussions_by_author_before_date(*_strict_list(params, 4))
+        return await get_discussions_by_author_before_date(context, *_strict_list(params, 4))
     elif method == 'get_blog':
-        return await get_blog(*_strict_list(params, 3, 2))
+        return await get_blog(context, *_strict_list(params, 3, 2))
     elif method == 'get_blog_entries':
-        return await get_blog_entries(*_strict_list(params, 3, 2))
+        return await get_blog_entries(context, *_strict_list(params, 3, 2))
 
     # Misc/dummy
     elif method == 'get_account_votes':
-        return await get_account_votes(*_strict_list(params, 1))
+        return await get_account_votes(context, *_strict_list(params, 1))
 
     raise ApiError("unknown method: %s.%s" % (api, method))
