@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines
 
-DB_VERSION = 6
+DB_VERSION = 12
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -64,6 +64,8 @@ def build_metadata():
         sa.Index('hive_accounts_ix1', 'vote_weight', 'id'), # core: quick ranks
         sa.Index('hive_accounts_ix2', 'name', 'id'), # core: quick id map
         sa.Index('hive_accounts_ix3', 'vote_weight', 'name', postgresql_ops=dict(name='varchar_pattern_ops')), # API: lookup
+        sa.Index('hive_accounts_ix4', 'id', 'name'), # API: quick filter/sort
+        sa.Index('hive_accounts_ix5', 'cached_at', 'name'), # core/listen sweep
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
@@ -88,8 +90,8 @@ def build_metadata():
         sa.ForeignKeyConstraint(['community'], ['hive_accounts.name'], name='hive_posts_fk2'),
         sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
         sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
-        sa.Index('hive_posts_ix1', 'parent_id'), # API
-        sa.Index('hive_posts_ix2', 'is_deleted', 'depth'), # API
+        sa.Index('hive_posts_ix3', 'author', 'depth', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: author blog/comments
+        sa.Index('hive_posts_ix4', 'parent_id', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: fetching children
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
@@ -121,9 +123,8 @@ def build_metadata():
         sa.Column('created_at', sa.DateTime, nullable=False),
 
         sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'), # core
-        sa.Index('hive_follows_ix2', 'following', 'follower', postgresql_where=sql_text("state = 1")), # API
-        sa.Index('hive_follows_ix3', 'follower', 'following', postgresql_where=sql_text("state = 1")), # API
-        sa.Index('hive_follows_ix4', 'follower', 'following', postgresql_where=sql_text("state = 2")), # API
+        sa.Index('hive_follows_ix5a', 'following', 'state', 'created_at', 'follower'),
+        sa.Index('hive_follows_ix5b', 'follower', 'state', 'created_at', 'following'),
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
@@ -281,8 +282,14 @@ def build_metadata():
 
         sa.Index('hive_posts_cache_ix2', 'promoted', postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")), # API
         sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # core
-        sa.Index('hive_posts_cache_ix6', 'sc_trend', 'post_id'), # API
-        sa.Index('hive_posts_cache_ix7', 'sc_hot', 'post_id'), # API
+        sa.Index('hive_posts_cache_ix6a', 'sc_trend', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: global trending
+        sa.Index('hive_posts_cache_ix7a', 'sc_hot', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: global hot
+        sa.Index('hive_posts_cache_ix6b', 'post_id', 'sc_trend', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered trending
+        sa.Index('hive_posts_cache_ix7b', 'post_id', 'sc_hot', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered hot
+        sa.Index('hive_posts_cache_ix8', 'category', 'payout', 'depth', postgresql_where=sql_text("is_paidout = '0'")), # API: tag stats
+        sa.Index('hive_posts_cache_ix9a', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout
+        sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered payout
+
         mysql_engine='InnoDB',
         mysql_default_charset='utf8mb4'
     )
@@ -326,26 +333,26 @@ def setup(db):
         db.query(sql)
 
 def reset_autovac(db):
-    """Initializes per-table autovacuum/autoanalyze params"""
-    # consider using scale_factor = 0 with flat thresholds:
-    #   autovacuum_vacuum_threshold, autovacuum_analyze_threshold
+    """Initializes/resets per-table autovacuum/autoanalyze params.
 
-    autovac_config = {
-        # default
-        'hive_accounts':    (0.2, 0.1),
-        'hive_state':       (0.2, 0.1),
-        'hive_reblogs':     (0.2, 0.1),
-        'hive_payments':    (0.2, 0.1),
-        # more aggresive
-        'hive_posts':       (0.010, 0.005),
-        'hive_post_tags':   (0.010, 0.005),
-        'hive_feed_cache':  (0.010, 0.005),
-        # very aggresive
-        'hive_posts_cache': (0.0050, 0.0025), # @36M, ~2/day,  3/day (~240k new tuples daily)
-        'hive_blocks':      (0.0100, 0.0014), # @20M, ~1/week, 1/day
-        'hive_follows':     (0.0050, 0.0025)} # @47M, ~1/day,  3/day (~300k new tuples daily)
+    We use a scale factor of 0 and specify exact threshold tuple counts,
+    per-table, in the format (autovacuum_threshold, autoanalyze_threshold)."""
 
-    for table, (vacuum_sf, analyze_sf) in autovac_config.items():
-        sql = """ALTER TABLE %s SET (autovacuum_vacuum_scale_factor = %s,
-                                     autovacuum_analyze_scale_factor = %s)"""
-        db.query(sql % (table, vacuum_sf, analyze_sf))
+    autovac_config = { #    vacuum  analyze
+        'hive_accounts':    (50000, 100000),
+        'hive_posts_cache': (25000, 25000),
+        'hive_posts':       (2500, 10000),
+        'hive_post_tags':   (5000, 10000),
+        'hive_follows':     (5000, 5000),
+        'hive_feed_cache':  (5000, 5000),
+        'hive_blocks':      (5000, 25000),
+        'hive_reblogs':     (5000, 5000),
+        'hive_payments':    (5000, 5000),
+    }
+
+    for table, (n_vacuum, n_analyze) in autovac_config.items():
+        sql = """ALTER TABLE %s SET (autovacuum_vacuum_scale_factor = 0,
+                                     autovacuum_vacuum_threshold = %s,
+                                     autovacuum_analyze_scale_factor = 0,
+                                     autovacuum_analyze_threshold = %s)"""
+        db.query(sql % (table, n_vacuum, n_analyze))

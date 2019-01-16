@@ -68,6 +68,10 @@ class CustomOp:
     @classmethod
     def reblog(cls, account, op_json, block_date):
         """Handle legacy 'reblog' op"""
+        if ('account' not in op_json
+                or 'author' not in op_json
+                or 'permlink' not in op_json):
+            return
         blogger = op_json['account']
         author = op_json['author']
         permlink = op_json['permlink']

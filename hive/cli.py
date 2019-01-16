@@ -27,6 +27,12 @@ def run():
         from hive.db.db_state import DbState
         print(DbState.status())
 
+    #elif mode == 'sync-profile':
+    #    from hive.indexer.sync import Sync
+    #    from hive.utils.profiler import Profiler
+    #    with Profiler():
+    #        Sync(conf=conf).run()
+
     else:
         raise Exception("unknown run mode %s" % mode)
 

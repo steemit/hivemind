@@ -4,6 +4,7 @@ import logging
 import ujson as json
 
 from hive.db.methods import query_all, query_row
+from hive.utils.normalize import sbd_amount, rep_to_raw
 
 log = logging.getLogger(__name__)
 
@@ -38,19 +39,19 @@ def load_posts(ids, truncate_body=0):
     if not ids:
         return []
 
-    sql = """
-    SELECT post_id, author, permlink, title, body, promoted, payout, created_at,
-           payout_at, is_paidout, rshares, raw_json, category, depth, json,
-           children, votes, author_rep, updated_at,
+    # fetch posts and associated author reps
+    sql = """SELECT post_id, author, permlink, title, body, category, depth,
+                    promoted, payout, payout_at, is_paidout, children, votes,
+                    created_at, updated_at, rshares, raw_json, json
+               FROM hive_posts_cache WHERE post_id IN :ids"""
+    result = query_all(sql, ids=tuple(ids))
+    author_reps = _query_author_rep_map(result)
 
-           preview, img_url, is_nsfw
-      FROM hive_posts_cache WHERE post_id IN :ids
-    """
-
-    # key by id so we can return sorted by input order
+    # key by id so we can return output sorted by input order
     posts_by_id = {}
-    for row in query_all(sql, ids=tuple(ids)):
+    for row in result:
         row = dict(row)
+        row['author_rep'] = author_reps[row['author']]
         post = _condenser_post_object(row, truncate_body=truncate_body)
         posts_by_id[row['post_id']] = post
 
@@ -66,6 +67,13 @@ def load_posts(ids, truncate_body=0):
 
     return [posts_by_id[_id] for _id in ids]
 
+def _query_author_rep_map(posts):
+    """Given a list of posts, returns an author->reputation map."""
+    if not posts:
+        return {}
+    names = tuple(set([post['author'] for post in posts]))
+    sql = "SELECT name, reputation FROM hive_accounts WHERE name IN :names"
+    return {r['name']: r['reputation'] for r in query_all(sql, names=names)}
 
 def _condenser_account_object(row):
     """Convert an internal account record into legacy-steemd style."""
@@ -73,7 +81,7 @@ def _condenser_account_object(row):
         'name': row['name'],
         'created': str(row['created_at']),
         'post_count': row['post_count'],
-        'reputation': _rep_to_raw(row['reputation']),
+        'reputation': rep_to_raw(row['reputation']),
         'net_vesting_shares': row['vote_weight'],
         'transfer_history': [],
         'json_metadata': json.dumps({
@@ -100,7 +108,7 @@ def _condenser_post_object(row, truncate_body=0):
     post['json_metadata'] = row['json']
 
     post['created'] = _json_date(row['created_at'])
-    post['last_updated'] = _json_date(row['updated_at'])
+    post['last_update'] = _json_date(row['updated_at'])
     post['depth'] = row['depth']
     post['children'] = row['children']
     post['net_rshares'] = row['rshares']
@@ -115,7 +123,7 @@ def _condenser_post_object(row, truncate_body=0):
     post['replies'] = []
     post['body_length'] = len(row['body'])
     post['active_votes'] = _hydrate_active_votes(row['votes'])
-    post['author_reputation'] = _rep_to_raw(row['author_rep'])
+    post['author_reputation'] = rep_to_raw(row['author_rep'])
 
     # import fields from legacy object
     assert row['raw_json']
@@ -135,14 +143,16 @@ def _condenser_post_object(row, truncate_body=0):
     post['max_accepted_payout'] = raw_json['max_accepted_payout']
     post['percent_steem_dollars'] = raw_json['percent_steem_dollars']
 
+    if paid:
+        curator_payout = sbd_amount(raw_json['curator_payout_value'])
+        post['curator_payout_value'] = _amount(curator_payout)
+        post['total_payout_value'] = _amount(row['payout'] - curator_payout)
+
     # not used by condenser, but may be useful
     #post['net_votes'] = post['total_votes'] - row['up_votes']
     #post['allow_replies'] = raw_json['allow_replies']
     #post['allow_votes'] = raw_json['allow_votes']
     #post['allow_curation_rewards'] = raw_json['allow_curation_rewards']
-    #post['curator_payout_value'] = raw_json['curator_payout_value'] if paid else _amount(0)
-    #curator_payout = amount(raw_json['curator_payout_value'])
-    #post['total_payout_value'] = _amount(row['payout'] - curator_payout) if paid else _amount(0)
 
     return post
 
@@ -164,13 +174,3 @@ def _json_date(date=None):
     if not date:
         return '1969-12-31T23:59:59'
     return 'T'.join(str(date).split(' '))
-
-def _rep_to_raw(rep):
-    """Convert a UI-ready rep score back into its approx raw value."""
-    if not isinstance(rep, (str, float, int)):
-        return 0
-    rep = float(rep) - 25
-    rep = rep / 9
-    rep = rep + 9
-    sign = 1 if rep >= 0 else -1
-    return int(sign * pow(10, rep))
