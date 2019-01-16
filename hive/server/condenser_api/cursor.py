@@ -19,7 +19,7 @@ def _get_account_id(name):
     """Get account id from hive db."""
     assert name, 'no account name specified'
     _id = query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
-    assert _id, "account `%s` not found" % name
+    assert _id, "account not found: `%s`" % name
     return _id
 
 
@@ -59,10 +59,11 @@ def get_following(account: str, start: str, state: int, limit: int):
 
 def get_follow_counts(account: str):
     """Return following/followers count for `account`."""
+    account_id = _get_account_id(account)
     sql = """SELECT following, followers
                FROM hive_accounts
-              WHERE name = :account"""
-    return dict(query_row(sql, account=account))
+              WHERE id = :account_id"""
+    return dict(query_row(sql, account_id=account_id))
 
 
 def get_reblogged_by(author: str, permlink: str):
@@ -199,8 +200,16 @@ def pids_by_blog_by_index(account: str, start_index: int, limit: int = 20):
 
     account_id = _get_account_id(account)
 
+    if start_index == -1 or start_index == 0:
+        start_index = query_one("""SELECT COUNT(*)-1 FROM hive_feed_cache
+                                    WHERE account_id = :account_id""",
+                                account_id=account_id)
+        if start_index < 0:
+            return []
+
     offset = start_index - limit + 1
-    assert offset >= 0, 'start_index and limit combination is invalid'
+    assert offset >= 0, ('start_index and limit combination is invalid (%d, %d)'
+                         % (start_index, limit))
 
     ids = query_col(sql, account_id=account_id, limit=limit, offset=offset)
     return list(reversed(ids))
