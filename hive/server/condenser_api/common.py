@@ -16,7 +16,10 @@ def return_error_info(function):
         """Catch ApiError and AssersionError (always due to user error)."""
         try:
             return await function(*args, **kwargs)
-        except (ApiError, AssertionError) as e:
+        except (ApiError, AssertionError, TypeError) as e:
+            # one specific TypeError we want to silence; others need a trace.
+            if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
+                raise e
             return {
                 "error": {
                     "code": -32000,
@@ -26,10 +29,11 @@ def return_error_info(function):
 def valid_account(name, allow_empty=False):
     """Returns validated account name or throws Assert."""
     if not name:
-        assert allow_empty, 'account must be specified'
+        assert allow_empty, 'invalid account (not specified)'
         return ""
-    assert isinstance(name, str), "account must be string; received: %s" % name
-    assert len(name) >= 3 and len(name) <= 16, "invalid account: %s" % name
+    assert isinstance(name, str), "invalid account name type"
+    assert 3 <= len(name) <= 16, "invalid account name length: `%s`" % name
+    assert name[0] != '@', "invalid account name char `@`"
     assert re.match(r'^[a-z0-9-\.]+$', name), 'invalid account char'
     return name
 
@@ -49,7 +53,7 @@ def valid_sort(sort, allow_empty=False):
         return ""
     assert isinstance(sort, str), 'sort must be a string'
     valid_sorts = ['trending', 'promoted', 'hot', 'created']
-    assert sort in valid_sorts, 'invalid sort'
+    assert sort in valid_sorts, 'invalid sort `%s`' % sort
     return sort
 
 def valid_tag(tag, allow_empty=False):
@@ -58,23 +62,29 @@ def valid_tag(tag, allow_empty=False):
         assert allow_empty, 'tag was blank'
         return ""
     assert isinstance(tag, str), 'tag must be a string'
-    assert re.match('^[a-z0-9-]+$', tag), 'invalid tag'
+    assert re.match('^[a-z0-9-_]+$', tag), 'invalid tag `%s`' % tag
     return tag
 
 def valid_limit(limit, ubound=100):
     """Given a user-provided limit, return a valid int, or raise."""
+    assert limit is not None, 'limit must be provided'
     limit = int(limit)
     assert limit > 0, "limit must be positive"
-    assert limit <= ubound, "limit exceeds max"
+    assert limit <= ubound, "limit exceeds max (%d > %d)" % (limit, ubound)
     return limit
 
 def valid_offset(offset, ubound=None):
     """Given a user-provided offset, return a valid int, or raise."""
     offset = int(offset)
-    assert offset >= 0, "offset cannot be negative"
+    assert offset >= -1, "offset cannot be negative"
     if ubound is not None:
         assert offset <= ubound, "offset too large"
     return offset
+
+def valid_follow_type(follow_type: str):
+    """Ensure follow type is valid steemd type."""
+    assert follow_type in ['blog', 'ignore'], 'invalid follow_type `%s`' % follow_type
+    return follow_type
 
 def get_post_id(author, permlink):
     """Given an author/permlink, retrieve the id from db."""
@@ -84,5 +94,5 @@ def get_post_id(author, permlink):
 
 def get_child_ids(post_id):
     """Given a parent post id, retrieve all child ids."""
-    sql = "SELECT id FROM hive_posts WHERE parent_id = %d AND is_deleted = '0'"
-    return query_col(sql % post_id)
+    sql = "SELECT id FROM hive_posts WHERE parent_id = :id AND is_deleted = '0'"
+    return query_col(sql, id=post_id)
