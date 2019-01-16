@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 # steemd account 'tabs' - specific post list queries
 ACCOUNT_TAB_KEYS = {
-    '': 'blog',
+    'blog': 'blog',
     'feed': 'feed',
     'comments': 'comments',
     'recent-replies': 'recent_replies'}
@@ -46,16 +46,39 @@ ACCOUNT_TAB_IGNORE = [
 
 # misc dummy paths used by condenser - send minimal get_state structure
 CONDENSER_NOOP_URLS = [
+    'create_account',
+    'approval',
     'recover_account_step_1',
+    'recover_account_step_2',
     'submit.html',
     'market',
     'change_password',
     'login.html',
     'welcome',
-    'change_password',
     'tos.html',
     'privacy.html',
+    'support.html',
     'faq.html',
+    'about.html',
+    'pick_account',
+    'waiting_list.html',
+]
+
+# post list sorts
+POST_LIST_SORTS = [
+    'trending',
+    'promoted',
+    'hot',
+    'created',
+    'payout',
+    'payout_comments',
+    # unsupported:
+    'recent',
+    'trending30',
+    'active',
+    'votes',
+    'responses',
+    'cashout',
 ]
 
 @return_error_info
@@ -78,15 +101,15 @@ async def get_state(path: str):
     # account - `/@account/tab` (feed, blog, comments, replies)
     if part[0] and part[0][0] == '@':
         assert not part[1] == 'transfers', 'transfers API not served here'
-        assert not part[1] == 'blog', 'canonical blog route is `/@account`'
         assert not part[2], 'unexpected account path[2] %s' % path
+
+        if part[1] == '':
+            part[1] = 'blog'
 
         account = valid_account(part[0][1:])
         state['accounts'][account] = _load_account(account)
 
-        if not account:
-            state['error'] = 'account not found'
-        elif part[1] in ACCOUNT_TAB_KEYS:
+        if part[1] in ACCOUNT_TAB_KEYS:
             key = ACCOUNT_TAB_KEYS[part[1]]
             posts = await _get_account_discussion_by_key(account, key)
             state['content'] = _keyed_posts(posts)
@@ -94,8 +117,9 @@ async def get_state(path: str):
         elif part[1] in ACCOUNT_TAB_IGNORE:
             pass # condenser no-op URLs
         else:
-            # invalid/undefined case; probably requesting `@user/permlink`.
-            state['error'] = 'invalid account path requested.'
+            # invalid/undefined case; probably requesting `@user/permlink`,
+            # but condenser still relies on a valid response for redirect.
+            state['error'] = 'invalid get_state account path %s' % path
 
     # discussion - `/category/@account/permlink`
     elif part[1] and part[1][0] == '@':
@@ -105,7 +129,7 @@ async def get_state(path: str):
         state['accounts'] = _load_content_accounts(state['content'])
 
     # ranked posts - `/sort/category`
-    elif part[0] in ['trending', 'promoted', 'hot', 'created']:
+    elif part[0] in POST_LIST_SORTS:
         assert not part[2], "unexpected discussion path part[2] %s" % path
         sort = valid_sort(part[0])
         tag = valid_tag(part[1].lower(), allow_empty=True)
@@ -121,15 +145,11 @@ async def get_state(path: str):
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
-    elif part[0] == 'witnesses' or part[0] == '~witnesses':
-        assert not part[1] and not part[2]
-        raise ApiError("not implemented: /%s" % path)
-
     elif part[0] in CONDENSER_NOOP_URLS:
         assert not part[1] and not part[2]
 
     else:
-        log.warning('unhandled path /%s', path)
+        raise ApiError('unhandled path: /%s' % path)
 
     return state
 
@@ -152,12 +172,22 @@ async def _get_account_discussion_by_key(account, key):
     return posts
 
 def _normalize_path(path):
-    if path[0] == '/':
+    if path and path[0] == '/':
         path = path[1:]
+
+    # some clients pass the query string to get_state, and steemd allows it :(
+    if '?' in path:
+        path = path.split('?')[0]
+
     if not path:
         path = 'trending'
+    assert '#' not in path, 'path contains hash mark (#)' % path
+    assert '?' not in path, 'path contains query string: `%s`' % path
+
     parts = path.split('/')
-    assert len(parts) < 4, 'too many parts in path'
+    if len(parts) == 4 and parts[3] == '':
+        parts = parts[:-1]
+    assert len(parts) < 4, 'too many parts in path: `%s`' % path
     while len(parts) < 3:
         parts.append('')
     return (path, parts)
@@ -180,7 +210,9 @@ def _load_content_accounts(content):
     return {a['name']: a for a in accounts}
 
 def _load_account(name):
-    account = load_accounts([name])[0]
+    ret = load_accounts([name])
+    assert ret, 'account not found: `%s`' % name
+    account = ret[0]
     for key in ACCOUNT_TAB_KEYS.values():
         account[key] = []
     return account
@@ -197,10 +229,14 @@ def _load_discussion(author, permlink):
     while queue:
         parent = queue.pop()
 
-        children = load_posts(get_child_ids(parent['post_id']))
-        parent['replies'] = list(map(_ref, children))
+        child_ids = get_child_ids(parent['post_id'])
+        if child_ids:
+            children = load_posts(child_ids)
+            if not children:
+                log.warning("no children loaded for %s", _ref(parent))
+            parent['replies'] = list(map(_ref, children))
+            queue.extend(children)
 
-        queue.extend(children)
         ret.append(parent)
 
     return {_ref(post): post for post in ret}
