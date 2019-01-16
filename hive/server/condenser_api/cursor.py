@@ -23,38 +23,56 @@ def _get_account_id(name):
     return _id
 
 
-def get_followers(account: str, start: str, state: int, limit: int):
+def get_followers(account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts following a given account."""
     account_id = _get_account_id(account)
-    seek = "AND name >= :start" if start else ''
+    start_id = _get_account_id(start) if start else None
+    state = 2 if follow_type == 'ignore' else 1
+
+    seek = ''
+    if start_id:
+        seek = """AND hf.created_at <= (
+                     SELECT created_at FROM hive_follows
+                      WHERE following = :account_id
+                        AND follower = :start_id)"""
 
     sql = """
         SELECT name FROM hive_follows hf
      LEFT JOIN hive_accounts ON hf.follower = id
          WHERE hf.following = :account_id
            AND state = :state %s
-      ORDER BY name ASC
+      ORDER BY hf.created_at DESC
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account_id=account_id, start=start, state=state, limit=limit)
+    return query_col(sql, account_id=account_id, start_id=start_id,
+                     state=state, limit=limit)
 
 
-def get_following(account: str, start: str, state: int, limit: int):
+def get_following(account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
     account_id = _get_account_id(account)
-    seek = "AND name >= :start" if start else ''
+    start_id = _get_account_id(start) if start else None
+    state = 2 if follow_type == 'ignore' else 1
+
+    seek = ''
+    if start_id:
+        seek = """AND hf.created_at <= (
+                     SELECT created_at FROM hive_follows
+                      WHERE follower = :account_id
+                        AND following = :start_id)"""
 
     sql = """
         SELECT name FROM hive_follows hf
      LEFT JOIN hive_accounts ON hf.following = id
          WHERE hf.follower = :account_id
            AND state = :state %s
-      ORDER BY name ASC
+      ORDER BY hf.created_at DESC
          LIMIT :limit
     """ % seek
 
-    return query_col(sql, account_id=account_id, start=start, state=state, limit=limit)
+    return query_col(sql, account_id=account_id, start_id=start_id,
+                     state=state, limit=limit)
 
 
 def get_follow_counts(account: str):

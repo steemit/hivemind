@@ -12,6 +12,7 @@ from hive.server.condenser_api.common import (
     valid_tag,
     valid_offset,
     valid_limit,
+    valid_follow_type,
     get_post_id,
     get_child_ids)
 
@@ -25,10 +26,6 @@ async def get_account_votes(account):
     raise ApiError("get_account_votes is no longer supported, for details see "
                    "https://steemit.com/steemit/@steemitdev/additional-public-api-change")
 
-def _follow_type_to_int(follow_type: str):
-    """Convert steemd-style "follow type" into internal status (int)."""
-    assert follow_type in ['blog', 'ignore'], "invalid follow_type"
-    return 1 if follow_type == 'blog' else 2
 
 # Follows Queries
 
@@ -46,8 +43,8 @@ async def get_followers(account: str, start: str, follow_type: str = None,
         follow_type = 'blog'
     followers = cursor.get_followers(
         valid_account(account),
-        valid_account(start or '', allow_empty=True),
-        _follow_type_to_int(follow_type),
+        valid_account(start, allow_empty=True),
+        valid_follow_type(follow_type),
         valid_limit(limit, 1000))
     return [_legacy_follower(name, account, follow_type) for name in followers]
 
@@ -62,8 +59,8 @@ async def get_following(account: str, start: str, follow_type: str = None,
         follow_type = 'blog'
     following = cursor.get_following(
         valid_account(account),
-        valid_account(start or '', allow_empty=True),
-        _follow_type_to_int(follow_type),
+        valid_account(start, allow_empty=True),
+        valid_follow_type(follow_type),
         valid_limit(limit, 1000))
     return [_legacy_follower(account, name, follow_type) for name in following]
 
