@@ -8,13 +8,13 @@ from hive.utils.system import colorize, peak_usage_mb
 
 log = logging.getLogger(__name__)
 
-def _normalize_sql(sql, maxlen=150):
+def _normalize_sql(sql, maxlen=180):
     """Collapse whitespace and middle-truncate if needed."""
     out = ' '.join(sql.split())
     if len(out) > maxlen:
         i = int(maxlen / 2 - 4)
         out = (out[0:i] +
-               ' . . . ' +
+               ' ... ' +
                out[-i:None])
     return out
 

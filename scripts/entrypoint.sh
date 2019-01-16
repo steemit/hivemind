@@ -5,7 +5,9 @@
 # a non-micro-fork was encountered. Hive has a startup routine which attempts
 # to recover automatically, so database should be kept intact between restarts.
 
-# eb need to set: RUN_IN_EB, S3_BUCKET, SYNC_TO_S3 (boolean) if a syncer
+# eb with self-contained postgres need to set: RUN_IN_EB, S3_BUCKET, and SYNC_TO_S3 (boolean) if a syncer
+# eb with external postgres do not require RUN_IN_EB, S3_BUCKET, or SYNC_TO_S3
+# with external postgres need to set: SYNC_SERVICE if a syncer
 # hive expects: DATABASE_URL, LOG_LEVEL, STEEMD_URL, JUSSI_URL
 # default DATABASE_URL should be postgresql://postgres:postgres@localhost:5432/postgres
 
@@ -65,24 +67,39 @@ if [[ "$RUN_IN_EB" ]]; then
 
     service postgresql restart
   fi
-fi
+  cd $APP_ROOT
+  # startup hive
+  echo hivemind: starting sync
+  exec "${POPULATE_CMD}" sync 2>&1&
 
-cd $APP_ROOT
-
-# startup hive
-echo hivemind: starting sync
-exec "${POPULATE_CMD}" sync 2>&1&
-
-echo hivemind: starting server
-if [[ ! "$SYNC_TO_S3" ]]; then
-    exec "${POPULATE_CMD}" server
+  echo hivemind: starting server
+  if [[ ! "$SYNC_TO_S3" ]]; then
+      exec "${POPULATE_CMD}" server
+  else
+      exec "${POPULATE_CMD}" server --log-level=warning 2>&1&
+      mkdir -p /etc/service/hivesync
+      cp /usr/local/bin/hivesync.sh /etc/service/hivesync/run
+      chmod +x /etc/service/hivesync/run
+      echo hivemind: starting hivesync service
+      runsv /etc/service/hivesync
+  fi
 else
-    exec "${POPULATE_CMD}" server --log-level=warning 2>&1&
+  # start hive with an external postgres
+  cd $APP_ROOT
+  if [[ "$SYNC_SERVICE" ]]; then
+    echo hivemind: starting sync
+    exec "${POPULATE_CMD}" sync 2>&1&
+    echo hivemind: starting server
+    exec "${POPULATE_CMD}" server 2>&1&
+    # make sure hive sync and server continually run
     mkdir -p /etc/service/hivesync
-    cp /usr/local/bin/hivesync.sh /etc/service/hivesync/run
+    cp /usr/local/bin/hivesynccontinue.sh /etc/service/hivesync/run
     chmod +x /etc/service/hivesync/run
-    echo hivemind: starting hivesync service
     runsv /etc/service/hivesync
+  else
+    echo hivemind: starting server
+    exec "${POPULATE_CMD}" server
+  fi
 fi
 
 echo hivemind: application has stopped, see log for errors
