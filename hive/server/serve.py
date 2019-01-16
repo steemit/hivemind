@@ -26,10 +26,10 @@ def build_methods():
 
     [methods.add(method, 'hive.' + method.__name__) for method in (
         hive_api.db_head_state,
-        hive_api.payouts_total,
-        hive_api.payouts_last_24h,
-        hive_api.get_accounts,
-        hive_api.get_accounts_ac,
+        #hive_api.payouts_total,
+        #hive_api.payouts_last_24h,
+        #hive_api.get_accounts,
+        #hive_api.get_accounts_ac,
         # --- disabled until #92
         #hive_api.get_followers,
         #hive_api.get_following,
@@ -58,9 +58,39 @@ def build_methods():
         condenser_api.get_replies_by_last_update,
 
         condenser_api.get_discussions_by_author_before_date,
+        condenser_api.get_post_discussions_by_payout,
+        condenser_api.get_comment_discussions_by_payout,
         condenser_api.get_blog,
         condenser_api.get_blog_entries,
+        condenser_api.get_account_reputations,
+        condenser_api.get_reblogged_by,
     )]
+
+    # dummy methods -- serve informational error
+    methods.add(condenser_api.get_account_votes, 'condenser_api.get_account_votes')
+    methods.add(condenser_api.get_account_votes, 'tags_api.get_account_votes')
+
+    # follow_api aliases
+    methods.add(condenser_api.get_followers, 'follow_api.get_followers')
+    methods.add(condenser_api.get_following, 'follow_api.get_following')
+    methods.add(condenser_api.get_follow_count, 'follow_api.get_follow_count')
+    methods.add(condenser_api.get_account_reputations, 'follow_api.get_account_reputations')
+    methods.add(condenser_api.get_blog, 'follow_api.get_blog')
+    methods.add(condenser_api.get_blog_entries, 'follow_api.get_blog_entries')
+    methods.add(condenser_api.get_reblogged_by, 'follow_api.get_reblogged_by')
+
+    # tags_api aliases
+    methods.add(condenser_api.get_content, 'tags_api.get_discussion')
+    methods.add(condenser_api.get_content_replies, 'tags_api.get_content_replies')
+    methods.add(condenser_api.get_discussions_by_trending, 'tags_api.get_discussions_by_trending')
+    methods.add(condenser_api.get_discussions_by_hot, 'tags_api.get_discussions_by_hot')
+    methods.add(condenser_api.get_discussions_by_promoted, 'tags_api.get_discussions_by_promoted')
+    methods.add(condenser_api.get_discussions_by_created, 'tags_api.get_discussions_by_created')
+    methods.add(condenser_api.get_discussions_by_blog, 'tags_api.get_discussions_by_blog')
+    methods.add(condenser_api.get_discussions_by_comments, 'tags_api.get_discussions_by_comments')
+    methods.add(condenser_api.get_discussions_by_author_before_date, 'tags_api.get_discussions_by_author_before_date')
+    methods.add(condenser_api.get_post_discussions_by_payout, 'tags_api.get_post_discussions_by_payout')
+    methods.add(condenser_api.get_comment_discussions_by_payout, 'tags_api.get_comment_discussions_by_payout')
 
     methods.add(condenser_api_call)
 
@@ -84,23 +114,22 @@ def truncate_response_log(logger):
 def run_server(conf):
     """Configure and launch the API server."""
 
+    # configure jsonrpcserver logging
     log_level = conf.log_level()
     config.debug = (log_level == logging.DEBUG)
-    #config.debug = logging.getLogger().isEnabledFor(logging.DEBUG)
+    #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
     truncate_response_log(logging.getLogger('jsonrpcserver.dispatcher.response'))
-    #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
+
+    # init
     log = logging.getLogger(__name__)
-
     methods = build_methods()
-
     #context = dict(db=conf.db())
 
     app = web.Application()
     app['config'] = dict()
     app['config']['args'] = conf.args()
     app['config']['hive.MAX_DB_ROW_RESULTS'] = 100000
-    app['config']['hive.DB_QUERY_LIMIT'] = app['config']['hive.MAX_DB_ROW_RESULTS'] + 1
     #app['config']['hive.logger'] = logger
 
     #async def init_db(app):

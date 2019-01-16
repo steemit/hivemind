@@ -5,7 +5,7 @@ from hive.db.methods import query_col, query_all
 from hive.server.condenser_api.common import (return_error_info, valid_tag, valid_limit)
 
 @return_error_info
-@cached(ttl=3600)
+@cached(ttl=7200, timeout=1200)
 async def get_top_trending_tags_summary():
     """Get top 50 trending tags among pending posts."""
     # Same results, more overhead:
@@ -21,7 +21,7 @@ async def get_top_trending_tags_summary():
     return query_col(sql)
 
 @return_error_info
-@cached(ttl=3600)
+@cached(ttl=3600, timeout=1200)
 async def get_trending_tags(start_tag: str = '', limit: int = 250):
     """Get top 250 trending tags among pending posts, with stats."""
 

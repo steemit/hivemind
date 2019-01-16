@@ -453,7 +453,7 @@ class CachedPost:
             ('is_hidden',   "%d" % stats['hide']),
             ('is_grayed',   "%d" % stats['gray']),
             ('author_rep',  "%f" % stats['author_rep']),
-            ('children',    "%d" % min(post['children'], 32767)), # TODO: #115
+            ('children',    "%d" % min(post['children'], 32767)),
         ])
 
         # if recounting, update the parent next pass.

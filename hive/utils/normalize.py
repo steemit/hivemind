@@ -133,6 +133,17 @@ def rep_log10(rep):
     out = (out * 9) + 25          # 9 points per magnitude. center at 25
     return round(out, 2)
 
+def rep_to_raw(rep):
+    """Convert a UI-ready rep score back into its approx raw value."""
+    if not isinstance(rep, (str, float, int)):
+        return 0
+    if float(rep) == 25:
+        return 0
+    rep = float(rep) - 25
+    rep = rep / 9
+    sign = 1 if rep >= 0 else -1
+    rep = abs(rep) + 9
+    return int(sign * pow(10, rep))
 
 def safe_img_url(url, max_size=1024):
     """Given an image URL, strict enforce size and validity."""

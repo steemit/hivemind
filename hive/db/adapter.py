@@ -188,6 +188,6 @@ class Db:
         if action == 'SELECT':
             return False
         if action in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START',
-                      'ALTER', 'TRUNCA', 'CREATE']:
+                      'ALTER', 'TRUNCA', 'CREATE', 'DROP I']:
             return True
         raise Exception("unknown action: {}".format(sql))
