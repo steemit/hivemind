@@ -62,6 +62,10 @@ def build_methods():
         condenser_api.get_blog_entries,
     )]
 
+    # dummy methods -- serve informational error
+    methods.add(condenser_api.get_account_votes, 'condenser_api.get_account_votes')
+    methods.add(condenser_api.get_account_votes, 'tags_api.get_account_votes')
+
     methods.add(condenser_api_call)
 
     return methods

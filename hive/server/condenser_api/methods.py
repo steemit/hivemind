@@ -5,6 +5,7 @@ from functools import wraps
 import hive.server.condenser_api.cursor as cursor
 from hive.server.condenser_api.objects import load_posts, load_posts_reblogs
 from hive.server.condenser_api.common import (
+    ApiError,
     return_error_info,
     valid_account,
     valid_permlink,
@@ -15,12 +16,21 @@ from hive.server.condenser_api.common import (
     get_child_ids)
 
 
-# Follows Queries
+# Dummy
+
+@return_error_info
+async def get_account_votes(account):
+    """Return an info message about get_acccount_votes being unsupported."""
+    # pylint: disable=unused-argument
+    raise ApiError("get_account_votes is no longer supported, for details see "
+                   "https://steemit.com/steemit/@steemitdev/additional-public-api-change")
 
 def _follow_type_to_int(follow_type: str):
     """Convert steemd-style "follow type" into internal status (int)."""
     assert follow_type in ['blog', 'ignore'], "invalid follow_type"
     return 1 if follow_type == 'blog' else 2
+
+# Follows Queries
 
 def _legacy_follower(follower, following, follow_type):
     return dict(follower=follower, following=following, what=[follow_type])

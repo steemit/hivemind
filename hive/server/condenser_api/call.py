@@ -24,6 +24,7 @@ from hive.server.condenser_api.methods import (
     get_discussions_by_author_before_date,
     get_blog,
     get_blog_entries,
+    get_account_votes,
 )
 
 def _strict_list(params, expected_len, min_len=None):
@@ -113,5 +114,9 @@ async def call(api, method, params):
         return await get_blog(*_strict_list(params, 3, 2))
     elif method == 'get_blog_entries':
         return await get_blog_entries(*_strict_list(params, 3, 2))
+
+    # Misc/dummy
+    elif method == 'get_account_votes':
+        return await get_account_votes(*_strict_list(params, 1))
 
     raise ApiError("unknown method: %s.%s" % (api, method))
