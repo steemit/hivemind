@@ -5,7 +5,6 @@ import logging
 from collections import OrderedDict
 import ujson as json
 
-from hive.db.methods import query_one
 from hive.utils.normalize import legacy_amount
 
 from hive.server.condenser_api.objects import (
@@ -82,16 +81,18 @@ POST_LIST_SORTS = [
 ]
 
 @return_error_info
-async def get_state(path: str):
+async def get_state(context, path: str):
     """`get_state` reimplementation.
 
     See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
     """
     (path, part) = _normalize_path(path)
 
+    db = context['db']
+
     state = {
-        'feed_price': _get_feed_price(),
-        'props': _get_props_lite(),
+        'feed_price': await _get_feed_price(db),
+        'props': await _get_props_lite(db),
         'tags': {},
         'accounts': {},
         'content': {},
@@ -107,11 +108,11 @@ async def get_state(path: str):
             part[1] = 'blog'
 
         account = valid_account(part[0][1:])
-        state['accounts'][account] = _load_account(account)
+        state['accounts'][account] = await _load_account(db, account)
 
         if part[1] in ACCOUNT_TAB_KEYS:
             key = ACCOUNT_TAB_KEYS[part[1]]
-            posts = await _get_account_discussion_by_key(account, key)
+            posts = await _get_account_discussion_by_key(db, account, key)
             state['content'] = _keyed_posts(posts)
             state['accounts'][account][key] = list(state['content'].keys())
         elif part[1] in ACCOUNT_TAB_IGNORE:
@@ -125,23 +126,23 @@ async def get_state(path: str):
     elif part[1] and part[1][0] == '@':
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
-        state['content'] = _load_discussion(author, permlink)
-        state['accounts'] = _load_content_accounts(state['content'])
+        state['content'] = await _load_discussion(db, author, permlink)
+        state['accounts'] = await _load_content_accounts(db, state['content'])
 
     # ranked posts - `/sort/category`
     elif part[0] in POST_LIST_SORTS:
         assert not part[2], "unexpected discussion path part[2] %s" % path
         sort = valid_sort(part[0])
         tag = valid_tag(part[1].lower(), allow_empty=True)
-        posts = load_posts(cursor.pids_by_query(sort, '', '', 20, tag))
-        state['content'] = _keyed_posts(posts)
+        pids = await cursor.pids_by_query(db, sort, '', '', 20, tag)
+        state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-        state['tag_idx'] = {'trending': await get_top_trending_tags_summary()}
+        state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context)}
 
     # tag "explorer" - `/tags`
     elif part[0] == "tags":
         assert not part[1] and not part[2], 'invalid /tags request'
-        for tag in await get_trending_tags():
+        for tag in await get_trending_tags(context):
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
@@ -153,19 +154,22 @@ async def get_state(path: str):
 
     return state
 
-async def _get_account_discussion_by_key(account, key):
+async def _get_account_discussion_by_key(db, account, key):
     assert account, 'account must be specified'
     assert key, 'discussion key must be specified'
 
     if key == 'recent_replies':
-        posts = load_posts(cursor.pids_by_replies_to_account(account, '', 20))
+        pids = await cursor.pids_by_replies_to_account(db, account, '', 20)
+        posts = await load_posts(db, pids)
     elif key == 'comments':
-        posts = load_posts(cursor.pids_by_account_comments(account, '', 20))
+        pids = await cursor.pids_by_account_comments(db, account, '', 20)
+        posts = await load_posts(db, pids)
     elif key == 'blog':
-        posts = load_posts(cursor.pids_by_blog(account, '', '', 20))
+        pids = await cursor.pids_by_blog(db, account, '', '', 20)
+        posts = await load_posts(db, pids)
     elif key == 'feed':
-        res = cursor.pids_by_feed_with_reblog(account, '', '', 20)
-        posts = load_posts_reblogs(res)
+        res = await cursor.pids_by_feed_with_reblog(db, account, '', '', 20)
+        posts = await load_posts_reblogs(db, res)
     else:
         raise ApiError("unknown account discussion key %s" % key)
 
@@ -181,7 +185,7 @@ def _normalize_path(path):
 
     if not path:
         path = 'trending'
-    assert '#' not in path, 'path contains hash mark (#)' % path
+    assert '#' not in path, 'path contains hash mark (#)'
     assert '?' not in path, 'path contains query string: `%s`' % path
 
     parts = path.split('/')
@@ -201,16 +205,16 @@ def _keyed_posts(posts):
 def _ref(post):
     return post['author'] + '/' + post['permlink']
 
-def _load_content_accounts(content):
+async def _load_content_accounts(db, content):
     if not content:
         return {}
     posts = content.values()
     names = set(map(lambda p: p['author'], posts))
-    accounts = load_accounts(names)
+    accounts = await load_accounts(db, names)
     return {a['name']: a for a in accounts}
 
-def _load_account(name):
-    ret = load_accounts([name])
+async def _load_account(db, name):
+    ret = await load_accounts(db, [name])
     assert ret, 'account not found: `%s`' % name
     account = ret[0]
     for key in ACCOUNT_TAB_KEYS.values():
@@ -218,22 +222,20 @@ def _load_account(name):
     return account
 
 
-def _load_discussion(author, permlink):
+async def _load_discussion(db, author, permlink):
     """Load a full discussion thread."""
-    post_id = get_post_id(author, permlink)
+    post_id = await get_post_id(db, author, permlink)
     if not post_id:
         return {}
 
     ret = []
-    queue = load_posts([post_id])
+    queue = await load_posts(db, [post_id])
     while queue:
         parent = queue.pop()
 
-        child_ids = get_child_ids(parent['post_id'])
+        child_ids = await get_child_ids(db, parent['post_id'])
         if child_ids:
-            children = load_posts(child_ids)
-            if not children:
-                log.warning("no children loaded for %s", _ref(parent))
+            children = await load_posts(db, child_ids)
             parent['replies'] = list(map(_ref, children))
             queue.extend(children)
 
@@ -241,14 +243,14 @@ def _load_discussion(author, permlink):
 
     return {_ref(post): post for post in ret}
 
-def _get_feed_price():
+async def _get_feed_price(db):
     """Get a steemd-style ratio object representing feed price."""
-    price = query_one("SELECT usd_per_steem FROM hive_state")
+    price = await db.query_one("SELECT usd_per_steem FROM hive_state")
     return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
 
-def _get_props_lite():
+async def _get_props_lite(db):
     """Return a minimal version of get_dynamic_global_properties data."""
-    raw = json.loads(query_one("SELECT dgpo FROM hive_state"))
+    raw = json.loads(await db.query_one("SELECT dgpo FROM hive_state"))
 
     # convert NAI amounts to legacy
     nais = ['virtual_supply', 'current_supply', 'current_sbd_supply',

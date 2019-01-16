@@ -1,11 +1,13 @@
-# Hivemind [ALPHA]
+# Hivemind [BETA]
 
 #### Developer-friendly microservice powering social networks on the Steem blockchain.
 
 Hive is a "consensus interpretation" layer for the Steem blockchain, maintaining the state of social features such as post feeds, follows, and communities. Written in Python, it synchronizes an SQL database with chain state, providing developers with a more flexible/extensible alternative to the raw steemd API.
 
-
 ## Development Environment
+
+ - Python 3.6 required
+ - Postgres 10+ recommended
 
 Dependencies:
 
@@ -82,7 +84,7 @@ Precedence: CLI over ENV over hive.conf. Check `hive --help` for details.
 
  - Focus on Postgres performance
  - 2.5GB of memory for `hive sync` process
- - 200GB storage for database
+ - 250GB storage for database
 
 
 ### Steem config
@@ -95,14 +97,13 @@ Build flags
 
 Plugins
 
- - `follow` - for reputation data (to be replaced with [reputation](https://github.com/steemit/steem/issues/1425))
- - `witness` - for account activity/bandwidth data
- - Not required: `tags`, `market_history`, `account_history`
+ - Required: `reputation reputation_api database_api condenser_api block_api`
+ - Not required: `follow*`, `tags*`, `market_history`, `account_history`, `witness`
 
 
 ### Postgres Performance
 
-For a system with 32G of memory, here's a good start:
+For a system with 16G of memory, here's a good start:
 
 ```
 effective_cache_size = 12GB # 50-75% of avail memory
