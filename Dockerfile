@@ -50,8 +50,10 @@ WORKDIR /app
 
 ADD scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 ADD scripts/hivesync.sh /usr/local/bin/hivesync.sh
+ADD scripts/hivesynccontinue.sh /usr/local/bin/hivesynccontinue.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/hivesync.sh
+RUN chmod +x /usr/local/bin/hivesynccontinue.sh
 
 RUN \
     pip3 install . && \
