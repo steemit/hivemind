@@ -26,10 +26,10 @@ def build_methods():
 
     [methods.add(method, 'hive.' + method.__name__) for method in (
         hive_api.db_head_state,
-        hive_api.payouts_total,
-        hive_api.payouts_last_24h,
-        hive_api.get_accounts,
-        hive_api.get_accounts_ac,
+        #hive_api.payouts_total,
+        #hive_api.payouts_last_24h,
+        #hive_api.get_accounts,
+        #hive_api.get_accounts_ac,
         # --- disabled until #92
         #hive_api.get_followers,
         #hive_api.get_following,
@@ -84,23 +84,22 @@ def truncate_response_log(logger):
 def run_server(conf):
     """Configure and launch the API server."""
 
+    # configure jsonrpcserver logging
     log_level = conf.log_level()
     config.debug = (log_level == logging.DEBUG)
-    #config.debug = logging.getLogger().isEnabledFor(logging.DEBUG)
+    #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
     truncate_response_log(logging.getLogger('jsonrpcserver.dispatcher.response'))
-    #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
+
+    # init
     log = logging.getLogger(__name__)
-
     methods = build_methods()
-
     #context = dict(db=conf.db())
 
     app = web.Application()
     app['config'] = dict()
     app['config']['args'] = conf.args()
     app['config']['hive.MAX_DB_ROW_RESULTS'] = 100000
-    app['config']['hive.DB_QUERY_LIMIT'] = app['config']['hive.MAX_DB_ROW_RESULTS'] + 1
     #app['config']['hive.logger'] = logger
 
     #async def init_db(app):
