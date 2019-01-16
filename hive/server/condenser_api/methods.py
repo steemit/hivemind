@@ -364,7 +364,7 @@ def _get_blog(account: str, start_index: int, limit: int = None):
     idx = int(start_index)
     for post in load_posts(ids):
         reblog = post['author'] != account
-        reblog_on = post['created'] if reblog else "1970-01-01T00"
+        reblog_on = post['created'] if reblog else "1970-01-01T00:00:00"
         out.append({"blog": account,
                     "entry_id": idx,
                     "comment": post,
