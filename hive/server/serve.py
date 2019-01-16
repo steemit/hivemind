@@ -70,6 +70,28 @@ def build_methods():
     methods.add(condenser_api.get_account_votes, 'condenser_api.get_account_votes')
     methods.add(condenser_api.get_account_votes, 'tags_api.get_account_votes')
 
+    # follow_api aliases
+    methods.add(condenser_api.get_followers, 'follow_api.get_followers')
+    methods.add(condenser_api.get_following, 'follow_api.get_following')
+    methods.add(condenser_api.get_follow_count, 'follow_api.get_follow_count')
+    methods.add(condenser_api.get_account_reputations, 'follow_api.get_account_reputations')
+    methods.add(condenser_api.get_blog, 'follow_api.get_blog')
+    methods.add(condenser_api.get_blog_entries, 'follow_api.get_blog_entries')
+    methods.add(condenser_api.get_reblogged_by, 'follow_api.get_reblogged_by')
+
+    # tags_api aliases
+    methods.add(condenser_api.get_content, 'tags_api.get_discussion')
+    methods.add(condenser_api.get_content_replies, 'tags_api.get_content_replies')
+    methods.add(condenser_api.get_discussions_by_trending, 'tags_api.get_discussions_by_trending')
+    methods.add(condenser_api.get_discussions_by_hot, 'tags_api.get_discussions_by_hot')
+    methods.add(condenser_api.get_discussions_by_promoted, 'tags_api.get_discussions_by_promoted')
+    methods.add(condenser_api.get_discussions_by_created, 'tags_api.get_discussions_by_created')
+    methods.add(condenser_api.get_discussions_by_blog, 'tags_api.get_discussions_by_blog')
+    methods.add(condenser_api.get_discussions_by_comments, 'tags_api.get_discussions_by_comments')
+    methods.add(condenser_api.get_discussions_by_author_before_date, 'tags_api.get_discussions_by_author_before_date')
+    methods.add(condenser_api.get_post_discussions_by_payout, 'tags_api.get_post_discussions_by_payout')
+    methods.add(condenser_api.get_comment_discussions_by_payout, 'tags_api.get_comment_discussions_by_payout')
+
     methods.add(condenser_api_call)
 
     return methods
