@@ -162,22 +162,24 @@ class Follow:
         log.info("[SYNC] query follower counts")
         sql = """
             CREATE TEMPORARY TABLE following_counts AS (
-                SELECT follower account_id, COUNT(*) num
-                FROM hive_follows WHERE state = 1
-                GROUP BY follower);
+                  SELECT id account_id, COUNT(state) num
+                    FROM hive_accounts
+               LEFT JOIN hive_follows hf ON id = hf.follower AND state = 1
+                GROUP BY id);
             CREATE TEMPORARY TABLE follower_counts AS (
-                SELECT following account_id, COUNT(*) num
-                FROM hive_follows WHERE state = 1
-                GROUP BY following);
+                  SELECT id account_id, COUNT(state) num
+                    FROM hive_accounts
+               LEFT JOIN hive_follows hf ON id = hf.following AND state = 1
+                GROUP BY id);
         """
         DB.query(sql)
 
         log.info("[SYNC] update follower counts")
         sql = """
-            UPDATE hive_accounts SET followers = num
-            FROM follower_counts WHERE id = account_id;
+            UPDATE hive_accounts SET followers = num FROM follower_counts
+             WHERE id = account_id AND followers != num;
 
-            UPDATE hive_accounts SET following = num
-            FROM following_counts WHERE id = account_id;
+            UPDATE hive_accounts SET following = num FROM following_counts
+             WHERE id = account_id AND following != num;
         """
         DB.query(sql)
