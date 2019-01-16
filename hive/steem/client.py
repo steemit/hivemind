@@ -82,7 +82,7 @@ class SteemClient:
         return self._gdgp()['last_irreversible_block_num']
 
     def is_testnet(self):
-        """Get last irreversible block"""
+        """Get is testnet pragma flag"""
         return self._gconfig()['IS_TEST_NET']
 
     def gdgp_extended(self):

@@ -55,7 +55,7 @@ class Payments:
         if chain == 'mainnet' and token != 'SBD':
             return # only care about SBD payments
         elif chain == 'testnet' and token != 'TBD':
-            return # only care about SBD payments
+            return # only care about TBD payments
 
         url = op['memo']
         if not cls._validate_url(url):
