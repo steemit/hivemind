@@ -3,7 +3,7 @@
 import time
 import logging
 
-from hive.db.schema import setup, build_metadata, teardown, DB_VERSION
+from hive.db.schema import setup, reset_autovac, build_metadata, teardown, DB_VERSION
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -82,14 +82,21 @@ class DbState:
     @classmethod
     def _disableable_indexes(cls):
         to_locate = [
-            'hive_posts_ix1', # (parent_id)
-            'hive_posts_ix2', # (is_deleted, depth)
-            'hive_follows_ix2', # (following, follower, state=1)
-            'hive_follows_ix3', # (follower, following, state=1)
+            'hive_posts_ix3', # (author, depth, id)
+            'hive_posts_ix4', # (parent_id, id, is_deleted=0)
+            'hive_follows_ix5a', # (following, state, created_at, follower)
+            'hive_follows_ix5b', # (follower, state, created_at, following)
             'hive_reblogs_ix1', # (post_id, account, created_at)
-            'hive_posts_cache_ix6', # (sc_trend, post_id)
-            'hive_posts_cache_ix7', # (sc_hot, post_id)
+            'hive_posts_cache_ix6a', # (sc_trend, post_id, paidout=0)
+            'hive_posts_cache_ix6b', # (post_id, sc_trend, paidout=0)
+            'hive_posts_cache_ix7a', # (sc_hot, post_id, paidout=0)
+            'hive_posts_cache_ix7b', # (post_id, sc_hot, paidout=0)
+            'hive_posts_cache_ix8', # (category, payout, depth, paidout=0)
+            'hive_posts_cache_ix9a', # (depth, payout, post_id, paidout=0)
+            'hive_posts_cache_ix9b', # (category, depth, payout, post_id, paidout=0)
             'hive_accounts_ix3', # (vote_weight, name VPO)
+            'hive_accounts_ix4', # (id, name)
+            'hive_accounts_ix5', # (cached_at, name)
         ]
 
         to_return = []
@@ -181,6 +188,7 @@ class DbState:
     @classmethod
     def _check_migrations(cls):
         """Check current migration version and perform updates as needed."""
+        #pylint: disable=line-too-long
         cls._ver = cls.db().query_one("SELECT db_version FROM hive_state LIMIT 1")
         assert cls._ver is not None, 'could not load state record'
 
@@ -194,15 +202,11 @@ class DbState:
             cls._set_ver(3)
 
         if cls._ver == 3:
-            sql = """CREATE INDEX hive_accounts_ix3 ON hive_accounts
-                      USING btree (vote_weight, name varchar_pattern_ops)"""
-            cls.db().query(sql)
+            cls.db().query("CREATE INDEX hive_accounts_ix3 ON hive_accounts (vote_weight, name varchar_pattern_ops)")
             cls._set_ver(4)
 
         if cls._ver == 4:
-            sql = """CREATE INDEX hive_follows_ix4 ON public.hive_follows
-                      USING btree (follower, following) WHERE state = 2;"""
-            cls.db().query(sql)
+            cls.db().query("CREATE INDEX hive_follows_ix4 ON hive_follows (follower, following) WHERE state = 2")
             cls._set_ver(5)
 
         if cls._ver == 5:
@@ -215,6 +219,49 @@ class DbState:
             Accounts.clear_ids()
             cls._set_ver(6)
 
+        if cls._ver == 6:
+            cls.db().query("DROP INDEX hive_posts_cache_ix6")
+            cls.db().query("CREATE INDEX hive_posts_cache_ix6a ON hive_posts_cache (sc_trend, post_id) WHERE is_paidout = '0'")
+            cls.db().query("CREATE INDEX hive_posts_cache_ix6b ON hive_posts_cache (post_id, sc_trend) WHERE is_paidout = '0'")
+            cls.db().query("DROP INDEX hive_posts_cache_ix7")
+            cls.db().query("CREATE INDEX hive_posts_cache_ix7a ON hive_posts_cache (sc_hot, post_id) WHERE is_paidout = '0'")
+            cls.db().query("CREATE INDEX hive_posts_cache_ix7b ON hive_posts_cache (post_id, sc_hot) WHERE is_paidout = '0'")
+            cls._set_ver(7)
+
+        if cls._ver == 7:
+            cls.db().query("CREATE INDEX hive_accounts_ix4 ON hive_accounts (id, name)")
+            cls.db().query("CREATE INDEX hive_accounts_ix5 ON hive_accounts (cached_at, name)")
+            cls._set_ver(8)
+
+        if cls._ver == 8:
+            cls.db().query("DROP INDEX hive_follows_ix2")
+            cls.db().query("DROP INDEX hive_follows_ix3")
+            cls.db().query("DROP INDEX hive_follows_ix4")
+            cls.db().query("CREATE INDEX hive_follows_5a ON hive_follows (following, state, created_at, follower)")
+            cls.db().query("CREATE INDEX hive_follows_5b ON hive_follows (follower, state, created_at, following)")
+            cls._set_ver(9)
+
+        if cls._ver == 9:
+            from hive.indexer.follow import Follow
+            Follow.force_recount()
+            cls._set_ver(10)
+
+        if cls._ver == 10:
+            cls.db().query("CREATE INDEX hive_posts_cache_ix8 ON hive_posts_cache (category, payout, depth) WHERE is_paidout = '0'")
+            cls.db().query("CREATE INDEX hive_posts_cache_ix9a ON hive_posts_cache (depth, payout, post_id) WHERE is_paidout = '0'")
+            cls.db().query("CREATE INDEX hive_posts_cache_ix9b ON hive_posts_cache (category, depth, payout, post_id) WHERE is_paidout = '0'")
+            cls._set_ver(11)
+
+        if cls._ver == 11:
+            cls.db().query("DROP INDEX hive_posts_ix1")
+            cls.db().query("DROP INDEX hive_posts_ix2")
+            cls.db().query("CREATE INDEX hive_posts_ix3 ON hive_posts (author, depth, id) WHERE is_deleted = '0'")
+            cls.db().query("CREATE INDEX hive_posts_ix4 ON hive_posts (parent_id, id) WHERE is_deleted = '0'")
+            cls._set_ver(12)
+
+        reset_autovac(cls.db())
+
+        log.info("[HIVE] db version: %d", cls._ver)
         assert cls._ver == DB_VERSION, "migration missing or invalid DB_VERSION"
         # Example migration:
         #if cls._ver == 1:
