@@ -3,27 +3,26 @@
 import logging
 import ujson as json
 
-from hive.db.methods import query_all, query_row
 from hive.utils.normalize import sbd_amount, rep_to_raw
 
 log = logging.getLogger(__name__)
 
 # Building of legacy account objects
 
-def load_accounts(names):
+async def load_accounts(db, names):
     """`get_accounts`-style lookup for `get_state` compat layer."""
     sql = """SELECT id, name, display_name, about, reputation, vote_weight,
                     created_at, post_count, profile_image, location, website,
                     cover_image
                FROM hive_accounts WHERE name IN :names"""
-    rows = query_all(sql, names=tuple(names))
+    rows = await db.query_all(sql, names=tuple(names))
     return [_condenser_account_object(row) for row in rows]
 
-def load_posts_reblogs(ids_with_reblogs, truncate_body=0):
+async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
     """Given a list of (id, reblogged_by) tuples, return posts w/ reblog key."""
     post_ids = [r[0] for r in ids_with_reblogs]
     reblog_by = dict(ids_with_reblogs)
-    posts = load_posts(post_ids, truncate_body=truncate_body)
+    posts = await load_posts(db, post_ids, truncate_body=truncate_body)
 
     # Merge reblogged_by data into result set
     for post in posts:
@@ -34,7 +33,7 @@ def load_posts_reblogs(ids_with_reblogs, truncate_body=0):
 
     return posts
 
-def load_posts(ids, truncate_body=0):
+async def load_posts(db, ids, truncate_body=0):
     """Given an array of post ids, returns full objects in the same order."""
     if not ids:
         return []
@@ -44,8 +43,8 @@ def load_posts(ids, truncate_body=0):
                     promoted, payout, payout_at, is_paidout, children, votes,
                     created_at, updated_at, rshares, raw_json, json
                FROM hive_posts_cache WHERE post_id IN :ids"""
-    result = query_all(sql, ids=tuple(ids))
-    author_reps = _query_author_rep_map(result)
+    result = await db.query_all(sql, ids=tuple(ids))
+    author_reps = await _query_author_rep_map(db, result)
 
     # key by id so we can return output sorted by input order
     posts_by_id = {}
@@ -62,18 +61,18 @@ def load_posts(ids, truncate_body=0):
         for _id in missed:
             sql = ("SELECT id, author, permlink, depth, created_at, is_deleted "
                    "FROM hive_posts WHERE id = :id")
-            log.warning("missing: %s", dict(query_row(sql, id=_id)))
+            log.warning("missing: %s", dict(await db.query_row(sql, id=_id)))
             ids.remove(_id)
 
     return [posts_by_id[_id] for _id in ids]
 
-def _query_author_rep_map(posts):
+async def _query_author_rep_map(db, posts):
     """Given a list of posts, returns an author->reputation map."""
     if not posts:
         return {}
     names = tuple(set([post['author'] for post in posts]))
     sql = "SELECT name, reputation FROM hive_accounts WHERE name IN :names"
-    return {r['name']: r['reputation'] for r in query_all(sql, names=names)}
+    return {r['name']: r['reputation'] for r in await db.query_all(sql, names=names)}
 
 def _condenser_account_object(row):
     """Convert an internal account record into legacy-steemd style."""

@@ -3,8 +3,6 @@
 import re
 from functools import wraps
 
-from hive.db.methods import query_one, query_col
-
 class ApiError(Exception):
     """API-specific errors: unimplemented/bad params. Pass back to client."""
     pass
@@ -87,13 +85,13 @@ def valid_follow_type(follow_type: str):
     assert follow_type in ['blog', 'ignore'], 'invalid follow_type `%s`' % follow_type
     return follow_type
 
-def get_post_id(author, permlink):
+async def get_post_id(db, author, permlink):
     """Given an author/permlink, retrieve the id from db."""
     sql = ("SELECT id FROM hive_posts WHERE author = :a "
            "AND permlink = :p AND is_deleted = '0' LIMIT 1")
-    return query_one(sql, a=author, p=permlink)
+    return await db.query_one(sql, a=author, p=permlink)
 
-def get_child_ids(post_id):
+async def get_child_ids(db, post_id):
     """Given a parent post id, retrieve all child ids."""
     sql = "SELECT id FROM hive_posts WHERE parent_id = :id AND is_deleted = '0'"
-    return query_col(sql, id=post_id)
+    return await db.query_col(sql, id=post_id)

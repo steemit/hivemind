@@ -20,7 +20,7 @@ from hive.server.condenser_api.common import (
 # Dummy
 
 @return_error_info
-async def get_account_votes(account):
+async def get_account_votes(context, account):
     """Return an info message about get_acccount_votes being unsupported."""
     # pylint: disable=unused-argument
     raise ApiError("get_account_votes is no longer supported, for details see "
@@ -33,7 +33,7 @@ def _legacy_follower(follower, following, follow_type):
     return dict(follower=follower, following=following, what=[follow_type])
 
 @return_error_info
-async def get_followers(account: str, start: str, follow_type: str = None,
+async def get_followers(context, account: str, start: str, follow_type: str = None,
                         limit: int = None, **kwargs):
     """Get all accounts following `account`. (EOL)"""
     # `type` reserved word workaround
@@ -41,7 +41,8 @@ async def get_followers(account: str, start: str, follow_type: str = None,
         follow_type = kwargs['type']
     if not follow_type:
         follow_type = 'blog'
-    followers = cursor.get_followers(
+    followers = await cursor.get_followers(
+        context['db'],
         valid_account(account),
         valid_account(start, allow_empty=True),
         valid_follow_type(follow_type),
@@ -49,7 +50,7 @@ async def get_followers(account: str, start: str, follow_type: str = None,
     return [_legacy_follower(name, account, follow_type) for name in followers]
 
 @return_error_info
-async def get_following(account: str, start: str, follow_type: str = None,
+async def get_following(context, account: str, start: str, follow_type: str = None,
                         limit: int = None, **kwargs):
     """Get all accounts `account` follows. (EOL)"""
     # `type` reserved word workaround
@@ -57,7 +58,8 @@ async def get_following(account: str, start: str, follow_type: str = None,
         follow_type = kwargs['type']
     if not follow_type:
         follow_type = 'blog'
-    following = cursor.get_following(
+    following = await cursor.get_following(
+        context['db'],
         valid_account(account),
         valid_account(start, allow_empty=True),
         valid_follow_type(follow_type),
@@ -65,53 +67,59 @@ async def get_following(account: str, start: str, follow_type: str = None,
     return [_legacy_follower(account, name, follow_type) for name in following]
 
 @return_error_info
-async def get_follow_count(account: str):
+async def get_follow_count(context, account: str):
     """Get follow count stats. (EOL)"""
-    count = cursor.get_follow_counts(valid_account(account))
+    count = await cursor.get_follow_counts(
+        context['db'],
+        valid_account(account))
     return dict(account=account,
                 following_count=count['following'],
                 follower_count=count['followers'])
 
 @return_error_info
-async def get_reblogged_by(author: str, permlink: str):
+async def get_reblogged_by(context, author: str, permlink: str):
     """Get all rebloggers of a post."""
-    return cursor.get_reblogged_by(
+    return await cursor.get_reblogged_by(
+        context['db'],
         valid_account(author),
         valid_permlink(permlink))
 
 @return_error_info
-async def get_account_reputations(account_lower_bound: str = None, limit: int = None):
+async def get_account_reputations(context, account_lower_bound: str = None, limit: int = None):
     """List account reputations"""
-    return dict(reputations=cursor.get_account_reputations(
+    return {'reputations': await cursor.get_account_reputations(
+        context['db'],
         account_lower_bound,
-        valid_limit(limit, 1000)))
+        valid_limit(limit, 1000))}
 
 
 # Content Primitives
 
 @return_error_info
-async def get_content(author: str, permlink: str):
+async def get_content(context, author: str, permlink: str):
     """Get a single post object."""
+    db = context['db']
     valid_account(author)
     valid_permlink(permlink)
-    post_id = get_post_id(author, permlink)
+    post_id = await get_post_id(db, author, permlink)
     if not post_id:
         return {'id': 0, 'author': '', 'permlink': ''}
-    posts = load_posts([post_id])
+    posts = await load_posts(db, [post_id])
     assert posts, 'post was not found in cache'
     return posts[0]
 
 
 @return_error_info
-async def get_content_replies(author: str, permlink: str):
+async def get_content_replies(context, author: str, permlink: str):
     """Get a list of post objects based on parent."""
+    db = context['db']
     valid_account(author)
     valid_permlink(permlink)
-    parent_id = get_post_id(author, permlink)
+    parent_id = await get_post_id(db, author, permlink)
     if parent_id:
-        child_ids = get_child_ids(parent_id)
+        child_ids = await get_child_ids(db, parent_id)
         if child_ids:
-            return load_posts(child_ids)
+            return await load_posts(db, child_ids)
     return []
 
 
@@ -140,131 +148,139 @@ def nested_query_compat(function):
 
 @return_error_info
 @nested_query_compat
-async def get_discussions_by_trending(start_author: str = '', start_permlink: str = '',
+async def get_discussions_by_trending(context, start_author: str = '', start_permlink: str = '',
                                       limit: int = 20, tag: str = None,
                                       truncate_body: int = 0, filter_tags: list = None):
     """Query posts, sorted by trending score."""
     assert not filter_tags, 'filter_tags not supported'
-    ids = cursor.pids_by_query(
+    ids = await cursor.pids_by_query(
+        context['db'],
         'trending',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_discussions_by_hot(start_author: str = '', start_permlink: str = '',
+async def get_discussions_by_hot(context, start_author: str = '', start_permlink: str = '',
                                  limit: int = 20, tag: str = None,
                                  truncate_body: int = 0, filter_tags: list = None):
     """Query posts, sorted by hot score."""
     assert not filter_tags, 'filter_tags not supported'
-    ids = cursor.pids_by_query(
+    ids = await cursor.pids_by_query(
+        context['db'],
         'hot',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_discussions_by_promoted(start_author: str = '', start_permlink: str = '',
+async def get_discussions_by_promoted(context, start_author: str = '', start_permlink: str = '',
                                       limit: int = 20, tag: str = None,
                                       truncate_body: int = 0, filter_tags: list = None):
     """Query posts, sorted by promoted amount."""
     assert not filter_tags, 'filter_tags not supported'
-    ids = cursor.pids_by_query(
+    ids = await cursor.pids_by_query(
+        context['db'],
         'promoted',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_discussions_by_created(start_author: str = '', start_permlink: str = '',
+async def get_discussions_by_created(context, start_author: str = '', start_permlink: str = '',
                                      limit: int = 20, tag: str = None,
                                      truncate_body: int = 0, filter_tags: list = None):
     """Query posts, sorted by creation date."""
     assert not filter_tags, 'filter_tags not supported'
-    ids = cursor.pids_by_query(
+    ids = await cursor.pids_by_query(
+        context['db'],
         'created',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_discussions_by_blog(tag: str = None, start_author: str = '',
+async def get_discussions_by_blog(context, tag: str = None, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
                                   truncate_body: int = 0, filter_tags: list = None):
     """Retrieve account's blog posts, including reblogs."""
     assert tag, '`tag` cannot be blank'
     assert not filter_tags, 'filter_tags not supported'
-    ids = cursor.pids_by_blog(
+    ids = await cursor.pids_by_blog(
+        context['db'],
         valid_account(tag),
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_discussions_by_feed(tag: str = None, start_author: str = '',
+async def get_discussions_by_feed(context, tag: str = None, start_author: str = '',
                                   start_permlink: str = '', limit: int = 20,
                                   truncate_body: int = 0, filter_tags: list = None):
     """Retrieve account's personalized feed."""
     assert tag, '`tag` cannot be blank'
     assert not filter_tags, 'filter_tags not supported'
-    res = cursor.pids_by_feed_with_reblog(
+    res = await cursor.pids_by_feed_with_reblog(
+        context['db'],
         valid_account(tag),
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100))
-    return load_posts_reblogs(res, truncate_body=truncate_body)
+    return await load_posts_reblogs(context['db'], res, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_discussions_by_comments(start_author: str = None, start_permlink: str = '',
+async def get_discussions_by_comments(context, start_author: str = None, start_permlink: str = '',
                                       limit: int = 20, truncate_body: int = 0,
                                       filter_tags: list = None):
     """Get comments by made by author."""
     assert start_author, '`start_author` cannot be blank'
     assert not filter_tags, 'filter_tags not supported'
-    ids = cursor.pids_by_account_comments(
+    ids = await cursor.pids_by_account_comments(
+        context['db'],
         valid_account(start_author),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_replies_by_last_update(start_author: str = None, start_permlink: str = '',
+async def get_replies_by_last_update(context, start_author: str = None, start_permlink: str = '',
                                      limit: int = 20, truncate_body: int = 0):
     """Get all replies made to any of author's posts."""
     assert start_author, '`start_author` cannot be blank'
-    ids = cursor.pids_by_replies_to_account(
+    ids = await cursor.pids_by_replies_to_account(
+        context['db'],
         valid_account(start_author),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_discussions_by_author_before_date(author: str = None, start_permlink: str = '',
+async def get_discussions_by_author_before_date(context, author: str = None, start_permlink: str = '',
                                                 before_date: str = '', limit: int = 10):
     """Retrieve account's blog posts, without reblogs.
 
@@ -274,61 +290,64 @@ async def get_discussions_by_author_before_date(author: str = None, start_permli
     """
     # pylint: disable=invalid-name,unused-argument
     assert author, '`author` cannot be blank'
-    ids = cursor.pids_by_blog_without_reblog(
+    ids = await cursor.pids_by_blog_without_reblog(
+        context['db'],
         valid_account(author),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100))
-    return load_posts(ids)
+    return await load_posts(context['db'], ids)
 
 
 @return_error_info
 @nested_query_compat
-async def get_post_discussions_by_payout(start_author: str = '', start_permlink: str = '',
+async def get_post_discussions_by_payout(context, start_author: str = '', start_permlink: str = '',
                                          limit: int = 20, tag: str = None,
                                          truncate_body: int = 0):
     """Query top-level posts, sorted by payout."""
-    ids = cursor.pids_by_query(
+    ids = await cursor.pids_by_query(
+        context['db'],
         'payout',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_comment_discussions_by_payout(start_author: str = '', start_permlink: str = '',
+async def get_comment_discussions_by_payout(context, start_author: str = '', start_permlink: str = '',
                                             limit: int = 20, tag: str = None,
                                             truncate_body: int = 0):
     """Query comments, sorted by payout."""
-    ids = cursor.pids_by_query(
+    ids = await cursor.pids_by_query(
+        context['db'],
         'payout_comments',
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100),
         valid_tag(tag, allow_empty=True))
-    return load_posts(ids, truncate_body=truncate_body)
+    return await load_posts(context['db'], ids, truncate_body=truncate_body)
 
 
 @return_error_info
 @nested_query_compat
-async def get_blog(account: str, start_entry_id: int = 0, limit: int = None):
+async def get_blog(context, account: str, start_entry_id: int = 0, limit: int = None):
     """Get posts for an author's blog (w/ reblogs), paged by index/limit.
 
     Equivalent to get_discussions_by_blog, but uses offset-based pagination.
     """
-    return _get_blog(account, start_entry_id, limit)
+    return await _get_blog(context['db'], account, start_entry_id, limit)
 
 @return_error_info
 @nested_query_compat
-async def get_blog_entries(account: str, start_entry_id: int = 0, limit: int = None):
+async def get_blog_entries(context, account: str, start_entry_id: int = 0, limit: int = None):
     """Get 'entries' for an author's blog (w/ reblogs), paged by index/limit.
 
     Interface identical to get_blog, but returns minimalistic post references.
     """
 
-    entries = _get_blog(account, start_entry_id, limit)
+    entries = await _get_blog(context['db'], account, start_entry_id, limit)
     for entry in entries:
         # replace the comment body with just author/permlink
         post = entry.pop('comment')
@@ -337,7 +356,7 @@ async def get_blog_entries(account: str, start_entry_id: int = 0, limit: int = N
 
     return entries
 
-def _get_blog(account: str, start_index: int, limit: int = None):
+async def _get_blog(db, account: str, start_index: int, limit: int = None):
     """Get posts for an author's blog (w/ reblogs), paged by index/limit.
 
     Examples:
@@ -354,7 +373,8 @@ def _get_blog(account: str, start_index: int, limit: int = None):
     if not limit:
         limit = start_index + 1
 
-    ids = cursor.pids_by_blog_by_index(
+    ids = await cursor.pids_by_blog_by_index(
+        db,
         valid_account(account),
         valid_offset(start_index),
         valid_limit(limit, 500))
@@ -362,9 +382,9 @@ def _get_blog(account: str, start_index: int, limit: int = None):
     out = []
 
     idx = int(start_index)
-    for post in load_posts(ids):
+    for post in await load_posts(db, ids):
         reblog = post['author'] != account
-        reblog_on = post['created'] if reblog else "1970-01-01T00:00:00"
+        reblog_on = post['created'] if reblog else "1970-01-01T00"
         out.append({"blog": account,
                     "entry_id": idx,
                     "comment": post,
