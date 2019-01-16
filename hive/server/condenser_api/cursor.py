@@ -349,7 +349,8 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
        SELECT id FROM hive_posts
         WHERE parent_id IN (SELECT id FROM hive_posts
                              WHERE author = :parent
-                               AND is_deleted = '0') %s
+                               AND is_deleted = '0'
+                          ORDER BY id DESC) %s
           AND is_deleted = '0'
      ORDER BY id DESC
         LIMIT :limit
