@@ -60,7 +60,7 @@ $ make test
 
 Hivemind is deployed as a Docker container.
 
-Here is an example command that will run DB migrations and start the syncing process:
+Here is an example command that will initialize the DB schema and start the syncing process:
 
 ```
 docker run -d --name hivemind --env DATABASE_URL=postgresql://user:pass@hostname:5432/databasename --env STEEMD_URL=https://yoursteemnode --env SYNC_SERVICE=1 -p 8080:8080 steemit/hivemind:latest
