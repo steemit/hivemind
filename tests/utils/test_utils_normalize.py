@@ -49,7 +49,7 @@ def test_tests_amount():
 def test_sbd_amount():
     assert debt_amount('1.001 SBD', 'mainnet') == Decimal('1.001')
 
-def test_tbs_amount():
+def test_tbd_amount():
     assert debt_amount('1.001 TBD', 'testnet') == Decimal('1.001')
 
 def test_parse_amount():

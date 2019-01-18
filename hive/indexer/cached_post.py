@@ -46,6 +46,11 @@ class CachedPost:
         cls._pending_promoted[post_id] = amount
 
     @classmethod
+    def set_chain(cls, chain):
+        """Set the chain to mainnet or testnet."""
+        cls._chain = chain
+
+    @classmethod
     def _dirty(cls, level, author, permlink, pid=None):
         """Mark a post as dirty."""
         assert level in LEVELS, "invalid level {}".format(level)
@@ -411,7 +416,7 @@ class CachedPost:
 
         # always write, unless simple vote update
         if level in ['insert', 'payout', 'update']:
-            basic = post_basic(post)
+            basic = post_basic(post, cls._chain)
             values.extend([
                 ('created_at',    post['created']),    # immutable*
                 ('updated_at',    post['last_update']),
@@ -439,8 +444,8 @@ class CachedPost:
             values.append(('promoted', bal))
 
         # update unconditionally
-        payout = post_payout(post)
-        stats = post_stats(post)
+        payout = post_payout(post, cls._chain)
+        stats = post_stats(post, cls._chain)
         values.extend([
             ('payout',      "%f" % payout['payout']),
             ('rshares',     "%d" % payout['rshares']),

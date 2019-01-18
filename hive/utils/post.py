@@ -45,7 +45,7 @@ def post_basic(post, chain='mainnet'):
 
     # payout is declined if max_payout = 0, or if 100% is burned
     is_payout_declined = False
-    if chain == 'mainnet' and debt_amount(post['max_accepted_payout'], chain) == 0:
+    if debt_amount(post['max_accepted_payout'], chain) == 0:
         is_payout_declined = True
     elif len(post['beneficiaries']) == 1:
         benny = first(post['beneficiaries'])

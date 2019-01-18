@@ -32,6 +32,7 @@ class Sync:
         self._conf = conf
         self._db = conf.db()
         self._steem = conf.steem()
+        self._chain = conf.chain()
 
     def run(self):
         """Initialize state; setup/recovery checks; sync and runloop."""
@@ -42,6 +43,8 @@ class Sync:
         # prefetch id->name memory map
         Accounts.load_ids()
 
+        CachedPost.set_chain(self._chain)
+        
         if DbState.is_initial_sync():
             # resume initial sync
             self.initial()
@@ -202,22 +205,12 @@ class Sync:
         """Update basic state props (head block, feed price) in db."""
         chain = 'testnet' if self._steem.is_testnet() else 'mainnet'
         state = self._steem.gdgp_extended()
-        if chain == 'mainnet':
-            self._db.query("""UPDATE hive_state SET block_num = :block_num,
-                           steem_per_mvest = :spm, usd_per_steem = :ups,
-                           sbd_per_steem = :sps, dgpo = :dgpo""",
-                           block_num=state['dgpo']['head_block_number'],
-                           spm=state['steem_per_mvest'],
-                           ups=state['usd_per_steem'],
-                           sps=state['sbd_per_steem'],
-                           dgpo=json.dumps(state['dgpo']))
-        elif chain == 'testnet':
-            self._db.query("""UPDATE hive_state SET block_num = :block_num,
-                           tests_per_mvest = :tpm, usd_per_steem = :ups,
-                           tbd_per_steem = :tps, dgpo = :dgpo""",
-                           block_num=state['dgpo']['head_block_number'],
-                           tpm=state['tests_per_mvest'],
-                           ups=state['usd_per_steem'],
-                           tps=state['tbd_per_steem'],
-                           dgpo=json.dumps(state['dgpo']))
+        self._db.query("""UPDATE hive_state SET block_num = :block_num,
+                       steem_per_mvest = :spm, usd_per_steem = :ups,
+                       sbd_per_steem = :sps, dgpo = :dgpo""",
+                       block_num=state['dgpo']['head_block_number'],
+                       spm=state['steem_per_mvest'],
+                       ups=state['usd_per_steem'],
+                       sps=state['sbd_per_steem'],
+                       dgpo=json.dumps(state['dgpo']))
         return state['dgpo']['head_block_number']
