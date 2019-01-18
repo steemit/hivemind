@@ -45,7 +45,7 @@ $ hive server
 ```
 
 ```bash
-$ curl --data '{"jsonrpc":"2.0","id":0,"method":"db_head_state"}' http://localhost:8080
+$ curl --data '{"jsonrpc":"2.0","id":0,"method":"hive.db_head_state"}' http://localhost:8080
 {"jsonrpc": "2.0", "result": {"db_head_block": 19930795, "db_head_time": "2018-02-16 21:35:42", "db_head_age": 10}, "id": 0}
 ```
 
@@ -58,7 +58,23 @@ $ make test
 
 ## Production Environment
 
-Hive is deployed as Docker container &mdash; see `Dockerfile`.
+Hivemind is deployed as a Docker container.
+
+Here is an example command that will initialize the DB schema and start the syncing process:
+
+```
+docker run -d --name hivemind --env DATABASE_URL=postgresql://user:pass@hostname:5432/databasename --env STEEMD_URL=https://yoursteemnode --env SYNC_SERVICE=1 -p 8080:8080 steemit/hivemind:latest
+```
+
+Be sure to set `DATABASE_URL` to point to your postgres database and `STEEMD_URL` to point to your steemd node to sync from.
+
+Once the database is synced, Hivemind will be available for serving requests.
+
+To follow along the logs, use this:
+
+```
+docker logs -f hivemind
+```
 
 
 ## Configuration
