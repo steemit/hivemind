@@ -12,7 +12,7 @@ from sqlalchemy.types import BOOLEAN
 
 DB_VERSION = 12
 
-def build_metadata(chain='mainnet'):
+def build_metadata():
     """Build schema def with SqlAlchemy"""
     metadata = sa.MetaData()
 
@@ -294,32 +294,18 @@ def build_metadata(chain='mainnet'):
         mysql_default_charset='utf8mb4'
     )
 
-    if chain == 'mainnet':
-        sa.Table(
-            'hive_state', metadata,
-            sa.Column('block_num', sa.Integer, primary_key=True, autoincrement=False),
-            sa.Column('db_version', sa.Integer, nullable=False),
-            sa.Column('steem_per_mvest', sa.types.DECIMAL(8, 3), nullable=False),
-            sa.Column('usd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
-            sa.Column('sbd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
-            sa.Column('dgpo', sa.Text, nullable=False),
+    sa.Table(
+        'hive_state', metadata,
+        sa.Column('block_num', sa.Integer, primary_key=True, autoincrement=False),
+        sa.Column('db_version', sa.Integer, nullable=False),
+        sa.Column('steem_per_mvest', sa.types.DECIMAL(8, 3), nullable=False),
+        sa.Column('usd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
+        sa.Column('sbd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
+        sa.Column('dgpo', sa.Text, nullable=False),
 
-            mysql_engine='InnoDB',
-            mysql_default_charset='utf8mb4'
-        )
-    elif chain == 'testnet':
-        sa.Table(
-            'hive_state', metadata,
-            sa.Column('block_num', sa.Integer, primary_key=True, autoincrement=False),
-            sa.Column('db_version', sa.Integer, nullable=False),
-            sa.Column('tests_per_mvest', sa.types.DECIMAL(8, 3), nullable=False),
-            sa.Column('usd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
-            sa.Column('tbd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
-            sa.Column('dgpo', sa.Text, nullable=False),
-
-            mysql_engine='InnoDB',
-            mysql_default_charset='utf8mb4'
-        )
+        mysql_engine='InnoDB',
+        mysql_default_charset='utf8mb4'
+    )
 
     return metadata
 
@@ -327,28 +313,17 @@ def teardown(db):
     """Drop all tables"""
     build_metadata().drop_all(db.engine())
 
-def setup(db, chain='mainnet'):
+def setup(db):
     """Creates all tables and seed data"""
     # initialize schema
-    build_metadata(chain).create_all(db.engine())
+    build_metadata().create_all(db.engine())
 
     # tune auto vacuum/analyze
     reset_autovac(db)
 
     # default rows
-    sqls = None
-    
-    if chain == 'mainnet':
-        sqls = [
+    sqls = [
         "INSERT INTO hive_state (block_num, db_version, steem_per_mvest, usd_per_steem, sbd_per_steem, dgpo) VALUES (0, %d, 0, 0, 0, '')" % DB_VERSION,
-        "INSERT INTO hive_blocks (num, hash, created_at) VALUES (0, '0000000000000000000000000000000000000000', '2016-03-24 16:04:57')",
-        "INSERT INTO hive_accounts (name, created_at) VALUES ('miners',    '2016-03-24 16:05:00')",
-        "INSERT INTO hive_accounts (name, created_at) VALUES ('null',      '2016-03-24 16:05:00')",
-        "INSERT INTO hive_accounts (name, created_at) VALUES ('temp',      '2016-03-24 16:05:00')",
-        "INSERT INTO hive_accounts (name, created_at) VALUES ('initminer', '2016-03-24 16:05:00')"]
-    elif chain == 'testnet':
-        sqls = [
-        "INSERT INTO hive_state (block_num, db_version, tests_per_mvest, usd_per_steem, tbd_per_steem, dgpo) VALUES (0, %d, 0, 0, 0, '')" % DB_VERSION,
         "INSERT INTO hive_blocks (num, hash, created_at) VALUES (0, '0000000000000000000000000000000000000000', '2016-03-24 16:04:57')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('miners',    '2016-03-24 16:05:00')",
         "INSERT INTO hive_accounts (name, created_at) VALUES ('null',      '2016-03-24 16:05:00')",

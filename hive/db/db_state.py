@@ -21,6 +21,8 @@ class DbState:
     _ver = None
     
     _url = None
+    
+    _chain = None
 
     @classmethod
     def initialize(cls, url='https://api.steemit.com'):
@@ -33,12 +35,12 @@ class DbState:
         
         log.info("[INIT] Welcome to hive!")
         cls.url = url
-        chain = 'testnet' if SteemClient(url).is_testnet() else 'mainnet'
+        cls._chain = 'testnet' if SteemClient(url).is_testnet() else 'mainnet'
         
         # create db schema if needed
         if not cls._is_schema_loaded():
-            log.info("[INIT] Create db schema on %s ...", chain)
-            setup(cls.db(), chain)
+            log.info("[INIT] Create db schema on %s ...", cls.chain())
+            setup(cls.db())
             cls._before_initial_sync()
 
         # perform db migrations
@@ -70,6 +72,11 @@ class DbState:
         cls._after_initial_sync()
         cls._is_initial_sync = False
         log.info("[INIT] Initial sync complete!")
+
+    @classmethod
+    def chain(cls):
+        """Check if we're on mainnet or testnet."""
+        return cls._chain
 
     @classmethod
     def is_initial_sync(cls):
