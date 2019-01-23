@@ -340,14 +340,14 @@ def reset_autovac(db):
 
     autovac_config = { #    vacuum  analyze
         'hive_accounts':    (50000, 100000),
-        'hive_posts_cache': (25000, 25000),
+        'hive_posts_cache': (10000, 25000),
         'hive_posts':       (2500, 10000),
-        'hive_post_tags':   (5000, 10000),
-        'hive_follows':     (5000, 5000),
-        'hive_feed_cache':  (5000, 5000),
-        'hive_blocks':      (5000, 25000),
-        'hive_reblogs':     (5000, 5000),
-        'hive_payments':    (5000, 5000),
+        'hive_post_tags':   (2500, 10000),
+        'hive_follows':     (2500, 5000),
+        'hive_feed_cache':  (2500, 5000),
+        'hive_blocks':      (2500, 25000),
+        'hive_reblogs':     (2500, 5000),
+        'hive_payments':    (2500, 5000),
     }
 
     for table, (n_vacuum, n_analyze) in autovac_config.items():
