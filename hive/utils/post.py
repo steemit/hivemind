@@ -19,10 +19,13 @@ def post_basic(post):
         pass
 
     thumb_url = ''
-    if md and 'image' in md and md['image']:
-        thumb_url = safe_img_url(first(md['image'])) or ''
-        if thumb_url:
-            md['image'] = [thumb_url]
+    if md and 'image' in md:
+        if md['image']:
+            if not isinstance(md['image'], list):
+                md['image'] = [md['image']]
+            md['image'] = list(filter(None, map(safe_img_url, md['image'])))
+        if md['image']:
+            thumb_url = md['image'][0]
         else:
             del md['image']
 
