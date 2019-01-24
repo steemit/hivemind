@@ -64,7 +64,7 @@ async def load_posts(db, ids, truncate_body=0):
                    "FROM hive_posts WHERE id = :id")
             post = await db.query_row(sql, id=_id)
             if not post['is_deleted']:
-                # TODO: This should never happen. Identify the cause.
+                # TODO: This should never happen. See #173 for analysis
                 log.error("missing post -- force insert %s", dict(post))
                 sql = """INSERT INTO hive_posts_cache (post_id, author, permlink)
                               VALUES (:id, :author, :permlink)"""
