@@ -382,6 +382,7 @@ class CachedPost:
          - `update`: post was modified
          - `payout`: post was paidout
          - `upvote`: post payout/votes changed
+         - `recount`: post has new child
         """
 
         #pylint: disable=bad-whitespace
@@ -389,7 +390,7 @@ class CachedPost:
 
         # last-minute sanity check to ensure `pid` is correct #78
         pid2 = cls._get_id(post['author']+'/'+post['permlink'])
-        assert pid == pid2, "hpc id %d maps to %d" % (pid, pid2)
+        assert pid == pid2, "hpc id %d maps to %d %s" % (pid, pid2, repr(post))
 
         # inserts always sequential. if pid > last_id, this operation
         # *must* be an insert; so `level` must not be any form of update.
