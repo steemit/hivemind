@@ -352,22 +352,26 @@ class CachedPost:
         if next_id <= last_id:
             return
 
-        gap = next_id - last_id - 1
-        if gap:
+        if next_id - last_id > 2:
             cls._ensure_safe_gap(last_id, next_id)
-            log.warning("skipped %d posts %d -> %d", gap, last_id, next_id)
+            if next_id - last_id > 4:
+                # gap of 2 is common due to deletions. report on larger gaps.
+                log.warning("skipping post ids %d -> %d", last_id, next_id)
 
         cls._last_id = next_id
 
     @classmethod
     def _ensure_safe_gap(cls, last_id, next_id):
         """Paranoid check of important operating assumption."""
-        sql = """SELECT COUNT(*) FROM hive_posts
-                  WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'"""
+        sql = """
+            SELECT COUNT(*) FROM hive_posts
+            WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'
+        """
         missing_posts = DB.query_one(sql, x1=(last_id + 1), x2=(next_id - 1))
-        if missing_posts:
-            raise Exception("found cache gap: %d --> %d (%d)"
-                            % (last_id, next_id, missing_posts))
+        if not missing_posts:
+            return
+        raise Exception("found large cache gap: %d --> %d (%d)"
+                        % (last_id, next_id, missing_posts))
 
     @classmethod
     def _sql(cls, pid, post, level=None):
