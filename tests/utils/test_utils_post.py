@@ -62,7 +62,7 @@ POST_1 = {
     "curator_payout_value": "0.000 SBD",
     "depth": 0,
     "id": 4437869,
-    "json_metadata": "{\"tags\":[\"spam\"],\"image\":[\"https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg\"],\"app\":\"steemit/0.1\",\"format\":\"markdown\"}",
+    "json_metadata": "{\"tags\":[\"spam\"],\"image\":[\"ddd\", \"https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg\",\"https://example.com/image.jpg\"],\"app\":\"steemit/0.1\",\"format\":\"markdown\"}",
     "last_payout": "2017-06-27T15:53:51",
     "last_update": "2017-06-20T15:53:51",
     "max_accepted_payout": "1000000.000 SBD",
@@ -91,7 +91,7 @@ POST_1 = {
 
 def test_post_basic():
     ret = post_basic(POST_1)
-    expect = {'json_metadata': {'tags': ['spam'], 'image': ['https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg'], 'app': 'steemit/0.1', 'format': 'markdown'},
+    expect = {'json_metadata': {'tags': ['spam'], 'image': ['https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg', 'https://example.com/image.jpg'], 'app': 'steemit/0.1', 'format': 'markdown'},
               'image': 'https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg',
               'tags': {'spam'},
               'is_nsfw': False,
