@@ -86,6 +86,12 @@ class Db:
             row = await cur.first()
         return row[0] if row else None
 
+    @sqltimer
+    async def query(self, sql, **kwargs):
+        """Perform a write query"""
+        async with self.db.acquire() as conn:
+            await self._query(conn, sql, **kwargs)
+
     async def _query(self, conn, sql, **kwargs):
         """Send a query off to SQLAlchemy."""
         try:
