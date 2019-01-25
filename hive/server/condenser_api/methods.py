@@ -140,7 +140,7 @@ def nested_query_compat(function):
     @wraps(function)
     def wrapper(*args, **kwargs):
         """Checks for specific condition signature and unpacks query"""
-        if args and not kwargs and len(args) < 3 and isinstance(args[1], dict):
+        if args and not kwargs and len(args) == 2 and isinstance(args[1], dict):
             return function(args[0], **args[1])
         return function(*args, **kwargs)
     return wrapper
