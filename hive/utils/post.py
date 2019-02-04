@@ -3,7 +3,7 @@
 
 import math
 import ujson as json
-from funcy.seqs import first
+from funcy.seqs import first, distinct
 
 from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time, utc_timestamp
 
@@ -33,8 +33,9 @@ def post_basic(post):
     tags = [post['category']]
     if md and 'tags' in md and isinstance(md['tags'], list):
         tags = tags + md['tags']
-    tags = set(list(map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags))[0:5])
-    tags.discard('')
+    tags = map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags)
+    tags = filter(None, tags)
+    tags = distinct(tags)[:5]
     is_nsfw = 'nsfw' in tags
 
     body = post['body']

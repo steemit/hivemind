@@ -89,11 +89,59 @@ POST_1 = {
     "vote_rshares": 0
 }
 
+POST_2 = {
+    "abs_rshares": 0,
+    "active": "2017-06-20T15:53:51",
+    "active_votes": [],
+    "allow_curation_rewards": True,
+    "allow_replies": True,
+    "allow_votes": True,
+    "author": "test-safari",
+    "author_reputation": "468237543674",
+    "author_rewards": 23,
+    "beneficiaries": [],
+    "body": "https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg",
+    "body_length": 0,
+    "cashout_time": "1969-12-31T23:59:59",
+    "category": "steemit",
+    "children": 0,
+    "children_abs_rshares": 0,
+    "created": "2017-06-20T15:53:51",
+    "curator_payout_value": "0.000 SBD",
+    "depth": 0,
+    "id": 4437869,
+    "json_metadata": "{\"tags\":[\"steemit\",\"steem\",\"\",\"abc\",\"bcd\",\"cde\"]}",
+    "last_payout": "2017-06-27T15:53:51",
+    "last_update": "2017-06-20T15:53:51",
+    "max_accepted_payout": "1000000.000 SBD",
+    "max_cashout_time": "1969-12-31T23:59:59",
+    "net_rshares": 0,
+    "net_votes": 4,
+    "parent_author": "",
+    "parent_permlink": "spam",
+    "pending_payout_value": "0.000 SBD",
+    "percent_steem_dollars": 10000,
+    "permlink": "june-spam",
+    "promoted": "0.000 SBD",
+    "reblogged_by": [],
+    "replies": [],
+    "reward_weight": 10000,
+    "root_author": "test-safari",
+    "root_permlink": "june-spam",
+    "root_title": "June Spam",
+    "title": "June Spam",
+    "total_payout_value": "0.044 SBD",
+    "total_pending_payout_value": "0.000 STEEM",
+    "total_vote_weight": 0,
+    "url": "/spam/@test-safari/june-spam",
+    "vote_rshares": 0
+}
+
 def test_post_basic():
     ret = post_basic(POST_1)
     expect = {'json_metadata': {'tags': ['spam'], 'image': ['https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg', 'https://example.com/image.jpg'], 'app': 'steemit/0.1', 'format': 'markdown'},
               'image': 'https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg',
-              'tags': {'spam'},
+              'tags': ['spam'],
               'is_nsfw': False,
               'body': 'https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg',
               'preview': 'https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg',
@@ -102,6 +150,11 @@ def test_post_basic():
               'is_payout_declined': False,
               'is_full_power': False}
     assert ret == expect
+
+def test_post_basic_tags():
+    tags = post_basic(POST_2)['tags']
+    expected = ['steemit', 'steem', 'abc', 'bcd', 'cde']
+    assert tags == expected, "got %s" % tags
 
 def test_post_legacy():
     ret = post_legacy(POST_1)
