@@ -384,8 +384,8 @@ class CachedPost:
 
         gap = next_id - last_id - 1
         if gap:
+            log.info("skipped %d ids %d -> %d", gap, last_id, next_id)
             cls._ensure_safe_gap(last_id, next_id)
-            log.warning("skipped %d posts %d -> %d", gap, last_id, next_id)
 
         cls._last_id = next_id
 
