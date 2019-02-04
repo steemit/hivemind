@@ -303,12 +303,13 @@ async def pids_by_account_comments(db, account: str, start_permlink: str = '', l
 
         seek = "AND id <= :start_id"
 
+    # `depth` in ORDER BY is a no-op, but forces an ix3 index scan (see #189)
     sql = """
         SELECT id FROM hive_posts
          WHERE author = :account %s
            AND depth > 0
            AND is_deleted = '0'
-      ORDER BY id DESC
+      ORDER BY id, depth DESC
          LIMIT :limit
     """ % seek
 
