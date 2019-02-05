@@ -309,7 +309,7 @@ async def pids_by_account_comments(db, account: str, start_permlink: str = '', l
          WHERE author = :account %s
            AND depth > 0
            AND is_deleted = '0'
-      ORDER BY id, depth DESC
+      ORDER BY id DESC, depth
          LIMIT :limit
     """ % seek
 
