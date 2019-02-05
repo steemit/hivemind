@@ -73,7 +73,7 @@ async def load_posts(db, ids, truncate_body=0):
     # in rare cases of cache inconsistency, recover and warn
     missed = set(ids) - posts_by_id.keys()
     if missed:
-        log.warning("get_posts do not exist in cache: %s", repr(missed))
+        log.info("get_posts do not exist in cache: %s", repr(missed))
         for _id in missed:
             ids.remove(_id)
             sql = ("SELECT id, author, permlink, depth, created_at, is_deleted "
@@ -86,7 +86,7 @@ async def load_posts(db, ids, truncate_body=0):
                               VALUES (:id, :author, :permlink)"""
                 await db.query(sql, **post)
             else:
-                log.warning("requested deleted post: %s", dict(post))
+                log.info("requested deleted post: %s", dict(post))
 
     return [posts_by_id[_id] for _id in ids]
 
