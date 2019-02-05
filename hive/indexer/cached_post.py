@@ -470,17 +470,18 @@ class CachedPost:
     @classmethod
     def _tag_sqls(cls, pid, tags, diff=True):
         """Generate SQL "deltas" for a post_id's associated tags."""
+        next_tags = set(tags)
         curr_tags = set()
         if diff:
             sql = "SELECT tag FROM hive_post_tags WHERE post_id = :id"
             curr_tags = set(DB.query_col(sql, id=pid))
 
-        to_rem = (curr_tags - tags)
+        to_rem = (curr_tags - next_tags)
         if to_rem:
             sql = "DELETE FROM hive_post_tags WHERE post_id = :id AND tag IN :tags"
             yield (sql, dict(id=pid, tags=tuple(to_rem)))
 
-        to_add = (tags - curr_tags)
+        to_add = (next_tags - curr_tags)
         if to_add:
             params = _keyify(to_add)
             vals = ["(:id, :%s)" % key for key in params.keys()]
