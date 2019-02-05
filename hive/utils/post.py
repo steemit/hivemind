@@ -35,7 +35,7 @@ def post_basic(post):
         tags = tags + md['tags']
     tags = map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags)
     tags = filter(None, tags)
-    tags = distinct(tags)[:5]
+    tags = list(distinct(tags))[:5]
     is_nsfw = 'nsfw' in tags
 
     body = post['body']
