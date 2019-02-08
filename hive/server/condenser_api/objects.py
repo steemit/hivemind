@@ -33,10 +33,9 @@ async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
 
     return posts
 
-async def load_posts(db, ids, truncate_body=0):
-    """Given an array of post ids, returns full objects in the same order."""
-    if not ids:
-        return []
+async def load_posts_keyed(db, ids, truncate_body=0):
+    """Given an array of post ids, returns full posts objects keyed by id."""
+    assert ids, 'no ids passed to load_posts_keyed'
 
     # fetch posts and associated author reps
     sql = """SELECT post_id, author, permlink, title, body, category, depth,
@@ -46,13 +45,22 @@ async def load_posts(db, ids, truncate_body=0):
     result = await db.query_all(sql, ids=tuple(ids))
     author_reps = await _query_author_rep_map(db, result)
 
-    # key by id so we can return output sorted by input order
     posts_by_id = {}
     for row in result:
         row = dict(row)
         row['author_rep'] = author_reps[row['author']]
         post = _condenser_post_object(row, truncate_body=truncate_body)
         posts_by_id[row['post_id']] = post
+
+    return posts_by_id
+
+async def load_posts(db, ids, truncate_body=0):
+    """Given an array of post ids, returns full objects in the same order."""
+    if not ids:
+        return []
+
+    # posts are keyed by id so we can return output sorted by input order
+    posts_by_id = await load_posts_keyed(db, ids, truncate_body=truncate_body)
 
     # in rare cases of cache inconsistency, recover and warn
     missed = set(ids) - posts_by_id.keys()

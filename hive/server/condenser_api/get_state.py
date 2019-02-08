@@ -10,6 +10,7 @@ from hive.utils.normalize import legacy_amount
 from hive.server.condenser_api.objects import (
     load_accounts,
     load_posts,
+    load_posts_keyed,
     load_posts_reblogs)
 from hive.server.condenser_api.common import (
     ApiError,
@@ -18,8 +19,7 @@ from hive.server.condenser_api.common import (
     valid_permlink,
     valid_sort,
     valid_tag,
-    get_post_id,
-    get_child_ids)
+    get_post_id)
 from hive.server.condenser_api.tags import (
     get_trending_tags,
     get_top_trending_tags_summary)
@@ -221,27 +221,48 @@ async def _load_account(db, name):
         account[key] = []
     return account
 
+async def _child_ids(db, parent_ids):
+    """Load child ids for multuple parent ids."""
+    sql = """
+             SELECT parent_id, array_agg(id)
+               FROM hive_posts
+              WHERE parent_id IN :ids
+                AND is_deleted = '0'
+           GROUP BY parent_id
+    """
+    rows = await db.query_all(sql, ids=tuple(parent_ids))
+    return [[row[0], row[1]] for row in rows]
 
 async def _load_discussion(db, author, permlink):
     """Load a full discussion thread."""
-    post_id = await get_post_id(db, author, permlink)
-    if not post_id:
+    root_id = await get_post_id(db, author, permlink)
+    if not root_id:
         return {}
 
-    ret = []
-    queue = await load_posts(db, [post_id])
-    while queue:
-        parent = queue.pop()
+    # build `ids` list and `tree` map
+    ids = []
+    tree = {}
+    todo = [root_id]
+    while todo:
+        ids.extend(todo)
+        rows = await _child_ids(db, todo)
+        todo = []
+        for pid, cids in rows:
+            tree[pid] = cids
+            todo.extend(cids)
 
-        child_ids = await get_child_ids(db, parent['post_id'])
-        if child_ids:
-            children = await load_posts(db, child_ids)
-            parent['replies'] = list(map(_ref, children))
-            queue.extend(children)
+    # load all post objects, build ref-map
+    posts = await load_posts_keyed(db, ids)
+    refs = {pid: _ref(post) for pid, post in posts.items()}
 
-        ret.append(parent)
+    # add child refs to parent posts
+    for pid, post in posts.items():
+        if pid in tree:
+            post['replies'] = [refs[cid] for cid in tree[pid]
+                               if cid in refs.items()]
 
-    return {_ref(post): post for post in ret}
+    # return all nodes keyed by ref
+    return {refs[pid]: post for pid, post in posts.items()}
 
 async def _get_feed_price(db):
     """Get a steemd-style ratio object representing feed price."""
