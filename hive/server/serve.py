@@ -157,10 +157,14 @@ def run_server(conf):
         return web.Response(status=status, text=str(curr_age))
 
     async def health(request):
-        """Get hive health data. 500 if behind by more than 3 blocks."""
+        """Get hive health state. 500 if db unavailable or too far behind."""
         #pylint: disable=unused-argument
         is_syncer = conf.get('sync_to_s3')
-        max_head_age = (conf.get('trail_blocks') + 3) * 3
+
+        # while 1 hr is a bit stale, such a condition is a symptom of a
+        # writer issue, *not* a reader node issue. Discussion in #174.
+        max_head_age = 3600 # 1hr
+
         try:
             state = await hive_api.db_head_state()
         except OperationalError as e:
