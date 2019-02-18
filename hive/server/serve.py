@@ -20,7 +20,7 @@ from hive.server.db import Db
 
 def build_methods():
     """Register all supported hive_api/condenser_api.calls."""
-    # pylint: disable=expression-not-assigned
+    # pylint: disable=expression-not-assigned, line-too-long
     methods = Methods()
 
     methods.add(**{'hive.' + method.__name__: method for method in (
@@ -131,40 +131,45 @@ def run_server(conf):
     #app['config']['hive.logger'] = logger
 
     async def init_db(app):
+        """Initialize db adapter."""
         args = app['config']['args']
         app['db'] = await Db.create(args['database_url'])
 
     async def close_db(app):
+        """Teardown db adapter."""
         app['db'].close()
         await app['db'].wait_closed()
 
     app.on_startup.append(init_db)
     app.on_cleanup.append(close_db)
 
-    async def _head_state():
-        try:
-            return await hive_api.db_head_state()
-        except OperationalError as e:
-            if conf.get('sync_to_s3'):
-                log.info("could not get head state (%s)", e)
-                return None
-            raise e
-
     async def head_age(request):
         """Get hive head block age in seconds. 500 status if age > 15s."""
         #pylint: disable=unused-argument
         healthy_age = 15 # hive is synced if head block within 15s
-        state = await _head_state()
-        curr_age = state['db_head_age'] if state else 31e6
+        try:
+            state = await hive_api.db_head_state()
+            curr_age = state['db_head_age']
+        except Exception as e:
+            log.info("could not get head state (%s)", e)
+            curr_age = 31e6
         status = 500 if curr_age > healthy_age else 200
         return web.Response(status=status, text=str(curr_age))
 
     async def health(request):
-        """Get hive health data. 500 if behind by more than 3 blocks."""
+        """Get hive health state. 500 if db unavailable or too far behind."""
         #pylint: disable=unused-argument
         is_syncer = conf.get('sync_to_s3')
-        max_head_age = (conf.get('trail_blocks') + 3) * 3
-        state = await _head_state()
+
+        # while 1 hr is a bit stale, such a condition is a symptom of a
+        # writer issue, *not* a reader node issue. Discussion in #174.
+        max_head_age = 3600 # 1hr
+
+        try:
+            state = await hive_api.db_head_state()
+        except OperationalError as e:
+            state = None
+            log.warning("could not get head state (%s)", e)
 
         if not state:
             status = 500
@@ -196,11 +201,11 @@ def run_server(conf):
         if response.wanted:
             headers = {'Access-Control-Allow-Origin': '*'}
             return web.json_response(response.deserialized(), status=200, headers=headers)
-        else:
-            return web.Response()
+        return web.Response()
 
+    if conf.get('sync_to_s3'):
+        app.router.add_get('/head_age', head_age)
     app.router.add_get('/.well-known/healthcheck.json', health)
-    app.router.add_get('/head_age', head_age)
     app.router.add_get('/health', health)
     app.router.add_post('/', jsonrpc_handler)
 
