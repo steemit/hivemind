@@ -1,6 +1,6 @@
 """Routes then builds a get_state response object"""
 
-#pylint: disable=line-too-long
+#pylint: disable=line-too-long,too-many-lines
 import logging
 from collections import OrderedDict
 import ujson as json
@@ -259,7 +259,7 @@ async def _load_discussion(db, author, permlink):
     for pid, post in posts.items():
         if pid in tree:
             post['replies'] = [refs[cid] for cid in tree[pid]
-                               if cid in refs.items()]
+                               if cid in refs]
 
     # return all nodes keyed by ref
     return {refs[pid]: post for pid, post in posts.items()}
