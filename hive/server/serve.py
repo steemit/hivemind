@@ -104,7 +104,7 @@ def truncate_response_log(logger):
 
     See also https://github.com/bcb/jsonrpcserver/issues/73.
     """
-    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message).2048s')
+    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message).512s')
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
 
@@ -116,7 +116,7 @@ def run_server(conf):
 
     # configure jsonrpcserver logging
     log_level = conf.log_level()
-    #logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
+    logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
     truncate_response_log(logging.getLogger('jsonrpcserver.dispatcher.response'))
 
