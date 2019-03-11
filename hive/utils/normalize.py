@@ -8,24 +8,37 @@ from pytz import utc
 import ujson as json
 
 NAI_MAP = {
-    '@@000000013': 'SBD',
-    '@@000000021': 'STEEM',
-    '@@000000037': 'VESTS',
+    'mainnet': {
+        '@@000000013': 'SBD',
+        '@@000000021': 'STEEM',
+        '@@000000037': 'VESTS'
+    },
+    'testnet': {
+        '@@000000013': 'TBD',
+        '@@000000021': 'TESTS',
+        '@@000000037': 'VESTS'
+    }
 }
 
-def vests_amount(value):
+def vests_amount(value, chain='mainnet'):
     """Returns a decimal amount, asserting units are VESTS"""
-    return parse_amount(value, 'VESTS')
+    return parse_amount(value, 'VESTS', chain)
 
-def steem_amount(value):
-    """Returns a decimal amount, asserting units are STEEM"""
-    return parse_amount(value, 'STEEM')
+def base_amount(value, chain='mainnet'):
+    """Returns a decimal amount, asserting units are base (STEEM or TESTS)"""
+    if chain == 'mainnet':
+        return parse_amount(value, 'STEEM', chain)
+    elif chain == 'testnet':
+        return parse_amount(value, 'TESTS', chain)
 
-def sbd_amount(value):
-    """Returns a decimal amount, asserting units are SBD"""
-    return parse_amount(value, 'SBD')
+def debt_amount(value, chain='mainnet'):
+    """Returns a decimal amount, asserting units are debt (SBD or TBD)"""
+    if chain == 'mainnet':
+        return parse_amount(value, 'SBD', chain)
+    elif chain == 'testnet':
+        return parse_amount(value, 'TBD', chain)
 
-def parse_amount(value, expected_unit=None):
+def parse_amount(value, expected_unit=None, chain='mainnet'):
     """Parse steemd-style amout/asset value, return (decimal, name)."""
     if isinstance(value, dict):
         value = [value['amount'], value['precision'], value['nai']]
@@ -37,9 +50,9 @@ def parse_amount(value, expected_unit=None):
     elif isinstance(value, list):
         satoshis, precision, nai = value
         dec_amount = decimal.Decimal(satoshis) / (10**precision)
-        assert nai in NAI_MAP, "unknown NAI %s; expected %s" % (
+        assert nai in NAI_MAP[chain], "unknown NAI %s; expected %s" % (
             nai, expected_unit or '(any)')
-        unit = NAI_MAP[nai]
+        unit = NAI_MAP[chain][nai]
 
     else:
         raise Exception("invalid input amount %s" % repr(value))
@@ -50,16 +63,16 @@ def parse_amount(value, expected_unit=None):
 
     return (dec_amount, unit)
 
-def amount(string):
+def amount(string, chain='mainnet'):
     """Parse a steemd asset-amount as a Decimal(). Discard asset type."""
-    return parse_amount(string)[0]
+    return parse_amount(string, None, chain)[0]
 
-def legacy_amount(value):
+def legacy_amount(value, chain='mainnet'):
     """Get a pre-appbase-style amount string given a (numeric, asset-str)."""
     if isinstance(value, str):
         return value # already legacy
-    amt, asset = parse_amount(value)
-    prec = {'SBD': 3, 'STEEM': 3, 'VESTS': 6}[asset]
+    amt, asset = parse_amount(value, None, chain)
+    prec = {'SBD': 3, 'TBD': 3, 'STEEM': 3, 'TESTS': 3, 'VESTS': 6}[asset]
     tmpl = ("%%.%df %%s" % prec)
     return tmpl % (amt, asset)
 

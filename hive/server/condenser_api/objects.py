@@ -3,7 +3,7 @@
 import logging
 import ujson as json
 
-from hive.utils.normalize import sbd_amount, rep_to_raw
+from hive.utils.normalize import debt_amount, rep_to_raw
 
 log = logging.getLogger(__name__)
 
@@ -159,7 +159,7 @@ def _condenser_post_object(row, truncate_body=0):
     post['percent_steem_dollars'] = raw_json['percent_steem_dollars']
 
     if paid:
-        curator_payout = sbd_amount(raw_json['curator_payout_value'])
+        curator_payout = debt_amount(raw_json['curator_payout_value'])
         post['curator_payout_value'] = _amount(curator_payout)
         post['total_payout_value'] = _amount(row['payout'] - curator_payout)
 
@@ -171,10 +171,15 @@ def _condenser_post_object(row, truncate_body=0):
 
     return post
 
-def _amount(amount, asset='SBD'):
+def _amount(amount, asset='SBD', chain='mainnet'):
     """Return a steem-style amount string given a (numeric, asset-str)."""
-    assert asset == 'SBD', 'unhandled asset %s' % asset
-    return "%.3f SBD" % amount
+    assert chain == 'mainnet' and asset == 'SBD', 'unhandled asset %s' % asset
+    assert chain == 'testnet' and asset == 'TBD', 'unhandled asset %s' % asset
+    
+    if chain == 'mainnet':
+        return "%.3f SBD" % amount
+    elif chain == 'testnet':
+        return "%.3f TBD" % amount
 
 def _hydrate_active_votes(vote_csv):
     """Convert minimal CSV representation into steemd-style object."""

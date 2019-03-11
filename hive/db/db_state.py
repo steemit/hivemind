@@ -5,6 +5,7 @@ import logging
 
 from hive.db.schema import setup, reset_autovac, build_metadata, teardown, DB_VERSION
 from hive.db.adapter import Db
+from hive.steem.client import SteemClient
 
 log = logging.getLogger(__name__)
 
@@ -18,21 +19,27 @@ class DbState:
 
     # db schema version
     _ver = None
+    
+    _url = None
+    
+    _chain = None
 
     @classmethod
-    def initialize(cls):
+    def initialize(cls, url='https://api.steemit.com'):
         """Perform startup database checks.
 
         1) Load schema if needed
         2) Run migrations if needed
         3) Check if initial sync has completed
         """
-
+        
         log.info("[INIT] Welcome to hive!")
-
+        cls.url = url
+        cls._chain = 'testnet' if SteemClient(url).is_testnet() else 'mainnet'
+        
         # create db schema if needed
         if not cls._is_schema_loaded():
-            log.info("[INIT] Create db schema...")
+            log.info("[INIT] Create db schema on %s ...", cls.chain())
             setup(cls.db())
             cls._before_initial_sync()
 
@@ -65,6 +72,11 @@ class DbState:
         cls._after_initial_sync()
         cls._is_initial_sync = False
         log.info("[INIT] Initial sync complete!")
+
+    @classmethod
+    def chain(cls):
+        """Check if we're on mainnet or testnet."""
+        return cls._chain
 
     @classmethod
     def is_initial_sync(cls):
@@ -211,9 +223,8 @@ class DbState:
 
         if cls._ver == 5:
             # recover acct names lost to issue #151
-            from hive.steem.client import SteemClient
             from hive.indexer.accounts import Accounts
-            names = SteemClient().get_all_account_names()
+            names = SteemClient(cls._url).get_all_account_names()
             Accounts.load_ids()
             Accounts.register(names, '1970-01-01T00:00:00')
             Accounts.clear_ids()

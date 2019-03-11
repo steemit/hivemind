@@ -45,15 +45,17 @@ class Payments:
             CachedPost.vote(author, permlink, record['post_id'])
 
     @classmethod
-    def _validated(cls, op, tx_idx, num, date):
+    def _validated(cls, op, tx_idx, num, date, chain='mainnet'):
         """Validate and normalize the transfer op."""
         # pylint: disable=unused-argument
         if op['to'] != 'null':
             return # only care about payments to null
 
-        amount, token = parse_amount(op['amount'])
-        if token != 'SBD':
+        amount, token = parse_amount(op['amount'], None, chain)
+        if chain == 'mainnet' and token != 'SBD':
             return # only care about SBD payments
+        elif chain == 'testnet' and token != 'TBD':
+            return # only care about TBD payments
 
         url = op['memo']
         if not cls._validate_url(url):

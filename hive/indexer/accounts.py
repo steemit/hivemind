@@ -145,11 +145,11 @@ class Accounts:
                 log.info(timer.batch_status())
 
     @classmethod
-    def _sql(cls, account, cached_at):
+    def _sql(cls, account, cached_at, chain='mainnet'):
         """Prepare a SQL query from a steemd account."""
-        vote_weight = (vests_amount(account['vesting_shares'])
-                       + vests_amount(account['received_vesting_shares'])
-                       - vests_amount(account['delegated_vesting_shares']))
+        vote_weight = (vests_amount(account['vesting_shares'], chain)
+                       + vests_amount(account['received_vesting_shares'], chain)
+                       - vests_amount(account['delegated_vesting_shares'], chain))
 
         # remove empty keys
         useless = ['transfer_history', 'market_history', 'post_history',
@@ -172,7 +172,7 @@ class Accounts:
             'proxy':        account['proxy'],
             'post_count':   account['post_count'],
             'reputation':   rep_log10(account['reputation']),
-            'proxy_weight': vests_amount(account['vesting_shares']),
+            'proxy_weight': vests_amount(account['vesting_shares'], chain),
             'vote_weight':  vote_weight,
             'active_at':    active_at,
             'cached_at':    cached_at,

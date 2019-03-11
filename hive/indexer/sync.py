@@ -32,16 +32,19 @@ class Sync:
         self._conf = conf
         self._db = conf.db()
         self._steem = conf.steem()
+        self._chain = conf.chain()
 
     def run(self):
         """Initialize state; setup/recovery checks; sync and runloop."""
 
         # ensure db schema up to date, check app status
-        DbState.initialize()
+        DbState.initialize(self._conf.get("steemd_url"))
 
         # prefetch id->name memory map
         Accounts.load_ids()
 
+        CachedPost.set_chain(self._chain)
+        
         if DbState.is_initial_sync():
             # resume initial sync
             self.initial()
@@ -200,6 +203,7 @@ class Sync:
     # refetch dynamic_global_properties, feed price, etc
     def _update_chain_state(self):
         """Update basic state props (head block, feed price) in db."""
+        chain = 'testnet' if self._steem.is_testnet() else 'mainnet'
         state = self._steem.gdgp_extended()
         self._db.query("""UPDATE hive_state SET block_num = :block_num,
                        steem_per_mvest = :spm, usd_per_steem = :ups,

@@ -83,6 +83,7 @@ class SteemStats(StatsAbstract):
     # Thresholds for critical call timing (ms)
     PAR_STEEMD = {
         'get_dynamic_global_properties': 20,
+        'get_config': 20,
         'get_block': 50,
         'get_blocks_batch': 5,
         'get_accounts': 3,
