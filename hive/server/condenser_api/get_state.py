@@ -257,14 +257,22 @@ async def _load_discussion(db, author, permlink):
     refs = {pid: _ref(post) for pid, post in posts.items()}
 
     muted_accounts = Mutes.all()
+    rem_pids = []
 
     # add child refs to parent posts
     for pid, post in posts.items():
         if post['author'] in muted_accounts:
-            del posts[pid]
+            rem_pids.append(pid)
         elif pid in tree:
             post['replies'] = [refs[cid] for cid in tree[pid]
                                if cid in refs]
+
+    # remove posts/comments from muted accounts
+    for pid in rem_pids:
+        if pid in posts:
+            del posts[pid]
+        if pid in tree:
+            rem_pids.extend(tree[pid])
 
     # return all nodes keyed by ref
     return {refs[pid]: post for pid, post in posts.items()}
