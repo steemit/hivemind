@@ -4,6 +4,7 @@ import logging
 import ujson as json
 
 from hive.utils.normalize import sbd_amount, rep_to_raw
+from hive.server.common.mutes import Mutes
 
 log = logging.getLogger(__name__)
 
@@ -45,14 +46,21 @@ async def load_posts_keyed(db, ids, truncate_body=0):
     result = await db.query_all(sql, ids=tuple(ids))
     author_reps = await _query_author_rep_map(db, result)
 
+    muted_accounts = Mutes.all()
     posts_by_id = {}
     for row in result:
         row = dict(row)
         row['author_rep'] = author_reps[row['author']]
         post = _condenser_post_object(row, truncate_body=truncate_body)
+        post['active_votes'] = _mute_votes(post['active_votes'], muted_accounts)
         posts_by_id[row['post_id']] = post
 
     return posts_by_id
+
+def _mute_votes(votes, muted_accounts):
+    if not muted_accounts:
+        return votes
+    return [v for v in votes if v['voter'] not in muted_accounts]
 
 async def load_posts(db, ids, truncate_body=0):
     """Given an array of post ids, returns full objects in the same order."""

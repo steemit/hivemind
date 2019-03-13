@@ -6,6 +6,7 @@ from collections import OrderedDict
 import ujson as json
 
 from hive.utils.normalize import legacy_amount
+from hive.server.common.mutes import Mutes
 
 from hive.server.condenser_api.objects import (
     load_accounts,
@@ -253,6 +254,19 @@ async def _load_discussion(db, author, permlink):
 
     # load all post objects, build ref-map
     posts = await load_posts_keyed(db, ids)
+
+    # remove posts/comments from muted accounts
+    muted_accounts = Mutes.all()
+    rem_pids = []
+    for pid, post in posts.items():
+        if post['author'] in muted_accounts:
+            rem_pids.append(pid)
+    for pid in rem_pids:
+        if pid in posts:
+            del posts[pid]
+        if pid in tree:
+            rem_pids.extend(tree[pid])
+
     refs = {pid: _ref(post) for pid, post in posts.items()}
 
     # add child refs to parent posts

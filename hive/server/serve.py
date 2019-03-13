@@ -15,6 +15,7 @@ from hive.server.condenser_api.tags import get_trending_tags as condenser_api_ge
 from hive.server.condenser_api.get_state import get_state as condenser_api_get_state
 from hive.server.condenser_api.call import call as condenser_api_call
 from hive.server import hive_api
+from hive.server.common.mutes import Mutes
 
 from hive.server.db import Db
 
@@ -123,6 +124,9 @@ def run_server(conf):
     # init
     log = logging.getLogger(__name__)
     methods = build_methods()
+
+    mutes = Mutes(conf.get('muted_accounts_url'))
+    Mutes.set_shared_instance(mutes)
 
     app = web.Application()
     app['config'] = dict()
