@@ -6,8 +6,6 @@ from dateutil.relativedelta import relativedelta
 from hive.utils.normalize import rep_to_raw
 from hive.server.common.mutes import Mutes
 
-MUTES = Mutes.all()
-
 #pylint: disable=too-many-lines
 
 def last_month():
@@ -354,7 +352,8 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
         parent_account = start_author
 
     mute = ''
-    if MUTES:
+    muted_accounts = Mutes.all()
+    if muted_accounts:
         mute = " AND author NOT IN :mutes"
 
     sql = """
@@ -370,4 +369,4 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
     """ % (seek, mute)
 
     return await db.query_col(sql, parent=parent_account, start_id=start_id,
-                              limit=limit, mutes=tuple(MUTES))
+                              limit=limit, mutes=tuple(muted_accounts))
