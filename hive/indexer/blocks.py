@@ -59,6 +59,7 @@ class Blocks:
     @classmethod
     def _process(cls, block, is_initial_sync=False):
         """Process a single block. Assumes a trx is open."""
+        #pylint: disable=too-many-branches
         num = cls._push(block)
         date = block['timestamp']
 
@@ -197,12 +198,16 @@ class Blocks:
             post_ids = tuple(DB.query_col(sql, date=date))
 
             # remove all recent records
-            DB.query("DELETE FROM hive_posts_cache WHERE post_id IN :ids", ids=post_ids)
             DB.query("DELETE FROM hive_feed_cache  WHERE created_at >= :date", date=date)
             DB.query("DELETE FROM hive_reblogs     WHERE created_at >= :date", date=date)
             DB.query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
-            DB.query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
-            DB.query("DELETE FROM hive_posts       WHERE id IN :ids", ids=post_ids)
+
+            # remove posts: core, tags, cache entries
+            if post_ids:
+                DB.query("DELETE FROM hive_posts_cache WHERE post_id IN :ids", ids=post_ids)
+                DB.query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
+                DB.query("DELETE FROM hive_posts       WHERE id      IN :ids", ids=post_ids)
+
             DB.query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
             DB.query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
 
