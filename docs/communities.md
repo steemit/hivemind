@@ -1,8 +1,10 @@
-# Steem Communities
+# Hive / Steem Communities
 
-Initial spec, 2017
+Feb 6, 2017 - Initial spec
 
-## Overview
+Apr 15, 2019 - Updated spec
+
+## Introduction
 
 As described in the *[Steemit 2017 Roadmap](https://steem.io/2017roadmap.pdf)*:
 
@@ -43,6 +45,7 @@ The goal of the community feature is to empower users to create tighter groups a
 
  - microblogging
  - link sharing
+ - local meetups
  - world news
  - curation guilds (cross-posting undervalued posts, overvalued posts, plagiarism, etc)
  - original photography
@@ -51,53 +54,129 @@ The goal of the community feature is to empower users to create tighter groups a
 
 Posts either "belong" to a single community, or are in the user's own blog (not in a community).
 
-## Specifications
+## Overview
 
-Communities are created by designating an account as a community. Each community has a set of admins and moderators who maintain it and control settings over the look and feel.
+#### Community Types
 
-### Member Types
+All communities and posts are viewable/readable by all, but there are options to limit who can post or comment in a community. For instance, an organization may create a restricted community for official updates: only members of the organization would be able to post updates, but anyone can comment. Alternatively, a professional group or local community may choose to limit all posting and commenting to approved members (perhaps those they verify independently).
 
-1. Owner: holder of the community account's private keys. Assigns admins.
-2. Admin: can edit admins and mods. Has mod powers.
-3. Mod: can remove posts, block users, add/remove contributors
-4. Contributor: in closed communities, an approved poster.
-5. Guest: a poster in a public community and a commenter in a restricted community
+1. **Open**: anyone can post or comment
+2. **Restricted**: guests can comment but not post
+3. **Closed**: only mods and approved members can post topics
 
+#### User Roles
 
-### Community Types
+1. **Owner**: can assign admins. 
+2. **Admin**: can edit admin settings and assign mods.
+3. **Mod**: can mute posts/users, add/remove contributors, pin posts, set user titles.
+4. **Contributor**: in restricted/closed communities, an approved member.
+5. **Guest**: can post/comment in public communities and comment in restricted communities.
 
-1. Public: anyone can post a topic
-2. Restricted: only mods and approved members can post topics
+#### User Actions
 
-Either type of community can be "followed" by any user.
+**Owners** have the ability to:
 
-### Community parameters (editable by mods)
+- **set admins**: assign or revoke admin priviledges
 
-Admin settings
+**Admins** have the ability to:
+
+- **set moderators**: grant or revoke mod priviledges
+- **set community type**: control if a community is fully open, or only open comment, or closed
+- **set payout split**: control reward sharing destinations/percentages
+
+**Moderators** have the ability to:
+
+- **mute users**: prevents the user from posting any more into their community (until/unless unmuted)
+- **mute posts**: prevents the post from being shown in the UI (until unmuted)
+- **set approved posters**: for closed groups, sets who is allowed to submit posts/comments
+- **set display settings**: control the look and feel of community home pages
+- **pin posts**: ability for specific posts to always show at the top of the community feed
+- **set user titles**: ability to add a label for specific members to designate role or status
+
+**Contributors** have the ability to:
+
+- **in an open community**: N/A
+- **in a restricted community: post**
+- **in a closed community: post and comment **
+
+**Guests** have the ability to:
+
+- **post in a community**: as long as they are not muted, or posting into a *closed/restricted* group
+- **comment in a community**: as long as they are not muted, or posting into a *closed* group
+- **flag a post**: adds an item and a note to the community's moderation queue for review
+- **follow a community**: to customize their feed with communities they care about
+
+## Registration
+
+##### Goals
+
+Name registration, particularly in decentralized systems, is far from trivial. The ideal properties for registering community names may include:
+
+1. ability to claim a community name based on their subjective capacity to lead that community
+2. ability to reclaim ownership of a community which has ceased activity (due to lost key or inactivity)
+3. fully decentralized: no central entity is controlling registration and collecting payments
+
+##### Potential solutions:
+
+1. The original spec suggested that community names be based on account names; this fulfills #3 but negates #2 and doesn't address #1. 
+2. A centralized registry which collects a registration fee and manages name-to-owner mapping. This can address #1 and #2 at the cost of centralization.
+3. A modified Harberger Tax model with a multiplier which makes it (e.g. 90%) cheaper to maintain a name once you own it. See [background](https://medium.com/@simondlr/what-is-harberger-tax-where-does-the-blockchain-fit-in-1329046922c6) and [example implementation on r/ethtrader](<https://www.reddit.com/r/ethtrader/comments/a3r1bn/you_can_now_change_the_top_banner_on_the_redesign/>).
+4. Maintain a community registry off-chain which assigns community names to owners. This could be managed through a GitHub repository using PRs and a small group of reviewers. This addresses #1 and #2 but is far from a decentralized solution. This could be done just for MVP, allowing us to move forward while deferring a fully decentralized solution to a later date.
+
+## Considerations
+
+- Generally speaking, operations such as account role grants and mutes are not retroactive.
+  - The reason for this is to allow for consistent state among services which can also be replayed independently, as well as for simplicity of implementation. If it is needed to batch-mute old posts, this can be still be accomplished by issuing batch `mutePost` operations.
+  - Example: If a user is muted, the state of their previous posts is not changed. If the user attempts to post in a community during this period, their posts are not actually muted but "invalid" since they did not have the correct priviledge at the time. Likewise, if they are unmuted, any of these "invalid" posts remain so.
+  - Example: payout split changes cannot be retroactive, otherwise previously valid posts may be considered invalid.
+- A post's `community` cannot be changed after the post is created. This avoids a host of edge cases.
+- A community can only have 1 account named as the owner.
+- A community member is assigned, at most, 1 role.
+
+#### Undefined
+
+- Can a non-member be assigned to be a moderator or admin of a community?
+- How does an owner/admin relinquish control of community -- does oldest mod inherit role? 
+
+## Community Metadata
+
+##### Editable by Owner
+
+- `owner`: each community must name a single owner. Only owners can transfer ownership.
+
+##### Editable by Admins - Core Settings
+
+Core settings which will influence community logic and validation rules.
 
  - `type`
-   - `public`
-   - `open-comment`: guests can comment but not post
-   - `restricted`: only approved members can post/comment
- - `payment_split`: % of rewards which go to the community account. implement in 1.0, don't enforce until 1.1
- - `admins`
+   - `open`: (default) guests can post and comment.
+   - `restricted`: only approved contributors can post. guests can comment.
+   - `closed`: only approved contributors can post or comment.
+ - `reward_share`: dictionary mapping `account` to `percent`
+    - specifies required minimum beneficiary amount per post for it to be considered valid
+    - can be blank or contain up to 8 entries
 
-Mod settings
+##### Editable by Admins - Display Settings
 
- - `name`: the name of this community (32 chars)
+Can be stored as a JSON dictionary.
+
+ - `name`: the display name of this community (32 chars)
  - `about`: short blurb about this community (512 chars)
  - `description`: a blob of markdown to describe purpose, enumerate rules, etc. (5000 chars)
- - `language`: primary language. `en`, `es`, `ru`, etc (https://en.wikipedia.org/wiki/ISO_639-3 ?)
- - `nsfw`: if this community is 18+, UI automatically tags all posts `nsfw`
- - `bg_color`: hex-encoded RGB value (e.g. `EEDDCC`)
- - `bg_color2`: hex-encoded RGB value, if provided, creates a gradient
- - `comment_sort`: RESERVED - default sort/display method for comments (e.g. `votes`, `trending`, `age`, `forum`)
- - `display`: RESERVED - graphical layout in communities (version >1.0)
  - `flag_text`: custom text for reporting content
+ - `language`: primary language. `en`, `es`, `ru`, etc (https://en.wikipedia.org/wiki/ISO_639-3 ?)
+ - `nsfw`: if this community is 18+, UI automatically tags all posts/comments `nsfw`
+ - `bg_color`: background color - hex-encoded RGB value (e.g. `EEDDCC`)
+ - `bg_color2`: background color - hex-encoded RGB value (if provided, creates a gradient)
+
+Extra settings (Post-MVP)
+
+ - `comment_display`: default comment display method (e.g. `votes`, `trending`, `age`, `forum`) 
+ - `feed_display`: specify graphical layout in communities
 
 ## Operations
 
-Communities are not part of blockchain consensus, so all actions make use of standard operations. Standalone services will monitor the blockchain for relevant ops to build and maintain state.
+Communities are not part of blockchain consensus, so all operations take the form of `custom_json` operations which are to be monitored and validated by separate services to build and maintain state.
 
 The standard format for `custom_json` ops:
 
@@ -121,11 +200,9 @@ The standard format for `custom_json` ops:
  - `<community>` required parameter for all ops and names a valid community.  
  - `<params*>` is any number of other parameters for the action being performed
 
-### Admin actions
+### Owner Operations
 
-Must be submitted by an *admin* or the community *owner* account.
-
-#### Designate account as a community
+#### Create a community [TBD]
 
 ```
 ["create", {
@@ -135,10 +212,30 @@ Must be submitted by an *admin* or the community *owner* account.
 }]
 ```
 
- - type is either `restricted` or `public`
+ - type is either `public`,  `restricted`, or `closed`
  - must name at least 1 valid admin
 
-#### Add admin
+#### Set reward share
+
+```
+["setRewardShare", {
+  "community": <community>, 
+  "reward_share": { <account1>: <percent1>, ... }
+}]
+```
+
+#### Set community type
+
+```
+["setType", {
+  "community": <community>, 
+  "type": <type>
+}]
+```
+
+- type is either `public`,  `restricted`, or `closed`
+
+#### Add/remove admin
 
 ```
 ["addAdmins", {
@@ -146,8 +243,6 @@ Must be submitted by an *admin* or the community *owner* account.
   "accounts": [ <account>, ... ]
 }]
 ```
-
-#### Remove admin
 
 ```
 ["removeAdmins", {
@@ -158,7 +253,9 @@ Must be submitted by an *admin* or the community *owner* account.
 
  - there must remain at least 1 admin at all times
 
-#### Add moderators
+### Admin Operations
+
+#### Add/remove moderators
 
 ```
 ["addMods", {
@@ -167,8 +264,6 @@ Must be submitted by an *admin* or the community *owner* account.
 }]
 ```
 
-#### Remove moderators
-
 ```
 ["removeMods", {
   "community": <community>, 
@@ -176,10 +271,7 @@ Must be submitted by an *admin* or the community *owner* account.
 }]
 ```
 
-
-### Moderator actions
-
-#### Update settings
+#### Update display settings
 
 ```
 ["updateSettings", {
@@ -188,10 +280,12 @@ Must be submitted by an *admin* or the community *owner* account.
 }]
 ```
 
-Valid keys are `name`, `about`, `description`, `language`, `nsfw`.
+Valid keys are `name`, `about`, `description`, `language`, `nsfw`, `flag_text`.
+
+### Moderator Operations
 
 
-#### Add approved posters
+#### Add/remove approved posters
 
 In restricted communities, gives topic-creation permission to the named accounts.
 
@@ -202,8 +296,6 @@ In restricted communities, gives topic-creation permission to the named accounts
 }]
 ```
 
-#### Remove approved posters
-
 ```
 ["removePosters", {
   "community": <community>, 
@@ -211,7 +303,7 @@ In restricted communities, gives topic-creation permission to the named accounts
 }]
 ```
 
-#### Mute user
+#### Mute/unmute user
 
 Muting a user prevents their topics and comments from being shown in the community.
 
@@ -221,8 +313,6 @@ Muting a user prevents their topics and comments from being shown in the communi
   "account": <account>
 }]
 ```
-
-#### Unmute user
 
 ```
 ["unmuteUser", {
@@ -241,7 +331,7 @@ Muting a user prevents their topics and comments from being shown in the communi
 }]
 ```
 
-#### Mute a post
+#### Mute/unmute a post
 
 Can be a topic or a comment.
 
@@ -253,8 +343,6 @@ Can be a topic or a comment.
   "notes": <comment>
 }]
 ```
-
-#### Unmute a post
 
 ```
 ["unmutePost", {
@@ -287,12 +375,23 @@ Stickies a post to the top of the community homepage. If multiple posts are stic
 }]
 ```
 
-### Public operations
+### Guest Operations
 
+#### Un/subscribe to a community
 
-#### Un/Following a community
+Allows a user to signify which communities they want shown on their personal trending feed and to be shown in their navigation menu.
 
-Following and unfollowing communities is performed identically to following and unfollowing any other user.
+```
+["subscribe", {
+  "community": <community>
+}]
+```
+
+```
+["unsubscribe", {
+  "community": <community>
+}]
+```
 
 #### Flag a post
 
@@ -307,7 +406,7 @@ Places a post in the review queue. It's up to the community to define what const
 }]
 ```
 
-### Posting in a community
+#### Posting in a community
 
 To mark a post as belonging to a community, set the `community` key in `json_metadata`. Do not use an `@` prefix.
 
@@ -323,9 +422,15 @@ To mark a post as belonging to a community, set the `community` key in `json_met
 
 If a post is edited to name a different community, this change will be ignored.   If a post is posted "into" a community that the user does not have permission to post into, the json will be interpreted as if the "community" key does not exist, and the post will be posted onto the user's own blog.
 
+
+
+
+
 ---
 
-## Pages
+
+
+## Appendix A. Interface Considerations
 
  - admin
    - Create a community
@@ -349,9 +454,17 @@ If a post is edited to name a different community, this change will be ignored. 
    - Main page (Posts list)
  - trending/popular communities (+search)
 
+
+
+
+
 -----
 
-## Community db schema
+
+
+## Appendix B. Example Database Schema
+
+Not complete -- for reference only.
 
 ```
 accounts
