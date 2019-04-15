@@ -97,7 +97,7 @@ All communities and posts are viewable/readable by all, but there are options to
 
 - **in an open community**: N/A
 - **in a restricted community: post**
-- **in a closed community: post and comment **
+- **in a closed community: post and comment**
 
 **Guests** have the ability to:
 
