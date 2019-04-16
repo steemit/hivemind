@@ -2,7 +2,7 @@
 
 Feb 6, 2017 - Initial spec
 
-Apr 15, 2019 - Updated spec
+Apr 15, 2019 - Updated spec. Alignment progress with https://github.com/stratos-steem/stratos/wiki/Subapp:-Communities
 
 ## Introduction
 
