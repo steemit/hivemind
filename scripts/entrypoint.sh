@@ -12,15 +12,16 @@
 # default DATABASE_URL should be postgresql://postgres:postgres@localhost:5432/postgres
 
 POPULATE_CMD="$(which hive)"
+PGVER=$(ls /var/lib/postgresql/)
 
 if [[ "$RUN_IN_EB" ]]; then
-  mkdir /var/lib/postgresql/9.5/main
+  mkdir /var/lib/postgresql/$PGVER/main
   if [[ $? -ne 0 ]]; then
     echo hivemind: restarted -- db already exists. skip init, start postgres
     service postgresql start
   else
-    chown -R postgres:postgres /var/lib/postgresql/9.5
-    cd /var/lib/postgresql/9.5
+    chown -R postgres:postgres /var/lib/postgresql/$PGVER
+    cd /var/lib/postgresql/$PGVER
 
     echo hivemind: attempting to pull in state file from s3://$S3_BUCKET/hivemind-$SCHEMA_HASH-latest.tar.lz4
 
@@ -44,7 +45,7 @@ if [[ "$RUN_IN_EB" ]]; then
         exit 1
       else
         echo hivemindsync: state file for schema version $SCHEMA_HASH not found, creating a new one from genesis
-        chpst -upostgres /usr/lib/postgresql/9.5/bin/initdb -D /var/lib/postgresql/9.5/main
+        chpst -upostgres /usr/lib/postgresql/$PGVER/bin/initdb -D /var/lib/postgresql/$PGVER/main
       fi
     else
       echo hivemind: state file loaded successfully
