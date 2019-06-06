@@ -30,9 +30,10 @@ echo hivemindsync: stopping postgres service
 service postgresql stop
 
 echo hivemindsync: starting a new state file upload operation, compressing directory...
-cd /var/lib/postgresql/9.5
+PGVER=$(ls /var/lib/postgresql/)
+cd /var/lib/postgresql/$PGVER
 echo hivemindsync: postgres data dir size is `du -hs .`
-tar cf hivemind.tar.lz4 --use-compress-prog=lz4 -C /var/lib/postgresql/9.5 main
+tar cf hivemind.tar.lz4 --use-compress-prog=lz4 -C /var/lib/postgresql/$PGVER main
 if [[ ! $? -eq 0 ]]; then
   echo NOTIFYALERT! hivemindsync was unable to compress state file, check the logs.
   exit 1
