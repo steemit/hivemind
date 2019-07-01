@@ -158,6 +158,10 @@ condenser_api.get_discussions_by_blog
 condenser_api.get_discussions_by_feed
 condenser_api.get_discussions_by_comments
 condenser_api.get_replies_by_last_update
+
+condenser_api.get_blog
+condenser_api.get_blog_entries
+condenser_api.get_discussions_by_author_before_date
 ```
 
 
