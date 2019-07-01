@@ -107,7 +107,7 @@ Precedence: CLI over ENV over hive.conf. Check `hive --help` for details.
 
 Build flags
 
- - `LOW_MEMORY_MODE=OFF` - need post content
+ - `LOW_MEMORY_NODE=OFF` - need post content
  - `CLEAR_VOTES=OFF` - need all vote data
  - `SKIP_BY_TX=ON` - tx lookup not used
 
