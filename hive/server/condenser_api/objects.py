@@ -122,7 +122,7 @@ def _condenser_post_object(row, truncate_body=0):
 
     # condenser#3424 mitigation
     if not row['category']:
-        row['category'] = 'all'
+        row['category'] = 'undefined'
 
     post = {}
     post['post_id'] = row['post_id']
