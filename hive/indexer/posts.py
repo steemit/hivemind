@@ -10,8 +10,7 @@ from hive.utils.normalize import load_json_key
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
-
-from hive.community.roles import is_community_post_valid
+from hive.indexer.community import Community
 
 log = logging.getLogger(__name__)
 DB = Db.instance()
@@ -207,7 +206,7 @@ class Posts:
             depth = parent_depth + 1
 
         # check post validity in specified context
-        is_valid = date < '2020-01-01' or is_community_post_valid(community, op)
+        is_valid = date < '2020-01-01' or Community.is_post_valid(community, op)
         if not is_valid:
             url = "@%s/%s" % (op['author'], op['permlink'])
             log.info("Invalid post %s in @%s", url, community)
@@ -222,9 +221,10 @@ class Posts:
 
         Ensures value is readable and referenced account exists.
         """
+        #pylint: disable=too-many-boolean-expressions
 
         # short-circuit pre-launch
-        if date < '2018-07-01':
+        if date < '2020-01-1':
             return None
 
         md = load_json_key(comment, 'json_metadata')
@@ -232,7 +232,8 @@ class Posts:
                 or not isinstance(md, dict)
                 or not 'community' in md
                 or not isinstance(md['community'], str)
-                or not Accounts.exists(md['community'])):
+                or not Accounts.exists(md['community'])
+                or not Community.exists(md['community'])):
             return None
 
         return md['community']
