@@ -120,6 +120,10 @@ def _condenser_post_object(row, truncate_body=0):
     """Given a hive_posts_cache row, create a legacy-style post object."""
     paid = row['is_paidout']
 
+    # condenser#3424 mitigation
+    if not row['category']:
+        row['category'] = 'all'
+
     post = {}
     post['post_id'] = row['post_id']
     post['author'] = row['author']
