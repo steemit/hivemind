@@ -197,7 +197,7 @@ The standard format for `custom_json` ops:
 ["setRole", {
     "community": <community>,
     "account": <account>,
-    "role": admin|mod|member|none|muted
+    "role": admin|mod|member|none|muted,
     "notes": <comment>
 }]
 ```
