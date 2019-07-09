@@ -84,6 +84,11 @@ class Blocks:
                 elif op_type == 'create_claimed_account_operation':
                     account_names.add(op['new_account_name'])
 
+                # account metadata updates
+                elif op_type == 'account_update_operation':
+                    if not is_initial_sync:
+                        Accounts.dirty(set([op['account']]))
+
                 # post ops
                 elif op_type == 'comment_operation':
                     comment_ops.append(op)
