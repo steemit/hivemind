@@ -216,7 +216,7 @@ class Posts:
                     category=category, community=community, date=date)
 
     @classmethod
-    def _get_op_community(cls, comment, date):
+    def _get_op_community(cls, op, date):
         """Given a comment op, safely read 'community' field from json.
 
         Ensures value is readable and referenced account exists.
@@ -227,7 +227,7 @@ class Posts:
         if date < '2020-01-1':
             return None
 
-        md = load_json_key(comment, 'json_metadata')
+        md = load_json_key(op, 'json_metadata')
         if (not md
                 or not isinstance(md, dict)
                 or not 'community' in md
