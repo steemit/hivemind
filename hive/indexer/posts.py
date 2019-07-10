@@ -156,6 +156,11 @@ class Posts:
             CachedPost.delete(pid, op['author'], op['permlink'])
             if depth == 0:
                 FeedCache.delete(pid)
+            else:
+                # force parent child recount when child is deleted
+                prnt = cls._get_parent_by_child_id(pid)
+                CachedPost.recount(prnt['author'], prnt['permlink'], prnt['id'])
+
 
     @classmethod
     def update(cls, op, date, pid):
@@ -167,6 +172,16 @@ class Posts:
         # pylint: disable=unused-argument
         if not DbState.is_initial_sync():
             CachedPost.update(op['author'], op['permlink'], pid)
+
+    @classmethod
+    def _get_parent_by_child_id(cls, child_id):
+        """Get parent's `id`, `author`, `permlink` by child id."""
+        sql = """SELECT id, author, permlink FROM hive_posts
+                  WHERE id = (SELECT parent_id FROM hive_posts
+                               WHERE id = :child_id)"""
+        result = DB.query_row(sql, child_id=child_id)
+        assert result, "parent of %d not found" % child_id
+        return result
 
     @classmethod
     def _insert_feed_cache(cls, post):
