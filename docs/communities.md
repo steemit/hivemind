@@ -141,7 +141,7 @@ Core settings which will influence community logic and validation rules.
 Can be stored as a JSON dictionary.
 
  - `name`: the display name of this community (32 chars)
- - `about`: short blurb about this community (512 chars)
+ - `about`: short blurb about this community (120 chars)
  - `description`: a blob of markdown to describe purpose, enumerate rules, etc. (5000 chars)
  - `flag_text`: custom text for reporting content
  - `language`: primary language. `en`, `es`, `ru`, etc (https://en.wikipedia.org/wiki/ISO_639-3 ?)
@@ -284,7 +284,7 @@ Stickies a post to the top of the community homepage. If multiple posts are stic
 
 
 ```
-["unPinPost", {
+["unpinPost", {
   "community": <community>,
   "account": <account>,
   "permlink": <permlink>
@@ -316,7 +316,7 @@ Places a post in the review queue. It's up to the community to define what const
 ```
 ["flagPost", {
   "community": <community>,
-  "author": <author>,
+  "account": <account>,
   "permlink": <permlink>,
   "comment": <comment>
 }]
