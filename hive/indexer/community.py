@@ -35,6 +35,33 @@ COMMANDS = [
     'mutePost', 'unmutePost', 'pinPost', 'unpinPost', 'flagPost',
 ]
 
+
+def process_json_community_op(actor, op_json, date):
+    """Validates community op and apply state changes to db."""
+    op = CommunityOp(actor, date)
+    op.validate(op_json)
+    op.process()
+
+def read_key_str(op, key):
+    """Reads a key from a dict, ensuring non-blank str if present."""
+    if key in op:
+        assert isinstance(op[key], str), 'key `%s` was not str' % key
+        assert op[key], 'key `%s` was blank' % key
+        return op[key]
+    return None
+
+def read_key_json(obj, key):
+    """Given a dict, parse JSON in `key`. Blank dict on failure."""
+    ret = {}
+    if key in obj:
+        try:
+            ret = json.loads(obj[key])
+        except Exception:
+            pass
+        assert ret, 'json key `%s` was blank' % key
+    return ret
+
+
 class Community:
     """Handles hive community registration and operations."""
 
@@ -103,151 +130,260 @@ class Community:
             return role >= ROLE_MEMBER
         return role >= ROLE_GUEST
 
-def read_key_str(op, key):
-    """Reads a key from a dict, ensuring non-blank str if present."""
-    if key in op:
-        assert isinstance(op[key], str), 'key `%s` was not str' % key
-        assert op[key], 'key `%s` was blank' % key
-        return op[key]
-    return None
+class CommunityOp:
+    """Handles validating and processing of community custom_json ops."""
+    #pylint: disable=too-many-instance-attributes
 
-# community methods
-# -----------------
-def process_json_community_op(actor, op_json, date):
-    """Validates community op and apply state changes to db."""
-    #pylint: disable=line-too-long,unused-variable,too-many-branches,too-many-locals,too-many-statements
+    SCHEMA = {
+        'setRole': ['community', 'account', 'role'],
+        'updateSettings': ['community', 'settings'],
+        'setUserTitle': ['community', 'title'],
+        'mutePost': ['community', 'account', 'permlink', 'notes'],
+        'unmutePost': ['community', 'account', 'permlink', 'notes'],
+        'pinPost': ['community', 'account', 'permlink'],
+        'unpinPost': ['community', 'account', 'permlink'],
+        'flagPost': ['community', 'account', 'permlink', 'notes'],
+        'subscribe': ['community'],
+        'unsubscribe': ['community'],
+    }
 
-    action, op = op_json  # ['flagPost', {community: '', author: '', ...}]
-    actor_id = Accounts.get_id(actor)
+    def __init__(self, actor, date):
+        """Inits a community op for validation and processing."""
+        self.date = date
+        self.valid = False
+        self.action = None
+        self.op = None
 
-    # validate operation
-    assert action in COMMANDS, 'invalid op: `%s`' % action
+        self.actor = actor
+        self.actor_id = None
 
-    # validate community
-    community = read_key_str(op, 'community')
-    assert community, 'must name a community'
-    assert Accounts.exists(community), 'invalid name `%s`' % community
-    community_id = Community.get_id(community)
-    assert community_id, 'community `%s` does not exist' % community
+        self.community = None
+        self.community_id = None
 
-    # get actor's role
-    actor_role = Community.get_user_role(community, actor)
+        self.account = None
+        self.account_id = None
 
-    # if present: validate account
-    account = read_key_str(op, 'account')
-    account_id = None
-    if account:
-        assert Accounts.exists(account), 'account `%s` not found' % account
-        account_id = Accounts.get_id(account)
+        self.permlink = None
+        self.post_id = None
 
-    # if present: validate permlink
-    permlink = read_key_str(op, 'permlink')
-    post_id = None
-    depth = None
-    if permlink:
-        assert account, 'permlink requires named account'
-        post_id, depth = Posts.get_id_and_depth(account, permlink)
-        assert post_id, 'invalid post: %s/%s' % (account, permlink)
+        self.role = None
+        self.role_id = None
+
+        self.notes = None
+        self.title = None
+        self.settings = None
+
+    def validate(self, raw_op):
+        """Pre-processing and validation of custom_json payload."""
+        # validate basic structure
+        self._validate_raw_op(raw_op)
+        self.action = raw_op[0]
+        self.op = raw_op[1]
+        self.actor_id = Accounts.get_id(self.actor)
+
+        # validate and read schema
+        self._read_schema()
+
+        # validate permissions
+        self._validate_permissions()
+
+
+        self.valid = True
+
+    def process(self):
+        """Applies a validated operation."""
+        assert self.valid, 'cannot apply invalid op'
+        action = self.action
+        params = dict(
+            date=self.date,
+            community=self.community,
+            community_id=self.community_id,
+            actor=self.actor,
+            actor_id=self.actor_id,
+            account=self.account,
+            account_id=self.account_id,
+            post_id=self.post_id,
+            role_id=self.role_id,
+            notes=self.notes,
+            title=self.title,
+            settings=json.dumps(self.settings) if self.settings else None
+        )
+
+
+        # Community-level commands
+        if action == 'updateSettings':
+            DB.query("""UPDATE hive_communities SET settings = :settings
+                         WHERE name = :community""", **params)
+        elif action == 'subscribe':
+            DB.query("""INSERT INTO hive_subscriptions (account_id, community_id)
+                        VALUES (:actor_id, :community_id)""", **params)
+        elif action == 'unsubscribe':
+            DB.query("""DELETE FROM hive_subscriptions
+                         WHERE account_id = :actor_id
+                           AND community_id = :community_id""", **params)
+
+        # Account-level actions
+        elif action == 'setRole':
+            DB.query("""UPDATE hive_roles SET role_id = :role_id
+                         WHERE account = :account
+                           AND community = :community""", **params)
+        elif action == 'setUserTitle':
+            DB.query("""UPDATE hive_roles SET title = :title
+                         WHERE account = :account
+                           AND community = :community""", **params)
+
+        # Post-level actions
+        elif action == 'mutePost':
+            DB.query("""UPDATE hive_posts SET is_muted = 1
+                         WHERE id = :post_id""", **params)
+        elif action == 'unmutePost':
+            DB.query("""UPDATE hive_posts SET is_muted = 0
+                         WHERE id = :post_id""", **params)
+        elif action == 'pinPost':
+            DB.query("""UPDATE hive_posts SET is_pinned = 1
+                         WHERE id = :post_id""", **params)
+        elif action == 'unpinPost':
+            DB.query("""UPDATE hive_posts SET is_pinned = 0
+                         WHERE id = :post_id""", **params)
+        elif action == 'flagPost':
+            DB.query("""INSERT INTO hive_flags (account, community,
+                               author, permlink, comment, created_at)
+                        VALUES (:actor, :community, :account, :permlink,
+                                :notes, :date)""", **params)
+
+        # INSERT INTO hive_modlog (account, community, action, created_at)
+        # VALUES  (account, community, json.inspect, block_date)
+        return True
+
+
+    def _validate_raw_op(self, raw_op):
+        assert isinstance(raw_op, list), 'op json must be list'
+        assert len(raw_op) == 2, 'op json must have 2 elements'
+        assert isinstance(raw_op[0], str), 'op json[0] must be string'
+        assert isinstance(raw_op[1], dict), 'op json[1] must be dict'
+        assert raw_op[0] in self.SCHEMA.keys(), 'invalid action'
+        return (raw_op[0], raw_op[1])
+
+    def _read_schema(self):
+        schema = self.SCHEMA[self.action]
+
+        # validate structure
+        _keys = self.op.keys()
+        missing = schema - _keys
+        assert not missing, 'missing keys: %s' % missing
+        extra = _keys - schema
+        assert not extra, 'extraneous keys: %s' % extra
+
+        # read and validate keys
+        if 'community' in schema:
+            self._read_community()
+        if 'account' in schema:
+            self._read_account()
+        if 'permlink' in schema:
+            self._read_permlink()
+        if 'role' in schema:
+            self._read_role()
+        if 'notes' in schema:
+            self._read_notes()
+        if 'title' in schema:
+            self._read_title()
+        if 'settings' in schema:
+            self._read_settings()
+
+    def _read_community(self):
+        _name = read_key_str(self.op, 'community')
+        assert _name, 'must name a community'
+        assert Accounts.exists(_name), 'invalid name `%s`' % _name
+        _id = Community.get_id(_name)
+        assert _id, 'community `%s` does not exist' % _name
+
+        self.community = _name
+        self.community_id = _id
+
+    def _read_account(self):
+        _name = read_key_str(self.op, 'account')
+        assert _name, 'must name an account'
+        assert Accounts.exists(_name), 'account `%s` not found' % _name
+        self.account = _name
+        self.account_id = Accounts.get_id(_name)
+
+    def _read_permlink(self):
+        assert self.account, 'permlink requires named account'
+        _permlink = read_key_str(self.op, 'permlink')
+        assert _permlink, 'must name a permlink'
+        _pid, _depth = Posts.get_id_and_depth(self.account, _permlink)
+        assert _pid, 'invalid post: %s/%s' % (self.account, _permlink)
+
         # TODO: assert post belongs to community
 
-    role = read_key_str(op, 'role')
-    new_role = None
-    if role:
-        assert role in ROLES, 'invalid role'
-        new_role = ROLES[role]
+        self.permlink = _permlink
+        self.post_id = _pid
 
-    # validate permissions
-    if action == 'setRole':
-        assert actor_role >= ROLE_MOD, 'only mods and up can alter roles'
-        assert actor_role > new_role, 'cannot promote to or above own rank'
+    def _read_role(self):
+        _role = read_key_str(self.op, 'role')
+        assert _role, 'must name a role'
+        assert _role in ROLES, 'invalid role'
+        self.role = _role
+        self.role_id = ROLES[_role]
 
-        if actor != account:
-            account_role = Community.get_user_role(community, account)
-            assert account_role < actor_role, 'cannot modify higher-role user'
-            assert account_role != new_role, 'user is already `%s`' % op['role']
+    def _read_notes(self):
+        _notes = read_key_str(self.op, 'notes')
+        assert _notes, 'notes must be specified'
+        assert len(_notes) <= 120, 'notes must be under 120 characters'
+        _notes = _notes.strip()
+        assert _notes, 'notes cannot be blank'
+        self.notes = _notes
 
-    if action == 'updateSettings':
-        assert actor_role >= ROLE_ADMIN, 'only mods can update settings'
-    if action == 'setUserTitle':
-        assert actor_role >= ROLE_MOD, 'only mods can set user titles'
-    if action == 'mutePost':
-        assert actor_role >= ROLE_MOD, 'only mods can mute posts'
-    if action == 'unmutePost':
-        assert actor_role >= ROLE_MOD, 'only mods can unmute posts'
-    if action == 'pinPost':
-        assert actor_role >= ROLE_MOD, 'only mods can pin posts'
-    if action == 'unpinPost':
-        assert actor_role >= ROLE_MOD, 'only mods can unpin posts'
-    if action == 'flagPost':
-        assert actor_role > ROLE_MUTED, 'muted users cannot flag posts'
-    if action == 'subscribe':
-        pass
-    if action == 'unsubscribe':
-        pass
+    def _read_title(self):
+        _title = read_key_str(self.op, 'title') or ''
+        _title = _title.strip()
+        assert len(_title) < 120, 'user title must be under 120 characters'
+        self.title = _title
 
+    def _read_settings(self):
+        _settings = read_key_json(self.op, 'settings')
+        # TODO: validation
+        self.settings = dict(
+            name=read_key_str(_settings, 'name'), # 32
+            about=read_key_str(_settings, 'about'), #120
+            description=read_key_str(_settings, 'description'), #5000
+            flag_text=read_key_str(_settings, 'flag_text'), #???
+            language=read_key_str(_settings, 'language'), #2 https://en.wikipedia.org/wiki/ISO_639-1
+            nsfw=read_key_str(_settings, 'nsfw'), # true/false
+            bg_color=read_key_str(_settings, 'bg_color'), #hex
+            bg_color2=read_key_str(_settings, 'bg_color2'), #hex
+            primary_tag=read_key_str(_settings, 'primary_tag'), #tag (32chars?)
+        )
 
+    def _validate_permissions(self):
+        community = self.community
+        action = self.action
+        actor = self.actor
+        actor_role = Community.get_user_role(community, actor)
+        new_role = self.role_id
 
-
-    log.warning("valid community op from %s @ %s -- %s", actor, date, op_json)
-
-    # Community-level commands
-    # ----------------
-
-    if action == 'updateSettings':
-        settings = op['settings']
-        DB.query("UPDATE hive_communities SET settings = :settings WHERE name = :community",
-                 community=community, settings=json.dumps(settings))
-
-    if action == 'subscribe':
-        DB.query("INSERT INTO hive_subscriptions (account, community) VALUES (:account, :community)",
-                 account=actor, community=community)
-
-    if action == 'unsubscribe':
-        DB.query("DELETE FROM hive_subscriptions WHERE account = :account AND community = :community",
-                 account=actor, community=community)
-
-    # Account-level actions
-    # ----------------
-    if action == 'setRole':
-        assert account_id
-        role = read_key_str(op, 'role')
-        assert role, 'no role specified'
-        role_id = ROLES[role]
-        assert role_id, 'invalid role `%s`' % role
-        DB.query("UPDATE hive_roles SET role_id = :role_id WHERE account = :account AND community = :community",
-                 role_id=role_id, account=account, community=community)
-
-    if action == 'setUserTitle':
-        assert account_id
-        title = read_key_str(op, 'title')
-        DB.query("UPDATE hive_roles SET title = :title WHERE account = :account AND community = :community",
-                 title=title, account=account, community=community)
-
-
-    # MOD POST Actions
-    # ----------------
-    if action == 'mutePost':
-        assert post_id, 'no post specified'
-        DB.query("UPDATE hive_posts SET is_muted = 1 WHERE id = :id", id=post_id)
-
-    if action == 'unmutePost':
-        assert post_id, 'no post specified'
-        DB.query("UPDATE hive_posts SET is_muted = 0 WHERE id = :id", id=post_id)
-
-    if action == 'pinPost':
-        assert post_id, 'no post specified'
-        DB.query("UPDATE hive_posts SET is_pinned = 1 WHERE id = :id", id=post_id)
-
-    if action == 'unpinPost':
-        assert post_id, 'no post specified'
-        DB.query("UPDATE hive_posts SET is_pinned = 0 WHERE id = :id", id=post_id)
-
-    # GUEST POST Actions
-    # ------------------
-    if action == 'flagPost':
-        assert post_id, 'no post specified'
-        DB.query("INSERT INTO hive_flags (account, community, author, permlink, comment, created_at) VALUES (:account, :community, :author, :permlink, :comment, :date)")
-
-    # track success (TODO: failures as well?)
-    # INSERT INTO hive_modlog (account, community, action, created_at) VALUES  (account, community, json.inspect, block_date)
-    return True
+        if action == 'setRole':
+            assert actor_role >= ROLE_MOD, 'only mods and up can alter roles'
+            assert actor_role > new_role, 'cannot promote to or above own rank'
+            if actor != self.account:
+                account_role = Community.get_user_role(community, self.account)
+                assert account_role < actor_role, 'cant modify higher-role user'
+                assert account_role != new_role, 'role would not change'
+        elif action == 'updateSettings':
+            assert actor_role >= ROLE_ADMIN, 'only admins can update settings'
+        elif action == 'setUserTitle':
+            assert actor_role >= ROLE_MOD, 'only mods can set user titles'
+        elif action == 'mutePost':
+            assert actor_role >= ROLE_MOD, 'only mods can mute posts'
+        elif action == 'unmutePost':
+            assert actor_role >= ROLE_MOD, 'only mods can unmute posts'
+        elif action == 'pinPost':
+            assert actor_role >= ROLE_MOD, 'only mods can pin posts'
+        elif action == 'unpinPost':
+            assert actor_role >= ROLE_MOD, 'only mods can unpin posts'
+        elif action == 'flagPost':
+            assert actor_role > ROLE_MUTED, 'muted users cannot flag posts'
+        elif action == 'subscribe':
+            pass
+        elif action == 'unsubscribe':
+            pass
