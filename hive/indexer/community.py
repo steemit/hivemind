@@ -8,7 +8,6 @@ import ujson as json
 
 from hive.db.adapter import Db
 from hive.indexer.accounts import Accounts
-from hive.indexer.posts import Posts
 
 log = logging.getLogger(__name__)
 
@@ -311,6 +310,8 @@ class CommunityOp:
         assert self.account, 'permlink requires named account'
         _permlink = read_key_str(self.op, 'permlink')
         assert _permlink, 'must name a permlink'
+
+        from hive.indexer.posts import Posts
         _pid, _depth = Posts.get_id_and_depth(self.account, _permlink)
         assert _pid, 'invalid post: %s/%s' % (self.account, _permlink)
 

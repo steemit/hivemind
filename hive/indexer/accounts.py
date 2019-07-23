@@ -12,7 +12,6 @@ from hive.utils.normalize import rep_log10, vests_amount
 from hive.utils.timer import Timer
 from hive.utils.account import safe_profile_metadata
 from hive.utils.unique_fifo import UniqueFIFO
-from hive.indexer.community import Community
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +79,7 @@ class Accounts:
             cls._ids[name] = _id
 
         # post-insert: pass to communities to check for new registrations
+        from hive.indexer.community import Community
         Community.register(new_names, block_date)
 
     # account cache methods
