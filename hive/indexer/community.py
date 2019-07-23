@@ -360,14 +360,13 @@ class CommunityOp:
     def _validate_permissions(self):
         community = self.community
         action = self.action
-        actor = self.actor
-        actor_role = Community.get_user_role(community, actor)
+        actor_role = Community.get_user_role(community, self.actor)
         new_role = self.role_id
 
         if action == 'setRole':
             assert actor_role >= ROLE_MOD, 'only mods and up can alter roles'
             assert actor_role > new_role, 'cannot promote to or above own rank'
-            if actor != self.account:
+            if self.actor != self.account:
                 account_role = Community.get_user_role(community, self.account)
                 assert account_role < actor_role, 'cant modify higher-role user'
                 assert account_role != new_role, 'role would not change'

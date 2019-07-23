@@ -1,9 +1,12 @@
 """Hive db state manager. Check if schema loaded, init synced, etc."""
 
+#pylint: disable=too-many-lines
+
 import time
 import logging
 
-from hive.db.schema import setup, reset_autovac, build_metadata, teardown, DB_VERSION
+from hive.db.schema import (setup, reset_autovac, build_metadata,
+                            build_metadata_community, teardown, DB_VERSION)
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -188,7 +191,7 @@ class DbState:
     @classmethod
     def _check_migrations(cls):
         """Check current migration version and perform updates as needed."""
-        #pylint: disable=line-too-long
+        #pylint: disable=line-too-long,too-many-branches,too-many-statements
         cls._ver = cls.db().query_one("SELECT db_version FROM hive_state LIMIT 1")
         assert cls._ver is not None, 'could not load state record'
 
@@ -258,6 +261,14 @@ class DbState:
             cls.db().query("CREATE INDEX hive_posts_ix3 ON hive_posts (author, depth, id) WHERE is_deleted = '0'")
             cls.db().query("CREATE INDEX hive_posts_ix4 ON hive_posts (parent_id, id) WHERE is_deleted = '0'")
             cls._set_ver(12)
+
+        if cls._ver == 12: # community schema
+            assert False, 'community schema migration not finalized'
+            for table in ['hive_communities', 'hive_members',
+                          'hive_flags', 'hive_modlog']:
+                cls.db().query("DROP TABLE %s" % table)
+            build_metadata_community().create_all(cls.db().engine())
+            cls._set_ver(13)
 
         reset_autovac(cls.db())
 
