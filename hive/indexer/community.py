@@ -76,11 +76,12 @@ class Community:
             if not re.match(r'^hive-[123]\d{4,6}$', name):
                 continue
             type_id = int(name[5])
+            _id = Accounts.get_id(name)
 
-            sql = """INSERT INTO hive_communities (name, title, settings,
+            sql = """INSERT INTO hive_communities (id, name, title, settings,
                                                    type_id, created_at)
-                          VALUES (:name, '', '{}', :type_id, :date)"""
-            DB.query(sql, name=name, type_id=type_id, date=block_date)
+                          VALUES (:id, :name, '', '{}', :type_id, :date)"""
+            DB.query(sql, id=_id, name=name, type_id=type_id, date=block_date)
             sql = """INSERT INTO hive_roles (community, account, role_id, created_at)
                          VALUES (:community, :account, :role_id, :date)"""
             DB.query(sql, community=name, account=name, role_id=ROLE_OWNER, date=block_date)
