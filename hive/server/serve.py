@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import time
 
 from datetime import datetime
 from sqlalchemy.exc import OperationalError
@@ -14,10 +15,19 @@ from hive.server.condenser_api import methods as condenser_api
 from hive.server.condenser_api.tags import get_trending_tags as condenser_api_get_trending_tags
 from hive.server.condenser_api.get_state import get_state as condenser_api_get_state
 from hive.server.condenser_api.call import call as condenser_api_call
-from hive.server import hive_api
 from hive.server.common.mutes import Mutes
 
 from hive.server.db import Db
+
+async def db_head_state(context):
+    """Status/health check."""
+    db = context['db']
+    sql = ("SELECT num, created_at, extract(epoch from created_at) ts "
+           "FROM hive_blocks ORDER BY num DESC LIMIT 1")
+    row = await db.query_row(sql)
+    return dict(db_head_block=row['num'],
+                db_head_time=str(row['created_at']),
+                db_head_age=int(time.time() - row['ts']))
 
 def build_methods():
     """Register all supported hive_api/condenser_api.calls."""
@@ -25,11 +35,7 @@ def build_methods():
     methods = Methods()
 
     methods.add(**{'hive.' + method.__name__: method for method in (
-        hive_api.db_head_state,
-        #hive_api.payouts_total,
-        #hive_api.payouts_last_24h,
-        #hive_api.get_accounts,
-        #hive_api.get_accounts_ac,
+        db_head_state,
     )})
 
     methods.add(**{'condenser_api.' + method.__name__: method for method in (
@@ -152,7 +158,7 @@ def run_server(conf):
         #pylint: disable=unused-argument
         healthy_age = 15 # hive is synced if head block within 15s
         try:
-            state = await hive_api.db_head_state()
+            state = await db_head_state(app)
             curr_age = state['db_head_age']
         except Exception as e:
             log.info("could not get head state (%s)", e)
@@ -170,7 +176,7 @@ def run_server(conf):
         max_head_age = 3600 # 1hr
 
         try:
-            state = await hive_api.db_head_state()
+            state = await db_head_state(app)
         except OperationalError as e:
             state = None
             log.warning("could not get head state (%s)", e)
