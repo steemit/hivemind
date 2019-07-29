@@ -78,6 +78,7 @@ class Community:
             type_id = int(name[5])
             _id = Accounts.get_id(name)
 
+            # TODO: settings
             sql = """INSERT INTO hive_communities (id, name, title, settings,
                                                    type_id, created_at)
                           VALUES (:id, :name, '', '{}', :type_id, :date)"""
@@ -97,6 +98,14 @@ class Community:
         """Given a community name, get its internal id."""
         sql = "SELECT id FROM hive_communities WHERE name = :name"
         return DB.query_one(sql, name=name)
+
+    @classmethod
+    def get_all_muted(cls, community):
+        """Return a list of all muted accounts."""
+        return DB.query_col("""SELECT account FROM hive_roles
+                                WHERE community = :community
+                                  AND role_id < 0""",
+                            community=community)
 
     @classmethod
     def get_user_role(cls, community, account):
@@ -129,6 +138,28 @@ class Community:
         elif type_id == TYPE_COUNCIL:
             return role >= ROLE_MEMBER
         return role >= ROLE_GUEST
+
+    @classmethod
+    def is_subscribed(cls, community_id, account_id):
+        """Check an account's subscription status."""
+        sql = """SELECT 1 FROM hive_subscriptions
+                  WHERE community_id = :community_id
+                    AND account_id = :account_id"""
+        return bool(DB.query_one(sql, community_id=community_id,
+                                 account_id=account_id))
+
+    @classmethod
+    def recalc_pending_payouts(cls):
+        """Update all hive_community.pending_payout entries."""
+        # TODO: use/filter on community field
+        sql = """SELECT category, SUM(payout) FROM hive_posts_cache
+                  WHERE is_paidout = '0' GROUP BY category
+               ORDER BY SUM(payout) DESC"""
+        rows = DB.query_all(sql)
+        for community, total in rows:
+            sql = """UPDATE hive_communities SET pending_payout = :total
+                      WHERE name = :community"""
+            DB.query(sql, community=community, total=total)
 
 class CommunityOp:
     """Handles validating and processing of community custom_json ops."""
@@ -217,10 +248,16 @@ class CommunityOp:
         elif action == 'subscribe':
             DB.query("""INSERT INTO hive_subscriptions (account_id, community_id)
                         VALUES (:actor_id, :community_id)""", **params)
+            DB.query("""UPDATE hive_communities
+                           SET subscribers = subscribers + 1
+                         WHERE id = :community_id)""", **params)
         elif action == 'unsubscribe':
             DB.query("""DELETE FROM hive_subscriptions
                          WHERE account_id = :actor_id
                            AND community_id = :community_id""", **params)
+            DB.query("""UPDATE hive_communities
+                           SET subscribers = subscribers - 1
+                         WHERE id = :community_id)""", **params)
 
         # Account-level actions
         elif action == 'setRole':
@@ -385,6 +422,8 @@ class CommunityOp:
         elif action == 'flagPost':
             assert actor_role > ROLE_MUTED, 'muted users cannot flag posts'
         elif action == 'subscribe':
-            pass
+            active = Community.is_subscribed(self.community_id, self.actor_id)
+            assert not active, 'already subscribed'
         elif action == 'unsubscribe':
-            pass
+            active = Community.is_subscribed(self.community_id, self.actor_id)
+            assert active, 'already unsubscribed'
