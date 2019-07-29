@@ -19,17 +19,16 @@ async def comments_by_id(db, ids, observer=None):
         post = {
             'id': row['post_id'],
             'author': row['author'],
-            'permlink': row['permlink'],
-            'body': row['body'],
+            'url': row['author'] + '/' + row['permlink'],
             'depth': row['depth'],
+            'body': row['body'],
             'payout': str(row['payout']),
-            'updated_at': str(row['updated_at']),
             'created_at': str(row['created_at']),
+            'updated_at': str(row['updated_at']),
             'payout_at': str(row['payout_at']),
             'is_paidout': row['is_paidout'],
             'rshares': row['rshares'],
             'hide': row['is_hidden'] or row['is_grayed'],
-            'url': row['author'] + '/' + row['permlink'],
             'top_votes': top_votes,
         }
 
@@ -40,22 +39,19 @@ async def comments_by_id(db, ids, observer=None):
     return by_id
 
 
-def posts_by_id(db, ids, observer=None):
+def posts_by_id(db, ids, observer=None, lite=True):
     """Given a list of post ids, returns lite post objects in the same order."""
 
-    sql = """
-    SELECT post_id, author, permlink, title, preview, img_url, payout,
-           promoted, created_at, payout_at, is_nsfw, rshares, votes,
-           is_muted, is_invalid
-      FROM hive_posts_cache WHERE post_id IN :ids
-    """
+    # pylint: disable=too-many-locals
 
-    reblogged_ids = []
-    if observer:
-        reblogged_ids = db.query_col("SELECT post_id FROM hive_reblogs "
-                                     "WHERE account = :a AND post_id IN :ids",
-                                     a=observer, ids=tuple(ids))
+    sql = """SELECT post_id, author, permlink, title, img_url, payout, promoted,
+                    created_at, payout_at, is_nsfw, rshares, votes,
+                    is_muted, is_invalid, %s
+               FROM hive_posts_cache WHERE post_id IN :ids"""
+    fields = ['preview'] if lite else ['body', 'updated_at', 'json']
+    sql = sql % (', '.join(fields))
 
+    reblogged_ids = _reblogged_ids(db, observer, ids) if observer else []
 
     # TODO: filter out observer's mutes?
 
@@ -73,15 +69,24 @@ def posts_by_id(db, ids, observer=None):
             'author': row['author'],
             'url': row['author'] + '/' + row['permlink'],
             'title': row['title'],
-            'preview': row['preview'],
-            'img_url': row['img_url'],
             'payout': float(row['payout']),
             'promoted': float(row['promoted']),
             'created_at': str(row['created_at']),
             'payout_at': str(row['payout_at']),
-            'is_nsfw' : row['is_nsfw'],
+            'is_paidout': row['is_paidout'],
             'rshares' : row['rshares'],
-            'top_votes' : top_votes}
+            'hide': False, # TODO
+            'top_votes' : top_votes,
+            'thumb_url': row['img_url'],
+            'is_nsfw' : row['is_nsfw'],
+        }
+
+        if lite:
+            obj['preview'] = row['preview']
+        else:
+            obj['body'] = row['body']
+            obj['updated_at'] = str(row['updated_at'])
+            obj['json_metadata'] = row['json']
 
         if observer:
             obj['context'] = {
@@ -102,6 +107,12 @@ def posts_by_id(db, ids, observer=None):
     return {'posts': [by_id[_id] for _id in ids],
             'accounts': find_accounts(db, authors, observer)}
 
+def _reblogged_ids(db, observer, post_ids):
+    ids = db.query_col("""SELECT post_id FROM hive_reblogs
+                           WHERE account = :observer
+                             AND post_id IN :ids""",
+                       observer=observer, ids=tuple(post_ids))
+    return ids
 
 def _top_votes(obj, limit, observer):
     observer_vote = None

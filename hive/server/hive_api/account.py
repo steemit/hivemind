@@ -8,26 +8,27 @@ async def get_account(context, name, observer):
 
     Observer: Includes `followed`/`muted` context."""
     db = context['db']
-    sql = """SELECT id, name, display_name, about, vote_weight, created_at,
-                    location, website, followers, following, profile_image,
-                    cover_image, rank
+    sql = """SELECT id, name, display_name, about, created_at,
+                    vote_weight, rank, followers, following,
+                    location, website, profile_image, cover_image
                FROM hive_accounts WHERE name = :name"""
     row = await db.query_row(sql, name=name)
 
     account = {
         'id': row['id'],
         'name': row['name'],
-        'display_name': row['display_name'],
-        'about': row['about'],
-        'vote_weight': estimated_sp(row['vote_weight']),
-        'created': str(row['created_at']),
-        'location': row['location'],
-        'website': row['website'],
+        'created': str(row['created_at']).split(' ')[0],
+        'sp': int(estimated_sp(row['vote_weight'])),
+        'rank': row['rank'],
         'followers': row['followers'],
         'following': row['following'],
+        'display_name': row['display_name'],
+        'about': row['about'],
+
+        'location': row['location'],
+        'website': row['website'],
         'profile_image': row['profile_image'],
         'cover_image': row['cover_image'],
-        'rank': row['rank'],
     }
 
     if observer:
@@ -45,19 +46,23 @@ async def find_accounts(context, names, observer=None):
     """Find and return lite accounts by `names`."""
     db = context['db']
 
-    sql = """SELECT id, name, display_name, about, vote_weight, created_at, followers, following
+    assert len(names) < 100, 'too many accounts requested'
+
+    sql = """SELECT id, name, display_name, about, created_at,
+                    vote_weight, rank, followers, following
                FROM hive_accounts WHERE name IN :names"""
     rows = await db.query_all(sql, names=tuple(names))
 
     accounts = [{
         'id': row['id'],
         'name': row['name'],
-        'display_name': row['display_name'],
-        'about': row['about'],
-        'vote_weight': estimated_sp(row['vote_weight']),
-        'created': str(row['created_at']),
+        'created': str(row['created_at']).split(' ')[0],
+        'sp': int(estimated_sp(row['vote_weight'])),
+        'rank': row['rank'],
         'followers': row['followers'],
         'following': row['following'],
+        'display_name': row['display_name'],
+        'about': row['about'],
         } for row in rows]
 
     if observer:
