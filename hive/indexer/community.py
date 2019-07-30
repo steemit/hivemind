@@ -83,9 +83,18 @@ class Community:
                                                    type_id, created_at)
                           VALUES (:id, :name, '', '{}', :type_id, :date)"""
             DB.query(sql, id=_id, name=name, type_id=type_id, date=block_date)
-            sql = """INSERT INTO hive_roles (community, account, role_id, created_at)
-                         VALUES (:community, :account, :role_id, :date)"""
-            DB.query(sql, community=name, account=name, role_id=ROLE_OWNER, date=block_date)
+            sql = """INSERT INTO hive_roles (community_id, account_id, role_id, created_at)
+                         VALUES (:community_id, :account_id, :role_id, :date)"""
+            DB.query(sql, community_id=_id, account_id=_id, role_id=ROLE_OWNER, date=block_date)
+
+    @classmethod
+    def validated_name(cls, name):
+        """Perform basic validation on community name, then search for id."""
+        if (name[:5] == 'hive-'
+                and name[5] in ['1', '2', '3']
+                and re.match(r'^hive-[123]\d{4,6}$', name)):
+            return name
+        return None
 
     @classmethod
     def exists(cls, name):
@@ -102,20 +111,22 @@ class Community:
     @classmethod
     def get_all_muted(cls, community):
         """Return a list of all muted accounts."""
-        return DB.query_col("""SELECT account FROM hive_roles
-                                WHERE community = :community
-                                  AND role_id < 0""",
-                            community=community)
+        return DB.query_col("""SELECT name FROM hive_accounts
+                                WHERE id IN (SELECT account_id FROM hive_roles
+                                              WHERE community_id = :community_id
+                                                AND role_id < 0)""",
+                            community_id=cls.get_id(community))
 
     @classmethod
-    def get_user_role(cls, community, account):
+    def get_user_role(cls, community_id, account_id):
         """Get user role within a specific community."""
+
         return DB.query_one("""SELECT role_id FROM hive_roles
-                                WHERE community = :community
-                                  AND account = :account
+                                WHERE community_id = :community_id
+                                  AND account_id = :account_id
                                 LIMIT 1""",
-                            community=community,
-                            account=account) or ROLE_GUEST
+                            community_id=community_id,
+                            account_id=account_id) or ROLE_GUEST
 
     @classmethod
     def is_post_valid(cls, community, comment_op: dict):
@@ -127,7 +138,9 @@ class Community:
             - For journal post, author must be a member
         """
 
-        role = cls.get_user_role(community, comment_op['author'])
+        community_id = cls.get_id(community)
+        account_id = Accounts.get_id(comment_op['author'])
+        role = cls.get_user_role(community_id, account_id)
         type_id = int(community[5])
 
         # TODO: (1.5) check that beneficiaries are valid
@@ -137,7 +150,7 @@ class Community:
                 return role >= ROLE_MEMBER
         elif type_id == TYPE_COUNCIL:
             return role >= ROLE_MEMBER
-        return role >= ROLE_GUEST
+        return role >= ROLE_GUEST # or at least not muted
 
     @classmethod
     def is_subscribed(cls, community_id, account_id):
@@ -147,6 +160,11 @@ class Community:
                     AND account_id = :account_id"""
         return bool(DB.query_one(sql, community_id=community_id,
                                  account_id=account_id))
+    @classmethod
+    def is_pinned(cls, post_id):
+        """Check a post's pinned status."""
+        sql = """SELECT is_pinned FROM hive_posts WHERE id = :id"""
+        return bool(DB.query_one(sql, id=post_id))
 
     @classmethod
     def recalc_pending_payouts(cls):
@@ -262,12 +280,12 @@ class CommunityOp:
         # Account-level actions
         elif action == 'setRole':
             DB.query("""UPDATE hive_roles SET role_id = :role_id
-                         WHERE account = :account
-                           AND community = :community""", **params)
+                         WHERE account_id = :account_id
+                           AND community_id = :community_id""", **params)
         elif action == 'setUserTitle':
             DB.query("""UPDATE hive_roles SET title = :title
-                         WHERE account = :account
-                           AND community = :community""", **params)
+                         WHERE account_id = :account_id
+                           AND community_id = :community_id""", **params)
 
         # Post-level actions
         elif action == 'mutePost':
@@ -350,10 +368,12 @@ class CommunityOp:
         assert _permlink, 'must name a permlink'
 
         from hive.indexer.posts import Posts
-        _pid, _depth = Posts.get_id_and_depth(self.account, _permlink)
+        _pid = Posts.get_id(self.account, _permlink)
         assert _pid, 'invalid post: %s/%s' % (self.account, _permlink)
 
-        # TODO: assert post belongs to community
+        sql = """SELECT community FROM hive_posts WHERE id = :id LIMIT 1"""
+        _comm = DB.query_one(sql, id=_pid)
+        assert self.community == _comm, 'post does not belong to community'
 
         self.permlink = _permlink
         self.post_id = _pid
@@ -376,14 +396,14 @@ class CommunityOp:
     def _read_title(self):
         _title = read_key_str(self.op, 'title') or ''
         _title = _title.strip()
-        assert len(_title) < 120, 'user title must be under 120 characters'
+        assert len(_title) < 32, 'user title must be under 32 characters'
         self.title = _title
 
     def _read_settings(self):
         _settings = read_key_json(self.op, 'settings')
         # TODO: validation
         self.settings = dict(
-            name=read_key_str(_settings, 'name'), # 32
+            title=read_key_str(_settings, 'title'), # 32
             about=read_key_str(_settings, 'about'), #120
             description=read_key_str(_settings, 'description'), #5000
             flag_text=read_key_str(_settings, 'flag_text'), #???
@@ -395,16 +415,16 @@ class CommunityOp:
         )
 
     def _validate_permissions(self):
-        community = self.community
+        community_id = self.community_id
         action = self.action
-        actor_role = Community.get_user_role(community, self.actor)
+        actor_role = Community.get_user_role(community_id, self.actor_id)
         new_role = self.role_id
 
         if action == 'setRole':
             assert actor_role >= ROLE_MOD, 'only mods and up can alter roles'
             assert actor_role > new_role, 'cannot promote to or above own rank'
             if self.actor != self.account:
-                account_role = Community.get_user_role(community, self.account)
+                account_role = Community.get_user_role(community_id, self.account_id)
                 assert account_role < actor_role, 'cant modify higher-role user'
                 assert account_role != new_role, 'role would not change'
         elif action == 'updateSettings':
@@ -416,14 +436,19 @@ class CommunityOp:
         elif action == 'unmutePost':
             assert actor_role >= ROLE_MOD, 'only mods can unmute posts'
         elif action == 'pinPost':
+            pinned = Community.is_pinned(self.post_id)
+            assert not pinned, 'post is already pinned'
             assert actor_role >= ROLE_MOD, 'only mods can pin posts'
         elif action == 'unpinPost':
+            pinned = Community.is_pinned(self.post_id)
+            assert pinned, 'post is already not pinned'
             assert actor_role >= ROLE_MOD, 'only mods can unpin posts'
         elif action == 'flagPost':
+            # TODO: assert user has not yet flagged post
             assert actor_role > ROLE_MUTED, 'muted users cannot flag posts'
         elif action == 'subscribe':
-            active = Community.is_subscribed(self.community_id, self.actor_id)
+            active = Community.is_subscribed(community_id, self.actor_id)
             assert not active, 'already subscribed'
         elif action == 'unsubscribe':
-            active = Community.is_subscribed(self.community_id, self.actor_id)
+            active = Community.is_subscribed(community_id, self.actor_id)
             assert active, 'already unsubscribed'

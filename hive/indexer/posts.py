@@ -6,7 +6,6 @@ import collections
 from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
-from hive.utils.normalize import load_json_key
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
@@ -196,17 +195,25 @@ class Posts:
             parent_id = None
             depth = 0
             category = op['parent_permlink']
-            community = cls._get_op_community(op, date) or op['author']
+            community = Community.validated_name(category)
+            is_valid = True
 
         # this is a comment; inherit parent props.
         else:
             parent_id = cls.get_id(op['parent_author'], op['parent_permlink'])
-            sql = "SELECT depth,category,community FROM hive_posts WHERE id=:id"
-            parent_depth, category, community = DB.query_row(sql, id=parent_id)
+            sql = "SELECT depth,category,community,is_valid FROM hive_posts WHERE id=:id"
+            parent_depth, category, community, is_valid = DB.query_row(sql, id=parent_id)
             depth = parent_depth + 1
 
+        # TODO: is non-nsfw post in nsfw community invalid?
+
         # check post validity in specified context
-        is_valid = date < '2020-01-01' or Community.is_post_valid(community, op)
+        if community:
+            if is_valid:
+                is_valid = date < '2020-01-01' or Community.is_post_valid(community, op)
+        else:
+            community = op['author']
+
         if not is_valid:
             url = "@%s/%s" % (op['author'], op['permlink'])
             log.info("Invalid post %s in @%s", url, community)
@@ -214,26 +221,3 @@ class Posts:
         return dict(author=op['author'], permlink=op['permlink'], id=pid,
                     is_valid=is_valid, parent_id=parent_id, depth=depth,
                     category=category, community=community, date=date)
-
-    @classmethod
-    def _get_op_community(cls, op, date):
-        """Given a comment op, safely read 'community' field from json.
-
-        Ensures value is readable and referenced account exists.
-        """
-        #pylint: disable=too-many-boolean-expressions
-
-        # short-circuit pre-launch
-        if date < '2020-01-1':
-            return None
-
-        md = load_json_key(op, 'json_metadata')
-        if (not md
-                or not isinstance(md, dict)
-                or not 'community' in md
-                or not isinstance(md['community'], str)
-                or not Accounts.exists(md['community'])
-                or not Community.exists(md['community'])):
-            return None
-
-        return md['community']

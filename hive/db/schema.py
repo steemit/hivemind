@@ -234,25 +234,23 @@ def build_metadata_community(metadata=None):
         sa.Column('description', sa.String(5000), nullable=False, server_default=''),
         sa.Column('pending_payout', sa.types.DECIMAL(10, 3), nullable=False, server_default='0'),
         sa.Column('subscribers', sa.Integer, nullable=False, server_default='0'),
-        sa.Column('settings', TEXT, nullable=False),
         sa.Column('lang', CHAR(2), nullable=False, server_default='en'),
-        sa.Column('settings', TEXT, nullable=False),
         sa.Column('type_id', SMALLINT, nullable=False, server_default='0'),
         sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime, nullable=False),
+        sa.Column('settings', TEXT, nullable=False),
         sa.UniqueConstraint('name', name='hive_communities_ux1'),
-        sa.ForeignKeyConstraint(['name'], ['hive_accounts.name'], name='hive_communities_fk1'),
     )
 
     sa.Table(
         'hive_roles', metadata,
-        sa.Column('account', VARCHAR(16), nullable=False),
-        sa.Column('community', VARCHAR(16), nullable=False),
+        sa.Column('account_id', sa.Integer, nullable=False),
+        sa.Column('community_id', sa.Integer, nullable=False),
         sa.Column('role_id', SMALLINT, nullable=False, server_default='0'),
-        sa.Column('title', sa.String(255), nullable=False, server_default=''),
+        sa.Column('title', sa.String(140), nullable=False, server_default=''),
         sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.UniqueConstraint('account', 'community', name='hive_roles_ux1'),
-        sa.Index('hive_roles_ix1', 'community', 'account', 'created_at'),
+        sa.UniqueConstraint('account_id', 'community_id', name='hive_roles_ux1'),
+        sa.Index('hive_roles_ix1', 'community_id', 'account_id', 'created_at'), # TODO: role or title instead of created_At
     )
 
     sa.Table(
@@ -280,7 +278,7 @@ def build_metadata_community(metadata=None):
         sa.Column('id', sa.Integer, primary_key=True),
         sa.Column('community_id', sa.Integer, nullable=False),
         sa.Column('account_id', sa.Integer, nullable=False),
-        sa.Column('action', sa.String(32), nullable=False),
+        sa.Column('action_id', SMALLINT, nullable=False),
         sa.Column('params', sa.String(1000), nullable=False),
         sa.Column('created_at', sa.DateTime, nullable=False),
         sa.Index('hive_modlog_ix1', 'community_id', 'created_at'),

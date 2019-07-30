@@ -140,7 +140,7 @@ Core settings which will influence community logic and validation rules.
 
 Can be stored as a JSON dictionary.
 
- - `name`: the display name of this community (32 chars)
+ - `title`: the display name of this community (32 chars)
  - `about`: short blurb about this community (120 chars)
  - `description`: a blob of markdown to describe purpose, enumerate rules, etc. (5000 chars)
  - `flag_text`: custom text for reporting content
@@ -221,7 +221,7 @@ In addition to editing user roles (e.g. appointing mods), admins can define the 
 }]
 ```
 
-Valid keys are `name`, `about`, `description`, `language`, `nsfw`, `flag_text`.
+Valid keys are `title`, `about`, `description`, `language`, `nsfw`, `flag_text`, `bg_color`, `bg_color2`, `primary_tag`.
 
 #### Set reward share (v1.5)
 
