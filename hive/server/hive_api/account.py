@@ -35,7 +35,7 @@ async def get_account(context, name, observer):
         state = db.query_one("""SELECT state FROM hive_follows
                                  WHERE follower = :follower
                                    AND following = :following""",
-                             follower=get_account_id(db, observer),
+                             follower=await get_account_id(db, observer),
                              following=account['id'])
         account['context'] = {'followed': state == 1,
                               'muted': state == 2}
@@ -66,10 +66,10 @@ async def find_accounts(context, names, observer=None):
         } for row in rows]
 
     if observer:
-        followed = db.query_col("""SELECT following FROM hive_follows
-                                    WHERE follower = :account_id
-                                      AND state = 1""",
-                                account_id=get_account_id(db, observer))
+        followed = await db.query_col("""SELECT following FROM hive_follows
+                                          WHERE follower = :account_id
+                                            AND state = 1""",
+                                      account_id=await get_account_id(db, observer))
         for account in accounts:
             if account['id'] in followed:
                 account['context'] = {'followed': True}

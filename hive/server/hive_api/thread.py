@@ -57,11 +57,15 @@ async def _fetch_children(db, root_id, start_id, sort, limit, observer=None):
 
     # load objects and assemble response tree
     comments = await comments_by_id(db, relevant_ids, observer)
-    return _build_tree(tree[root_id], tree, comments, sort_ids=relevant_ids)
+
+    return {'accounts': comments['accounts'],
+            'posts': _build_tree(tree[root_id], tree, comments['posts'], sort_ids=relevant_ids)}
 
 
 def _build_tree(root_ids, tree, comments, sort_ids):
     # comments is sorted...
+
+    # TODO: fetch account role/title, include in response
 
     ret = []
     for root_id in sorted(root_ids, key=sort_ids.index):
