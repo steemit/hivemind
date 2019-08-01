@@ -17,6 +17,8 @@ from hive.server.condenser_api.get_state import get_state as condenser_api_get_s
 from hive.server.condenser_api.call import call as condenser_api_call
 from hive.server.common.mutes import Mutes
 
+from hive.server.condenser_api2.call import call as condenser_api2_call
+
 from hive.server.db import Db
 
 async def db_head_state(context):
@@ -99,6 +101,11 @@ def build_methods():
     # legacy `call` style adapter
     methods.add(**{
         'call': condenser_api_call
+    })
+
+    methods.add(**{
+        'hive.call2': condenser_api2_call,
+        'call2': condenser_api2_call
     })
 
     return methods
