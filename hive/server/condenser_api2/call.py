@@ -4,7 +4,7 @@ from hive.server.condenser_api.common import (
     ApiError,
     return_error_info,
 )
-from hive.server.condenser_api2.get_state import get_state
+from hive.server.condenser_api2.get_state import (get_state, get_discussion)
 from hive.server.condenser_api2.tags import get_trending_tags
 from hive.server.condenser_api2.methods import (
     get_discussions_by_trending,
@@ -69,6 +69,8 @@ async def call(context, api, method, params):
     # Content monolith
     if method == 'get_state':
         return await get_state(context, *_strict_list(params, 1))
+    elif method == 'get_discussion':
+        return await get_discussion(context, *_strict_list(params, 2))
     elif method == 'get_trending_tags':
         return await get_trending_tags(context, *_strict_list(params, 2))
 

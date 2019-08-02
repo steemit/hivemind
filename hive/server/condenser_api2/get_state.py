@@ -5,7 +5,6 @@ import logging
 from collections import OrderedDict
 import ujson as json
 
-from hive.utils.normalize import legacy_amount
 from hive.server.common.mutes import Mutes
 
 from hive.server.condenser_api2.objects import (
@@ -36,34 +35,6 @@ ACCOUNT_TAB_KEYS = {
     'comments': 'comments',
     'recent-replies': 'recent_replies'}
 
-# dummy account paths used by condenser - just need account object
-ACCOUNT_TAB_IGNORE = [
-    'followed',
-    'followers',
-    'permissions',
-    'password',
-    'settings']
-
-# misc dummy paths used by condenser - send minimal get_state structure
-CONDENSER_NOOP_URLS = [
-    'create_account',
-    'approval',
-    'recover_account_step_1',
-    'recover_account_step_2',
-    'submit.html',
-    'market',
-    'change_password',
-    'login.html',
-    'welcome',
-    'tos.html',
-    'privacy.html',
-    'support.html',
-    'faq.html',
-    'about.html',
-    'pick_account',
-    'waiting_list.html',
-]
-
 # post list sorts
 POST_LIST_SORTS = [
     'trending',
@@ -72,13 +43,6 @@ POST_LIST_SORTS = [
     'created',
     'payout',
     'payout_comments',
-    # unsupported:
-    'recent',
-    'trending30',
-    'active',
-    'votes',
-    'responses',
-    'cashout',
 ]
 
 @return_error_info
@@ -92,36 +56,26 @@ async def get_state(context, path: str):
     db = context['db']
 
     state = {
-        'feed_price': await _get_feed_price(db),
-        'props': await _get_props_lite(db),
-        'tags': {},
-        'accounts': {},
-        'content': {},
-        'tag_idx': {'trending': []},
-        'discussion_idx': {"": {}}}
+        'feed_price': await _get_feed_price(db),    # contains feed price
+        'props': await _get_props_lite(db),         # contains sbd_print_rate
+        'tags': {},                                 # contains detail for /tags page
+        'accounts': {},                             # data about accounts (for login and post/comment)
+        'content': {},                              # full post/comment data
+        'tag_idx': {'trending': []},                # simple list of trending tags
+        'discussion_idx': {"": {}}}                 # ordered list of posts
 
     # account - `/@account/tab` (feed, blog, comments, replies)
     if part[0] and part[0][0] == '@':
-        assert not part[1] == 'transfers', 'transfers API not served here'
         assert not part[2], 'unexpected account path[2] %s' % path
-
-        if part[1] == '':
-            part[1] = 'blog'
+        assert part[1] in ACCOUNT_TAB_KEYS, 'invalid account tab %s' % path
 
         account = valid_account(part[0][1:])
-        state['accounts'][account] = await _load_account(db, account)
+        key = ACCOUNT_TAB_KEYS[part[1]]
 
-        if part[1] in ACCOUNT_TAB_KEYS:
-            key = ACCOUNT_TAB_KEYS[part[1]]
-            posts = await _get_account_discussion_by_key(db, account, key)
-            state['content'] = _keyed_posts(posts)
-            state['accounts'][account][key] = list(state['content'].keys())
-        elif part[1] in ACCOUNT_TAB_IGNORE:
-            pass # condenser no-op URLs
-        else:
-            # invalid/undefined case; probably requesting `@user/permlink`,
-            # but condenser still relies on a valid response for redirect.
-            state['error'] = 'invalid get_state account path %s' % path
+        posts = await _get_account_discussion_by_key(db, account, key)
+        state['content'] = _keyed_posts(posts)
+        state['accounts'][account] = await _load_account(db, account)
+        state['accounts'][account][key] = list(state['content'].keys())
 
     # discussion - `/category/@account/permlink`
     elif part[1] and part[1][0] == '@':
@@ -147,13 +101,24 @@ async def get_state(context, path: str):
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
-    elif part[0] in CONDENSER_NOOP_URLS:
-        assert not part[1] and not part[2]
-
     else:
         raise ApiError('unhandled path: /%s' % path)
 
     return state
+
+@return_error_info
+async def get_discussion(context, author, permlink, maxdepth=6):
+    """Load a discussion thread."""
+    db = context['db']
+    assert isinstance(maxdepth, int)
+    assert 0 < maxdepth < 7, 'invalid max depth'
+    author = valid_account(author)
+    permlink = valid_permlink(permlink)
+    state = {}
+    state['content'] = await _load_discussion(db, author, permlink)
+    state['accounts'] = await _load_content_accounts(db, state['content'])
+    return state
+
 
 async def _get_account_discussion_by_key(db, account, key):
     assert account, 'account must be specified'
@@ -177,21 +142,13 @@ async def _get_account_discussion_by_key(db, account, key):
     return posts
 
 def _normalize_path(path):
-    if path and path[0] == '/':
-        path = path[1:]
-
-    # some clients pass the query string to get_state, and steemd allows it :(
-    if '?' in path:
-        path = path.split('?')[0]
-
-    if not path:
-        path = 'trending'
+    assert path, 'path cannot be blank'
+    assert path[0] != '/', 'path must not start with slash'
+    assert path[-1] != '/', 'path must not end with slash'
     assert '#' not in path, 'path contains hash mark (#)'
     assert '?' not in path, 'path contains query string: `%s`' % path
 
     parts = path.split('/')
-    if len(parts) == 4 and parts[3] == '':
-        parts = parts[:-1]
     assert len(parts) < 4, 'too many parts in path: `%s`' % path
     while len(parts) < 3:
         parts.append('')
@@ -233,6 +190,15 @@ async def _child_ids(db, parent_ids):
     """
     rows = await db.query_all(sql, ids=tuple(parent_ids))
     return [[row[0], row[1]] for row in rows]
+
+async def _load_root_post(db, author, permlink):
+    root_id = await get_post_id(db, author, permlink)
+    if not root_id:
+        return {}
+
+    posts = await load_posts_keyed(db, [root_id])
+    return {_ref(post): post for post in posts.values()}
+
 
 async def _load_discussion(db, author, permlink):
     """Load a full discussion thread."""
@@ -286,21 +252,4 @@ async def _get_feed_price(db):
 async def _get_props_lite(db):
     """Return a minimal version of get_dynamic_global_properties data."""
     raw = json.loads(await db.query_one("SELECT dgpo FROM hive_state"))
-
-    # convert NAI amounts to legacy
-    nais = ['virtual_supply', 'current_supply', 'current_sbd_supply',
-            'pending_rewarded_vesting_steem', 'pending_rewarded_vesting_shares',
-            'total_vesting_fund_steem', 'total_vesting_shares']
-    for k in nais:
-        if k in raw:
-            raw[k] = legacy_amount(raw[k])
-
-    return dict(
-        time=raw['time'], #*
-        sbd_print_rate=raw['sbd_print_rate'],
-        sbd_interest_rate=raw['sbd_interest_rate'],
-        head_block_number=raw['head_block_number'], #*
-        total_vesting_shares=raw['total_vesting_shares'],
-        total_vesting_fund_steem=raw['total_vesting_fund_steem'],
-        last_irreversible_block_num=raw['last_irreversible_block_num'], #*
-    )
+    return dict(sbd_print_rate=raw['sbd_print_rate'])
