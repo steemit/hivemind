@@ -21,6 +21,9 @@ from hive.server.condenser_api.methods import (
     get_discussions_by_comments,
     get_replies_by_last_update,
 
+    get_post_discussions_by_payout,
+    get_comment_discussions_by_payout,
+
     get_discussions_by_author_before_date,
     get_blog,
     get_blog_entries,
@@ -112,6 +115,10 @@ async def call(context, api, method, params):
         return await get_discussions_by_promoted(context, **_strict_query(params))
     elif method == 'get_discussions_by_created':
         return await get_discussions_by_created(context, **_strict_query(params))
+    elif method == 'get_post_discussions_by_payout':
+        return await get_post_discussions_by_payout(context, **_strict_query(params))
+    elif method == 'get_comment_discussions_by_payout':
+        return await get_comment_discussions_by_payout(context, **_strict_query(params))
 
     # Account discussion queries
     elif method == 'get_discussions_by_blog':
