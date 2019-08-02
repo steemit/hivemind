@@ -118,7 +118,8 @@ disable=
     oct-method,
     coerce-method,
     #custom
-    fixme
+    fixme,
+    multiple-statements
 
 
 [REPORTS]
