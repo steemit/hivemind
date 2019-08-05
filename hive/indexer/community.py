@@ -41,13 +41,31 @@ def process_json_community_op(actor, op_json, date):
     op.validate(op_json)
     op.process()
 
-def read_key_str(op, key):
-    """Reads a key from a dict, ensuring non-blank str if present."""
+def read_key_bool(op, key):
+    """Reads a key from dict, ensuring valid bool if present."""
     if key in op:
-        assert isinstance(op[key], str), 'key `%s` was not str' % key
-        assert op[key], 'key `%s` was blank' % key
+        assert isinstance(op[key], bool), 'must be bool: %s' % key
         return op[key]
     return None
+
+def read_key_str(op, key, maxlen=None, fmt=None):
+    """Reads a key from a dict, ensuring non-blank str if present."""
+    if key not in op:
+        return None
+    assert isinstance(op[key], str), 'key `%s` was not str' % key
+    assert op[key], 'key `%s` was blank' % key
+    assert op[key] == op[key].strip(), 'invalid padding: %s' % key
+    assert not maxlen or len(op[key]) <= maxlen, 'exceeds max len: %s' % key
+
+    if fmt == 'hex':
+        assert re.match(r'^#[0-9a-f]{6}$', op[key]), 'invalid HEX: %s' % key
+    elif fmt == 'lang':
+        # TODO: https://en.wikipedia.org/wiki/ISO_639-1
+        assert re.match(r'^#[a-z]{2}$', op[key]), 'invalid lang: %s' % key
+    else:
+        assert fmt is None, 'invalid fmt: %s' % fmt
+
+    return op[key]
 
 def read_key_json(obj, key):
     """Given a dict, parse JSON in `key`. Blank dict on failure."""
@@ -78,7 +96,6 @@ class Community:
             type_id = int(name[5])
             _id = Accounts.get_id(name)
 
-            # TODO: settings
             sql = """INSERT INTO hive_communities (id, name, title, settings,
                                                    type_id, created_at)
                           VALUES (:id, :name, '', '{}', :type_id, :date)"""
@@ -255,14 +272,15 @@ class CommunityOp:
             role_id=self.role_id,
             notes=self.notes,
             title=self.title,
-            settings=json.dumps(self.settings) if self.settings else None
         )
-
 
         # Community-level commands
         if action == 'updateSettings':
-            DB.query("""UPDATE hive_communities SET settings = :settings
-                         WHERE name = :community""", **params)
+            DB.query("""UPDATE hive_communities SET title = :title,
+                               about = :about, description = :description,
+                               lang = :lang, is_nsfw = :is_nsfw,
+                               settings = :settings2
+                         WHERE name = :community""", name=self.community, **self.settings)
         elif action == 'subscribe':
             DB.query("""INSERT INTO hive_subscriptions (account_id, community_id)
                         VALUES (:actor_id, :community_id)""", **params)
@@ -346,7 +364,7 @@ class CommunityOp:
             self._read_settings()
 
     def _read_community(self):
-        _name = read_key_str(self.op, 'community')
+        _name = read_key_str(self.op, 'community', 16)
         assert _name, 'must name a community'
         assert Accounts.exists(_name), 'invalid name `%s`' % _name
         _id = Community.get_id(_name)
@@ -356,7 +374,7 @@ class CommunityOp:
         self.community_id = _id
 
     def _read_account(self):
-        _name = read_key_str(self.op, 'account')
+        _name = read_key_str(self.op, 'account', 16)
         assert _name, 'must name an account'
         assert Accounts.exists(_name), 'account `%s` not found' % _name
         self.account = _name
@@ -364,7 +382,7 @@ class CommunityOp:
 
     def _read_permlink(self):
         assert self.account, 'permlink requires named account'
-        _permlink = read_key_str(self.op, 'permlink')
+        _permlink = read_key_str(self.op, 'permlink', 256)
         assert _permlink, 'must name a permlink'
 
         from hive.indexer.posts import Posts
@@ -379,40 +397,39 @@ class CommunityOp:
         self.post_id = _pid
 
     def _read_role(self):
-        _role = read_key_str(self.op, 'role')
+        _role = read_key_str(self.op, 'role', 16)
         assert _role, 'must name a role'
         assert _role in ROLES, 'invalid role'
         self.role = _role
         self.role_id = ROLES[_role]
 
     def _read_notes(self):
-        _notes = read_key_str(self.op, 'notes')
-        assert _notes, 'notes must be specified'
-        assert len(_notes) <= 120, 'notes must be under 120 characters'
-        _notes = _notes.strip()
+        _notes = read_key_str(self.op, 'notes', 120)
         assert _notes, 'notes cannot be blank'
         self.notes = _notes
 
     def _read_title(self):
-        _title = read_key_str(self.op, 'title') or ''
+        _title = read_key_str(self.op, 'title', 32) or ''
         _title = _title.strip()
-        assert len(_title) < 32, 'user title must be under 32 characters'
         self.title = _title
 
     def _read_settings(self):
         _settings = read_key_json(self.op, 'settings')
-        # TODO: validation
+        # primary
         self.settings = dict(
-            title=read_key_str(_settings, 'title'), # 32
-            about=read_key_str(_settings, 'about'), #120
-            description=read_key_str(_settings, 'description'), #5000
-            flag_text=read_key_str(_settings, 'flag_text'), #???
-            language=read_key_str(_settings, 'language'), #2 https://en.wikipedia.org/wiki/ISO_639-1
-            nsfw=read_key_str(_settings, 'nsfw'), # true/false
-            bg_color=read_key_str(_settings, 'bg_color'), #hex
-            bg_color2=read_key_str(_settings, 'bg_color2'), #hex
-            primary_tag=read_key_str(_settings, 'primary_tag'), #tag (32chars?)
+            title=read_key_str(_settings, 'title', 32),
+            about=read_key_str(_settings, 'about', 120),
+            description=read_key_str(_settings, 'description', 5000),
+            lang=read_key_str(_settings, 'language', 2, 'lang'),
+            is_nsfw=read_key_bool(_settings, 'nsfw'),
         )
+        # extended
+        self.settings['settings2'] = json.dumps(dict(
+            flag_text=read_key_str(_settings, 'flag_text', 5000),
+            bg_color=read_key_str(_settings, 'bg_color', 6, 'hex'),
+            bg_color2=read_key_str(_settings, 'bg_color2', 6, 'hex'),
+            primary_tag=read_key_str(_settings, 'primary_tag', 32), # tag. TODO: evaluate
+        ))
 
     def _validate_permissions(self):
         community_id = self.community_id
