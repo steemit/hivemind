@@ -111,10 +111,10 @@ class Posts:
     @classmethod
     def insert(cls, op, date):
         """Inserts new post records."""
-        sql = """INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
-                                        category, community, depth, created_at)
-                      VALUES (:is_valid, :parent_id, :author, :permlink,
-                              :category, :community, :depth, :date)"""
+        sql = """INSERT INTO hive_posts (is_valid, is_muted, parent_id, author,
+                             permlink, category, community, depth, created_at)
+                      VALUES (:is_valid, is_muted, :parent_id, :author,
+                             :permlink, :category, :community, :depth, :date)"""
         sql += ";SELECT currval(pg_get_serial_sequence('hive_posts','id'))"
         post = cls._build_post(op, date)
         result = DB.query(sql, **post)
@@ -131,7 +131,8 @@ class Posts:
     @classmethod
     def undelete(cls, op, date, pid):
         """Re-allocates an existing record flagged as deleted."""
-        sql = """UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0',
+        sql = """UPDATE hive_posts SET is_valid = :is_valid,
+                   is_muted = :is_muted, is_deleted = '0', is_pinned = '0',
                    parent_id = :parent_id, category = :category,
                    community = :community, depth = :depth
                  WHERE id = :id"""
@@ -195,29 +196,36 @@ class Posts:
             parent_id = None
             depth = 0
             category = op['parent_permlink']
-            community = Community.validated_name(category)
+            community = category
             is_valid = True
+            is_muted = False
 
         # this is a comment; inherit parent props.
         else:
             parent_id = cls.get_id(op['parent_author'], op['parent_permlink'])
-            sql = "SELECT depth,category,community,is_valid FROM hive_posts WHERE id=:id"
-            parent_depth, category, community, is_valid = DB.query_row(sql, id=parent_id)
+            sql = """SELECT depth, category, community, is_valid, is_muted
+                       FROM hive_posts WHERE id = :id"""
+            parent_depth, category, community, is_valid, is_muted = DB.query_row(sql, id=parent_id)
             depth = parent_depth + 1
-
-        # TODO: is non-nsfw post in nsfw community invalid?
+            if is_muted: is_valid = False
 
         # check post validity in specified context
+        community = Community.validated_name(community)
         if community:
             if is_valid:
                 is_valid = date < '2020-01-01' or Community.is_post_valid(community, op)
         else:
             community = op['author']
 
+        # post is invalid if:
+        #  - author is muted in a community
+        #  - is a reply to a muted or invalid post
+        #  - (?) is non-nsfw post in nsfw community
         if not is_valid:
             url = "@%s/%s" % (op['author'], op['permlink'])
             log.info("Invalid post %s in @%s", url, community)
 
         return dict(author=op['author'], permlink=op['permlink'], id=pid,
-                    is_valid=is_valid, parent_id=parent_id, depth=depth,
-                    category=category, community=community, date=date)
+                    is_valid=is_valid, is_muted=is_muted, parent_id=parent_id,
+                    depth=depth, category=category, community=community,
+                    date=date)
