@@ -39,8 +39,9 @@ class Sync:
         # ensure db schema up to date, check app status
         DbState.initialize()
 
-        # prefetch id->name memory map
+        # prefetch id->name and id->rank memory maps
         Accounts.load_ids()
+        Accounts.fetch_ranks()
 
         if DbState.is_initial_sync():
             # resume initial sync
@@ -189,8 +190,8 @@ class Sync:
                      cnt['insert'], cnt['update'], cnt['payout'], cnt['upvote'],
                      cnt['recount'], accts, follows, ms, ' SLOW' if ms > 1000 else '')
 
-            #if num % 1200 == 0: #1hr
-            #    Accounts.update_ranks() #144
+            if num % 1200 == 0: #1hr
+                Accounts.fetch_ranks()
             if num % 100 == 0: #5min
                 Accounts.dirty_oldest(500)
                 Accounts.flush(steemd, trx=True)
