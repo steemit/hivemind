@@ -185,16 +185,19 @@ class Community:
 
     @classmethod
     def recalc_pending_payouts(cls):
-        """Update all hive_community.pending_payout entries."""
-        # TODO: use/filter on community field
-        sql = """SELECT category, SUM(payout) FROM hive_posts_cache
-                  WHERE is_paidout = '0' GROUP BY category
-               ORDER BY SUM(payout) DESC"""
-        rows = DB.query_all(sql)
-        for community, total in rows:
-            sql = """UPDATE hive_communities SET pending_payout = :total
+        """Update all pending_payout and rank fields."""
+        sql = """SELECT c.name, SUM(p.payout)
+                   FROM hive_communities c
+              LEFT JOIN hive_posts_cache p ON p.category = c.name
+                  WHERE p.is_paidout = '0'
+               GROUP BY c.name
+               ORDER BY SUM(p.payout) DESC"""
+        for rank, row in DB.query_all(sql):
+            community, total = row
+            sql = """UPDATE hive_communities
+                        SET pending_payout = :total, rank = :rank
                       WHERE name = :community"""
-            DB.query(sql, community=community, total=total)
+            DB.query(sql, community=community, total=total, rank=rank+1)
 
 class CommunityOp:
     """Handles validating and processing of community custom_json ops."""
