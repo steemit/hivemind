@@ -113,7 +113,7 @@ class Posts:
         """Inserts new post records."""
         sql = """INSERT INTO hive_posts (is_valid, is_muted, parent_id, author,
                              permlink, category, community, depth, created_at)
-                      VALUES (:is_valid, is_muted, :parent_id, :author,
+                      VALUES (:is_valid, :is_muted, :parent_id, :author,
                              :permlink, :category, :community, :depth, :date)"""
         sql += ";SELECT currval(pg_get_serial_sequence('hive_posts','id'))"
         post = cls._build_post(op, date)
