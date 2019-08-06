@@ -153,9 +153,12 @@ class Community:
             - Author is not muted in this community
             - For council post/comment, author must be a member
             - For journal post, author must be a member
+            - Community must exist
         """
 
         community_id = cls.get_id(community)
+        #assert community_id, 'community not found'
+        if not community_id: return False # TODO
         account_id = Accounts.get_id(comment_op['author'])
         role = cls.get_user_role(community_id, account_id)
         type_id = int(community[5])

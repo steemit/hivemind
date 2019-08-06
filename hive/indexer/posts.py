@@ -213,7 +213,7 @@ class Posts:
         community = Community.validated_name(community)
         if community:
             if is_valid:
-                is_valid = date < '2020-01-01' or Community.is_post_valid(community, op)
+                is_valid = Community.is_post_valid(community, op)
         else:
             community = op['author']
 

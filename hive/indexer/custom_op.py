@@ -51,7 +51,7 @@ class CustomOp:
                 if block_num < 6000000 and not isinstance(op_json, list):
                     op_json = ['follow', op_json]  # legacy compat
                 cls._process_legacy(account, op_json, block_date)
-            elif op['id'] == 'com.steemit.community':
+            elif op['id'] == 'community':
                 if block_num > 30e6:
                     process_json_community_op(account, op_json, block_date)
 
