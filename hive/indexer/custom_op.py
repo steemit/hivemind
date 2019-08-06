@@ -39,7 +39,7 @@ class CustomOp:
     def process_ops(cls, ops, block_num, block_date):
         """Given a list of operation in block, filter and process them."""
         for op in ops:
-            if op['id'] not in ['follow', 'com.steemit.community']:
+            if op['id'] not in ['follow', 'community']:
                 continue
 
             account = _get_auth(op)
