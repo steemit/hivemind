@@ -211,16 +211,16 @@ class CommunityOp:
     #pylint: disable=too-many-instance-attributes
 
     SCHEMA = {
-        'setRole': ['community', 'account', 'role'],
         'updateSettings': ['community', 'settings'],
-        'setUserTitle': ['community', 'title'],
-        'mutePost': ['community', 'account', 'permlink', 'notes'],
-        'unmutePost': ['community', 'account', 'permlink', 'notes'],
-        'pinPost': ['community', 'account', 'permlink'],
-        'unpinPost': ['community', 'account', 'permlink'],
-        'flagPost': ['community', 'account', 'permlink', 'notes'],
-        'subscribe': ['community'],
-        'unsubscribe': ['community'],
+        'setRole':        ['community', 'account', 'role'],
+        'setUserTitle':   ['community', 'account', 'title'],
+        'mutePost':       ['community', 'account', 'permlink', 'notes'],
+        'unmutePost':     ['community', 'account', 'permlink', 'notes'],
+        'pinPost':        ['community', 'account', 'permlink'],
+        'unpinPost':      ['community', 'account', 'permlink'],
+        'flagPost':       ['community', 'account', 'permlink', 'notes'],
+        'subscribe':      ['community'],
+        'unsubscribe':    ['community'],
     }
 
     def __init__(self, actor, date):
