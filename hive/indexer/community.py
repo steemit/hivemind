@@ -37,9 +37,13 @@ COMMANDS = [
 
 def process_json_community_op(actor, op_json, date):
     """Validates community op and apply state changes to db."""
+    log.warning("community op: %s, %s", actor, op_json)
     op = CommunityOp(actor, date)
-    op.validate(op_json)
-    op.process()
+    try:
+        op.validate(op_json)
+        op.process()
+    except AssertionError as e:
+        log.warning("invalid community op: %s, %s, %s", actor, op_json, e)
 
 def read_key_bool(op, key):
     """Reads a key from dict, ensuring valid bool if present."""
@@ -303,13 +307,15 @@ class CommunityOp:
 
         # Account-level actions
         elif action == 'setRole':
-            DB.query("""UPDATE hive_roles SET role_id = :role_id
-                         WHERE account_id = :account_id
-                           AND community_id = :community_id""", **params)
+            DB.query("""INSERT INTO hive_roles (account_id, community_id, role_id, created_at)
+                        VALUES (:account_id, :community_id, :role_id, :date)
+                            ON CONFLICT (account_id, community_id)
+                            DO UPDATE SET role_id = :role_id""", **params)
         elif action == 'setUserTitle':
-            DB.query("""UPDATE hive_roles SET title = :title
-                         WHERE account_id = :account_id
-                           AND community_id = :community_id""", **params)
+            DB.query("""INSERT INTO hive_roles (account_id, community_id, title, created_at)
+                        VALUES (:account_id, :community_id, :title, :date)
+                            ON CONFLICT (account_id, community_id)
+                            DO UPDATE SET title = :title""", **params)
 
         # Post-level actions
         elif action == 'mutePost':
