@@ -263,7 +263,7 @@ class DbState:
             cls._set_ver(12)
 
         if cls._ver == 12: # community schema
-            assert False, 'community schema migration not finalized'
+            #assert False, 'community schema migration not finalized'
             for table in ['hive_communities', 'hive_members',
                           'hive_flags', 'hive_modlog']:
                 cls.db().query("DROP TABLE %s" % table)
