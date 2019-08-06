@@ -24,7 +24,7 @@ def _get_auth(op):
     is always used and length 1. It may be that some ops will require
     `required_active_auths` in the future. For now, these are ignored.
     """
-    if op['required_active_auths']:
+    if op['required_auths']:
         log.warning("unexpected active auths: %s", op)
         return None
     if len(op['required_posting_auths']) != 1:
