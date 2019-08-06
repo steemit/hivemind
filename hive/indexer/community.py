@@ -319,16 +319,16 @@ class CommunityOp:
 
         # Post-level actions
         elif action == 'mutePost':
-            DB.query("""UPDATE hive_posts SET is_muted = 1
+            DB.query("""UPDATE hive_posts SET is_muted = '1'
                          WHERE id = :post_id""", **params)
         elif action == 'unmutePost':
-            DB.query("""UPDATE hive_posts SET is_muted = 0
+            DB.query("""UPDATE hive_posts SET is_muted = '0'
                          WHERE id = :post_id""", **params)
         elif action == 'pinPost':
-            DB.query("""UPDATE hive_posts SET is_pinned = 1
+            DB.query("""UPDATE hive_posts SET is_pinned = '1'
                          WHERE id = :post_id""", **params)
         elif action == 'unpinPost':
-            DB.query("""UPDATE hive_posts SET is_pinned = 0
+            DB.query("""UPDATE hive_posts SET is_pinned = '0'
                          WHERE id = :post_id""", **params)
         elif action == 'flagPost':
             DB.query("""INSERT INTO hive_flags (account, community,

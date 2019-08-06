@@ -222,6 +222,7 @@ class Posts:
         #  - is a reply to a muted or invalid post
         #  - (?) is non-nsfw post in nsfw community
         if not is_valid:
+            is_muted = True
             url = "@%s/%s" % (op['author'], op['permlink'])
             log.info("Invalid post %s in @%s", url, community)
 
