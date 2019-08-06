@@ -264,8 +264,8 @@ class DbState:
 
         if cls._ver == 12: # community schema
             #assert False, 'community schema migration not finalized'
-            for table in ['hive_communities', 'hive_members',
-                          'hive_flags', 'hive_modlog']:
+            for table in ['hive_members', 'hive_flags', 'hive_modlog',
+                          'hive_communities']:
                 cls.db().query("DROP TABLE %s" % table)
             build_metadata_community().create_all(cls.db().engine())
             cls._set_ver(13)
