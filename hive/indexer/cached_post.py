@@ -332,7 +332,16 @@ class CachedPost:
                     # fields blank. While it's best to not try to cache
                     # already-deleted posts, it can happen during missed
                     # post sweep and while using `trail_blocks` > 0.
-                    pass
+
+                    # monitor: post not found which should def. exist; see #173
+                    sql = """SELECT id, author, permlink, is_deleted
+                               FROM hive_posts WHERE id = :id"""
+                    row = DB.query_row(sql, id=pid)
+                    if level == 'insert' and not row['is_deleted']:
+                        log.warning("couldnt load post for %s: %s", level, row)
+                    else:
+                        log.info("couldnt load post for %s: %s", level, row)
+
                 cls._bump_last_id(pid)
 
             timer.batch_lap()
