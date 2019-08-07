@@ -7,17 +7,18 @@ from hive.server.condenser_api.common import (
 from hive.server.condenser_api2.get_state import (get_state, get_discussion)
 from hive.server.condenser_api2.tags import get_trending_tags
 from hive.server.condenser_api2.methods import (
+    # tag-based post lists
     get_discussions_by_trending,
     get_discussions_by_hot,
     get_discussions_by_promoted,
     get_discussions_by_created,
+    get_post_discussions_by_payout,
+    get_comment_discussions_by_payout,
+    # account-based post lists
     get_discussions_by_blog,
     get_discussions_by_feed,
     get_discussions_by_comments,
     get_replies_by_last_update,
-
-    get_post_discussions_by_payout,
-    get_comment_discussions_by_payout,
 )
 
 def _strict_list(params, expected_len, min_len=None):

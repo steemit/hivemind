@@ -69,10 +69,10 @@ async def get_state(context, path: str):
         assert not part[2], 'unexpected account path[2] %s' % path
         assert part[1] in ACCOUNT_TAB_KEYS, 'invalid account tab %s' % path
 
-        account = valid_account(part[0][1:])
         key = ACCOUNT_TAB_KEYS[part[1]]
-
+        account = valid_account(part[0][1:])
         posts = await _get_account_discussion_by_key(db, account, key)
+
         state['content'] = _keyed_posts(posts)
         state['accounts'][account] = await _load_account(db, account)
         state['accounts'][account][key] = list(state['content'].keys())
@@ -84,7 +84,7 @@ async def get_state(context, path: str):
         state['content'] = await _load_discussion(db, author, permlink)
         state['accounts'] = await _load_content_accounts(db, state['content'])
 
-    # ranked posts - `/sort/category`
+    # ranked posts - `/sort/tag`
     elif part[0] in POST_LIST_SORTS:
         assert not part[2], "unexpected discussion path part[2] %s" % path
         sort = valid_sort(part[0])
