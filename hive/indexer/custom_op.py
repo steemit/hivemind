@@ -17,6 +17,21 @@ DB = Db.instance()
 
 log = logging.getLogger(__name__)
 
+def _get_auth(op):
+    """get account name submitting a custom_json op.
+
+    Hive custom_json op processing requires `required_posting_auths`
+    is always used and length 1. It may be that some ops will require
+    `required_active_auths` in the future. For now, these are ignored.
+    """
+    if op['required_auths']:
+        log.warning("unexpected active auths: %s", op)
+        return None
+    if len(op['required_posting_auths']) != 1:
+        log.warning("unexpected auths: %s", op)
+        return None
+    return op['required_posting_auths'][0]
+
 class CustomOp:
     """Processes custom ops and dispatches updates."""
 
@@ -27,18 +42,11 @@ class CustomOp:
             if op['id'] not in ['follow', 'com.steemit.community']:
                 continue
 
-            # we assume `required_posting_auths` is always used and length 1.
-            # it may be that some ops require `required_active_auths` instead.
-            # (e.g. if we use that route for admin action of acct creation)
-            # if op['required_active_auths']:
-            #    log.warning("unexpected active auths: %s" % op)
-            if len(op['required_posting_auths']) != 1:
-                log.warning("unexpected auths: %s", op)
+            account = _get_auth(op)
+            if not account:
                 continue
 
-            account = op['required_posting_auths'][0]
             op_json = load_json_key(op, 'json')
-
             if op['id'] == 'follow':
                 if block_num < 6000000 and not isinstance(op_json, list):
                     op_json = ['follow', op_json]  # legacy compat

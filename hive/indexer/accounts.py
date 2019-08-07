@@ -26,6 +26,9 @@ class Accounts:
     # fifo queue
     _dirty = UniqueFIFO()
 
+    # in-mem id->rank map
+    _ranks = {}
+
     # account core methods
     # --------------------
 
@@ -116,15 +119,11 @@ class Accounts:
         return count
 
     @classmethod
-    def update_ranks(cls):
-        """Rebuild `hive_accounts` table rank-by-vote-weight column."""
-        sql = """
-        UPDATE hive_accounts
-           SET rank = r.rnk
-          FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY vote_weight DESC) as rnk FROM hive_accounts) r
-         WHERE hive_accounts.id = r.id AND rank != r.rnk;
-        """
-        DB.query(sql)
+    def fetch_ranks(cls):
+        """Rebuild account ranks and store in memory for next update."""
+        sql = "SELECT id FROM hive_accounts ORDER BY vote_weight DESC"
+        for rank, _id in enumerate(DB.query_col(sql)):
+            cls._ranks[_id] = rank + 1
 
     @classmethod
     def _cache_accounts(cls, accounts, steem, trx=True):
@@ -185,6 +184,11 @@ class Accounts:
             'cover_image':   profile['cover_image'],
 
             'raw_json': json.dumps(account)}
+
+        # update rank field, if present
+        _id = cls.get_id(account['name'])
+        if _id in cls._ranks:
+            values['rank'] = cls._ranks[_id]
 
         bind = ', '.join([k+" = :"+k for k in list(values.keys())][1:])
         return ("UPDATE hive_accounts SET %s WHERE name = :name" % bind, values)

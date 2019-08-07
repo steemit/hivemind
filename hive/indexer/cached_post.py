@@ -12,6 +12,8 @@ from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
 
+# pylint: disable=too-many-lines
+
 log = logging.getLogger(__name__)
 
 DB = Db.instance()
@@ -304,6 +306,7 @@ class CachedPost:
         (i.e. `not post['author']`), it's important to advance _last_id,
         because this cursor is used to deduce any missing cache entries.
         """
+        # pylint: disable=too-many-locals
 
         timer = Timer(total=len(tuples), entity='post',
                       laps=['rps', 'wps'], full_total=full_total)
@@ -317,8 +320,11 @@ class CachedPost:
             posts = steem.get_content_batch(post_args)
             post_ids = [tup[1] for tup in tups]
             post_levels = [tup[2] for tup in tups]
+
+            catmap = cls._get_cat_map_for_insert(tups)
             for pid, post, level in zip(post_ids, posts, post_levels):
                 if post['author']:
+                    if pid in catmap: post['category'] = catmap[pid]
                     buffer.extend(cls._sql(pid, post, level=level))
                 else:
                     # When a post has been deleted (or otherwise DNE),
@@ -326,7 +332,16 @@ class CachedPost:
                     # fields blank. While it's best to not try to cache
                     # already-deleted posts, it can happen during missed
                     # post sweep and while using `trail_blocks` > 0.
-                    pass
+
+                    # monitor: post not found which should def. exist; see #173
+                    sql = """SELECT id, author, permlink, is_deleted
+                               FROM hive_posts WHERE id = :id"""
+                    row = DB.query_row(sql, id=pid)
+                    if level == 'insert' and not row['is_deleted']:
+                        log.warning("couldnt load post for %s: %s", level, row)
+                    else:
+                        log.info("couldnt load post for %s: %s", level, row)
+
                 cls._bump_last_id(pid)
 
             timer.batch_lap()
@@ -346,32 +361,43 @@ class CachedPost:
         return cls._last_id
 
     @classmethod
+    def _get_cat_map_for_insert(cls, tups):
+        """Cached posts must use validated `category` from hive_posts.
+
+        `category` returned from steemd is subject to change.
+        """
+        # get list of ids of posts which are to be inserted
+        ids = [tup[1] for tup in tups if tup[2] == 'insert']
+        if not ids:
+            return {}
+        # build a map of id->category for each of those posts
+        sql = "SELECT id, category FROM hive_posts WHERE id IN :ids"
+        cats = {r[0]: r[1] for r in DB.query_all(sql, ids=tuple(ids))}
+        return cats
+
+    @classmethod
     def _bump_last_id(cls, next_id):
         """Update our last_id based on a recent insert."""
         last_id = cls.last_id()
         if next_id <= last_id:
             return
 
-        if next_id - last_id > 2:
+        gap = next_id - last_id - 1
+        if gap:
+            log.info("skipped %d ids %d -> %d", gap, last_id, next_id)
             cls._ensure_safe_gap(last_id, next_id)
-            if next_id - last_id > 4:
-                # gap of 2 is common due to deletions. report on larger gaps.
-                log.warning("skipping post ids %d -> %d", last_id, next_id)
 
         cls._last_id = next_id
 
     @classmethod
     def _ensure_safe_gap(cls, last_id, next_id):
         """Paranoid check of important operating assumption."""
-        sql = """
-            SELECT COUNT(*) FROM hive_posts
-            WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'
-        """
+        sql = """SELECT COUNT(*) FROM hive_posts
+                  WHERE id BETWEEN :x1 AND :x2 AND is_deleted = '0'"""
         missing_posts = DB.query_one(sql, x1=(last_id + 1), x2=(next_id - 1))
-        if not missing_posts:
-            return
-        raise Exception("found large cache gap: %d --> %d (%d)"
-                        % (last_id, next_id, missing_posts))
+        if missing_posts:
+            raise Exception("found cache gap: %d --> %d (%d)"
+                            % (last_id, next_id, missing_posts))
 
     @classmethod
     def _sql(cls, pid, post, level=None):

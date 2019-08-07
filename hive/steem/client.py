@@ -46,14 +46,19 @@ class SteemClient:
             assert 'author' in post, "invalid post: %s" % post
         return posts
 
-    def get_block(self, num):
+    def get_block(self, num, strict=True):
         """Fetches a single block.
 
         If the result does not contain a `block` key, it's assumed
         this block does not yet exist and None is returned.
         """
         result = self.__exec('get_block', {'block_num': num})
-        return result['block'] if 'block' in result else None
+        if 'block' in result:
+            return result['block']
+        elif strict:
+            raise Exception('block %d not available' % num)
+        else:
+            return None
 
     def stream_blocks(self, start_from, trail_blocks=0, max_gap=100):
         """Stream blocks. Returns a generator."""
