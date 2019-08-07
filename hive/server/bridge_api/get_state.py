@@ -8,7 +8,7 @@ import ujson as json
 from hive.utils.normalize import legacy_amount
 from hive.server.common.mutes import Mutes
 
-from hive.server.condenser_api2.objects import (
+from hive.server.bridge_api.objects import (
     load_accounts,
     load_posts,
     load_posts_keyed,
@@ -21,7 +21,7 @@ from hive.server.condenser_api.common import (
     valid_sort,
     valid_tag,
     get_post_id)
-from hive.server.condenser_api2.tags import (
+from hive.server.bridge_api.tags import (
     get_trending_tags,
     get_top_trending_tags_summary)
 

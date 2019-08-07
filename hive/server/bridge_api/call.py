@@ -4,9 +4,9 @@ from hive.server.condenser_api.common import (
     ApiError,
     return_error_info,
 )
-from hive.server.condenser_api2.get_state import get_state
-from hive.server.condenser_api2.tags import get_trending_tags
-from hive.server.condenser_api2.methods import (
+from hive.server.bridge_api.get_state import get_state
+from hive.server.bridge_api.tags import get_trending_tags
+from hive.server.bridge_api.methods import (
     get_discussions_by_trending,
     get_discussions_by_hot,
     get_discussions_by_promoted,
