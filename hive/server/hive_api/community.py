@@ -1,8 +1,8 @@
 """Hive API: Community methods"""
 import logging
 
-from hive.server.hive_api.common import get_account_id, valid_sort, url_to_id, valid_limit
-from hive.server.hive_api.post import posts_by_id, ranked_pids
+from hive.server.hive_api.common import (
+    get_account_id, get_community_id)
 
 log = logging.getLogger(__name__)
 
@@ -10,18 +10,12 @@ log = logging.getLogger(__name__)
 
 ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
 
-async def get_community_id(db, name):
-    """Get community id from db."""
-    return db.query_one("SELECT id FROM hive_communities WHERE name = :name",
-                        name=name)
-
 async def get_community(context, name, observer=None):
     """Retrieve full community object. Includes metadata, leadership team
 
     If `observer` is provided, get subcrption status, user title, user role.
     """
     db = context['db']
-
     observer_id = get_account_id(db, observer) if observer else None
 
     # community md
@@ -47,32 +41,41 @@ async def get_community(context, name, observer=None):
     # leadership
     sql = """SELECT a.name, r.role_id, r.title FROM hive_roles r
                JOIN hive_accounts a ON r.account_id = a.id
-              WHERE r.community_id = :community_id AND r.role_id >= :min_role"""
+              WHERE r.community_id = :community_id
+                AND r.role_id >= :min_role"""
     roles = db.query_all(sql, community_id=community_id, min_role=4)
     ret['team'] = {'owner': {}, 'admin': {}, 'mod': {}}
     for account, role_id, title in roles:
         ret['team'][ROLES[role_id]][account] = title
 
-    # context: role, title, subscribed
-    if observer_id:
-        row = db.query_row("""SELECT role_id, title FROM hive_roles
-                               WHERE community_id = :community_id
-                                 AND account_id = :account_id""",
-                           community_id=community_id,
-                           account_id=observer_id)
-        role, title = row if row else (0, None)
-        subscribed = db.query_one("""SELECT 1 FROM hive_subscriptions
-                                      WHERE community_id = :community_id
-                                        AND account_id = :account_id""",
-                                  community_id=community_id,
-                                  account_id=observer_id)
-        ret['context'] = {
-            'role': role,
-            'title': title,
-            'subscribed' : subscribed == 1}
+    if observer_id: # context: role, title, subscribed
+        _community_contexts(db, [ret], observer_id)
 
     return ret
 
+async def _community_contexts(db, communities, observer_id):
+    comms = {c['id']: c for c in communities}
+    ids = comms.keys()
+
+    # load role and title in each community
+    sql = """SELECT community_id, role_id, title FROM hive_roles
+              WHERE account_id = :account_id
+                AND community_id IN :ids"""
+    rows = db.query_all(sql, account_id=observer_id, ids=tuple(ids))
+    roles = {cid: [role_id, title] for cid, role_id, title in rows}
+
+    # load subscription status
+    sql = """SELECT community_id FROM hive_subscriptions
+              WHERE account_id = :account_id
+                AND community_id IN :ids"""
+    subs = db.query_col(sql, account_id=observer_id, ids=tuple(ids))
+
+    for cid, comm in comms.items():
+        role, title = roles[cid] if cid in roles else (0, '')
+        comm['context'] = {
+            'role': role,
+            'title': title,
+            'subscribed' : cid in subs}
 
 async def list_communities(context, start='', limit=25, query=None, observer=None):
     """List all communities, paginated. Returns lite community list.
@@ -80,27 +83,31 @@ async def list_communities(context, start='', limit=25, query=None, observer=Non
     Fields: (id, name, title, about, lang, type, nsfw, subs, created_at)
     """
     db = context['db']
+    observer_id = get_account_id(db, observer) if observer else None
 
     assert not query, 'query not yet supported'
 
     seek = ''
     if start:
-        seek = ' WHERE rank <= (SELECT rank FROM hive_communities WHERE name = :start)'
+        seek = """ WHERE rank <= (SELECT rank
+                                   FROM hive_communities
+                                  WHERE name = :start)"""
 
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw, rank,
                     subscribers, created_at
                FROM hive_communities %s
            ORDER BY rank DESC""" % seek
-    result = {r['id']: r for r in db.query_all(sql, start=start, limit=limit)}
+    result = [dict(r) for r in db.query_all(sql, start=start, limit=limit)]
 
-    if observer:
+    if observer_id:
         sql = """SELECT community_id FROM hive_subscriptions
-                  WHERE account_id = :account_id AND community_id IN (:ids)"""
+                  WHERE account_id = :account_id
+                    AND community_id IN (:ids)"""
         subscribed = db.query_col(sql,
-                                  account_id=get_account_id(db, observer),
-                                  ids=tuple(result.keys()))
-        for _id in subscribed:
-            result[_id]['subscribed'] = True
+                                  account_id=observer_id,
+                                  ids=tuple([r['id'] for r in result]))
+        for comm in result:
+            comm['context']['subscribed'] = comm['id'] in subscribed
 
     return result
 
@@ -141,67 +148,43 @@ async def list_all_subscriptions(context, account, observer=None):
                 row['context'] = {'subscribed': True}
     return result
 
-async def list_community_posts(context, community, sort='trending',
-                               start='', limit=10, observer=None):
-    """Paginated list of posts in a community. Includes pinned posts at the beginning.
-
-    Observer: includes vote/reblog status on each post.
-
-    Community:
-      - `all`: renders site default
-      - `my`: render's observer's subs
-      - (blank): show global trending
-      - (string): show community trending
-    """
+async def top_community_voters(context, community):
+    """Get a list of top 5 (pending) community voters."""
+    # TODO: which are voting on muted posts?
     db = context['db']
+    top = await _top_community_posts(db, community)
+    total = {}
+    for _, votes, _ in top:
+        for vote in votes.split("\n"):
+            voter, rshares = vote.split(',')[:2]
+            if voter not in total:
+                total[voter] += abs(int(rshares))
+    return sorted(total, key=total.get, reverse=True)[:5]
 
-    pinned_ids = []
+async def top_community_authors(context, community):
+    """Get a list of top 5 (pending) community authors."""
+    db = context['db']
+    top = await _top_community_posts(db, community)
+    total = {}
+    for author, _, payout in top:
+        if author not in total:
+            total[author] = 0
+        total[author] += payout
+    return sorted(total, key=total.get, reverse=True)[:5]
 
-    if not community:
-        # global trending: prefix home posts
-        communities = []
-        #if not start: pinned_ids = _pinned(db, DEFAULT_COMMUNITY)
-    elif community[0] == '#':
-        # feed for specific tag
-        communities = [community[1:]]
-    elif community[0] == '@':
-        # user's subscribed communities feed
-        communities = await _subscribed(db, community[1:])
-        #if not start: pinned_ids = _pinned(db, DEFAULT_COMMUNITY)
-    else:
-        # specific community feed
-        communities = [community]
-        if not start: pinned_ids = _pinned(db, community)
+async def top_community_muted(context, community):
+    """Get top authors (by SP) who are muted in a community."""
+    db = context['db']
+    sql = """SELECT a.name, a.voting_weight, r.title FROM hive_accounts a
+               JOIN hive_roles r ON a.id = r.account_id
+              WHERE r.community_id = :community_id AND r.role_id < 0
+           ORDER BY voting_weight DESC LIMIT 5"""
+    return db.query(sql, community_id=await get_community_id(db, community))
 
-    post_ids = ranked_pids(db,
-                           sort=valid_sort(sort),
-                           start_id=await url_to_id(db, start) if start else None,
-                           limit=valid_limit(limit, 50),
-                           communities=communities)
-
-    # TODO: fetch account role/title, include in response
-    # NOTE: consider including & interspercing promoted posts here
-
-    posts = posts_by_id(db, pinned_ids + post_ids, observer=observer)
-
-    # Add `pinned` flag to all pinned
-    for pinned_id in pinned_ids:
-        posts[pinned_id]['is_pinned'] = True
-
-    return posts
-
-async def _subscribed(db, account):
-    sql = """SELECT c.name FROM hive_communities c
-               JOIN hive_subscriptions s
-                 ON c.id = s.community_id
-              WHERE s.account_id = :account_id"""
-    return await db.query_col(sql, account_id=get_account_id(db, account))
-
-async def _pinned(db, community):
-    """Get a list of pinned post `id`s in `community`."""
-    sql = """SELECT id FROM hive_posts
-              WHERE is_pinned = '1'
-                AND is_deleted = '0'
-                AND community = :community
-            ORDER BY id DESC"""
-    return db.query_col(sql, community=community)
+async def _top_community_posts(db, community, limit=50):
+    # TODO: muted equivalent
+    sql = """SELECT author, votes, payout FROM hive_posts_cache
+              WHERE category = :community AND is_paidout = '0'
+                AND post_id IN (SELECT id FROM hive_posts WHERE is_muted = '0')
+           ORDER BY payout DESC LIMIT :limit"""
+    return await db.query_all(sql, community=community, limit=limit)

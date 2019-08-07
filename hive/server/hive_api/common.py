@@ -10,9 +10,30 @@ log = logging.getLogger(__name__)
 
 def __used_refs():
     # pylint
-    valid_account('')
-    valid_permlink('')
     valid_limit('')
+
+async def get_community_id(db, name):
+    """Get community id from db."""
+    return db.query_one("SELECT id FROM hive_communities WHERE name = :name",
+                        name=name)
+
+async def url_to_id(db, url):
+    """Get post_id based on post url."""
+    return await get_post_id(db, *split_url(url))
+
+async def get_post_id(db, author, permlink):
+    """Get post_id based on author/permlink."""
+    sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
+    _id = await db.query_one(sql, a=author, p=permlink)
+    assert _id, 'post id not found'
+    return _id
+
+async def get_account_id(db, name):
+    """Get account id from account name."""
+    assert name, 'no account name specified'
+    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
+    assert _id, "account not found: `%s`" % name
+    return _id
 
 def estimated_sp(vests):
     """Convert VESTS to SP units for display."""
@@ -51,21 +72,3 @@ def split_url(url, allow_empty=False):
     author = valid_account(parts[0])
     permlink = valid_permlink(parts[1])
     return (author, permlink)
-
-async def url_to_id(db, url):
-    """Get post_id based on post url."""
-    pid = await get_post_id(db, *split_url(url))
-    assert pid, 'post id not found'
-    return pid
-
-async def get_post_id(db, author, permlink):
-    """Get post_id based on author/permlink."""
-    sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    return await db.query_one(sql, a=author, p=permlink)
-
-async def get_account_id(db, name):
-    """Get account id from account name."""
-    assert name, 'no account name specified'
-    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
-    assert _id, "account not found: `%s`" % name
-    return _id

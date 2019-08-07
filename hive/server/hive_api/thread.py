@@ -2,7 +2,7 @@
 import logging
 
 from hive.server.hive_api.common import url_to_id, valid_comment_sort, valid_limit
-from hive.server.hive_api.post import comments_by_id
+from hive.server.hive_api.objects import comments_by_id
 log = logging.getLogger(__name__)
 
 # pylint: disable=too-many-arguments

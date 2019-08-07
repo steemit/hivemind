@@ -1,19 +1,62 @@
 """Hive API: post and comment object retrieval"""
 import logging
-from hive.server.hive_api.account import find_accounts
+from hive.server.hive_api.common import get_account_id, estimated_sp
 log = logging.getLogger(__name__)
 
-async def _append_flags(db, posts):
-    sql = """SELECT id, parent_id, community, category, is_muted, is_valid
-               FROM hive_posts WHERE id IN :ids"""
-    for row in await db.query_all(sql, ids=tuple(posts.keys())):
-        post = posts[row['id']]
-        post['parent_id'] = row['parent_id']
-        post['community'] = row['community']
-        post['category'] = row['category']
-        post['is_muted'] = row['is_muted']
-        post['is_valid'] = row['is_valid']
-    return posts
+# Account objects
+# ---------------
+
+async def accounts_by_name(db, names, observer=None, lite=True):
+    """Find and return accounts by `name`."""
+
+    sql = """SELECT id, name, display_name, about, created_at,
+                    vote_weight, rank, followers, following %s
+               FROM hive_accounts WHERE name IN :names"""
+    fields = '' if lite else ', location, website, profile_image, cover_image'
+    rows = await db.query_all(sql % fields, names=tuple(names))
+
+    accounts = {}
+    for row in rows:
+        account = {
+            'id': row['id'],
+            'name': row['name'],
+            'created': str(row['created_at']).split(' ')[0],
+            'sp': int(estimated_sp(row['vote_weight'])),
+            'rank': row['rank'],
+            'followers': row['followers'],
+            'following': row['following'],
+            'display_name': row['display_name'],
+            'about': row['about'],
+        }
+        if not lite:
+            account['location'] = row['location']
+            account['website'] = row['website']
+            account['profile_image'] = row['profile_image']
+            account['cover_image'] = row['cover_image']
+        accounts[account['id']] = account
+
+    if observer:
+        _follow_contexts(db, accounts,
+                         observer_id=await get_account_id(db, observer),
+                         include_mute=not lite)
+
+    return accounts.values()
+
+async def _follow_contexts(db, accounts, observer_id, include_mute=False):
+    sql = """SELECT following, state FROM hive_follows
+              WHERE follower = :account_id AND following IN :ids"""
+    rows = await db.query_all(sql,
+                              account_id=observer_id,
+                              ids=tuple(accounts.keys()))
+    for following_id, state in rows:
+        context = {'followed': state == 1}
+        if include_mute and state == 2:
+            context['muted'] = True
+        accounts[following_id]['context'] = context
+
+
+# Comment objects
+# ---------------
 
 async def comments_by_id(db, ids, observer=None):
     """Given an array of post ids, returns comment objects keyed by id."""
@@ -53,8 +96,7 @@ async def comments_by_id(db, ids, observer=None):
 
     by_id = await _append_flags(db, by_id)
     return {'posts': by_id, #[by_id[_id] for _id in ids],
-            'accounts': await find_accounts(dict(db=db), authors, observer)}
-
+            'accounts': await accounts_by_name(db, authors, observer, lite=True)}
 
 async def posts_by_id(db, ids, observer=None, lite=True):
     """Given a list of post ids, returns lite post objects in the same order."""
@@ -122,7 +164,19 @@ async def posts_by_id(db, ids, observer=None, lite=True):
 
     by_id = await _append_flags(db, by_id)
     return {'posts': [by_id[_id] for _id in ids],
-            'accounts': find_accounts(db, authors, observer)}
+            'accounts': accounts_by_name(db, authors, observer, lite=True)}
+
+async def _append_flags(db, posts):
+    sql = """SELECT id, parent_id, community, category, is_muted, is_valid
+               FROM hive_posts WHERE id IN :ids"""
+    for row in await db.query_all(sql, ids=tuple(posts.keys())):
+        post = posts[row['id']]
+        post['parent_id'] = row['parent_id']
+        post['community'] = row['community']
+        post['category'] = row['category']
+        post['is_muted'] = row['is_muted']
+        post['is_valid'] = row['is_valid']
+    return posts
 
 def _reblogged_ids(db, observer, post_ids):
     ids = db.query_col("""SELECT post_id FROM hive_reblogs
@@ -147,50 +201,3 @@ def _top_votes(obj, limit, observer):
     top = sorted(votes, key=lambda row: abs(int(row[1])), reverse=True)[:limit]
 
     return (top, observer_vote)
-
-
-async def ranked_pids(db, sort, start_id, limit, communities):
-    """Get a list of post_ids for a given posts query.
-
-    `sort` can be trending, hot, created, promoted, or payout.
-    """
-
-    assert sort in ['trending', 'hot', 'created', 'promoted', 'payout']
-
-    table = 'hive_posts_cache'
-    field = ''
-    where = []
-
-    if not sort == 'created':
-        where.append("is_paidout = '0'")
-
-    if sort == 'trending':
-        field = 'sc_trend'
-    elif sort == 'hot':
-        field = 'sc_hot'
-    elif sort == 'created':
-        field = 'post_id'
-        where.append('depth = 0')
-    elif sort == 'promoted':
-        field = 'promoted'
-        where.append('promoted > 0')
-    elif sort == 'payout':
-        field = 'payout'
-    elif sort == 'muted':
-        field = 'payout'
-
-    # TODO: index hive_posts (is_muted, category, id)
-    # TODO: copy is_muted and category from hive_posts to hive_posts_cache?
-    _filt = "is_muted = '%d'" % (1 if sort == 'muted' else 0)
-    if communities: _filt += " AND category IN :communities"
-    where.append("post_id IN (SELECT id FROM hive_posts WHERE %s)" % _filt)
-
-    if start_id:
-        sql = "%s <= (SELECT %s FROM %s WHERE post_id = :start_id)"
-        where.append(sql % (field, field, table))
-
-    sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
-           % (table, ' AND '.join(where), field))
-
-    return await db.query_col(sql, communities=tuple(communities),
-                              start_id=start_id, limit=limit)
