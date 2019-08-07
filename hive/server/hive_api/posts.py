@@ -1,4 +1,4 @@
-"""Hive API: Community methods"""
+"""Hive API: Post list methods"""
 import logging
 
 from hive.server.hive_api.common import (

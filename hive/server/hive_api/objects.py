@@ -1,4 +1,4 @@
-"""Hive API: post and comment object retrieval"""
+"""Hive API: account, post, and comment object retrieval"""
 import logging
 from hive.server.hive_api.common import get_account_id, estimated_sp
 log = logging.getLogger(__name__)
