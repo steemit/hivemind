@@ -73,13 +73,6 @@ POST_LIST_SORTS = [
     'created',
     'payout',
     'payout_comments',
-    # unsupported:
-    'recent',
-    'trending30',
-    'active',
-    'votes',
-    'responses',
-    'cashout',
 ]
 
 @return_error_info
@@ -138,7 +131,7 @@ async def get_state(context, path: str):
         tag = valid_tag(part[1].lower(), allow_empty=True)
 
         if tag[:5] == 'hive-':
-            community = get_community(context, tag)
+            community = await get_community(context, tag)
             if community:
                 state['community'] = {tag: community}
 
