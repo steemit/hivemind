@@ -16,7 +16,6 @@ async def get_community(context, name, observer=None):
     If `observer` is provided, get subcrption status, user title, user role.
     """
     db = context['db']
-    observer_id = await get_account_id(db, observer) if observer else None
 
     # community md
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
@@ -24,8 +23,6 @@ async def get_community(context, name, observer=None):
                FROM hive_communities WHERE name = :name"""
     row = await db.query_row(sql, name=name)
     assert row, 'community not found'
-
-    community_id = row['id']
 
     ret = {
         'id': row['id'],
@@ -38,6 +35,7 @@ async def get_community(context, name, observer=None):
         'subscribers': row['subscribers'],
         'created_at': row['created_at'],
         'settings': row['settings'],
+        'team': {'owner': {}, 'admin': {}, 'mod': {}},
     }
 
     # leadership
@@ -45,12 +43,12 @@ async def get_community(context, name, observer=None):
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :community_id
                 AND r.role_id >= :min_role"""
-    roles = await db.query_all(sql, community_id=community_id, min_role=4)
-    ret['team'] = {'owner': {}, 'admin': {}, 'mod': {}}
-    for account, role_id, title in roles:
-        ret['team'][ROLES[role_id]][account] = title
+    for row in await db.query_all(sql, community_id=ret['id'], min_role=4):
+        role = ROLES[row['role_id']]
+        ret['team'][role][row['account']] = row['title']
 
-    if observer_id: # context: role, title, subscribed
+    if observer: # context: role, title, subscribed
+        observer_id = await get_account_id(db, observer)
         await _community_contexts(db, [ret], observer_id)
 
     return ret
