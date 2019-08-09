@@ -17,7 +17,8 @@ from hive.server.condenser_api.get_state import get_state as condenser_api_get_s
 from hive.server.condenser_api.call import call as condenser_api_call
 from hive.server.common.mutes import Mutes
 
-from hive.server.bridge_api.call import call as bridge_api_call
+from hive.server.bridge_api import methods as bridge_api
+from hive.server.bridge_api.get_state import get_state as bridge_api_get_state
 
 from hive.server.db import Db
 
@@ -103,10 +104,22 @@ def build_methods():
         'call': condenser_api_call
     })
 
-    methods.add(**{
-        'hive.call2': bridge_api_call,
-        'call2': bridge_api_call
-    })
+    # bridge_api methods
+    methods.add(**{'bridge_api.' + method.__name__: method for method in (
+        bridge_api_get_state,
+
+        bridge_api.get_discussions_by_trending,
+        bridge_api.get_discussions_by_hot,
+        bridge_api.get_discussions_by_promoted,
+        bridge_api.get_discussions_by_created,
+        bridge_api.get_post_discussions_by_payout,
+        bridge_api.get_comment_discussions_by_payout,
+
+        bridge_api.get_discussions_by_blog,
+        bridge_api.get_discussions_by_feed,
+        bridge_api.get_discussions_by_comments,
+        bridge_api.get_replies_by_last_update,
+    )})
 
     return methods
 
