@@ -105,7 +105,7 @@ def build_methods():
     })
 
     # bridge_api methods
-    methods.add(**{'bridge_api.' + method.__name__: method for method in (
+    methods.add(**{'bridge.' + method.__name__: method for method in (
         bridge_api_get_state,
 
         bridge_api.get_discussions_by_trending,
