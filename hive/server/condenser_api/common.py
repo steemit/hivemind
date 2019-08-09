@@ -2,6 +2,7 @@
 
 import re
 from functools import wraps
+import traceback
 
 class ApiError(Exception):
     """API-specific errors: unimplemented/bad params. Pass back to client."""
@@ -21,7 +22,8 @@ def return_error_info(function):
             return {
                 "error": {
                     "code": -32000,
-                    "message": str(e) + " (hivemind-alpha)"}}
+                    "message": str(e) + " (hivemind-alpha)",
+                    "trace": traceback.format_exc()}}
     return wrapper
 
 def valid_account(name, allow_empty=False):
