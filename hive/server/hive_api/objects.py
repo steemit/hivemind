@@ -36,9 +36,9 @@ async def accounts_by_name(db, names, observer=None, lite=True):
         accounts[account['id']] = account
 
     if observer:
-        _follow_contexts(db, accounts,
-                         observer_id=await get_account_id(db, observer),
-                         include_mute=not lite)
+        await _follow_contexts(db, accounts,
+                               observer_id=await get_account_id(db, observer),
+                               include_mute=not lite)
 
     return accounts.values()
 
@@ -109,14 +109,14 @@ async def posts_by_id(db, ids, observer=None, lite=True):
     fields = ['preview'] if lite else ['body', 'updated_at', 'json']
     sql = sql % (', '.join(fields))
 
-    reblogged_ids = _reblogged_ids(db, observer, ids) if observer else []
+    reblogged_ids = await _reblogged_ids(db, observer, ids) if observer else []
 
     # TODO: filter out observer's mutes?
 
     # key by id.. returns sorted by input order
     authors = set()
     by_id = {}
-    for row in db.query_all(sql, ids=tuple(ids)):
+    for row in await db.query_all(sql, ids=tuple(ids)):
         assert not row['is_muted']
         assert not row['is_invalid']
         pid = row['post_id']
@@ -164,7 +164,7 @@ async def posts_by_id(db, ids, observer=None, lite=True):
 
     by_id = await _append_flags(db, by_id)
     return {'posts': [by_id[_id] for _id in ids],
-            'accounts': accounts_by_name(db, authors, observer, lite=True)}
+            'accounts': await accounts_by_name(db, authors, observer, lite=True)}
 
 async def _append_flags(db, posts):
     sql = """SELECT id, parent_id, community, category, is_muted, is_valid
@@ -178,12 +178,11 @@ async def _append_flags(db, posts):
         post['is_valid'] = row['is_valid']
     return posts
 
-def _reblogged_ids(db, observer, post_ids):
-    ids = db.query_col("""SELECT post_id FROM hive_reblogs
-                           WHERE account = :observer
-                             AND post_id IN :ids""",
-                       observer=observer, ids=tuple(post_ids))
-    return ids
+async def _reblogged_ids(db, observer, post_ids):
+    sql = """SELECT post_id FROM hive_reblogs
+              WHERE account = :observer
+                AND post_id IN :ids"""
+    return  await db.query_col(sql, observer=observer, ids=tuple(post_ids))
 
 def _top_votes(obj, limit, observer):
     observer_vote = None

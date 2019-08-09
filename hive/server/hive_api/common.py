@@ -14,8 +14,8 @@ def __used_refs():
 
 async def get_community_id(db, name):
     """Get community id from db."""
-    return db.query_one("SELECT id FROM hive_communities WHERE name = :name",
-                        name=name)
+    return await db.query_one("SELECT id FROM hive_communities WHERE name = :name",
+                              name=name)
 
 async def url_to_id(db, url):
     """Get post_id based on post url."""

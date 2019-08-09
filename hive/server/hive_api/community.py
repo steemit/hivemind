@@ -16,7 +16,7 @@ async def get_community(context, name, observer=None):
     If `observer` is provided, get subcrption status, user title, user role.
     """
     db = context['db']
-    observer_id = get_account_id(db, observer) if observer else None
+    observer_id = await get_account_id(db, observer) if observer else None
 
     # community md
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
@@ -49,7 +49,7 @@ async def get_community(context, name, observer=None):
         ret['team'][ROLES[role_id]][account] = title
 
     if observer_id: # context: role, title, subscribed
-        _community_contexts(db, [ret], observer_id)
+        await _community_contexts(db, [ret], observer_id)
 
     return ret
 
@@ -83,7 +83,7 @@ async def list_communities(context, start='', limit=25, query=None, observer=Non
     Fields: (id, name, title, about, lang, type, nsfw, subs, created_at)
     """
     db = context['db']
-    observer_id = get_account_id(db, observer) if observer else None
+    observer_id = await get_account_id(db, observer) if observer else None
 
     assert not query, 'query not yet supported'
 
@@ -136,12 +136,12 @@ async def list_all_subscriptions(context, account, observer=None):
           LEFT JOIN hive_roles r ON r.community_id = s.community_id
                                 AND r.account_id = s.account_id
               WHERE s.account_id = :account_id"""
-    result = await db.query_all(sql, account_id=get_account_id(db, account))
+    result = await db.query_all(sql, account_id=await get_account_id(db, account))
 
     if observer:
         sql = """SELECT community_id FROM hive_subscriptions
                   WHERE account_id = :account_id AND community_id IN :ids"""
-        subscribed = await db.query_col(sql, account_id=get_account_id(db, observer),
+        subscribed = await db.query_col(sql, account_id=await get_account_id(db, observer),
                                         ids=[r['id'] for r in result])
         for row in result:
             if row['id'] in subscribed:

@@ -39,18 +39,18 @@ async def list_community_posts(context, community, sort='trending',
     else:
         # specific community feed
         communities = [community]
-        if not start: pinned_ids = _pinned(db, community)
+        if not start: pinned_ids = await _pinned(db, community)
 
-    post_ids = ranked_pids(db,
-                           sort=valid_sort(sort),
-                           start_id=await url_to_id(db, start) if start else None,
-                           limit=valid_limit(limit, 50),
-                           communities=communities)
+    post_ids = await ranked_pids(db,
+                                 sort=valid_sort(sort),
+                                 start_id=await url_to_id(db, start) if start else None,
+                                 limit=valid_limit(limit, 50),
+                                 communities=communities)
 
     # TODO: fetch account role/title, include in response
     # NOTE: consider including & interspercing promoted posts here
 
-    posts = posts_by_id(db, pinned_ids + post_ids, observer=observer)
+    posts = await posts_by_id(db, pinned_ids + post_ids, observer=observer)
 
     # Add `pinned` flag to all pinned
     for pinned_id in pinned_ids:
@@ -63,7 +63,7 @@ async def _subscribed(db, account):
                JOIN hive_subscriptions s
                  ON c.id = s.community_id
               WHERE s.account_id = :account_id"""
-    return await db.query_col(sql, account_id=get_account_id(db, account))
+    return await db.query_col(sql, account_id=await get_account_id(db, account))
 
 async def _pinned(db, community):
     """Get a list of pinned post `id`s in `community`."""
@@ -72,7 +72,7 @@ async def _pinned(db, community):
                 AND is_deleted = '0'
                 AND community = :community
             ORDER BY id DESC"""
-    return db.query_col(sql, community=community)
+    return await db.query_col(sql, community=community)
 
 
 async def ranked_pids(db, sort, start_id, limit, communities):

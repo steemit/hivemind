@@ -21,7 +21,7 @@ async def get_account(context, name, observer):
     Observer: will include `followed`/`muted` context.
     """
     assert name, 'name cannot be blank'
-    return accounts_by_name(context['db'], [valid_account(name)], observer, lite=False)
+    return await accounts_by_name(context['db'], [valid_account(name)], observer, lite=False)
 
 async def get_accounts(context, names, observer=None):
     """Find and return lite accounts by `names`.
@@ -31,7 +31,7 @@ async def get_accounts(context, names, observer=None):
     assert isinstance(names, list), 'names must be a list'
     assert names, 'names cannot be blank'
     assert len(names) < 100, 'too many accounts requested'
-    return accounts_by_name(context['db'], names, observer, lite=True)
+    return await accounts_by_name(context['db'], names, observer, lite=True)
 
 
 # Follows/mute
@@ -43,7 +43,7 @@ async def list_followers(context, account, start='', limit=50, observer=None):
         valid_account(account),
         valid_account(start, allow_empty=True),
         'blog', valid_limit(limit, 100))
-    return accounts_by_name(context['db'], followers, observer, lite=True)
+    return await accounts_by_name(context['db'], followers, observer, lite=True)
 
 async def list_following(context, account, start='', limit=50, observer=None):
     """Get a list of all accounts `account` follows."""
@@ -52,7 +52,7 @@ async def list_following(context, account, start='', limit=50, observer=None):
         valid_account(account),
         valid_account(start, allow_empty=True),
         'blog', valid_limit(limit, 100))
-    return accounts_by_name(context['db'], following, observer, lite=True)
+    return await accounts_by_name(context['db'], following, observer, lite=True)
 
 async def list_all_muted(context, account):
     """Get a list of all account names muted by `account`."""
@@ -60,8 +60,7 @@ async def list_all_muted(context, account):
     sql = """SELECT a.name FROM hive_follows f
                JOIN hive_accounts a ON f.following_id = a.id
               WHERE follower = :follower AND state = 2"""
-    names = db.query_col(sql, follower=get_account_id(db, account))
-    return names
+    return await db.query_col(sql, follower=get_account_id(db, account))
 
 
 # Account post lists
@@ -70,24 +69,24 @@ async def list_account_blog(context, account, limit=10, observer=None, last_post
     """Get a blog feed (posts and reblogs from the specified account)"""
     db = context['db']
 
-    post_ids = pids_by_blog(
+    post_ids = await pids_by_blog(
         db,
         valid_account(account),
         *split_url(last_post, allow_empty=True),
         valid_limit(limit, 50))
-    return posts_by_id(db, post_ids, observer)
+    return await posts_by_id(db, post_ids, observer)
 
 async def list_account_posts(context, account, limit=10, observer=None, last_post=None):
     """Get an account's posts and comments"""
     db = context['db']
     start_author, start_permlink = split_url(last_post, allow_empty=True)
     assert not start_author or (start_author == account)
-    post_ids = pids_by_account_comments(
+    post_ids = await pids_by_account_comments(
         db,
         valid_account(account),
         valid_permlink(start_permlink),
         valid_limit(limit, 50))
-    return posts_by_id(db, post_ids, observer)
+    return await posts_by_id(db, post_ids, observer)
 
 async def list_account_feed(context, account, limit=10, observer=None, last_post=None):
     """Get all posts (blogs and resteems) from `account`'s follows."""
