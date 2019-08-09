@@ -5,8 +5,9 @@ import logging
 from collections import OrderedDict
 import ujson as json
 
-from hive.utils.normalize import legacy_amount
 from hive.server.common.mutes import Mutes
+
+from hive.server.hive_api.community import get_community
 
 from hive.server.bridge_api.objects import (
     load_accounts,
@@ -135,6 +136,12 @@ async def get_state(context, path: str):
         assert not part[2], "unexpected discussion path part[2] %s" % path
         sort = valid_sort(part[0])
         tag = valid_tag(part[1].lower(), allow_empty=True)
+
+        if tag[:5] == 'hive-':
+            community = get_community(context, tag)
+            if community:
+                state['community'] = {tag: community}
+
         pids = await cursor.pids_by_query(db, sort, '', '', 20, tag)
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
@@ -286,21 +293,4 @@ async def _get_feed_price(db):
 async def _get_props_lite(db):
     """Return a minimal version of get_dynamic_global_properties data."""
     raw = json.loads(await db.query_one("SELECT dgpo FROM hive_state"))
-
-    # convert NAI amounts to legacy
-    nais = ['virtual_supply', 'current_supply', 'current_sbd_supply',
-            'pending_rewarded_vesting_steem', 'pending_rewarded_vesting_shares',
-            'total_vesting_fund_steem', 'total_vesting_shares']
-    for k in nais:
-        if k in raw:
-            raw[k] = legacy_amount(raw[k])
-
-    return dict(
-        time=raw['time'], #*
-        sbd_print_rate=raw['sbd_print_rate'],
-        sbd_interest_rate=raw['sbd_interest_rate'],
-        head_block_number=raw['head_block_number'], #*
-        total_vesting_shares=raw['total_vesting_shares'],
-        total_vesting_fund_steem=raw['total_vesting_fund_steem'],
-        last_irreversible_block_num=raw['last_irreversible_block_num'], #*
-    )
+    return {'sbd_print_rate': raw['sbd_print_rate']}
