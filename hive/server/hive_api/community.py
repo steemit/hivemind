@@ -22,7 +22,7 @@ async def get_community(context, name, observer=None):
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
                     subscribers, created_at, settings
                FROM hive_communities WHERE name = :name"""
-    row = db.query_row(sql, name=name)
+    row = await db.query_row(sql, name=name)
     community_id = row['id']
 
     ret = {
@@ -43,7 +43,7 @@ async def get_community(context, name, observer=None):
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :community_id
                 AND r.role_id >= :min_role"""
-    roles = db.query_all(sql, community_id=community_id, min_role=4)
+    roles = await db.query_all(sql, community_id=community_id, min_role=4)
     ret['team'] = {'owner': {}, 'admin': {}, 'mod': {}}
     for account, role_id, title in roles:
         ret['team'][ROLES[role_id]][account] = title
@@ -61,14 +61,14 @@ async def _community_contexts(db, communities, observer_id):
     sql = """SELECT community_id, role_id, title FROM hive_roles
               WHERE account_id = :account_id
                 AND community_id IN :ids"""
-    rows = db.query_all(sql, account_id=observer_id, ids=tuple(ids))
+    rows = await db.query_all(sql, account_id=observer_id, ids=tuple(ids))
     roles = {cid: [role_id, title] for cid, role_id, title in rows}
 
     # load subscription status
     sql = """SELECT community_id FROM hive_subscriptions
               WHERE account_id = :account_id
                 AND community_id IN :ids"""
-    subs = db.query_col(sql, account_id=observer_id, ids=tuple(ids))
+    subs = await db.query_col(sql, account_id=observer_id, ids=tuple(ids))
 
     for cid, comm in comms.items():
         role, title = roles[cid] if cid in roles else (0, '')
@@ -97,15 +97,15 @@ async def list_communities(context, start='', limit=25, query=None, observer=Non
                     subscribers, created_at
                FROM hive_communities %s
            ORDER BY rank DESC""" % seek
-    result = [dict(r) for r in db.query_all(sql, start=start, limit=limit)]
+    result = [dict(r) for r in await db.query_all(sql, start=start, limit=limit)]
 
     if observer_id:
         sql = """SELECT community_id FROM hive_subscriptions
                   WHERE account_id = :account_id
                     AND community_id IN (:ids)"""
-        subscribed = db.query_col(sql,
-                                  account_id=observer_id,
-                                  ids=tuple([r['id'] for r in result]))
+        subscribed = await db.query_col(sql,
+                                        account_id=observer_id,
+                                        ids=tuple([r['id'] for r in result]))
         for comm in result:
             comm['context']['subscribed'] = comm['id'] in subscribed
 
@@ -121,7 +121,7 @@ async def list_community_roles(context, community, start='', limit=50):
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :community_id %s
            ORDER BY name LIMIT :limit""" % seek
-    return db.query_all(sql, community_id=community_id, start=start, limit=limit)
+    return await db.query_all(sql, community_id=community_id, start=start, limit=limit)
 
 
 async def list_all_subscriptions(context, account, observer=None):
@@ -136,13 +136,13 @@ async def list_all_subscriptions(context, account, observer=None):
           LEFT JOIN hive_roles r ON r.community_id = s.community_id
                                 AND r.account_id = s.account_id
               WHERE s.account_id = :account_id"""
-    result = db.query_all(sql, account_id=get_account_id(db, account))
+    result = await db.query_all(sql, account_id=get_account_id(db, account))
 
     if observer:
         sql = """SELECT community_id FROM hive_subscriptions
                   WHERE account_id = :account_id AND community_id IN :ids"""
-        subscribed = db.query_col(sql, account_id=get_account_id(db, observer),
-                                  ids=[r['id'] for r in result])
+        subscribed = await db.query_col(sql, account_id=get_account_id(db, observer),
+                                        ids=[r['id'] for r in result])
         for row in result:
             if row['id'] in subscribed:
                 row['context'] = {'subscribed': True}
@@ -179,7 +179,7 @@ async def top_community_muted(context, community):
                JOIN hive_roles r ON a.id = r.account_id
               WHERE r.community_id = :community_id AND r.role_id < 0
            ORDER BY voting_weight DESC LIMIT 5"""
-    return db.query(sql, community_id=await get_community_id(db, community))
+    return await db.query(sql, community_id=await get_community_id(db, community))
 
 async def _top_community_posts(db, community, limit=50):
     # TODO: muted equivalent
