@@ -45,7 +45,7 @@ async def get_community(context, name, observer=None):
                 AND r.role_id >= :min_role"""
     for row in await db.query_all(sql, community_id=ret['id'], min_role=4):
         role = ROLES[row['role_id']]
-        ret['team'][role][row['account']] = row['title']
+        ret['team'][role][row['name']] = row['title']
 
     if observer: # context: role, title, subscribed
         observer_id = await get_account_id(db, observer)
