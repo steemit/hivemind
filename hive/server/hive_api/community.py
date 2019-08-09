@@ -33,7 +33,7 @@ async def get_community(context, name, observer=None):
         'type': row['type_id'],
         'is_nsfw': row['is_nsfw'],
         'subscribers': row['subscribers'],
-        'created_at': row['created_at'],
+        'created_at': str(row['created_at']),
         'settings': row['settings'],
         'team': {'owner': {}, 'admin': {}, 'mod': {}},
     }
