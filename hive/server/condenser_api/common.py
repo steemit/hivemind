@@ -14,7 +14,7 @@ def return_error_info(function):
         """Catch ApiError and AssersionError (always due to user error)."""
         try:
             return await function(*args, **kwargs)
-        except (ApiError, AssertionError, TypeError) as e:
+        except (ApiError, AssertionError, TypeError, Exception) as e:
             # one specific TypeError we want to silence; others need a trace.
             if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
                 raise e

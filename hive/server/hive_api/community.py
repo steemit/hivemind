@@ -23,6 +23,8 @@ async def get_community(context, name, observer=None):
                     subscribers, created_at, settings
                FROM hive_communities WHERE name = :name"""
     row = await db.query_row(sql, name=name)
+    assert row, 'community not found'
+
     community_id = row['id']
 
     ret = {
