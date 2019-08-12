@@ -286,7 +286,7 @@ class CommunityOp:
                                about = :about, description = :description,
                                lang = :lang, is_nsfw = :is_nsfw,
                                settings = :settings2
-                         WHERE name = :community""", name=self.community, **self.settings)
+                         WHERE name = :community""", community=self.community, **self.settings)
         elif action == 'subscribe':
             DB.query("""INSERT INTO hive_subscriptions (account_id, community_id)
                         VALUES (:actor_id, :community_id)""", **params)
