@@ -177,21 +177,13 @@ async def _get_account_discussion_by_key(db, account, key):
     return posts
 
 def _normalize_path(path):
-    if path and path[0] == '/':
-        path = path[1:]
-
-    # some clients pass the query string to get_state, and steemd allows it :(
-    if '?' in path:
-        path = path.split('?')[0]
-
-    if not path:
-        path = 'trending'
+    assert path, 'path cannot be blank'
+    assert path[0] != '/', 'path cannot start with forward slash'
+    assert path[-1] != '/', 'path cannot end with forward slash'
     assert '#' not in path, 'path contains hash mark (#)'
     assert '?' not in path, 'path contains query string: `%s`' % path
 
     parts = path.split('/')
-    if len(parts) == 4 and parts[3] == '':
-        parts = parts[:-1]
     assert len(parts) < 4, 'too many parts in path: `%s`' % path
     while len(parts) < 3:
         parts.append('')
