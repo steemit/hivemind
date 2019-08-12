@@ -81,7 +81,7 @@ async def call(context, api, method, params):
     {"id":0,"jsonrpc":"2.0","method":"call",
      "params":["database_api","get_state",["trending"]]}
     ```"""
-    # pylint: disable=too-many-return-statements, too-many-branches
+    # pylint: disable=too-many-return-statements, too-many-branches, no-else-return
     assert api == 'condenser_api', "`call` requires condenser_api"
 
     # Follows
@@ -128,7 +128,9 @@ async def call(context, api, method, params):
     elif method == 'get_discussions_by_comments':
         return await get_discussions_by_comments(context, **_strict_query(params))
     elif method == 'get_replies_by_last_update':
-        return await get_replies_by_last_update(context, *_strict_list(params, 3))
+        if isinstance(params, list) and params and isinstance(params[0], list):
+            return await get_replies_by_last_update(context, *_strict_list(params, 3))
+        return await get_replies_by_last_update(context, **_strict_query(params))
 
     # Exotic account discussion queries
     elif method == 'get_discussions_by_author_before_date':
