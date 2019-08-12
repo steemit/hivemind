@@ -4,11 +4,8 @@ import logging
 import ujson as json
 
 from hive.utils.normalize import sbd_amount, rep_to_raw
-from hive.server.common.mutes import Mutes
 
 log = logging.getLogger(__name__)
-
-# Building of legacy account objects
 
 async def load_accounts(db, names):
     """`get_accounts`-style lookup for `get_state` compat layer."""
@@ -41,26 +38,20 @@ async def load_posts_keyed(db, ids, truncate_body=0):
     # fetch posts and associated author reps
     sql = """SELECT post_id, author, permlink, title, body, category, depth,
                     promoted, payout, payout_at, is_paidout, children, votes,
-                    created_at, updated_at, rshares, raw_json, json
+                    created_at, updated_at, rshares, raw_json, json,
+                    is_hidden, is_grayed, total_votes
                FROM hive_posts_cache WHERE post_id IN :ids"""
     result = await db.query_all(sql, ids=tuple(ids))
     author_reps = await _query_author_rep_map(db, result)
 
-    muted_accounts = Mutes.all()
     posts_by_id = {}
     for row in result:
         row = dict(row)
         row['author_rep'] = author_reps[row['author']]
         post = _condenser_post_object(row, truncate_body=truncate_body)
-        post['active_votes'] = _mute_votes(post['active_votes'], muted_accounts)
         posts_by_id[row['post_id']] = post
 
     return posts_by_id
-
-def _mute_votes(votes, muted_accounts):
-    if not muted_accounts:
-        return votes
-    return [v for v in votes if v['voter'] not in muted_accounts]
 
 async def load_posts(db, ids, truncate_body=0):
     """Given an array of post ids, returns full objects in the same order."""
@@ -81,10 +72,7 @@ async def load_posts(db, ids, truncate_body=0):
             post = await db.query_row(sql, id=_id)
             if not post['is_deleted']:
                 # TODO: This should never happen. See #173 for analysis
-                log.error("missing post -- force insert %s", dict(post))
-                sql = """INSERT INTO hive_posts_cache (post_id, author, permlink)
-                              VALUES (:id, :author, :permlink)"""
-                await db.query(sql, **post)
+                log.error("missing post: %s", dict(post))
             else:
                 log.warning("requested deleted post: %s", dict(post))
 
@@ -92,9 +80,8 @@ async def load_posts(db, ids, truncate_body=0):
 
 async def _query_author_rep_map(db, posts):
     """Given a list of posts, returns an author->reputation map."""
-    if not posts:
-        return {}
-    names = tuple(set([post['author'] for post in posts]))
+    if not posts: return {}
+    names = tuple({post['author'] for post in posts})
     sql = "SELECT name, reputation FROM hive_accounts WHERE name IN :names"
     return {r['name']: r['reputation'] for r in await db.query_all(sql, names=names)}
 
@@ -102,11 +89,10 @@ def _condenser_account_object(row):
     """Convert an internal account record into legacy-steemd style."""
     return {
         'name': row['name'],
-        'created': str(row['created_at']),
+        'created': _json_date(row['created_at']),
         'post_count': row['post_count'],
         'reputation': rep_to_raw(row['reputation']),
-        'net_vesting_shares': row['vote_weight'],
-        'transfer_history': [],
+        #'net_vesting_shares': row['vote_weight'],
         'json_metadata': json.dumps({
             'profile': {'name': row['display_name'],
                         'about': row['about'],
@@ -152,6 +138,11 @@ def _condenser_post_object(row, truncate_body=0):
     post['active_votes'] = _hydrate_active_votes(row['votes'])
     post['author_reputation'] = rep_to_raw(row['author_rep'])
 
+    post['stats'] = {
+        'hide': row['is_hidden'],
+        'gray': row['is_grayed'],
+        'total_votes': row['total_votes']}
+
     # import fields from legacy object
     assert row['raw_json']
     assert len(row['raw_json']) > 32
@@ -175,12 +166,6 @@ def _condenser_post_object(row, truncate_body=0):
         post['curator_payout_value'] = _amount(curator_payout)
         post['total_payout_value'] = _amount(row['payout'] - curator_payout)
 
-    # not used by condenser, but may be useful
-    #post['net_votes'] = post['total_votes'] - row['up_votes']
-    #post['allow_replies'] = raw_json['allow_replies']
-    #post['allow_votes'] = raw_json['allow_votes']
-    #post['allow_curation_rewards'] = raw_json['allow_curation_rewards']
-
     return post
 
 def _amount(amount, asset='SBD'):
@@ -190,14 +175,12 @@ def _amount(amount, asset='SBD'):
 
 def _hydrate_active_votes(vote_csv):
     """Convert minimal CSV representation into steemd-style object."""
-    if not vote_csv:
-        return []
+    if not vote_csv: return []
     cols = 'voter,rshares,percent,reputation'.split(',')
     votes = vote_csv.split("\n")
     return [dict(zip(cols, line.split(','))) for line in votes]
 
 def _json_date(date=None):
     """Given a db datetime, return a steemd/json-friendly version."""
-    if not date:
-        return '1969-12-31T23:59:59'
+    if not date: return '1969-12-31T23:59:59'
     return 'T'.join(str(date).split(' '))
