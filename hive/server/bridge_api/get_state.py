@@ -81,6 +81,7 @@ async def get_state(context, path: str):
 
     See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
     """
+    # pylint: disable=too-many-branches
     (path, part) = _normalize_path(path)
 
     db = context['db']
@@ -138,7 +139,7 @@ async def get_state(context, path: str):
         pids = await cursor.pids_by_query(db, sort, '', '', 20, tag)
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-        state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context)}
+        state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context, 20)}
 
     # tag "explorer" - `/tags`
     elif part[0] == "tags":

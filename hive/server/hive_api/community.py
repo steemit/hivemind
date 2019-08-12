@@ -1,5 +1,6 @@
 """Hive API: Community methods"""
 import logging
+import ujson as json
 
 from hive.server.hive_api.common import (
     get_account_id, get_community_id)
@@ -34,7 +35,7 @@ async def get_community(context, name, observer=None):
         'is_nsfw': row['is_nsfw'],
         'subscribers': row['subscribers'],
         'created_at': str(row['created_at']),
-        'settings': row['settings'],
+        'settings': json.loads(row['settings']),
         'team': {'owner': {}, 'admin': {}, 'mod': {}},
     }
 

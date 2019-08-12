@@ -5,19 +5,17 @@ from hive.server.condenser_api.common import (return_error_info, valid_tag, vali
 
 @return_error_info
 @cached(ttl=7200, timeout=1200)
-async def get_top_trending_tags_summary(context):
-    """Get top 50 trending tags among pending posts."""
-    # Same results, more overhead:
-    #return [tag['name'] for tag in await get_trending_tags('', 50)]
+async def get_top_trending_tags_summary(context, limit=50):
+    """Get top trending tags among pending posts."""
     sql = """
         SELECT category
           FROM hive_posts_cache
          WHERE is_paidout = '0'
       GROUP BY category
       ORDER BY SUM(payout) DESC
-         LIMIT 50
+         LIMIT :limit
     """
-    return await context['db'].query_col(sql)
+    return await context['db'].query_col(sql, limit=limit)
 
 @return_error_info
 @cached(ttl=3600, timeout=1200)
