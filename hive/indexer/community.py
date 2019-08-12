@@ -71,18 +71,12 @@ def read_key_str(op, key, maxlen=None, fmt=None):
 
     return op[key]
 
-def read_key_json(obj, key):
-    """Given a dict, parse JSON in `key`. Blank dict on failure."""
-    ret = {}
-    if key in obj:
-        err = None
-        try:
-            ret = json.loads(obj[key])
-        except Exception as e:
-            err = str(e)
-        assert not err, 'json key `%s` error: %s' % (key, err)
-        assert ret, 'json key `%s` was blank' % key
-    return ret
+def read_key_dict(obj, key):
+    """Given a dict, read `key`, ensuring result is a dict."""
+    assert key in obj, 'key `%s` not found' % key
+    assert obj[key], 'key `%s` was blank' % key
+    assert isinstance(obj[key], dict), 'key `%s` not a dict' % key
+    return obj[key]
 
 
 class Community:
@@ -428,7 +422,7 @@ class CommunityOp:
         self.title = _title
 
     def _read_settings(self):
-        _settings = read_key_json(self.op, 'settings')
+        _settings = read_key_dict(self.op, 'settings')
         # primary
         self.settings = dict(
             title=read_key_str(_settings, 'title', 32),
