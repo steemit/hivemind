@@ -65,7 +65,7 @@ def read_key_str(op, key, maxlen=None, fmt=None):
         assert re.match(r'^#[0-9a-f]{6}$', op[key]), 'invalid HEX: %s' % key
     elif fmt == 'lang':
         # TODO: https://en.wikipedia.org/wiki/ISO_639-1
-        assert re.match(r'^#[a-z]{2}$', op[key]), 'invalid lang: %s' % key
+        assert re.match(r'^[a-z]{2}$', op[key]), 'invalid lang: %s' % key
     else:
         assert fmt is None, 'invalid fmt: %s' % fmt
 
