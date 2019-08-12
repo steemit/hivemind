@@ -434,8 +434,8 @@ class CommunityOp:
         # extended
         self.settings['settings2'] = json.dumps(dict(
             flag_text=read_key_str(_settings, 'flag_text', 5000),
-            bg_color=read_key_str(_settings, 'bg_color', 6, 'hex'),
-            bg_color2=read_key_str(_settings, 'bg_color2', 6, 'hex'),
+            bg_color=read_key_str(_settings, 'bg_color', 7, 'hex'),
+            bg_color2=read_key_str(_settings, 'bg_color2', 7, 'hex'),
             primary_tag=read_key_str(_settings, 'primary_tag', 32), # tag. TODO: evaluate
         ))
 
