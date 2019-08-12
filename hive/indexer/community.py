@@ -75,10 +75,12 @@ def read_key_json(obj, key):
     """Given a dict, parse JSON in `key`. Blank dict on failure."""
     ret = {}
     if key in obj:
+        err = None
         try:
             ret = json.loads(obj[key])
-        except Exception:
-            pass
+        except Exception as e:
+            err = str(e)
+        assert not err, 'json key `%s` error: %s' % (key, err)
         assert ret, 'json key `%s` was blank' % key
     return ret
 
