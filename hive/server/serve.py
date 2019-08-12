@@ -107,18 +107,8 @@ def build_methods():
     # bridge_api methods
     methods.add(**{'bridge.' + method.__name__: method for method in (
         bridge_api_get_state,
-
-        bridge_api.get_discussions_by_trending,
-        bridge_api.get_discussions_by_hot,
-        bridge_api.get_discussions_by_promoted,
-        bridge_api.get_discussions_by_created,
-        bridge_api.get_post_discussions_by_payout,
-        bridge_api.get_comment_discussions_by_payout,
-
-        bridge_api.get_discussions_by_blog,
-        bridge_api.get_discussions_by_feed,
-        bridge_api.get_discussions_by_comments,
-        bridge_api.get_replies_by_last_update,
+        bridge_api.get_account_posts,
+        bridge_api.get_ranked_posts,
     )})
 
     return methods
@@ -140,6 +130,7 @@ def truncate_response_log(logger):
 
 def run_server(conf):
     """Configure and launch the API server."""
+    #pylint: disable=too-many-statements
 
     # configure jsonrpcserver logging
     log_level = conf.log_level()
