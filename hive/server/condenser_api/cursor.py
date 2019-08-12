@@ -5,6 +5,8 @@ from dateutil.relativedelta import relativedelta
 
 from hive.utils.normalize import rep_to_raw
 
+# pylint: disable=too-many-lines
+
 def last_month():
     """Get the date 1 month ago."""
     return datetime.now() + relativedelta(months=-1)
@@ -114,6 +116,7 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
+    # pylint: disable=too-many-arguments
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments']
 
@@ -137,7 +140,6 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
     elif sort == 'payout':
         field = 'payout'
         where.append("is_paidout = '0'")
-        where.append('depth = 0')
     elif sort == 'payout_comments':
         field = 'payout'
         where.append("is_paidout = '0'")
@@ -206,10 +208,9 @@ async def pids_by_blog_by_index(db, account: str, start_index: int, limit: int =
     (acct, 2, 3) = returns 3 posts: idxs (2,1,0)
     """
 
-
     account_id = await _get_account_id(db, account)
 
-    if start_index == -1 or start_index == 0:
+    if start_index in (-1, 0):
         sql = """SELECT COUNT(*) - 1 FROM hive_feed_cache
                   WHERE account_id = :account_id"""
         start_index = await db.query_one(sql, account_id=account_id)
@@ -316,7 +317,8 @@ async def pids_by_account_comments(db, account: str, start_permlink: str = '', l
     return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
 
 
-async def pids_by_replies_to_account(db, start_author: str, start_permlink: str = '', limit: int = 20):
+async def pids_by_replies_to_account(db, start_author: str, start_permlink: str = '',
+                                     limit: int = 20):
     """Get a list of post_ids representing replies to an author.
 
     To get the first page of results, specify `start_author` as the
