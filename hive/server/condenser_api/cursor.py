@@ -116,39 +116,38 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
-    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-arguments,bad-whitespace,line-too-long
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments']
 
+    params = {             # field      pending posts   comment promoted    todo        community
+        'trending':        ('sc_trend', True,   False,  False,  False),   # posts=True  pending=False
+        'hot':             ('sc_hot',   True,   False,  False,  False),   # posts=True  pending=False
+        'created':         ('post_id',  False,  True,   False,  False),
+        'promoted':        ('promoted', True,   False,  False,  True),    # posts=True
+        'payout':          ('payout',   True,   True,   False,  False),
+        'payout_comments': ('payout',   True,   False,  True,   False),
+    }[sort]
+
     table = 'hive_posts_cache'
-    field = ''
+    field = params[0]
     where = []
 
-    if sort == 'trending':
-        field = 'sc_trend'
-        where.append("is_paidout = '0'")
-    elif sort == 'hot':
-        field = 'sc_hot'
-        where.append("is_paidout = '0'")
-    elif sort == 'created':
-        field = 'post_id'
-        where.append('depth = 0')
-    elif sort == 'promoted':
-        field = 'promoted'
-        where.append("is_paidout = '0'")
-        where.append('promoted > 0')
-    elif sort == 'payout':
-        field = 'payout'
-        where.append("is_paidout = '0'")
-        where.append('depth = 0')
-    elif sort == 'payout_comments':
-        field = 'payout'
-        where.append("is_paidout = '0'")
-        where.append('depth > 0')
+    # primary filters
+    if params[1]: where.append("is_paidout = '0'")
+    if params[2]: where.append('depth = 0')
+    if params[3]: where.append('depth > 0')
+    if params[4]: where.append('promoted > 0')
 
+    # filter by community, category, or tag
     if tag:
-        is_community = tag[:5] == 'hive-'
-        if is_community or sort in ['payout', 'payout_comments']:
+        #if tag[:5] == 'hive-'
+        #    cid = get_community_id(tag)
+        #    where.append('community_id = :cid')
+        if tag[:5] == 'hive-':
+            where.append('category = :tag')
+            if not (params[2] or params[3]): where.append('depth = 0')
+        elif sort in ['payout', 'payout_comments']:
             where.append('category = :tag')
         else:
             sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
