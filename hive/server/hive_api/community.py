@@ -36,17 +36,17 @@ async def get_community(context, name, observer=None):
         'subscribers': row['subscribers'],
         'created_at': str(row['created_at']),
         'settings': json.loads(row['settings']),
-        'team': {'owner': {}, 'admin': {}, 'mod': {}},
+        'team': [],
     }
 
     # leadership
     sql = """SELECT a.name, r.role_id, r.title FROM hive_roles r
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :community_id
-                AND r.role_id >= :min_role"""
+                AND r.role_id >= :min_role AND r.role_id < 8
+           ORDER BY r.role_id DESC"""
     for row in await db.query_all(sql, community_id=ret['id'], min_role=4):
-        role = ROLES[row['role_id']]
-        ret['team'][role][row['name']] = row['title']
+        ret['team'].append((row['name'], ROLES[row['role_id']], row['title']))
 
     if observer: # context: role, title, subscribed
         observer_id = await get_account_id(db, observer)
@@ -63,7 +63,7 @@ async def _community_contexts(db, communities, observer_id):
               WHERE account_id = :account_id
                 AND community_id IN :ids"""
     rows = await db.query_all(sql, account_id=observer_id, ids=tuple(ids))
-    roles = {cid: [role_id, title] for cid, role_id, title in rows}
+    roles = {cid: [ROLES[role_id], title] for cid, role_id, title in rows}
 
     # load subscription status
     sql = """SELECT community_id FROM hive_subscriptions
@@ -122,7 +122,8 @@ async def list_community_roles(context, community, start='', limit=50):
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :community_id %s
            ORDER BY name LIMIT :limit""" % seek
-    return await db.query_all(sql, community_id=community_id, start=start, limit=limit)
+    rows = await db.query_all(sql, community_id=community_id, start=start, limit=limit)
+    return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
 
 
 async def list_all_subscriptions(context, account, observer=None):
