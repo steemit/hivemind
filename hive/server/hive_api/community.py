@@ -88,7 +88,7 @@ async def load_communities(db, ids, lite=True):
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
                     subscribers, created_at, settings
                FROM hive_communities WHERE id IN :ids"""
-    rows = await db.query_row(sql, ids=tuple(ids))
+    rows = await db.query_all(sql, ids=tuple(ids))
 
     out = {}
     for row in rows:
