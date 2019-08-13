@@ -20,6 +20,8 @@ from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
 
+from hive.indexer.jobs import audit_cache_posts
+
 log = logging.getLogger(__name__)
 
 class Sync:
@@ -42,6 +44,8 @@ class Sync:
         # prefetch id->name and id->rank memory maps
         Accounts.load_ids()
         Accounts.fetch_ranks()
+
+        audit_cache_posts(self._db)
 
         if DbState.is_initial_sync():
             # resume initial sync
