@@ -177,8 +177,8 @@ class Db:
             Stats.log_db(sql, perf() - start)
             return result
         except Exception as e:
-            log.info("[SQL-ERR] %s in query %s (%s)",
-                     e.__class__.__name__, sql, kwargs)
+            log.warning("[SQL-ERR] %s in query %s (%s)",
+                        e.__class__.__name__, sql, kwargs)
             raise e
 
     @staticmethod

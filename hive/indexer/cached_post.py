@@ -337,10 +337,17 @@ class CachedPost:
                     sql = """SELECT id, author, permlink, is_deleted
                                FROM hive_posts WHERE id = :id"""
                     row = DB.query_row(sql, id=pid)
-                    if level == 'insert' and not row['is_deleted']:
-                        log.warning("couldnt load post for %s: %s", level, row)
+                    if row['is_deleted']:
+                        log.info("found deleted post for %s: %s", level, row)
+                        if level == 'payout':
+                            log.warning("force delete %s", row)
+                            cls.delete(pid, row['author'], row['permlink'])
+                    elif level == 'insert':
+                        log.error("insert post not found -- DEFER %s", row)
+                        cls.insert(row['author'], row['permlink'], pid)
                     else:
-                        log.info("couldnt load post for %s: %s", level, row)
+                        log.warning("%s post not found -- DEFER %s", level, row)
+                        cls._dirty(level, row['author'], row['permlink'], pid)
 
                 cls._bump_last_id(pid)
 
