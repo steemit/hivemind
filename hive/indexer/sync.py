@@ -45,8 +45,6 @@ class Sync:
         Accounts.load_ids()
         Accounts.fetch_ranks()
 
-        audit_cache_posts(self._db)
-
         if DbState.is_initial_sync():
             # resume initial sync
             self.initial()
@@ -58,6 +56,8 @@ class Sync:
 
             # perform cleanup if process did not exit cleanly
             CachedPost.recover_missing_posts(self._steem)
+
+        audit_cache_posts(self._db, self._steem)
 
         self._update_chain_state()
 
