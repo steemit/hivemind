@@ -76,7 +76,7 @@ POST_LIST_SORTS = [
 ]
 
 @return_error_info
-async def get_state(context, path: str):
+async def get_state(context, path, observer=None):
     """`get_state` reimplementation.
 
     See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
@@ -132,7 +132,7 @@ async def get_state(context, path: str):
         tag = valid_tag(part[1].lower(), allow_empty=True)
 
         if tag[:5] == 'hive-':
-            community = await get_community(context, tag)
+            community = await get_community(context, tag, observer)
             if community:
                 state['community'] = {tag: community}
 
