@@ -176,8 +176,8 @@ class HttpClient(object):
                 if secs < 0: # request failed
                     secs = perf() - start
                     info = {'secs': round(secs, 3), 'try': tries}
-                log.error('%s failed in %.1fs. try %d. %s - %s',
-                          what, secs, tries, info, repr(e))
+                log.warning('%s failed in %.1fs. try %d. %s - %s',
+                            what, secs, tries, info, repr(e))
 
             if tries % 2 == 0:
                 self.next_node()

@@ -341,7 +341,7 @@ class CachedPost:
                         log.info("found deleted post for %s: %s", level, row)
                         if level == 'payout':
                             log.warning("force delete %s", row)
-                            cls.delete(id, row['author'], row['permlink'])
+                            cls.delete(pid, row['author'], row['permlink'])
                     elif level == 'insert':
                         log.error("insert post not found -- DEFER %s", row)
                         cls.insert(row['author'], row['permlink'], pid)
