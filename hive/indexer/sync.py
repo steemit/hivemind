@@ -60,7 +60,7 @@ class Sync:
         if self._conf.get('test_max_block'):
             # debug mode: partial sync
             return self.from_steemd()
-        elif self._conf.get('test_disable_sync'):
+        if self._conf.get('test_disable_sync'):
             # debug mode: no sync, just stream
             return self.listen()
 
@@ -193,8 +193,8 @@ class Sync:
             if num % 1200 == 0: #1hr
                 Accounts.fetch_ranks()
             if num % 100 == 0: #5min
+                log.info("[LIVE] flag 500 oldest accounts for update")
                 Accounts.dirty_oldest(500)
-                Accounts.flush(steemd, trx=True)
             if num % 20 == 0: #1min
                 self._update_chain_state()
 
