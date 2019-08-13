@@ -6,6 +6,7 @@ import traceback
 
 class ApiError(Exception):
     """API-specific errors: unimplemented/bad params. Pass back to client."""
+    # pylint: disable=unnecessary-pass
     pass
 
 def return_error_info(function):
@@ -17,8 +18,8 @@ def return_error_info(function):
             return await function(*args, **kwargs)
         except (ApiError, AssertionError, TypeError, Exception) as e:
             # one specific TypeError we want to silence; others need a trace.
-            if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
-                raise e
+            #if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
+            #    raise e
             return {
                 "error": {
                     "code": -32000,

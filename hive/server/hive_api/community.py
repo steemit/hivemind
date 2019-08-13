@@ -3,11 +3,13 @@ import logging
 import ujson as json
 from hive.server.hive_api.common import (
     get_account_id, get_community_id)
+from hive.server.condenser_api.common import return_error_info
 
 log = logging.getLogger(__name__)
 
 ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
 
+@return_error_info
 async def get_community(context, name, observer=None):
     """Retrieve full community object. Includes metadata, leadership team
 
