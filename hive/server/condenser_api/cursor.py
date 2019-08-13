@@ -140,13 +140,15 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
     elif sort == 'payout':
         field = 'payout'
         where.append("is_paidout = '0'")
+        where.append('depth = 0')
     elif sort == 'payout_comments':
         field = 'payout'
         where.append("is_paidout = '0'")
         where.append('depth > 0')
 
     if tag:
-        if sort in ['payout', 'payout_comments']:
+        is_community = tag[:5] == 'hive-'
+        if is_community or sort in ['payout', 'payout_comments']:
             where.append('category = :tag')
         else:
             sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
