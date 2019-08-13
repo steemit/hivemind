@@ -16,15 +16,16 @@ async def get_community(context, name, observer=None):
     If `observer` is provided, get subcription status, user title, user role.
     """
     db = context['db']
-    communities = await communities_by_name(db, [name], lite=False)
-    assert name in communities, 'community not found'
+    cid = await get_community_id(db, name)
+    assert cid, 'community not found'
+    communities = await load_communities(db, [cid], lite=False)
 
     if observer:
         observer_id = await get_account_id(db, observer)
-        await _append_observer_roles(db, communities.values(), observer_id)
-        await _append_observer_subs(db, communities.values(), observer_id)
+        await _append_observer_roles(db, communities, observer_id)
+        await _append_observer_subs(db, communities, observer_id)
 
-    return communities[name]
+    return communities[cid]
 
 async def list_communities(context, last='', limit=25, query=None, observer=None):
     """List all communities, paginated. Returns lite community list.
@@ -40,15 +41,15 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
                                    FROM hive_communities
                                   WHERE name = :last)"""
 
-    sql = """SELECT name FROM hive_communities %s ORDER BY rank DESC""" % seek
-    names = db.query_col(sql, last=last, limit=limit)
-    result = await communities_by_name(db, names, lite=True)
+    sql = """SELECT id FROM hive_communities %s ORDER BY rank DESC""" % seek
+    ids = await db.query_col(sql, last=last, limit=limit)
+    communities = await load_communities(db, ids, lite=True)
 
     if observer:
-        observer_id = await get_account_id(db, observer) if observer else None
-        _append_observer_subs(db, result.values(), observer_id)
+        observer_id = await get_account_id(db, observer)
+        await _append_observer_subs(db, communities, observer_id)
 
-    return result
+    return communities
 
 async def list_community_roles(context, community, last='', limit=50):
     """List community account-roles (anyone with special status or title)."""
@@ -67,19 +68,18 @@ async def list_all_subscriptions(context, account):
     db = context['db']
     account_id = await get_account_id(db, account)
 
-    sql = """SELECT name FROM hive_communities
-              WHERE id IN (SELECT community_id FROM hive_subscriptions
-                            WHERE account_id = :account_id)"""
-    names = await db.query_all(sql, account_id=account_id)
-    communities = await communities_by_name(db, names, lite=True)
-    await _append_observer_roles(db, communities.values(), account_id)
+    sql = """SELECT community_id FROM hive_subscriptions
+              WHERE account_id = :account_id"""
+    ids = await db.query_col(sql, account_id=account_id)
+    communities = await load_communities(db, ids, lite=True)
+    await _append_observer_roles(db, communities, account_id)
     return communities
 
 
 # Communities - internal
 # ----------------------
 
-async def communities_by_name(db, names, lite=True):
+async def load_communities(db, ids, lite=True):
     """Retrieve full community objects. If not lite: includes settings, team.
 
     Observer: adds subcription status, user title, user role.
@@ -87,8 +87,8 @@ async def communities_by_name(db, names, lite=True):
 
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
                     subscribers, created_at, settings
-               FROM hive_communities WHERE name IN :names"""
-    rows = await db.query_row(sql, names=tuple(names))
+               FROM hive_communities WHERE id IN :ids"""
+    rows = await db.query_row(sql, ids=tuple(ids))
 
     out = {}
     for row in rows:
@@ -109,7 +109,7 @@ async def communities_by_name(db, names, lite=True):
             ret['settings'] = json.loads(row['settings'])
             ret['team'] = await _community_team(db, ret['id'])
 
-        out[ret['name']] = ret
+        out[ret['id']] = ret
 
     return out
 
@@ -123,8 +123,7 @@ async def _community_team(db, community_id):
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
 
 async def _append_observer_roles(db, communities, observer_id):
-    comms = {c['id']: c for c in communities}
-    ids = comms.keys()
+    ids = communities.keys()
 
     sql = """SELECT community_id, role_id, title FROM hive_roles
               WHERE account_id = :account_id
@@ -132,21 +131,20 @@ async def _append_observer_roles(db, communities, observer_id):
     rows = await db.query_all(sql, account_id=observer_id, ids=tuple(ids))
     roles = {cid: [role_id, title] for cid, role_id, title in rows}
 
-    for cid, comm in comms.items():
+    for cid, comm in communities.items():
         role_id, title = roles[cid] if cid in roles else (0, '')
         comm['context']['role'] = ROLES[role_id]
         comm['context']['title'] = title
 
 async def _append_observer_subs(db, communities, observer_id):
-    comms = {c['id']: c for c in communities}
-    ids = comms.keys()
+    ids = communities.keys()
 
     sql = """SELECT community_id FROM hive_subscriptions
               WHERE account_id = :account_id
                 AND community_id IN :ids"""
     subs = await db.query_col(sql, account_id=observer_id, ids=tuple(ids))
 
-    for cid, comm in comms.items():
+    for cid, comm in communities.items():
         comm['context']['subscribed'] = cid in subs
 
 
