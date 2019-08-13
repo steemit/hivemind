@@ -191,6 +191,7 @@ class Sync:
                      cnt['recount'], accts, follows, ms, ' SLOW' if ms > 1000 else '')
 
             if num % 1200 == 0: #1hr
+                log.info("[LIVE] update account ranks mmap")
                 Accounts.fetch_ranks()
             if num % 100 == 0: #5min
                 log.info("[LIVE] flag 500 oldest accounts for update")
