@@ -117,7 +117,7 @@ class CachedPost:
                 del cls._ids[url]
 
     @classmethod
-    def undelete(cls, post_id, author, permlink):
+    def undelete(cls, post_id, author, permlink, category):
         """Handle a post 'undeleted' by a `comment` op.
 
         'Undeletion' occurs when hive detects that a previously deleted
@@ -149,7 +149,8 @@ class CachedPost:
         DB.query(cls._insert({
             'post_id': post_id,
             'author': author,
-            'permlink': permlink}))
+            'permlink': permlink,
+            'category': category}))
         cls.update(author, permlink, post_id)
 
     @classmethod
