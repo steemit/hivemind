@@ -262,11 +262,17 @@ class DbState:
             cls.db().query("CREATE INDEX hive_posts_ix4 ON hive_posts (parent_id, id) WHERE is_deleted = '0'")
             cls._set_ver(12)
 
+        # //-- force reset
+        if cls._ver == 13:
+            cls._ver = 12
+        # //--
+
         if cls._ver == 12: # community schema
             #assert False, 'community schema migration not finalized'
             for table in ['hive_members', 'hive_flags', 'hive_modlog',
-                          'hive_communities']:
-                cls.db().query("DROP TABLE %s" % table)
+                          'hive_communities', 'hive_subscriptions',
+                          'hive_roles', 'hive_notifs']:
+                cls.db().query("DROP TABLE IF EXISTS %s" % table)
             build_metadata_community().create_all(cls.db().engine())
             cls._set_ver(13)
 
