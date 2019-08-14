@@ -8,7 +8,7 @@ from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
 from sqlalchemy.types import BOOLEAN
 
-#pylint: disable=line-too-long, too-many-lines
+#pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
 DB_VERSION = 13
 
@@ -229,16 +229,18 @@ def build_metadata_community(metadata=None):
         'hive_communities', metadata,
         sa.Column('id', sa.Integer, primary_key=True, autoincrement=False),
         sa.Column('name', VARCHAR(16), nullable=False),
-        sa.Column('title', sa.String(32), nullable=False),
+        sa.Column('type_id', SMALLINT, nullable=False),
+        sa.Column('title', sa.String(32), nullable=False, server_default=''),
         sa.Column('about', sa.String(120), nullable=False, server_default=''),
-        sa.Column('description', sa.String(5000), nullable=False, server_default=''),
-        sa.Column('pending_payout', sa.types.DECIMAL(10, 3), nullable=False, server_default='0'),
+        sa.Column('created_at', sa.DateTime, nullable=False),
+        sa.Column('pending_payout', sa.Integer, nullable=False, server_default='0'),
+        sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
         sa.Column('subscribers', sa.Integer, nullable=False, server_default='0'),
         sa.Column('lang', CHAR(2), nullable=False, server_default='en'),
-        sa.Column('type_id', SMALLINT, nullable=False, server_default='0'),
         sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.Column('settings', TEXT, nullable=False),
+        sa.Column('description', sa.String(5000), nullable=False, server_default=''),
+        sa.Column('flag_text', sa.String(5000), nullable=False, server_default=''),
+        sa.Column('settings', TEXT, nullable=False, server_default='{}'),
         sa.UniqueConstraint('name', name='hive_communities_ux1'),
     )
 

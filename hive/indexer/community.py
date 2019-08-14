@@ -27,13 +27,20 @@ TYPE_COUNCIL = 3
 
 COMMANDS = [
     # community
-    'updateSettings', 'subscribe', 'unsubscribe',
+    'updateProps', 'subscribe', 'unsubscribe',
     # community+account
     'setRole', 'setUserTitle',
     # community+account+permlink
     'mutePost', 'unmutePost', 'pinPost', 'unpinPost', 'flagPost',
 ]
 
+def assert_keys_match(keys, expected, allow_missing=True):
+    """Compare a set of input keys to expected keys."""
+    if not allow_missing:
+        missing = expected - keys
+        assert not missing, 'missing keys: %s' % missing
+    extra = keys - expected
+    assert not extra, 'extraneous keys: %s' % extra
 
 def process_json_community_op(actor, op_json, date):
     """Validates community op and apply state changes to db."""
@@ -96,9 +103,8 @@ class Community:
             type_id = int(name[5])
             _id = Accounts.get_id(name)
 
-            sql = """INSERT INTO hive_communities (id, name, title, settings,
-                                                   type_id, created_at)
-                          VALUES (:id, :name, '', '{}', :type_id, :date)"""
+            sql = """INSERT INTO hive_communities (id, name, type_id, created_at)
+                          VALUES (:id, :name, :type_id, :date)"""
             DB.query(sql, id=_id, name=name, type_id=type_id, date=block_date)
             sql = """INSERT INTO hive_roles (community_id, account_id, role_id, created_at)
                          VALUES (:community_id, :account_id, :role_id, :date)"""
@@ -207,7 +213,7 @@ class CommunityOp:
     #pylint: disable=too-many-instance-attributes
 
     SCHEMA = {
-        'updateSettings': ['community', 'settings'],
+        'updateProps':    ['community', 'props'],
         'setRole':        ['community', 'account', 'role'],
         'setUserTitle':   ['community', 'account', 'title'],
         'mutePost':       ['community', 'account', 'permlink', 'notes'],
@@ -243,7 +249,7 @@ class CommunityOp:
 
         self.notes = None
         self.title = None
-        self.settings = None
+        self.props = None
 
     def validate(self, raw_op):
         """Pre-processing and validation of custom_json payload."""
@@ -281,12 +287,11 @@ class CommunityOp:
         )
 
         # Community-level commands
-        if action == 'updateSettings':
-            DB.query("""UPDATE hive_communities SET title = :title,
-                               about = :about, description = :description,
-                               lang = :lang, is_nsfw = :is_nsfw,
-                               settings = :settings2
-                         WHERE name = :community""", community=self.community, **self.settings)
+        if action == 'updateProps':
+            bind = ', '.join([k+" = :"+k for k in list(self.props.keys())][1:])
+            DB.query("UPDATE hive_communities SET %s WHERE id = :id" % bind,
+                     id=self.community_id, **self.props)
+
         elif action == 'subscribe':
             DB.query("""INSERT INTO hive_subscriptions (account_id, community_id)
                         VALUES (:actor_id, :community_id)""", **params)
@@ -349,11 +354,7 @@ class CommunityOp:
         schema = self.SCHEMA[self.action]
 
         # validate structure
-        _keys = self.op.keys()
-        missing = schema - _keys
-        assert not missing, 'missing keys: %s' % missing
-        extra = _keys - schema
-        assert not extra, 'extraneous keys: %s' % extra
+        assert_keys_match(self.op.keys(), schema, allow_missing=False)
 
         # read and validate keys
         if 'community' in schema:
@@ -368,8 +369,8 @@ class CommunityOp:
             self._read_notes()
         if 'title' in schema:
             self._read_title()
-        if 'settings' in schema:
-            self._read_settings()
+        if 'props' in schema:
+            self._read_props()
 
     def _read_community(self):
         _name = read_key_str(self.op, 'community', 16)
@@ -421,23 +422,30 @@ class CommunityOp:
         _title = _title.strip()
         self.title = _title
 
-    def _read_settings(self):
-        _settings = read_key_dict(self.op, 'settings')
-        # primary
-        self.settings = dict(
-            title=read_key_str(_settings, 'title', 32),
-            about=read_key_str(_settings, 'about', 120),
-            description=read_key_str(_settings, 'description', 5000),
-            lang=read_key_str(_settings, 'language', 2, 'lang'),
-            is_nsfw=read_key_bool(_settings, 'nsfw'),
-        )
-        # extended
-        self.settings['settings2'] = json.dumps(dict(
-            flag_text=read_key_str(_settings, 'flag_text', 5000),
-            bg_color=read_key_str(_settings, 'bg_color', 7, 'hex'),
-            bg_color2=read_key_str(_settings, 'bg_color2', 7, 'hex'),
-            primary_tag=read_key_str(_settings, 'primary_tag', 32), # tag. TODO: evaluate
-        ))
+    def _read_props(self):
+        props = read_key_dict(self.op, 'props')
+        valid = ['title', 'about', 'lang', 'is_nsfw',
+                 'description', 'flag_text', 'settings']
+        assert_keys_match(props.keys(), valid, allow_missing=True)
+
+        out = {}
+        if 'title' in props:
+            out['title'] = read_key_str(props, 'title', 32)
+        if 'about' in props:
+            out['about'] = read_key_str(props, 'about', 120)
+        if 'lang' in props:
+            out['lang'] = read_key_str(props, 'lang', 2, 'lang')
+        if 'is_nsfw' in props:
+            out['is_nsfw'] = read_key_bool(props, 'is_nsfw')
+        if 'description' in props:
+            out['description'] = read_key_str(props, 'description', 5000)
+        if 'flag_text' in props:
+            out['flag_text'] = read_key_str(props, 'flag_text', 5000)
+        if 'settings' in props:
+            out['settings'] = json.dumps(read_key_dict(props, 'settings'))
+        assert out, 'props were blank'
+        self.props = out
+
 
     def _validate_permissions(self):
         community_id = self.community_id
@@ -452,8 +460,8 @@ class CommunityOp:
                 account_role = Community.get_user_role(community_id, self.account_id)
                 assert account_role < actor_role, 'cant modify higher-role user'
                 assert account_role != new_role, 'role would not change'
-        elif action == 'updateSettings':
-            assert actor_role >= ROLE_ADMIN, 'only admins can update settings'
+        elif action == 'updateProps':
+            assert actor_role >= ROLE_ADMIN, 'only admins can update props'
         elif action == 'setUserTitle':
             assert actor_role >= ROLE_MOD, 'only mods can set user titles'
         elif action == 'mutePost':

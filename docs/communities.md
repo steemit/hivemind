@@ -61,7 +61,7 @@ All communities and posts are viewable and readable by all, and there is a gover
 #### User Roles Overview
 
 1. **Owner**: can assign admins. 
-2. **Admin**: can edit admin settings, display settings, and assign mods.
+2. **Admin**: can edit community properties and assign mods.
 3. **Mod**: can mute posts/users, add/remove members, pin posts, set user titles.
 4. **Member**: in restricted (journal/council) communities, an approved member.
 5. **Guest**: can post/comment in topics and comment in journals.
@@ -215,9 +215,9 @@ In addition to editing user roles (e.g. appointing mods), admins can define the 
 #### Update display settings
 
 ```
-["updateSettings", {
+["updateProps", {
   "community": <community>, 
-  "settings": { <key:value>, ... }
+  "props": { <key:value>, ... }
 }]
 ```
 
