@@ -128,7 +128,7 @@ async def _append_observer_roles(db, communities, observer_id):
               WHERE account_id = :account_id
                 AND community_id IN :ids"""
     rows = await db.query_all(sql, account_id=observer_id, ids=tuple(ids))
-    roles = {cid: [role_id, title] for cid, role_id, title in rows}
+    roles = {r['community_id']: [r['role_id'], r['title']] for r in rows}
 
     for cid, comm in communities.items():
         role_id, title = roles[cid] if cid in roles else (0, '')
