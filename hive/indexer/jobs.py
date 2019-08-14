@@ -5,7 +5,7 @@ from hive.indexer.cached_post import CachedPost
 log = logging.getLogger(__name__)
 
 def _last_post_id(db):
-    sql = "SELECT id FROM hive_posts ORDER BY id DESC LIMIT 1"
+    sql = "SELECT post_id FROM hive_posts_cache ORDER BY post_id DESC LIMIT 1"
     return db.query_one(sql) or 0
 
 def audit_cache_missing(db, steem):
