@@ -28,20 +28,17 @@ async def get_community(context, name, observer=None):
     return communities[cid]
 
 async def list_communities(context, last='', limit=25, query=None, observer=None):
-    """List all communities, paginated. Returns lite community list.
-
-    Fields: (id, name, title, about, lang, type, nsfw, subs, created_at)
-    """
+    """List all communities, paginated. Returns lite community list."""
     db = context['db']
     assert not query, 'query not yet supported'
 
     seek = ''
     if last:
-        seek = """ WHERE rank < (SELECT rank
+        seek = """ WHERE rank > (SELECT rank
                                    FROM hive_communities
-                                  WHERE name = :last)"""
+                                  WHERE name = :last) """
 
-    sql = """SELECT id FROM hive_communities %s ORDER BY rank DESC""" % seek
+    sql = "SELECT id FROM hive_communities %s ORDER BY rank" % seek
     ids = await db.query_col(sql, last=last, limit=limit)
     communities = await load_communities(db, ids, lite=True)
 
@@ -86,9 +83,10 @@ async def load_communities(db, ids, lite=True):
     """
 
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
-                    subscribers, created_at, settings
+                    subscribers, created_at %s
                FROM hive_communities WHERE id IN :ids"""
-    rows = await db.query_all(sql, ids=tuple(ids))
+    fields = ', description, settings' if not lite else ''
+    rows = await db.query_all(sql % fields, ids=tuple(ids))
 
     out = {}
     for row in rows:
@@ -106,6 +104,7 @@ async def load_communities(db, ids, lite=True):
         }
 
         if not lite:
+            ret['description'] = row['description']
             ret['settings'] = json.loads(row['settings'])
             ret['team'] = await _community_team(db, ret['id'])
 
