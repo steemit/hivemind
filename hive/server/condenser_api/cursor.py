@@ -144,12 +144,13 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
         #if tag[:5] == 'hive-'
         #    cid = get_community_id(tag)
         #    where.append('community_id = :cid')
-        if tag[:5] == 'hive-':
-            where.append('category = :tag')
-            if not (params[2] or params[3]): where.append('depth = 0')
-        elif sort in ['payout', 'payout_comments']:
+        if sort in ['payout', 'payout_comments']:
             where.append('category = :tag')
         else:
+            if tag[:5] == 'hive-':
+                where.append('category = :tag')
+                if sort in ('trending', 'hot'):
+                    where.append('depth = 0')
             sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
             where.append("post_id IN (%s)" % sql)
 
