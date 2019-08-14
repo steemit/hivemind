@@ -293,7 +293,7 @@ class CommunityOp:
 
         # Community-level commands
         if action == 'updateProps':
-            bind = ', '.join([k+" = :"+k for k in list(self.props.keys())])
+            bind = ', '.join([k+" = :"+k for k in list(self.props.keys())][1:])
             DB.query("UPDATE hive_communities SET %s WHERE id = :id" % bind,
                      id=self.community_id, **self.props)
 
