@@ -136,19 +136,19 @@ Core settings which will influence community logic and validation rules.
     - specifies required minimum beneficiary amount per post for it to be considered valid
     - can be blank or contain up to 8 entries
 
-##### Editable by Admins - Display Settings
+##### Editable by Admins - Community Properties
 
 Can be stored as a JSON dictionary.
 
  - `title`: the display name of this community (32 chars)
  - `about`: short blurb about this community (120 chars)
+ - `lang`: primary language. `en`, `es`, `ru`, etc (https://en.wikipedia.org/wiki/ISO_639-3 ?)
+ - `is_nsfw`: `true` if this community is 18+. UI to automatically tag all posts/comments `nsfw`
  - `description`: a blob of markdown to describe purpose, enumerate rules, etc. (5000 chars)
  - `flag_text`: custom text for reporting content
- - `language`: primary language. `en`, `es`, `ru`, etc (https://en.wikipedia.org/wiki/ISO_639-3 ?)
- - `nsfw`: `true` if this community is 18+. UI to automatically tag all posts/comments `nsfw`
- - `bg_color`: background color - hex-encoded RGB value (e.g. `#EEDDCC`)
- - `bg_color2`: background color - hex-encoded RGB value (if provided, creates a gradient)
- - `primary_tag`: the preferred tag for the community, set on each post; potential custom URL later 
+ - `settings': json dict; recognized keys:
+   - `bg_color`: background color - hex-encoded RGB value (e.g. `#EEDDCC`)
+   - `bg_color2`: background color - hex-encoded RGB value (if provided, creates a gradient)
 
 Extra settings (v1.5)
 
@@ -221,7 +221,7 @@ In addition to editing user roles (e.g. appointing mods), admins can define the 
 }]
 ```
 
-Valid keys are `title`, `about`, `description`, `language`, `nsfw`, `flag_text`, `bg_color`, `bg_color2`, `primary_tag`.
+Valid keys are `title`, `about`, `lang`, `is_nsfw`, `description`, `flag_text`, `settings`.
 
 #### Set reward share (v1.5)
 
