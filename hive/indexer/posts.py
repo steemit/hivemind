@@ -140,7 +140,8 @@ class Posts:
         DB.query(sql, **post)
 
         if not DbState.is_initial_sync():
-            CachedPost.undelete(pid, post['author'], post['permlink'])
+            CachedPost.undelete(pid, post['author'], post['permlink'],
+                                post['category'])
             cls._insert_feed_cache(post)
 
     @classmethod
