@@ -11,7 +11,7 @@ async def load_accounts(db, names):
     """`get_accounts`-style lookup for `get_state` compat layer."""
     sql = """SELECT id, name, display_name, about, reputation, vote_weight,
                     created_at, post_count, profile_image, location, website,
-                    cover_image
+                    cover_image, rank
                FROM hive_accounts WHERE name IN :names"""
     rows = await db.query_all(sql, names=tuple(names))
     return [_condenser_account_object(row) for row in rows]
@@ -92,7 +92,10 @@ def _condenser_account_object(row):
         'created': _json_date(row['created_at']),
         'post_count': row['post_count'],
         'reputation': rep_to_raw(row['reputation']),
-        #'net_vesting_shares': row['vote_weight'],
+        'stats': {
+            'sp': int(row['vote_weight'] * 0.0005037),
+            'rank': row['rank'],
+        },
         'json_metadata': json.dumps({
             'profile': {'name': row['display_name'],
                         'about': row['about'],
