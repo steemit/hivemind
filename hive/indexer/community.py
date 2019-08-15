@@ -187,6 +187,12 @@ class Community:
         return bool(DB.query_one(sql, community_id=community_id,
                                  account_id=account_id))
     @classmethod
+    def is_post_muted(cls, post_id):
+        """Check a post's muted status."""
+        sql = """SELECT is_muted FROM hive_posts WHERE id = :id"""
+        return bool(DB.query_one(sql, id=post_id))
+
+    @classmethod
     def is_pinned(cls, post_id):
         """Check a post's pinned status."""
         sql = """SELECT is_pinned FROM hive_posts WHERE id = :id"""
@@ -455,8 +461,12 @@ class CommunityOp:
         elif action == 'setUserTitle':
             assert actor_role >= ROLE_MOD, 'only mods can set user titles'
         elif action == 'mutePost':
+            muted = Community.is_post_muted(self.post_id)
+            assert not muted, 'post is already muted'
             assert actor_role >= ROLE_MOD, 'only mods can mute posts'
         elif action == 'unmutePost':
+            muted = Community.is_post_muted(self.post_id)
+            assert muted, 'post is already not muted'
             assert actor_role >= ROLE_MOD, 'only mods can unmute posts'
         elif action == 'pinPost':
             pinned = Community.is_pinned(self.post_id)
