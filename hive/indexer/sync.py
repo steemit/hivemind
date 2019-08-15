@@ -19,6 +19,7 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
+from hive.indexer.community import Community
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ class Sync:
         # prefetch id->name and id->rank memory maps
         Accounts.load_ids()
         Accounts.fetch_ranks()
+
+        Community.recalc_pending_payouts()
 
         if DbState.is_initial_sync():
             # resume initial sync
@@ -193,6 +196,8 @@ class Sync:
             if num % 1200 == 0: #1hr
                 log.info("[LIVE] update account ranks mmap")
                 Accounts.fetch_ranks()
+                log.info("[LIVE] recalc comm ranks")
+                Community.recalc_pending_payouts()
             if num % 100 == 0: #5min
                 log.info("[LIVE] flag 500 oldest accounts for update")
                 Accounts.dirty_oldest(500)
