@@ -23,7 +23,7 @@ def return_error_info(function):
             return {
                 "error": {
                     "code": -32000,
-                    "message": str(e) + " (hivemind-alpha)",
+                    "message": repr(e) + " (hivemind-beta)",
                     "trace": traceback.format_exc()}}
     return wrapper
 
