@@ -58,6 +58,15 @@ async def load_posts_keyed(db, ids, truncate_body=0):
         post = _condenser_post_object(row, truncate_body=truncate_body)
         posts_by_id[row['post_id']] = post
 
+    sql = """SELECT id, is_pinned, is_muted, is_valid
+               FROM hive_posts WHERE id IN :ids"""
+    for row in await db.query_all(sql, ids=tuple(ids)):
+        if row['id'] in posts_by_id:
+            post = posts_by_id[row['id']]
+            post['stats']['is_pinned'] = row['is_pinned']
+            post['stats']['is_muted'] = row['is_muted']
+            post['stats']['is_valid'] = row['is_valid']
+
     return posts_by_id
 
 async def load_posts(db, ids, truncate_body=0):
