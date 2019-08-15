@@ -143,7 +143,7 @@ async def get_state(context, path, observer=None):
         if community:
             state['community'] = {tag: community}
 
-        pids = await cursor.pids_by_query(db, sort, '', '', 20, tag)
+        pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag)
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
         state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context, 20)}
@@ -174,10 +174,10 @@ async def _get_account_discussion_by_key(db, account, key):
     assert key, 'discussion key must be specified'
 
     if key == 'recent_replies':
-        pids = await cursor.pids_by_replies_to_account(db, account, '', 20)
+        pids = await cursor.pids_by_replies(db, account, '', 20)
         posts = await load_posts(db, pids)
     elif key == 'comments':
-        pids = await cursor.pids_by_account_comments(db, account, '', 20)
+        pids = await cursor.pids_by_comments(db, account, '', 20)
         posts = await load_posts(db, pids)
     elif key == 'blog':
         pids = await cursor.pids_by_blog(db, account, '', '', 20)

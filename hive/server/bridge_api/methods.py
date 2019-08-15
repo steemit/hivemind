@@ -16,7 +16,7 @@ async def get_ranked_posts(context, sort, start_author='', start_permlink='', li
     """Query posts, sorted by given method."""
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments'], 'invalid sort'
-    ids = await cursor.pids_by_query(
+    ids = await cursor.pids_by_ranked(
         context['db'],
         sort,
         valid_account(start_author, allow_empty=True),
@@ -47,9 +47,9 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
     elif sort == 'comments':
         start = start if start_permlink else (account, None)
         assert account == start[0], 'comments - account must match start author'
-        ids = await cursor.pids_by_account_comments(db, *start, limit)
+        ids = await cursor.pids_by_comments(db, *start, limit)
         return await load_posts(context['db'], ids)
     elif sort == 'replies':
         start = start if start_permlink else (account, None)
-        ids = await cursor.pids_by_replies_to_account(db, *start, limit)
+        ids = await cursor.pids_by_replies(db, *start, limit)
         return await load_posts(context['db'], ids)

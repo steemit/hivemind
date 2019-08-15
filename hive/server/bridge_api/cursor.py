@@ -28,7 +28,7 @@ async def _get_account_id(db, name):
     return _id
 
 
-async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
+async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
@@ -151,7 +151,7 @@ async def pids_by_feed_with_reblog(db, account: str, start_author: str = '',
     return [(row[0], row[1]) for row in result]
 
 
-async def pids_by_account_comments(db, account: str, start_permlink: str = '', limit: int = 20):
+async def pids_by_comments(db, account: str, start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids representing comments by an author."""
     seek = ''
     start_id = None
@@ -175,8 +175,8 @@ async def pids_by_account_comments(db, account: str, start_permlink: str = '', l
     return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
 
 
-async def pids_by_replies_to_account(db, start_author: str, start_permlink: str = '',
-                                     limit: int = 20):
+async def pids_by_replies(db, start_author: str, start_permlink: str = '',
+                          limit: int = 20):
     """Get a list of post_ids representing replies to an author.
 
     To get the first page of results, specify `start_author` as the

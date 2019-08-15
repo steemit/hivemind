@@ -8,7 +8,7 @@ from hive.server.hive_api.common import (
     valid_account, valid_permlink, valid_limit)
 from hive.server.condenser_api.cursor import get_followers, get_following
 from hive.server.bridge_api.cursor import (
-    pids_by_blog, pids_by_account_comments, pids_by_feed_with_reblog)
+    pids_by_blog, pids_by_comments, pids_by_feed_with_reblog)
 
 
 log = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ async def list_account_posts(context, account, limit=10, observer=None, last_pos
     db = context['db']
     start_author, start_permlink = split_url(last_post, allow_empty=True)
     assert not start_author or (start_author == account)
-    post_ids = await pids_by_account_comments(
+    post_ids = await pids_by_comments(
         db,
         valid_account(account),
         valid_permlink(start_permlink),
