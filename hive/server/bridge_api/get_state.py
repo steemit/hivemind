@@ -82,7 +82,7 @@ async def get_state(context, path, observer=None):
 
     See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
     """
-    # pylint: disable=too-many-branches,too-many-locals
+    # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     (path, part) = _normalize_path(path)
 
     db = context['db']
@@ -95,7 +95,8 @@ async def get_state(context, path, observer=None):
         'accounts': {},
         'content': {},
         'tag_idx': {'trending': []},
-        'discussion_idx': {"": {}}}
+        'discussion_idx': {"": {}},
+        'community': {}}
 
     # account - `/@account/tab` (feed, blog, comments, replies)
     if part[0] and part[0][0] == '@':
@@ -122,10 +123,18 @@ async def get_state(context, path, observer=None):
 
     # discussion - `/category/@account/permlink`
     elif part[1] and part[1][0] == '@':
+        tag = part[0]
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
+
         state['content'] = await _load_discussion(db, author, permlink)
         state['accounts'] = await _load_content_accounts(db, state['content'], observer_id)
+
+        if tag[:5] == 'hive-':
+            assert state['content'][author + '/' + permlink]['category'] == tag
+            community = await get_community(context, tag, observer)
+            if community:
+                state['community'] = {tag: community}
 
     # ranked posts - `/sort/category`
     elif part[0] in POST_LIST_SORTS:
