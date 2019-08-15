@@ -59,30 +59,46 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag):
     if params[4]: where.append('promoted > 0')
 
     # filter by community, category, or tag
-    if tag:
-        #if tag[:5] == 'hive-'
-        #    cid = get_community_id(tag)
-        #    where.append('community_id = :cid')
+    community = tag if tag[:5] == 'hive-' else None
+    if community:
+        where.append('category = :tag')
+        if sort not in ('payout', 'payout_comments'):
+            sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
+            where.append("post_id IN (%s)" % sql)
+        if sort in ('trending', 'hot'):
+            where.append('depth = 0')
+    elif tag:
         if sort in ['payout', 'payout_comments']:
             where.append('category = :tag')
         else:
-            if tag[:5] == 'hive-':
-                where.append('category = :tag')
-                if sort in ('trending', 'hot'):
-                    where.append('depth = 0')
             sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
             where.append("post_id IN (%s)" % sql)
 
+    pinned_ids = []
     start_id = None
     if start_permlink:
         start_id = await _get_post_id(db, start_author, start_permlink)
         sql = "%s <= (SELECT %s FROM %s WHERE post_id = :start_id)"
         where.append(sql % (field, field, table))
+    elif community:
+        pinned_ids = _pinned(db, tag)
 
     sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
            % (table, ' AND '.join(where), field))
 
-    return await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
+    return pinned_ids + await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
+
+
+async def _pinned(db, community):
+    """Get a list of pinned post `id`s in `community`."""
+    sql = """SELECT id FROM hive_posts
+              WHERE is_pinned = '1'
+                AND is_deleted = '0'
+                AND community = :community
+                AND id IN (SELECT post_id FROM hive_post_tags
+                            WHERE tag = :community)
+            ORDER BY id DESC"""
+    return await db.query_col(sql, community=community)
 
 
 async def pids_by_blog(db, account: str, start_author: str = '',
