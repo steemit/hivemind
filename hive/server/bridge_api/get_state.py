@@ -8,6 +8,7 @@ import ujson as json
 from hive.server.common.mutes import Mutes
 
 from hive.server.hive_api.community import get_community
+from hive.server.hive_api.common import get_account_id
 
 from hive.server.bridge_api.objects import (
     load_accounts,
@@ -81,10 +82,11 @@ async def get_state(context, path, observer=None):
 
     See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
     """
-    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-branches,too-many-locals
     (path, part) = _normalize_path(path)
 
     db = context['db']
+    observer_id = get_account_id(db, observer) if observer else None
 
     state = {
         'feed_price': await _get_feed_price(db),
@@ -104,7 +106,7 @@ async def get_state(context, path, observer=None):
             part[1] = 'blog'
 
         account = valid_account(part[0][1:])
-        state['accounts'][account] = await _load_account(db, account)
+        state['accounts'][account] = await _load_account(db, account, observer_id)
 
         if part[1] in ACCOUNT_TAB_KEYS:
             key = ACCOUNT_TAB_KEYS[part[1]]
@@ -123,7 +125,7 @@ async def get_state(context, path, observer=None):
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
         state['content'] = await _load_discussion(db, author, permlink)
-        state['accounts'] = await _load_content_accounts(db, state['content'])
+        state['accounts'] = await _load_content_accounts(db, state['content'], observer_id)
 
     # ranked posts - `/sort/category`
     elif part[0] in POST_LIST_SORTS:
@@ -199,16 +201,16 @@ def _keyed_posts(posts):
 def _ref(post):
     return post['author'] + '/' + post['permlink']
 
-async def _load_content_accounts(db, content):
+async def _load_content_accounts(db, content, observer_id):
     if not content:
         return {}
     posts = content.values()
     names = set(map(lambda p: p['author'], posts))
-    accounts = await load_accounts(db, names)
+    accounts = await load_accounts(db, names, observer_id)
     return {a['name']: a for a in accounts}
 
-async def _load_account(db, name):
-    ret = await load_accounts(db, [name])
+async def _load_account(db, name, observer_id):
+    ret = await load_accounts(db, [name], observer_id)
     assert ret, 'account not found: `%s`' % name
     account = ret[0]
     for key in ACCOUNT_TAB_KEYS.values():
