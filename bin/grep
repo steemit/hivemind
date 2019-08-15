@@ -1,2 +1,9 @@
 #!/usr/bin/env bash
-grep -rn $1 * --color=always --exclude-dir=docs/hive --exclude-dir=hivemind.egg-info | grep -v __pycache__ --color=auto
+
+if [ -z "$2" ]
+  then
+    grep -rn $1 * --color=always --exclude-dir=docs/hive --exclude-dir=hivemind.egg-info | grep -v __pycache__ --color=auto
+else
+    grep -rn $1 $2 --color=always --exclude-dir=docs/hive --exclude-dir=hivemind.egg-info | grep -v __pycache__ --color=auto
+fi
+
