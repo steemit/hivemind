@@ -86,7 +86,7 @@ async def get_state(context, path, observer=None):
     (path, part) = _normalize_path(path)
 
     db = context['db']
-    observer_id = get_account_id(db, observer) if observer else None
+    observer_id = await get_account_id(db, observer) if observer else None
 
     state = {
         'feed_price': await _get_feed_price(db),
