@@ -201,7 +201,7 @@ class Community:
                   WHERE p.is_paidout = '0'
                GROUP BY c.name
                ORDER BY SUM(p.payout) DESC"""
-        for rank, row in DB.query_all(sql):
+        for rank, row in enumerate(DB.query_all(sql)):
             community, total = row
             sql = """UPDATE hive_communities
                         SET pending_payout = :total, rank = :rank
