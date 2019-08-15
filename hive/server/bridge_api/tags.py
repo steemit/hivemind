@@ -20,7 +20,7 @@ async def get_top_trending_tags_summary(context, limit=50):
     """
     tags = await context['db'].query_col(sql, limit=limit)
 
-    return comms + (tags - comms)
+    return comms + [tag for tag in tags if tag not in comms]
 
 @return_error_info
 @cached(ttl=3600, timeout=1200)

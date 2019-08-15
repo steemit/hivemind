@@ -162,6 +162,11 @@ async def get_state(context, path, observer=None):
     else:
         raise ApiError('unhandled path: /%s' % path)
 
+    for tag in state['tag_idx']['trending']:
+        if tag in state['community']: continue
+        obj = await if_tag_community(context, tag, observer)
+        if obj: state['community'][tag] = obj
+
     return state
 
 async def _get_account_discussion_by_key(db, account, key):
