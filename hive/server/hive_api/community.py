@@ -46,14 +46,14 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
         observer_id = await get_account_id(db, observer)
         await _append_observer_subs(db, communities, observer_id)
 
-    return communities
+    return [communities[_id] for _id in ids]
 
 async def list_community_roles(context, community, last='', limit=50):
     """List community account-roles (anyone with special status or title)."""
     db = context['db']
     community_id = await get_community_id(db, community)
     seek = ' AND account > :last' if last else ''
-    sql = """SELECT a.name, r.role_id, r.title FROM hive_roles
+    sql = """SELECT a.name, r.role_id, r.title FROM hive_roles r
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :id %s
            ORDER BY name LIMIT :limit""" % seek
@@ -68,6 +68,7 @@ async def list_all_subscriptions(context, account):
     sql = """SELECT community_id FROM hive_subscriptions
               WHERE account_id = :account_id"""
     ids = await db.query_col(sql, account_id=account_id)
+    if not ids: return []
     communities = await load_communities(db, ids, lite=True)
     await _append_observer_roles(db, communities, account_id)
     return communities
