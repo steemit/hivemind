@@ -293,8 +293,9 @@ class CommunityOp:
                      id=self.community_id, **self.props)
 
         elif action == 'subscribe':
-            DB.query("""INSERT INTO hive_subscriptions (account_id, community_id)
-                        VALUES (:actor_id, :community_id)""", **params)
+            DB.query("""INSERT INTO hive_subscriptions
+                               (account_id, community_id, created_at)
+                        VALUES (:actor_id, :community_id, :date)""", **params)
             DB.query("""UPDATE hive_communities
                            SET subscribers = subscribers + 1
                          WHERE id = :community_id)""", **params)
