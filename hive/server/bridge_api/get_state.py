@@ -111,6 +111,8 @@ async def get_state(context, path, observer=None):
             posts = await _get_account_discussion_by_key(db, account, key)
             state['content'] = _keyed_posts(posts)
             state['accounts'][account][key] = list(state['content'].keys())
+            if part[1] == 'feed':
+                state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context, 10)}
         elif part[1] in ACCOUNT_TAB_IGNORE:
             pass # condenser no-op URLs
         else:
@@ -146,7 +148,7 @@ async def get_state(context, path, observer=None):
         pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag)
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-        state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context, 20)}
+        state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context, 10)}
 
     # tag "explorer" - `/tags`
     elif path == "tags":

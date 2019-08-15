@@ -7,6 +7,9 @@ from hive.server.common.helpers import (return_error_info, valid_limit)
 @cached(ttl=7200, timeout=1200)
 async def get_top_trending_tags_summary(context, limit=50):
     """Get top trending tags among pending posts."""
+    sql = "SELECT name FROM hive_communities ORDER BY rank LIMIT 10"
+    comms = await context['db'].query_col(sql, limit=limit)
+
     sql = """
         SELECT category
           FROM hive_posts_cache
@@ -15,7 +18,9 @@ async def get_top_trending_tags_summary(context, limit=50):
       ORDER BY SUM(payout) DESC
          LIMIT :limit
     """
-    return await context['db'].query_col(sql, limit=limit)
+    tags = await context['db'].query_col(sql, limit=limit)
+
+    return comms + (tags - comms)
 
 @return_error_info
 @cached(ttl=3600, timeout=1200)
