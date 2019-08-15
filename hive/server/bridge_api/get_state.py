@@ -101,9 +101,7 @@ async def get_state(context, path, observer=None):
     if part[0] and part[0][0] == '@':
         assert not part[1] == 'transfers', 'transfers API not served here'
         assert not part[2], 'unexpected account path[2] %s' % path
-
-        if part[1] == '':
-            part[1] = 'blog'
+        if part[1] == '': part[1] = 'blog'
 
         account = valid_account(part[0][1:])
         state['accounts'][account] = await _load_account(db, account, observer_id)
@@ -129,11 +127,11 @@ async def get_state(context, path, observer=None):
         state['content'] = await _load_discussion(db, author, permlink)
         state['accounts'] = await _load_content_accounts(db, state['content'], observer_id)
 
-        if tag[:5] == 'hive-':
-            assert state['content'][author + '/' + permlink]['category'] == tag
-            community = await get_community(context, tag, observer)
-            if community:
-                state['community'] = {tag: community}
+        community = await tag_community(context, tag, observer)
+        if community:
+            ref = author + '/' + permlink
+            assert state['content'][ref]['category'] == tag, 'invalid comm url'
+            state['community'] = {tag: community}
 
     # ranked posts - `/sort/category`
     elif part[0] in POST_LIST_SORTS:
@@ -141,10 +139,9 @@ async def get_state(context, path, observer=None):
         sort = valid_sort(part[0])
         tag = valid_tag(part[1].lower(), allow_empty=True)
 
-        if tag[:5] == 'hive-':
-            community = await get_community(context, tag, observer)
-            if community:
-                state['community'] = {tag: community}
+        community = await tag_community(context, tag, observer)
+        if community:
+            state['community'] = {tag: community}
 
         pids = await cursor.pids_by_query(db, sort, '', '', 20, tag)
         state['content'] = _keyed_posts(await load_posts(db, pids))
@@ -152,19 +149,25 @@ async def get_state(context, path, observer=None):
         state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context, 20)}
 
     # tag "explorer" - `/tags`
-    elif part[0] == "tags":
-        assert not part[1] and not part[2], 'invalid /tags request'
+    elif path == "tags":
         for tag in await get_trending_tags(context):
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
-    elif part[0] in CONDENSER_NOOP_URLS:
-        assert not part[1] and not part[2]
+    elif path in CONDENSER_NOOP_URLS:
+        pass
 
     else:
         raise ApiError('unhandled path: /%s' % path)
 
     return state
+
+async def tag_community(context, tag, observer):
+    """Attempt to load community if tag is proper format."""
+    if tag[:5] == 'hive-':
+        return await get_community(context, tag, observer)
+    return None
+
 
 async def _get_account_discussion_by_key(db, account, key):
     assert account, 'account must be specified'
