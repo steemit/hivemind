@@ -265,7 +265,6 @@ class CommunityOp:
         # validate permissions
         self._validate_permissions()
 
-
         self.valid = True
 
     def process(self):
@@ -337,7 +336,7 @@ class CommunityOp:
                                author, permlink, comment, created_at)
                         VALUES (:actor, :community, :account, :permlink,
                                 :notes, :date)""", **params)
-
+        # TODO: modlog/notify
         # INSERT INTO hive_modlog (account, community, action, created_at)
         # VALUES  (account, community, json.inspect, block_date)
         return True
@@ -352,26 +351,16 @@ class CommunityOp:
         return (raw_op[0], raw_op[1])
 
     def _read_schema(self):
+        """Validate structure; read and validate keys."""
         schema = self.SCHEMA[self.action]
-
-        # validate structure
         assert_keys_match(self.op.keys(), schema, allow_missing=False)
-
-        # read and validate keys
-        if 'community' in schema:
-            self._read_community()
-        if 'account' in schema:
-            self._read_account()
-        if 'permlink' in schema:
-            self._read_permlink()
-        if 'role' in schema:
-            self._read_role()
-        if 'notes' in schema:
-            self._read_notes()
-        if 'title' in schema:
-            self._read_title()
-        if 'props' in schema:
-            self._read_props()
+        if 'community' in schema: self._read_community()
+        if 'account'   in schema: self._read_account()
+        if 'permlink'  in schema: self._read_permlink()
+        if 'role'      in schema: self._read_role()
+        if 'notes'     in schema: self._read_notes()
+        if 'title'     in schema: self._read_title()
+        if 'props'     in schema: self._read_props()
 
     def _read_community(self):
         _name = read_key_str(self.op, 'community', 16)
