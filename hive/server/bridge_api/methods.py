@@ -2,7 +2,7 @@
 
 import hive.server.bridge_api.cursor as cursor
 from hive.server.bridge_api.objects import load_posts, load_posts_reblogs
-from hive.server.condenser_api.common import (
+from hive.server.common.helpers import (
     return_error_info,
     valid_account,
     valid_permlink,

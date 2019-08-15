@@ -9,8 +9,14 @@ def last_month():
     """Get the date 1 month ago."""
     return datetime.now() + relativedelta(months=-1)
 
+async def get_post_id(db, author, permlink):
+    """Given an author/permlink, retrieve the id from db."""
+    sql = ("SELECT id FROM hive_posts WHERE author = :a "
+           "AND permlink = :p AND is_deleted = '0' LIMIT 1")
+    return await db.query_one(sql, a=author, p=permlink)
+
 async def _get_post_id(db, author, permlink):
-    """Get post_id from hive db."""
+    """Get post_id from hive db. (does NOT filter on is_deleted)"""
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
     return await db.query_one(sql, a=author, p=permlink)
 

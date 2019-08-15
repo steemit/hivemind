@@ -1,6 +1,6 @@
 """Handles legacy `call` method."""
 
-from hive.server.condenser_api.common import (
+from hive.server.common.helpers import (
     ApiError,
     return_error_info,
 )

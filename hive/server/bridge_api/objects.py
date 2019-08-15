@@ -1,4 +1,4 @@
-"""Handles building condenser_api-compatible response objects."""
+"""Handles building condenser-compatible response objects."""
 
 import logging
 import ujson as json

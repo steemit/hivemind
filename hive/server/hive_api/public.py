@@ -6,9 +6,9 @@ from hive.server.hive_api.objects import accounts_by_name, posts_by_id
 from hive.server.hive_api.common import (
     get_account_id, split_url,
     valid_account, valid_permlink, valid_limit)
-from hive.server.condenser_api.cursor import (
-    get_followers, get_following, pids_by_blog, pids_by_account_comments,
-    pids_by_feed_with_reblog)
+from hive.server.condenser_api.cursor import get_followers, get_following
+from hive.server.bridge_api.cursor import (
+    pids_by_blog, pids_by_account_comments, pids_by_feed_with_reblog)
 
 
 log = logging.getLogger(__name__)

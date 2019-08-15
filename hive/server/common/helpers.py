@@ -1,4 +1,4 @@
-"""Helpers for condenser_api calls."""
+"""Helpers for server/API functions."""
 
 import re
 from functools import wraps
@@ -87,14 +87,3 @@ def valid_follow_type(follow_type: str):
     """Ensure follow type is valid steemd type."""
     assert follow_type in ['blog', 'ignore'], 'invalid follow_type `%s`' % follow_type
     return follow_type
-
-async def get_post_id(db, author, permlink):
-    """Given an author/permlink, retrieve the id from db."""
-    sql = ("SELECT id FROM hive_posts WHERE author = :a "
-           "AND permlink = :p AND is_deleted = '0' LIMIT 1")
-    return await db.query_one(sql, a=author, p=permlink)
-
-async def get_child_ids(db, post_id):
-    """Given a parent post id, retrieve all child ids."""
-    sql = "SELECT id FROM hive_posts WHERE parent_id = :id AND is_deleted = '0'"
-    return await db.query_col(sql, id=post_id)

@@ -1,7 +1,7 @@
 """Hive API: Internal supporting methods"""
 import logging
 
-from hive.server.condenser_api.common import (
+from hive.server.common.helpers import (
     valid_account,
     valid_permlink,
     valid_limit)

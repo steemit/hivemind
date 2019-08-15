@@ -3,7 +3,7 @@ import logging
 import ujson as json
 from hive.server.hive_api.common import (
     get_account_id, get_community_id)
-from hive.server.condenser_api.common import return_error_info
+from hive.server.common.helpers import return_error_info
 
 log = logging.getLogger(__name__)
 
