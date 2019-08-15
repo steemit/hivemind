@@ -96,6 +96,7 @@ async def _query_author_rep_map(db, posts):
 def _condenser_account_object(row):
     """Convert an internal account record into legacy-steemd style."""
     return {
+        'id': row['id'],
         'name': row['name'],
         'created': _json_date(row['created_at']),
         'post_count': row['post_count'],
