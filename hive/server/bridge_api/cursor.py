@@ -81,7 +81,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag):
         sql = "%s <= (SELECT %s FROM %s WHERE post_id = :start_id)"
         where.append(sql % (field, field, table))
     elif community:
-        pinned_ids = _pinned(db, tag)
+        pinned_ids = await _pinned(db, tag)
 
     sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
            % (table, ' AND '.join(where), field))
