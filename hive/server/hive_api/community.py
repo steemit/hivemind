@@ -9,6 +9,15 @@ log = logging.getLogger(__name__)
 
 ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
 
+async def if_tag_community(context, tag, observer=None):
+    """Attempt to load community if tag is proper format."""
+    if tag[:5] == 'hive-':
+        db = context['db']
+        cid = await get_community_id(db, tag)
+        if cid:
+            return await get_community(context, tag, observer)
+    return None
+
 @return_error_info
 async def get_community(context, name, observer=None):
     """Retrieve full community object. Includes metadata, leadership team

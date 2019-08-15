@@ -7,7 +7,7 @@ import ujson as json
 
 from hive.server.common.mutes import Mutes
 
-from hive.server.hive_api.community import get_community
+from hive.server.hive_api.community import if_tag_community
 from hive.server.hive_api.common import get_account_id
 
 from hive.server.bridge_api.objects import (
@@ -127,7 +127,7 @@ async def get_state(context, path, observer=None):
         state['content'] = await _load_discussion(db, author, permlink)
         state['accounts'] = await _load_content_accounts(db, state['content'], observer_id)
 
-        community = await tag_community(context, tag, observer)
+        community = await if_tag_community(context, tag, observer)
         if community:
             ref = author + '/' + permlink
             assert state['content'][ref]['category'] == tag, 'invalid comm url'
@@ -139,7 +139,7 @@ async def get_state(context, path, observer=None):
         sort = valid_sort(part[0])
         tag = valid_tag(part[1].lower(), allow_empty=True)
 
-        community = await tag_community(context, tag, observer)
+        community = await if_tag_community(context, tag, observer)
         if community:
             state['community'] = {tag: community}
 
@@ -161,13 +161,6 @@ async def get_state(context, path, observer=None):
         raise ApiError('unhandled path: /%s' % path)
 
     return state
-
-async def tag_community(context, tag, observer):
-    """Attempt to load community if tag is proper format."""
-    if tag[:5] == 'hive-':
-        return await get_community(context, tag, observer)
-    return None
-
 
 async def _get_account_discussion_by_key(db, account, key):
     assert account, 'account must be specified'
