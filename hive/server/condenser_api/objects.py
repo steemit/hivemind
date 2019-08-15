@@ -52,7 +52,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
         row = dict(row)
         row['author_rep'] = author_reps[row['author']]
         post = _condenser_post_object(row, truncate_body=truncate_body)
-        #post['active_votes'] = _mute_votes(post['active_votes'], muted_accounts)
+        post['active_votes'] = _mute_votes(post['active_votes'], muted_accounts)
         posts_by_id[row['post_id']] = post
 
     return posts_by_id

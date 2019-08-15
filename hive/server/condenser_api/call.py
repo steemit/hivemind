@@ -128,9 +128,7 @@ async def call(context, api, method, params):
     elif method == 'get_discussions_by_comments':
         return await get_discussions_by_comments(context, **_strict_query(params))
     elif method == 'get_replies_by_last_update':
-        if isinstance(params, list) and params and isinstance(params[0], list):
-            return await get_replies_by_last_update(context, *_strict_list(params, 3))
-        return await get_replies_by_last_update(context, **_strict_query(params))
+        return await get_replies_by_last_update(context, *_strict_list(params, 3))
 
     # Exotic account discussion queries
     elif method == 'get_discussions_by_author_before_date':

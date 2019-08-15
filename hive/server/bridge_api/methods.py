@@ -1,6 +1,6 @@
-"""Steemd/condenser_api compatibility layer API methods."""
+"""Bridge API public endpoints for posts"""
 
-import hive.server.condenser_api.cursor as cursor
+import hive.server.bridge_api.cursor as cursor
 from hive.server.bridge_api.objects import load_posts, load_posts_reblogs
 from hive.server.condenser_api.common import (
     return_error_info,

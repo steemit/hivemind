@@ -27,7 +27,7 @@ from hive.server.bridge_api.tags import (
     get_trending_tags,
     get_top_trending_tags_summary)
 
-import hive.server.condenser_api.cursor as cursor
+import hive.server.bridge_api.cursor as cursor
 
 log = logging.getLogger(__name__)
 

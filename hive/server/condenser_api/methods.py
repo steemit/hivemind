@@ -16,6 +16,8 @@ from hive.server.condenser_api.common import (
     get_post_id,
     get_child_ids)
 
+# pylint: disable=too-many-arguments,line-too-long,too-many-lines
+
 
 # Dummy
 
@@ -320,6 +322,7 @@ async def get_comment_discussions_by_payout(context, start_author: str = '', sta
                                             limit: int = 20, tag: str = None,
                                             truncate_body: int = 0):
     """Query comments, sorted by payout."""
+    # pylint: disable=invalid-name
     ids = await cursor.pids_by_query(
         context['db'],
         'payout_comments',

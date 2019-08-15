@@ -1,4 +1,4 @@
-"""condenser_api trending tag fetching methods"""
+"""bridge_api trending tag fetching methods"""
 
 from aiocache import cached
 from hive.server.condenser_api.common import (return_error_info, valid_limit)
