@@ -17,10 +17,9 @@ async def load_accounts(db, names, observer_id=None):
     rows = await db.query_all(sql, names=tuple(names))
     accounts = [_condenser_account_object(row) for row in rows]
 
-    by_id = {account['id']: account for account in accounts}
-
     if observer_id:
-        _follow_contexts(db, by_id, observer_id, include_mute=True)
+        by_id = {account['id']: account for account in accounts}
+        await _follow_contexts(db, by_id, observer_id, include_mute=True)
 
     return accounts
 
@@ -188,9 +187,14 @@ def _amount(amount, asset='SBD'):
 def _hydrate_active_votes(vote_csv):
     """Convert minimal CSV representation into steemd-style object."""
     if not vote_csv: return []
-    cols = 'voter,rshares,percent,reputation'.split(',')
-    votes = vote_csv.split("\n")
-    return [dict(zip(cols, line.split(','))) for line in votes]
+    votes = []
+    for line in vote_csv.split("\n"):
+        voter, rshares, percent, reputation = line.split(',')
+        votes.append(dict(voter=voter,
+                          rshares=rshares,
+                          percent=percent,
+                          reputation=rep_to_raw(reputation)))
+    return votes
 
 def _json_date(date=None):
     """Given a db datetime, return a steemd/json-friendly version."""
