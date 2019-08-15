@@ -18,7 +18,9 @@ async def get_post_id(db, author, permlink):
 async def _get_post_id(db, author, permlink):
     """Get post_id from hive db. (does NOT filter on is_deleted)"""
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    return await db.query_one(sql, a=author, p=permlink)
+    post_id = await db.query_one(sql, a=author, p=permlink)
+    assert post_id, 'invalid author/permlink'
+    return post_id
 
 async def _get_account_id(db, name):
     """Get account id from hive db."""
@@ -74,9 +76,6 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag):
     start_id = None
     if start_permlink:
         start_id = await _get_post_id(db, start_author, start_permlink)
-        if not start_id:
-            return []
-
         sql = "%s <= (SELECT %s FROM %s WHERE post_id = :start_id)"
         where.append(sql % (field, field, table))
 
@@ -95,9 +94,6 @@ async def pids_by_blog(db, account: str, start_author: str = '',
     start_id = None
     if start_permlink:
         start_id = await _get_post_id(db, start_author, start_permlink)
-        if not start_id:
-            return []
-
         seek = """
           AND created_at <= (
             SELECT created_at
