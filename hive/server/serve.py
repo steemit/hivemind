@@ -19,6 +19,7 @@ from hive.server.common.mutes import Mutes
 
 from hive.server.bridge_api import methods as bridge_api
 from hive.server.bridge_api.get_state import get_state as bridge_api_get_state
+from hive.server.hive_api import community as hive_api_community
 
 from hive.server.db import Db
 
@@ -109,6 +110,10 @@ def build_methods():
         bridge_api_get_state,
         bridge_api.get_account_posts,
         bridge_api.get_ranked_posts,
+        hive_api_community.get_community,
+        hive_api_community.list_communities,
+        hive_api_community.list_community_roles,
+        hive_api_community.list_all_subscriptions,
     )})
 
     return methods
