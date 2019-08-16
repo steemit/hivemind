@@ -326,7 +326,11 @@ class CachedPost:
             catmap = cls._get_cat_map_for_insert(tups)
             for pid, post, level in zip(post_ids, posts, post_levels):
                 if post['author']:
-                    if pid in catmap: post['category'] = catmap[pid]
+                    if pid in catmap:
+                        cat = catmap[pid]
+                        post['category'] = cat
+                        if cat == 'hive-' and Accounts.exists(cat):
+                            post['community_id'] = Accounts.get_id(cat)
                     buffer.extend(cls._sql(pid, post, level=level))
                 else:
                     # When a post has been deleted (or otherwise DNE),
@@ -439,10 +443,11 @@ class CachedPost:
         # immutable; write only once (*edge case: undeleted posts)
         if level == 'insert':
             values.extend([
-                ('author',   post['author']),
-                ('permlink', post['permlink']),
-                ('category', post['category']),
-                ('depth',    post['depth'])])
+                ('author',       post['author']),
+                ('permlink',     post['permlink']),
+                ('category',     post['category']),
+                ('community_id', post['community_id']),
+                ('depth',        post['depth'])])
 
         # always write, unless simple vote update
         if level in ['insert', 'payout', 'update']:

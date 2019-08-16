@@ -271,6 +271,17 @@ class DbState:
             build_metadata_community().create_all(cls.db().engine())
             cls._set_ver(13)
 
+        if cls._ver == 13:
+            cls.db().query("ALTER TABLE hive_posts_cache ADD COLUMN community_id integer")
+            sqls = ("CREATE INDEX hive_posts_cache_ix30 ON hive_posts_cache (community_id, sc_trend,   post_id) WHERE community_id IS NOT NULL AND depth = 0",
+                    "CREATE INDEX hive_posts_cache_ix31 ON hive_posts_cache (community_id, sc_hot,     post_id) WHERE community_id IS NOT NULL AND depth = 0",
+                    "CREATE INDEX hive_posts_cache_ix32 ON hive_posts_cache (community_id, created_at, post_id) WHERE community_id IS NOT NULL AND depth = 0",
+                    "CREATE INDEX hive_posts_cache_ix33 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_paidout = '0'",
+                    "CREATE INDEX hive_posts_cache_ix34 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_paidout = '0' AND is_grayed = '1'")
+            for sql in sqls:
+                cls.db().query(sql)
+            cls._set_ver(14)
+
         reset_autovac(cls.db())
 
         log.info("[HIVE] db version: %d", cls._ver)

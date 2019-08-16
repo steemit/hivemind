@@ -88,6 +88,8 @@ def build_metadata():
         sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
         sa.Index('hive_posts_ix3', 'author', 'depth', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: author blog/comments
         sa.Index('hive_posts_ix4', 'parent_id', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: fetching children
+
+        sa.Index('hive_posts_ix4', 'community', 'id', postgresql_where=sql_text("is_pinned = '1'")), # API: pinned posts in community
     )
 
     sa.Table(
@@ -155,6 +157,7 @@ def build_metadata():
         sa.Column('category', VARCHAR(255), nullable=False, server_default=''),
 
         # important/index
+        sa.Column('community_id', sa.Integer, nullable=True),
         sa.Column('depth', SMALLINT, nullable=False, server_default='0'),
         sa.Column('children', SMALLINT, nullable=False, server_default='0'),
 
@@ -195,15 +198,29 @@ def build_metadata():
         sa.Column('json', sa.Text),
         sa.Column('raw_json', sa.Text),
 
-        sa.Index('hive_posts_cache_ix2', 'promoted', postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")), # API
-        sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # core
-        sa.Index('hive_posts_cache_ix6a', 'sc_trend', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: global trending
-        sa.Index('hive_posts_cache_ix7a', 'sc_hot', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: global hot
-        sa.Index('hive_posts_cache_ix6b', 'post_id', 'sc_trend', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered trending
-        sa.Index('hive_posts_cache_ix7b', 'post_id', 'sc_hot', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered hot
-        sa.Index('hive_posts_cache_ix8', 'category', 'payout', 'depth', postgresql_where=sql_text("is_paidout = '0'")), # API: tag stats
-        sa.Index('hive_posts_cache_ix9a', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout
-        sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered payout
+        sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id',  postgresql_where=sql_text("is_paidout = '0'")),                   # core
+
+        sa.Index('hive_posts_cache_ix8',  'category', 'payout', 'depth',            postgresql_where=sql_text("is_paidout = '0'")), # API: tag stats
+
+        # post lists
+        sa.Index('hive_posts_cache_ix2',  'promoted',             postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")),  # API: promoted
+
+        sa.Index('hive_posts_cache_ix6a', 'sc_trend', 'post_id',  postgresql_where=sql_text("is_paidout = '0'")),                   # API: trending             todo: depth=0
+        sa.Index('hive_posts_cache_ix7a', 'sc_hot',   'post_id',  postgresql_where=sql_text("is_paidout = '0'")),                   # API: hot                  todo: depth=0
+        sa.Index('hive_posts_cache_ix6b', 'post_id',  'sc_trend', postgresql_where=sql_text("is_paidout = '0'")),                   # API: trending, filtered   todo: depth=0
+        sa.Index('hive_posts_cache_ix7b', 'post_id',  'sc_hot',   postgresql_where=sql_text("is_paidout = '0'")),                   # API: hot, filtered        todo: depth=0
+
+        sa.Index('hive_posts_cache_ix9a',             'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout
+        sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout, filtered
+        sa.Index('hive_posts_cache_ix9a',             'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")),          # API: payout
+        sa.Index('hive_posts_cache_ix9b', 'category', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")),          # API: payout, filtered
+
+
+        sa.Index('hive_posts_cache_ix30', 'community_id', 'sc_trend',   'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community trend
+        sa.Index('hive_posts_cache_ix31', 'community_id', 'sc_hot',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community hot
+        sa.Index('hive_posts_cache_ix32', 'community_id', 'created_at', 'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community created
+        sa.Index('hive_posts_cache_ix33', 'community_id', 'payout',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND is_paidout = '0'")), # API: community payout
+        sa.Index('hive_posts_cache_ix34', 'community_id', 'payout',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '1' AND is_paidout = '0'")), # API: community muted
     )
 
     sa.Table(
