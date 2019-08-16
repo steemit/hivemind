@@ -210,10 +210,8 @@ def build_metadata():
         sa.Index('hive_posts_cache_ix6b', 'post_id',  'sc_trend', postgresql_where=sql_text("is_paidout = '0'")),                   # API: trending, filtered   todo: depth=0
         sa.Index('hive_posts_cache_ix7b', 'post_id',  'sc_hot',   postgresql_where=sql_text("is_paidout = '0'")),                   # API: hot, filtered        todo: depth=0
 
-        sa.Index('hive_posts_cache_ix9a',             'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout
-        sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout, filtered
-        sa.Index('hive_posts_cache_ix9a',             'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")),          # API: payout
-        sa.Index('hive_posts_cache_ix9b', 'category', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")),          # API: payout, filtered
+        sa.Index('hive_posts_cache_ix9a',             'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout               todo: rem depth
+        sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout, filtered     todo: rem depth
 
 
         sa.Index('hive_posts_cache_ix30', 'community_id', 'sc_trend',   'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community trend
