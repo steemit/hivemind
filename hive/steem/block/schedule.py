@@ -71,7 +71,7 @@ class BlockSchedule:
         we can identify this case by comparing current time to latest
         received block time."""
         if num == self._head_num:
-            gap = time() - utc_timestamp(date)
+            gap = int(time() - utc_timestamp(date))
             assert gap > -60, 'system clock is %ds behind chain' % gap
             if gap > 60:
                 raise StaleHeadException("chain gap is %fs" % gap)
