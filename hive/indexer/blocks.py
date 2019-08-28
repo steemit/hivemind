@@ -86,6 +86,9 @@ class Blocks:
                 elif op_type == 'account_update_operation':
                     if not is_initial_sync:
                         Accounts.dirty(set([op['account']]))
+                elif op_type == 'account_update2_operation':
+                    if not is_initial_sync:
+                        Accounts.dirty(set([op['account']]))
 
                 # post ops
                 elif op_type == 'comment_operation':
