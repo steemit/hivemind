@@ -38,17 +38,13 @@ def process_json_community_op(actor, op_json, date):
     """Validates community op and apply state changes to db."""
     CommunityOp.process_if_valid(actor, op_json, date)
 
-def read_key_bool(op, key):
+def strict_bool(op, key):
     """Reads a key from dict, ensuring valid bool if present."""
-    if key in op:
-        assert isinstance(op[key], bool), 'must be bool: %s' % key
-        return op[key]
-    return None
+    assert isinstance(op[key], bool), 'must be bool: %s' % key
+    return op[key]
 
-def read_key_str(op, key, maxlen=None, fmt=None):
+def strict_str(op, key, maxlen=None, fmt=None):
     """Reads a key from a dict, ensuring non-blank str if present."""
-    if key not in op:
-        return None
     assert isinstance(op[key], str), 'key `%s` was not str' % key
     assert op[key], 'key `%s` was blank' % key
     assert op[key] == op[key].strip(), 'invalid padding: %s' % key
@@ -64,13 +60,41 @@ def read_key_str(op, key, maxlen=None, fmt=None):
 
     return op[key]
 
-def read_key_dict(obj, key):
+def strict_dict(obj, key):
     """Given a dict, read `key`, ensuring result is a dict."""
-    assert key in obj, 'key `%s` not found' % key
     assert obj[key], 'key `%s` was blank' % key
     assert isinstance(obj[key], dict), 'key `%s` not a dict' % key
     return obj[key]
 
+def strict_post_id(community, author, permlink):
+    strict_str({'permlink': permlink}, 'permlink', 256)
+    from hive.indexer.posts import Posts
+    post_id = Posts.get_id(author, permlink)
+    assert post_id, 'invalid account/permlink'
+    assert_post_community(post_id, community)
+    return post_id
+
+def strict_account_id(account):
+    strict_str({'account': account}, 'account', 16)
+    assert Accounts.exists(account), 'account not found'
+    return Accounts.get_id(account)
+
+def strict_community_id(community):
+    strict_str({'community': community}, 'community', 16)
+    assert Accounts.exists(community), 'invalid community name'
+    community_id = Community.get_id(community)
+    assert community_id, 'invalid community'
+    return community_id
+
+def strict_role_id(role):
+    role = strict_str({'role': role}, 'role', 16)
+    assert role in ROLES, 'invalid role'
+    return ROLES[role]
+
+def assert_post_community(post_id, expected):
+    sql = """SELECT community FROM hive_posts WHERE id = :id LIMIT 1"""
+    community = DB.query_one(sql, id=post_id)
+    assert community == expected, 'post belongs to %s' % community
 
 class Community:
     """Handles hive community registration and operations."""
@@ -197,51 +221,41 @@ class CommunityOp:
         'unsubscribe':    ['community'],
     }
 
-    def __init__(self, actor, date):
+    def __init__(self):
         """Inits a community op for validation and processing."""
-        self.date = date
+        self.date = None
         self.valid = False
         self.action = None
         self.op = None
 
-        self.actor = actor
         self.actor_id = None
-
-        self.community = None
         self.community_id = None
-
-        self.account = None
         self.account_id = None
-
-        self.permlink = None
         self.post_id = None
-
-        self.role = None
         self.role_id = None
 
-        self.notes = None
-        self.title = None
         self.props = None
 
     @classmethod
     def process_if_valid(cls, actor, op_json, date):
         """Helper to instantiate, validate, process an op."""
-        op = CommunityOp(actor, date)
-        if op.validate(op_json):
+        op = CommunityOp()
+        if op.validate(actor, op_json, date):
             op.process()
             return True
         return False
 
-    def validate(self, raw_op):
+    def validate(self, actor, raw_op, date):
         """Pre-processing and validation of custom_json payload."""
-        log.info("processing op: %s, %s", self.actor, raw_op)
+        log.info("processing op: %s, %s", actor, raw_op)
+        self.date = date
 
         try:
             # validate basic structure
             self._validate_raw_op(raw_op)
             self.action = raw_op[0]
             self.op = raw_op[1]
-            self.actor_id = Accounts.get_id(self.actor)
+            self.actor_id = Accounts.get_id(actor)
 
             # validate and read schema
             self._read_schema()
@@ -262,24 +276,24 @@ class CommunityOp:
         action = self.action
         params = dict(
             date=self.date,
-            community=self.community,
             community_id=self.community_id,
-            actor=self.actor,
             actor_id=self.actor_id,
-            account=self.account,
             account_id=self.account_id,
             post_id=self.post_id,
             role_id=self.role_id,
-            notes=self.notes,
-            title=self.title,
+            title=self.op.get('title'),
         )
+        notes = self.op.get('notes')
 
         # Community-level commands
         if action == 'updateProps':
-            bind = ', '.join([k+" = :"+k for k in list(self.props.keys())])
+            props = self.op['props']
+            if 'settings' in props:
+                props = {**props, 'settings': json.dumps(props['settings'])}
+            bind = ', '.join([k+" = :"+k for k in list(props.keys())])
             DB.query("UPDATE hive_communities SET %s WHERE id = :id" % bind,
-                     id=self.community_id, **self.props)
-            self._notify('set_props', payload=json.dumps(read_key_dict(self.op, 'props')))
+                     id=self.community_id, **props)
+            self._notify('set_props', payload=json.dumps(self.op['props']))
 
         elif action == 'subscribe':
             DB.query("""INSERT INTO hive_subscriptions
@@ -303,34 +317,34 @@ class CommunityOp:
                         VALUES (:account_id, :community_id, :role_id, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET role_id = :role_id""", **params)
-            self._notify('set_role', payload=ROLES[self.role_id])
+            self._notify('set_role', payload=self.op.get('role'))
         elif action == 'setUserTitle':
             DB.query("""INSERT INTO hive_roles
                                (account_id, community_id, title, created_at)
                         VALUES (:account_id, :community_id, :title, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET title = :title""", **params)
-            self._notify('set_label', payload=self.title)
+            self._notify('set_label', payload=self.op.get('title'))
 
         # Post-level actions
         elif action == 'mutePost':
             DB.query("""UPDATE hive_posts SET is_muted = '1'
                          WHERE id = :post_id""", **params)
-            self._notify('mute_post', payload=self.notes)
+            self._notify('mute_post', payload=notes)
         elif action == 'unmutePost':
             DB.query("""UPDATE hive_posts SET is_muted = '0'
                          WHERE id = :post_id""", **params)
-            self._notify('unmute_post', payload=self.notes)
+            self._notify('unmute_post', payload=notes)
         elif action == 'pinPost':
             DB.query("""UPDATE hive_posts SET is_pinned = '1'
                          WHERE id = :post_id""", **params)
-            self._notify('pin_post', payload=self.notes)
+            self._notify('pin_post', payload=notes)
         elif action == 'unpinPost':
             DB.query("""UPDATE hive_posts SET is_pinned = '0'
                          WHERE id = :post_id""", **params)
-            self._notify('unpin_post', payload=self.notes)
+            self._notify('unpin_post', payload=notes)
         elif action == 'flagPost':
-            self._notify('flag_post', payload=self.notes)
+            self._notify('flag_post', payload=notes)
 
         return True
 
@@ -355,90 +369,38 @@ class CommunityOp:
 
     def _read_schema(self):
         """Validate structure; read and validate keys."""
-        schema = self.SCHEMA[self.action]
-        assert_keys_match(self.op.keys(), schema, allow_missing=False)
-        if 'community' in schema: self._read_community()
-        if 'account'   in schema: self._read_account()
-        if 'permlink'  in schema: self._read_permlink()
-        if 'role'      in schema: self._read_role()
-        if 'notes'     in schema: self._read_notes()
-        if 'title'     in schema: self._read_title()
-        if 'props'     in schema: self._read_props()
+        op = self.op
+        provided = op.keys()
+        expected = self.SCHEMA[self.action]
+        assert_keys_match(provided, expected, allow_missing=False)
 
-    def _read_community(self):
-        _name = read_key_str(self.op, 'community', 16)
-        assert _name, 'must name a community'
-        assert Accounts.exists(_name), 'invalid name `%s`' % _name
-        _id = Community.get_id(_name)
-        assert _id, 'community `%s` does not exist' % _name
+        if 'community' in op:
+            self.community_id = strict_community_id(op['community'])
+        if 'account' in op:
+            self.account_id = strict_account_id(op['account'])
+        if 'permlink' in op:
+            self.post_id = strict_post_id(op['community'],
+                                          op['account'], op['permlink'])
+        if 'role' in op:
+            self.role_id = strict_role_id(op['role'])
+        if 'notes' in op:
+            strict_str(op, 'notes', 120)
+        if 'title' in op:
+            op['title'] == '' or strict_str(op, 'title', 32)
 
-        self.community = _name
-        self.community_id = _id
-
-    def _read_account(self):
-        _name = read_key_str(self.op, 'account', 16)
-        assert _name, 'must name an account'
-        assert Accounts.exists(_name), 'account `%s` not found' % _name
-        self.account = _name
-        self.account_id = Accounts.get_id(_name)
-
-    def _read_permlink(self):
-        assert self.account, 'permlink requires named account'
-        _permlink = read_key_str(self.op, 'permlink', 256)
-        assert _permlink, 'must name a permlink'
-
-        from hive.indexer.posts import Posts
-        _pid = Posts.get_id(self.account, _permlink)
-        assert _pid, 'invalid post: %s/%s' % (self.account, _permlink)
-
-        sql = """SELECT community FROM hive_posts WHERE id = :id LIMIT 1"""
-        _comm = DB.query_one(sql, id=_pid)
-        assert self.community == _comm, 'post does not belong to community'
-
-        self.permlink = _permlink
-        self.post_id = _pid
-
-    def _read_role(self):
-        _role = read_key_str(self.op, 'role', 16)
-        assert _role, 'must name a role'
-        assert _role in ROLES, 'invalid role'
-        self.role = _role
-        self.role_id = ROLES[_role]
-
-    def _read_notes(self):
-        _notes = read_key_str(self.op, 'notes', 120)
-        assert _notes, 'notes cannot be blank'
-        self.notes = _notes
-
-    def _read_title(self):
-        _title = read_key_str(self.op, 'title', 32) or ''
-        _title = _title.strip()
-        self.title = _title
-
-    def _read_props(self):
-        props = read_key_dict(self.op, 'props')
-        valid = ['title', 'about', 'lang', 'is_nsfw',
-                 'description', 'flag_text', 'settings']
-        assert_keys_match(props.keys(), valid, allow_missing=True)
-
-        out = {}
-        if 'title' in props:
-            out['title'] = read_key_str(props, 'title', 32)
-        if 'about' in props:
-            out['about'] = read_key_str(props, 'about', 120)
-        if 'lang' in props:
-            out['lang'] = read_key_str(props, 'lang', 2, 'lang')
-        if 'is_nsfw' in props:
-            out['is_nsfw'] = read_key_bool(props, 'is_nsfw')
-        if 'description' in props:
-            out['description'] = read_key_str(props, 'description', 5000)
-        if 'flag_text' in props:
-            out['flag_text'] = read_key_str(props, 'flag_text', 5000)
-        if 'settings' in props:
-            out['settings'] = json.dumps(read_key_dict(props, 'settings'))
-        assert out, 'props were blank'
-        self.props = out
-
+        if 'props' in op:
+            props = strict_dict(op, 'props')
+            assert props, 'props were blank'
+            valid = ['title', 'about', 'lang', 'is_nsfw',
+                     'description', 'flag_text', 'settings']
+            assert_keys_match(props.keys(), valid, allow_missing=True)
+            if 'title'       in props: strict_str(props, 'title', 32)
+            if 'about'       in props: strict_str(props, 'about', 120)
+            if 'lang'        in props: strict_str(props, 'lang', 2, 'lang')
+            if 'is_nsfw'     in props: strict_bool(props, 'is_nsfw')
+            if 'description' in props: strict_str(props, 'description', 5000)
+            if 'flag_text'   in props: strict_str(props, 'flag_text', 5000)
+            if 'settings'    in props: strict_dict(props, 'settings')
 
     def _validate_permissions(self):
         community_id = self.community_id
@@ -449,7 +411,7 @@ class CommunityOp:
         if action == 'setRole':
             assert actor_role >= ROLE_MOD, 'only mods and up can alter roles'
             assert actor_role > new_role, 'cannot promote to or above own rank'
-            if self.actor != self.account:
+            if self.actor_id != self.account_id:
                 account_role = Community.get_user_role(community_id, self.account_id)
                 assert account_role < actor_role, 'cant modify higher-role user'
                 assert account_role != new_role, 'role would not change'
