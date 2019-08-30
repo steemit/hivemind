@@ -90,9 +90,9 @@ class Posts:
 
     @classmethod
     def delete_op(cls, op):
-        """Given a delete ops, mark the post as deleted.
+        """Given a delete_comment op, mark the post as deleted.
 
-        (And remove them from the feed cache.)
+        Also remove it from post-cache and feed-cache.
         """
         cls.delete(op)
 
