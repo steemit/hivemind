@@ -7,7 +7,7 @@ def safe_profile_metadata(account):
     """Given an account, return sanitized profile data."""
     prof = {}
     try:
-        prof = json.loads(account['json_metadata'])['profile']
+        prof = json.loads(account['posting_json_metadata'])['profile']
         if not isinstance(prof, dict):
             prof = {}
     except Exception:

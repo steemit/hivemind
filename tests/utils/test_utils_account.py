@@ -12,7 +12,7 @@ def test_valid_account():
         cover_image='https://steemitimages.com/0x0/https://pbs.twimg.com/profile_banners/816255358066946050/1483447009/1500x500',
         profile_image='https://www.parhlo.com/wp-content/uploads/2016/01/tmp617041537745813506.jpg',
     )
-    account = {'name': 'foo', 'json_metadata': json.dumps(dict(profile=raw_profile))}
+    account = {'name': 'foo', 'posting_json_metadata': json.dumps(dict(profile=raw_profile))}
 
     safe_profile = safe_profile_metadata(account)
     for key, safe_value in safe_profile.items():
