@@ -64,9 +64,7 @@ class Blocks:
         date = block['timestamp']
 
         account_names = set()
-        comment_ops = []
         json_ops = []
-        delete_ops = []
         for tx_idx, tx in enumerate(block['transactions']):
             for operation in tx['operations']:
                 op_type = operation['type']
@@ -88,12 +86,15 @@ class Blocks:
                 elif op_type == 'account_update_operation':
                     if not is_initial_sync:
                         Accounts.dirty(set([op['account']]))
+                elif op_type == 'account_update2_operation':
+                    if not is_initial_sync:
+                        Accounts.dirty(set([op['account']]))
 
                 # post ops
                 elif op_type == 'comment_operation':
-                    comment_ops.append(op)
+                    Posts.comment_op(op, date)
                 elif op_type == 'delete_comment_operation':
-                    delete_ops.append(op)
+                    Posts.delete_op(op)
                 elif op_type == 'vote_operation':
                     if not is_initial_sync:
                         CachedPost.vote(op['author'], op['permlink'])
@@ -105,8 +106,6 @@ class Blocks:
                     json_ops.append(op)
 
         Accounts.register(account_names, date)     # register any new names
-        Posts.comment_ops(comment_ops, date)       # handle inserts, edits
-        Posts.delete_ops(delete_ops)               # handle post deletion
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops
 
         return num

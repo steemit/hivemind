@@ -214,7 +214,7 @@ async def pids_by_blog_by_index(db, account: str, start_index: int, limit: int =
                   WHERE account_id = :account_id"""
         start_index = await db.query_one(sql, account_id=account_id)
         if start_index < 0:
-            return []
+            return (0, [])
 
     offset = start_index - limit + 1
     assert offset >= 0, ('start_index and limit combination is invalid (%d, %d)'
@@ -230,7 +230,7 @@ async def pids_by_blog_by_index(db, account: str, start_index: int, limit: int =
     """
 
     ids = await db.query_col(sql, account_id=account_id, limit=limit, offset=offset)
-    return list(reversed(ids))
+    return (start_index, list(reversed(ids)))
 
 
 async def pids_by_blog_without_reblog(db, account: str, start_permlink: str = '', limit: int = 20):
