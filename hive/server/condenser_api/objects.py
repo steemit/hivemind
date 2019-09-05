@@ -189,9 +189,14 @@ def _hydrate_active_votes(vote_csv):
     """Convert minimal CSV representation into steemd-style object."""
     if not vote_csv:
         return []
-    cols = 'voter,rshares,percent,reputation'.split(',')
-    votes = vote_csv.split("\n")
-    return [dict(zip(cols, line.split(','))) for line in votes]
+    votes = []
+    for line in vote_csv.split("\n"):
+        voter, rshares, percent, reputation = line.split(',')
+        votes.append(dict(voter=voter,
+                          rshares=rshares,
+                          percent=percent,
+                          reputation=rep_to_raw(reputation)))
+    return votes
 
 def _json_date(date=None):
     """Given a db datetime, return a steemd/json-friendly version."""
