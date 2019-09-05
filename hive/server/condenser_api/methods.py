@@ -373,7 +373,7 @@ async def _get_blog(db, account: str, start_index: int, limit: int = None):
     if not limit:
         limit = start_index + 1
 
-    ids = await cursor.pids_by_blog_by_index(
+    start_index, ids = await cursor.pids_by_blog_by_index(
         db,
         valid_account(account),
         valid_offset(start_index),
