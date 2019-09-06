@@ -262,8 +262,6 @@ class DbState:
             cls.db().query("CREATE INDEX hive_posts_ix4 ON hive_posts (parent_id, id) WHERE is_deleted = '0'")
             cls._set_ver(12)
 
-        cls._ver = 12
-
         if cls._ver == 12: # community schema
             #assert False, 'community schema migration not finalized'
             for table in ['hive_members', 'hive_flags', 'hive_modlog',
