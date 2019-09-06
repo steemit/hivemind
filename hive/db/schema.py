@@ -243,7 +243,7 @@ def build_metadata_community(metadata=None):
         sa.Column('settings',    TEXT,            nullable=False, server_default='{}'),
 
         sa.UniqueConstraint('name', name='hive_communities_ux1'),
-        #sa.Index('hive_communities_ix1', 'rank', 'id')
+        sa.Index('hive_communities_ix1', 'rank', 'id')
     )
 
     sa.Table(
@@ -255,7 +255,7 @@ def build_metadata_community(metadata=None):
         sa.Column('title',        sa.String(140), nullable=False, server_default=''),
 
         sa.UniqueConstraint('account_id', 'community_id', name='hive_roles_ux1'),
-        sa.Index('hive_roles_ix1', 'community_id', 'account_id', 'role'),
+        sa.Index('hive_roles_ix1', 'community_id', 'account_id', 'role_id'),
     )
 
     sa.Table(
