@@ -166,7 +166,7 @@ class Community:
 
     @classmethod
     def recalc_pending_payouts(cls):
-        """Update all pending_payout and rank fields."""
+        """Update all pending payout and rank fields."""
         sql = """SELECT c.name, SUM(p.payout)
                    FROM hive_communities c
               LEFT JOIN hive_posts_cache p ON p.category = c.name
@@ -176,7 +176,7 @@ class Community:
         for rank, row in enumerate(DB.query_all(sql)):
             community, total = row
             sql = """UPDATE hive_communities
-                        SET pending_payout = :total, rank = :rank
+                        SET sum_pending = :total, rank = :rank
                       WHERE name = :community"""
             DB.query(sql, community=community, total=total, rank=rank+1)
 

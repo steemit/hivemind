@@ -233,7 +233,7 @@ def build_metadata_community(metadata=None):
         sa.Column('name',        VARCHAR(16),     nullable=False),
         sa.Column('title',       sa.String(32),   nullable=False, server_default=''),
         sa.Column('created_at',  sa.DateTime,     nullable=False),
-        sa.Column('sum_pending', sa.Integer,      nullable=False, server_default='0'), # TODO: renamed!
+        sa.Column('sum_pending', sa.Integer,      nullable=False, server_default='0'),
         sa.Column('rank',        sa.Integer,      nullable=False, server_default='0'),
         sa.Column('subscribers', sa.Integer,      nullable=False, server_default='0'),
         sa.Column('is_nsfw',     BOOLEAN,         nullable=False, server_default='0'),
@@ -255,7 +255,7 @@ def build_metadata_community(metadata=None):
         sa.Column('title',        sa.String(140), nullable=False, server_default=''),
 
         sa.UniqueConstraint('account_id', 'community_id', name='hive_roles_ux1'),
-        sa.Index('hive_roles_ix1', 'community_id', 'account_id', 'created_at'), # TODO: role or title instead of created_At
+        sa.Index('hive_roles_ix1', 'community_id', 'account_id', 'role'),
     )
 
     sa.Table(
@@ -281,9 +281,9 @@ def build_metadata_community(metadata=None):
         sa.Column('payload',      sa.Text,     nullable=True),
 
         sa.Index('hive_notifs_ix1', 'dst_id',                  'id', postgresql_where=sql_text("dst_id IS NOT NULL")),
-        sa.Index('hive_notifs_ix1', 'community_id',            'id', postgresql_where=sql_text("community_id IS NOT NULL")),
-        sa.Index('hive_notifs_ix1', 'community_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL")), # TODO: does it make sense? is this a useful filter?
-        sa.Index('hive_notifs_ix1', 'community_id', 'post_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND post_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix2', 'community_id',            'id', postgresql_where=sql_text("community_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix3', 'community_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix4', 'community_id', 'post_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND post_id IS NOT NULL")),
     )
 
     return metadata
