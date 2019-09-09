@@ -54,6 +54,10 @@ async def _follow_contexts(db, accounts, observer_id, include_mute=False):
             context['muted'] = True
         accounts[following_id]['context'] = context
 
+    for account in accounts.values():
+        if 'context' not in account:
+            account['context'] = {'followed': False}
+
 
 # Comment objects
 # ---------------
