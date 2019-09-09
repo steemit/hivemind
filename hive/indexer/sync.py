@@ -194,12 +194,11 @@ class Sync:
                      cnt['recount'], accts, follows, ms, ' SLOW' if ms > 1000 else '')
 
             if num % 1200 == 0: #1hr
-                log.info("[LIVE] update account ranks mmap")
+                log.warning("hourly stats")
                 Accounts.fetch_ranks()
-                log.info("[LIVE] recalc comm ranks")
                 Community.recalc_pending_payouts()
             if num % 100 == 0: #5min
-                log.info("[LIVE] flag 500 oldest accounts for update")
+                log.warning("head block: %d", num)
                 Accounts.dirty_oldest(500)
             if num % 20 == 0: #1min
                 self._update_chain_state()
