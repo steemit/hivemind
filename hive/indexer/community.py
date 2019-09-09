@@ -254,9 +254,11 @@ class CommunityOp:
             self._validate_permissions()
 
             self.valid = True
+            log.warning("%s %s was valid", raw_op[0], raw_op[1])
 
         except AssertionError as e:
             payload = repr(e)
+            log.warning("%s %s was invalid: %s", raw_op[0], raw_op[1], payload)
             Notify('error', dst_id=self.actor_id,
                    when=self.date, payload=payload).write()
 
