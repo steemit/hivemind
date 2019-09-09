@@ -78,7 +78,7 @@ class Notify:
         return dict(
             type_id=self.enum.value,
             score=self.score,
-            when=self.when,
+            created_at=self.when,
             src_id=self.src_id,
             dst_id=self.dst_id,
             post_id=self.post_id,
@@ -90,8 +90,9 @@ class Notify:
         """Store this notification."""
         assert not self._id, 'notify has id %d' % self._id
         log.warning("notify --> %s", vars(self))
-        sql = """INSERT INTO hive_notifs (type_id, score, "when", src_id, dst_id,
-                                          post_id, community_id, payload)
-                      VALUES (:type_id, :score, :when, :src_id, :dst_id,
+        sql = """INSERT INTO hive_notifs (type_id, score, created_at, src_id,
+                                          dst_id, post_id, community_id,
+                                          payload)
+                      VALUES (:type_id, :score, :created_at, :src_id, :dst_id,
                               :post_id, :community_id, :payload)"""
         DB.query(sql, **self.to_dict())

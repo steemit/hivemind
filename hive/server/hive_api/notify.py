@@ -60,7 +60,7 @@ async def community_notifications(context, community, limit=100):
     return [_render(row) for row in rows]
 
 def _notifs_sql(where):
-    sql = """SELECT hn.id, hn.type_id, hn.score, "when",
+    sql = """SELECT hn.id, hn.type_id, hn.score, hn.created_at,
                     src.name src, dst.name dst,
                     hp.author, hp.permlink, hc.name community,
                     hc.title community_title, payload
@@ -80,7 +80,7 @@ def _render(row):
     """Convert object to string rep."""
     # src dst payload community post
     enum = NotifyType(row['type_id'])
-    out = {'type': enum.name, 'score': row['score']}
+    out = {'type': enum.name, 'score': row['score'], 'date': str(row['created_at'])}
     msg = STRINGS[enum.value]
     if '<src>' in msg:
         msg = msg.replace('<src>', '@' + row['src'])
