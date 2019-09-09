@@ -44,6 +44,22 @@ async def account_notifications(context, account, min_score=0, limit=100):
     db = context['db']
     limit = valid_limit(limit, 100)
     account_id = await get_account_id(db, account)
+    sql = _notifs_sql("dst_id = :dst_id")
+    rows = await db.query_all(sql, min_score=min_score, dst_id=account_id, limit=limit)
+    return [_render(row) for row in rows]
+
+@return_error_info
+async def community_notifications(context, community, limit=100):
+    """Load notifications for named community."""
+    db = context['db']
+    limit = valid_limit(limit, 100)
+    min_score = 0
+    account_id = await get_account_id(db, community)
+    sql = _notifs_sql("community_id = :dst_id")
+    rows = await db.query_all(sql, min_score=min_score, dst_id=account_id, limit=limit)
+    return [_render(row) for row in rows]
+
+def _notifs_sql(where):
     sql = """SELECT hn.id, hn.type_id, hn.score, "when",
                     src.name src, dst.name dst,
                     hp.author, hp.permlink, hc.name community,
@@ -53,13 +69,12 @@ async def account_notifications(context, account, min_score=0, limit=100):
           LEFT JOIN hive_accounts dst ON hn.dst_id = dst.id
           LEFT JOIN hive_posts hp ON hn.post_id = hp.id
           LEFT JOIN hive_communities hc ON hn.community_id = hc.id
-          WHERE dst_id = :dst_id
+          WHERE %s
             AND score >= :min_score
             AND hn.id > 23
        ORDER BY hn.id DESC
           LIMIT :limit"""
-    rows = await db.query_all(sql, min_score=min_score, dst_id=account_id, limit=limit)
-    return [_render(row) for row in rows]
+    return sql % where
 
 def _render(row):
     """Convert object to string rep."""

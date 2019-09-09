@@ -112,6 +112,7 @@ def build_methods():
         bridge_api.get_account_posts,
         bridge_api.get_ranked_posts,
         hive_api_notify.account_notifications,
+        hive_api_notify.community_notifications,
         hive_api_community.get_community,
         hive_api_community.list_communities,
         hive_api_community.list_community_roles,
