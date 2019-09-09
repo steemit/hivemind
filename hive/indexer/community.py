@@ -96,6 +96,10 @@ class Community:
                          VALUES (:community_id, :account_id, :role_id, :date)"""
             DB.query(sql, community_id=_id, account_id=_id, role_id=ROLE_OWNER, date=block_date)
 
+            Notify('new_community', src_id=None, dst_id=_id,
+                   when=block_date, community_id=_id).write()
+
+
     @classmethod
     def validated_name(cls, name):
         """Perform basic validation on community name, then search for id."""
@@ -342,6 +346,7 @@ class CommunityOp:
             if self._subscribed(self.account_id):
                 dst_id = self.account_id
 
+        log.warning("_notify %s %s", op, kwargs)
         Notify(op, src_id=self.actor_id, dst_id=dst_id, post_id=self.post_id,
                when=self.date, community_id=self.community_id, **kwargs).write()
 
