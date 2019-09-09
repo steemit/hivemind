@@ -336,6 +336,10 @@ class CommunityOp:
         elif action == 'flagPost':
             self._notify('flag_post', payload=self.notes)
 
+        else:
+            assert False, '%s invalid action' % action
+
+        log.warning("%s processed", action)
         return True
 
     def _notify(self, op, **kwargs):
