@@ -100,7 +100,7 @@ class Notify:
         """Store this notification."""
         assert not self._id, 'notify has id %d' % self._id
         log.warning("notify --> %s", vars(self))
-        sql = """INSERT INTO hive_notify (type_id, score, "when", src_id, dst_id,
+        sql = """INSERT INTO hive_notifs (type_id, score, "when", src_id, dst_id,
                                           post_id, community_id, payload)
                       VALUES (:type_id, :score, :when, :src_id, :dst_id,
                               :post_id, :community_id, :payload)"""
