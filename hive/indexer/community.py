@@ -312,16 +312,14 @@ class CommunityOp:
                         VALUES (:account_id, :community_id, :role_id, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET role_id = :role_id""", **params)
-            payload = '@' + self.account + ' ' + ROLE_NAMES[self.role_id]
-            self._notify('set_role', payload=payload)
+            self._notify('set_role', payload=ROLE_NAMES[self.role_id])
         elif action == 'setUserTitle':
             DB.query("""INSERT INTO hive_roles
                                (account_id, community_id, title, created_at)
                         VALUES (:account_id, :community_id, :title, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET title = :title""", **params)
-            payload = '@' + self.account + ' ' + self.title
-            self._notify('set_label', payload=payload)
+            self._notify('set_label', payload=self.title)
 
         # Post-level actions
         elif action == 'mutePost':
@@ -343,23 +341,21 @@ class CommunityOp:
         elif action == 'flagPost':
             self._notify('flag_post', payload=self.notes)
 
-        else:
-            assert False, '%s invalid action' % action
-
-        log.warning("%s processed", action)
         return True
 
     def _notify(self, op, **kwargs):
         dst_id = None
-        # only notify recipient for these ops
-        if op in ('set_role', 'set_label'):
-            # and only if they are subscribed
-            if self._subscribed(self.account_id):
-                dst_id = self.account_id
+        score = 35
 
-        log.warning("_notify %s %s", op, kwargs)
-        Notify(op, src_id=self.actor_id, dst_id=dst_id, post_id=self.post_id,
-               when=self.date, community_id=self.community_id, **kwargs).write()
+        if self.account_id and not self.post_id:
+            dst_id = self.account_id
+            if not self._subscribed(self.account_id):
+                score = 15
+
+        Notify(op, src_id=self.actor_id, dst_id=dst_id,
+               post_id=self.post_id, when=self.date,
+               community_id=self.community_id,
+               score=score, **kwargs).write()
 
     def _validate_raw_op(self, raw_op):
         assert isinstance(raw_op, list), 'op json must be list'
