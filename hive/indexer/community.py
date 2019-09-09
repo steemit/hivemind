@@ -22,6 +22,9 @@ ROLE_MEMBER = ROLES['member']
 ROLE_GUEST = ROLES['guest']
 ROLE_MUTED = ROLES['muted']
 
+ROLE_NAMES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
+
+
 TYPE_TOPIC = 1
 TYPE_JOURNAL = 2
 TYPE_COUNCIL = 3
@@ -311,7 +314,7 @@ class CommunityOp:
                         VALUES (:account_id, :community_id, :role_id, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET role_id = :role_id""", **params)
-            self._notify('set_role', payload=ROLES[self.role_id])
+            self._notify('set_role', payload=ROLE_NAMES[self.role_id])
         elif action == 'setUserTitle':
             DB.query("""INSERT INTO hive_roles
                                (account_id, community_id, title, created_at)
