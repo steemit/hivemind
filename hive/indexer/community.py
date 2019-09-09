@@ -257,11 +257,9 @@ class CommunityOp:
             self._validate_permissions()
 
             self.valid = True
-            log.warning("%s %s was valid", raw_op[0], raw_op[1])
 
         except AssertionError as e:
-            payload = repr(e)
-            log.warning("%s %s was invalid: %s", raw_op[0], raw_op[1], payload)
+            payload = str(e)
             Notify('error', dst_id=self.actor_id,
                    when=self.date, payload=payload).write()
 
@@ -314,14 +312,16 @@ class CommunityOp:
                         VALUES (:account_id, :community_id, :role_id, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET role_id = :role_id""", **params)
-            self._notify('set_role', payload=ROLE_NAMES[self.role_id])
+            payload = '@' + self.account + ' ' + ROLE_NAMES[self.role_id]
+            self._notify('set_role', payload=payload)
         elif action == 'setUserTitle':
             DB.query("""INSERT INTO hive_roles
                                (account_id, community_id, title, created_at)
                         VALUES (:account_id, :community_id, :title, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET title = :title""", **params)
-            self._notify('set_label', payload=self.title)
+            payload = '@' + self.account + ' ' + self.title
+            self._notify('set_label', payload=payload)
 
         # Post-level actions
         elif action == 'mutePost':
