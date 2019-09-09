@@ -10,46 +10,36 @@ DB = Db.instance()
 
 class NotifyType(IntEnum):
     """Labels for notify `type_id` field."""
-    new_community = 1   # <src> created <community>
-    set_role = 2        # <src> set <dst> <payload>
-    set_props = 3       # <src> set properties <payload>
-    set_label = 4       # <src> label <dst> <payload>
-    mute_post = 5       # <src> mute <post> <payload>
-    unmute_post = 6     # <src> unmute <post> <payload>
-    pin_post = 7        # <src> pin <post>
-    unpin_post = 8      # <src> unpin <post>
-    flag_post = 9       # <src> flag <post>
-    error = 10          # error: <payload>
+    # active
+    new_community = 1
+    set_role = 2
+    set_props = 3
+    set_label = 4
+    mute_post = 5
+    unmute_post = 6
+    pin_post = 7
+    unpin_post = 8
+    flag_post = 9
+    error = 10
 
-    resteem = 11        # <src> resteemed <post>
-    mention = 12        # <post> mentioned <dst>
-    follow = 13         # <src> followed <dst>
+    # inactive
+    resteem = 11
+    mention = 12
+    follow = 13
 
-    vote_post = 14      # <src> voted on <post>
-    vote_comment = 15   # <src> voted on <post>
-    reply_post = 16     # <src> replied to <post>  (?) child post or parent post
-    reply_comment = 17  # <src> replied to <post>
+    vote_post = 14
+    vote_comment = 15
+    reply_post = 16
+    reply_comment = 17
 
-    update_account = 18 # <dst> updated account
-    receive = 19        # <src> sent <dst> <payload>
-    send = 20           # <dst> sent <src> <payload>
+    update_account = 18
+    receive = 19
+    send = 20
 
-#   reward = 21         # <post> rewarded <payload>
-#   power_up = 22       # <dst> power up <payload>
-#   power_down = 23     # <dst> power down <payload>
-#   message = 99        # <src>: <payload>
-
-
-#                                      agg-cols
-# case 1: src     comm payload                           update_settings, new_community
-# case 2: src(dst)comm payload         dst,comm          set_role, set_title
-# case 3: src     comm payload post                      mute, pin, flag
-# case 4: src dst              post    dst,post          resteem, mention
-# case 5: src dst                      dst               follow
-# case 6: src dst      payload post    dst               vote, reply   (optional: payload?)
-# case 7: src dst      payload         dst               send, receive
-# case 8:     dst      payload                           error, update_account
-# case 9:     dst      payload post    dst               reward
+    #reward = 21
+    #power_up = 22
+    #power_down = 23
+    #message = 99
 
 class Notify:
     """Handles writing notifications/messages."""
