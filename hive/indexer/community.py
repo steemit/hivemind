@@ -262,6 +262,8 @@ class CommunityOp:
             Notify('error', dst_id=self.actor_id,
                    when=self.date, payload=payload).write()
 
+        return self.valid
+
     def process(self):
         """Applies a validated operation."""
         assert self.valid, 'cannot apply invalid op'
