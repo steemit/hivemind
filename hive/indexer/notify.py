@@ -2,11 +2,11 @@
 
 from enum import IntEnum
 import logging
-#from hive.db.adapter import Db
+from hive.db.adapter import Db
 #pylint: disable=too-many-lines,line-too-long
 
 log = logging.getLogger(__name__)
-#DB = Db.instance()
+DB = Db.instance()
 
 class NotifyType(IntEnum):
     """Labels for notify `type_id` field."""
@@ -99,8 +99,9 @@ class Notify:
     def write(self):
         """Store this notification."""
         assert not self._id, 'notify has id %d' % self._id
-        # TODO: write to db
-        if self.enum == NotifyType.error:
-            log.warning("notify --> %s", vars(self))
-        else:
-            log.info("notify --> %s", vars(self))
+        log.warning("notify --> %s", vars(self))
+        sql = """INSERT INTO hive_notify (type_id, score, when, src_id, dst_id,
+                                          post_id, community_id, payload)
+                      VALUES (:type_id, :score, :when, :src_id, :dst_id,
+                              :post_id, :community_id, :payload)"""
+        DB.query(sql, **self.to_dict())
