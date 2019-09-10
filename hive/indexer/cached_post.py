@@ -329,7 +329,8 @@ class CachedPost:
                     if pid in catmap:
                         cat = catmap[pid]
                         post['category'] = cat
-                        if cat == 'hive-' and Accounts.exists(cat):
+                        # TODO: comm table check
+                        if cat[0:5] == 'hive-' and Accounts.exists(cat):
                             post['community_id'] = Accounts.get_id(cat)
                         else:
                             post['community_id'] = None
