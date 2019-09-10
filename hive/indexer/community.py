@@ -8,6 +8,7 @@ import ujson as json
 
 from hive.db.adapter import Db
 from hive.indexer.accounts import Accounts
+from hive.indexer.notify import Notify
 
 log = logging.getLogger(__name__)
 
@@ -21,18 +22,12 @@ ROLE_MEMBER = ROLES['member']
 ROLE_GUEST = ROLES['guest']
 ROLE_MUTED = ROLES['muted']
 
+ROLE_NAMES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
+
+
 TYPE_TOPIC = 1
 TYPE_JOURNAL = 2
 TYPE_COUNCIL = 3
-
-COMMANDS = [
-    # community
-    'updateProps', 'subscribe', 'unsubscribe',
-    # community+account
-    'setRole', 'setUserTitle',
-    # community+account+permlink
-    'mutePost', 'unmutePost', 'pinPost', 'unpinPost', 'flagPost',
-]
 
 def assert_keys_match(keys, expected, allow_missing=True):
     """Compare a set of input keys to expected keys."""
@@ -44,13 +39,7 @@ def assert_keys_match(keys, expected, allow_missing=True):
 
 def process_json_community_op(actor, op_json, date):
     """Validates community op and apply state changes to db."""
-    log.warning("community op: %s, %s", actor, op_json)
-    op = CommunityOp(actor, date)
-    try:
-        op.validate(op_json)
-        op.process()
-    except AssertionError as e:
-        log.warning("invalid community op: %s, %s, %s", actor, op_json, e)
+    CommunityOp.process_if_valid(actor, op_json, date)
 
 def read_key_bool(op, key):
     """Reads a key from dict, ensuring valid bool if present."""
@@ -109,6 +98,10 @@ class Community:
             sql = """INSERT INTO hive_roles (community_id, account_id, role_id, created_at)
                          VALUES (:community_id, :account_id, :role_id, :date)"""
             DB.query(sql, community_id=_id, account_id=_id, role_id=ROLE_OWNER, date=block_date)
+
+            Notify('new_community', src_id=None, dst_id=_id,
+                   when=block_date, community_id=_id).write()
+
 
     @classmethod
     def validated_name(cls, name):
@@ -179,28 +172,8 @@ class Community:
         return role >= ROLE_GUEST # or at least not muted
 
     @classmethod
-    def is_subscribed(cls, community_id, account_id):
-        """Check an account's subscription status."""
-        sql = """SELECT 1 FROM hive_subscriptions
-                  WHERE community_id = :community_id
-                    AND account_id = :account_id"""
-        return bool(DB.query_one(sql, community_id=community_id,
-                                 account_id=account_id))
-    @classmethod
-    def is_post_muted(cls, post_id):
-        """Check a post's muted status."""
-        sql = """SELECT is_muted FROM hive_posts WHERE id = :id"""
-        return bool(DB.query_one(sql, id=post_id))
-
-    @classmethod
-    def is_pinned(cls, post_id):
-        """Check a post's pinned status."""
-        sql = """SELECT is_pinned FROM hive_posts WHERE id = :id"""
-        return bool(DB.query_one(sql, id=post_id))
-
-    @classmethod
     def recalc_pending_payouts(cls):
-        """Update all pending_payout and rank fields."""
+        """Update all pending payout and rank fields."""
         sql = """SELECT c.name, SUM(p.payout)
                    FROM hive_communities c
               LEFT JOIN hive_posts_cache p ON p.category = c.name
@@ -210,7 +183,7 @@ class Community:
         for rank, row in enumerate(DB.query_all(sql)):
             community, total = row
             sql = """UPDATE hive_communities
-                        SET pending_payout = :total, rank = :rank
+                        SET sum_pending = :total, rank = :rank
                       WHERE name = :community"""
             DB.query(sql, community=community, total=total, rank=rank+1)
 
@@ -257,21 +230,40 @@ class CommunityOp:
         self.title = None
         self.props = None
 
+    @classmethod
+    def process_if_valid(cls, actor, op_json, date):
+        """Helper to instantiate, validate, process an op."""
+        op = CommunityOp(actor, date)
+        if op.validate(op_json):
+            op.process()
+            return True
+        return False
+
     def validate(self, raw_op):
         """Pre-processing and validation of custom_json payload."""
-        # validate basic structure
-        self._validate_raw_op(raw_op)
-        self.action = raw_op[0]
-        self.op = raw_op[1]
-        self.actor_id = Accounts.get_id(self.actor)
+        log.info("processing op: %s, %s", self.actor, raw_op)
 
-        # validate and read schema
-        self._read_schema()
+        try:
+            # validate basic structure
+            self._validate_raw_op(raw_op)
+            self.action = raw_op[0]
+            self.op = raw_op[1]
+            self.actor_id = Accounts.get_id(self.actor)
 
-        # validate permissions
-        self._validate_permissions()
+            # validate and read schema
+            self._read_schema()
 
-        self.valid = True
+            # validate permissions
+            self._validate_permissions()
+
+            self.valid = True
+
+        except AssertionError as e:
+            payload = str(e)
+            Notify('error', dst_id=self.actor_id,
+                   when=self.date, payload=payload).write()
+
+        return self.valid
 
     def process(self):
         """Applies a validated operation."""
@@ -296,6 +288,7 @@ class CommunityOp:
             bind = ', '.join([k+" = :"+k for k in list(self.props.keys())][1:])
             DB.query("UPDATE hive_communities SET %s WHERE id = :id" % bind,
                      id=self.community_id, **self.props)
+            self._notify('set_props', payload=json.dumps(read_key_dict(self.op, 'props')))
 
         elif action == 'subscribe':
             DB.query("""INSERT INTO hive_subscriptions
@@ -314,39 +307,55 @@ class CommunityOp:
 
         # Account-level actions
         elif action == 'setRole':
-            DB.query("""INSERT INTO hive_roles (account_id, community_id, role_id, created_at)
+            DB.query("""INSERT INTO hive_roles
+                               (account_id, community_id, role_id, created_at)
                         VALUES (:account_id, :community_id, :role_id, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET role_id = :role_id""", **params)
+            self._notify('set_role', payload=ROLE_NAMES[self.role_id])
         elif action == 'setUserTitle':
-            DB.query("""INSERT INTO hive_roles (account_id, community_id, title, created_at)
+            DB.query("""INSERT INTO hive_roles
+                               (account_id, community_id, title, created_at)
                         VALUES (:account_id, :community_id, :title, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET title = :title""", **params)
+            self._notify('set_label', payload=self.title)
 
         # Post-level actions
         elif action == 'mutePost':
             DB.query("""UPDATE hive_posts SET is_muted = '1'
                          WHERE id = :post_id""", **params)
+            self._notify('mute_post', payload=self.notes)
         elif action == 'unmutePost':
             DB.query("""UPDATE hive_posts SET is_muted = '0'
                          WHERE id = :post_id""", **params)
+            self._notify('unmute_post', payload=self.notes)
         elif action == 'pinPost':
             DB.query("""UPDATE hive_posts SET is_pinned = '1'
                          WHERE id = :post_id""", **params)
+            self._notify('pin_post', payload=self.notes)
         elif action == 'unpinPost':
             DB.query("""UPDATE hive_posts SET is_pinned = '0'
                          WHERE id = :post_id""", **params)
+            self._notify('unpin_post', payload=self.notes)
         elif action == 'flagPost':
-            DB.query("""INSERT INTO hive_flags (account, community,
-                               author, permlink, comment, created_at)
-                        VALUES (:actor, :community, :account, :permlink,
-                                :notes, :date)""", **params)
-        # TODO: modlog/notify
-        # INSERT INTO hive_modlog (account, community, action, created_at)
-        # VALUES  (account, community, json.inspect, block_date)
+            self._notify('flag_post', payload=self.notes)
+
         return True
 
+    def _notify(self, op, **kwargs):
+        dst_id = None
+        score = 35
+
+        if self.account_id and not self.post_id:
+            dst_id = self.account_id
+            if not self._subscribed(self.account_id):
+                score = 15
+
+        Notify(op, src_id=self.actor_id, dst_id=dst_id,
+               post_id=self.post_id, when=self.date,
+               community_id=self.community_id,
+               score=score, **kwargs).write()
 
     def _validate_raw_op(self, raw_op):
         assert isinstance(raw_op, list), 'op json must be list'
@@ -461,27 +470,53 @@ class CommunityOp:
         elif action == 'setUserTitle':
             assert actor_role >= ROLE_MOD, 'only mods can set user titles'
         elif action == 'mutePost':
-            muted = Community.is_post_muted(self.post_id)
-            assert not muted, 'post is already muted'
+            assert not self._muted(), 'post is already muted'
             assert actor_role >= ROLE_MOD, 'only mods can mute posts'
         elif action == 'unmutePost':
-            muted = Community.is_post_muted(self.post_id)
-            assert muted, 'post is already not muted'
+            assert self._muted(), 'post is already not muted'
             assert actor_role >= ROLE_MOD, 'only mods can unmute posts'
         elif action == 'pinPost':
-            pinned = Community.is_pinned(self.post_id)
-            assert not pinned, 'post is already pinned'
+            assert not self._pinned(), 'post is already pinned'
             assert actor_role >= ROLE_MOD, 'only mods can pin posts'
         elif action == 'unpinPost':
-            pinned = Community.is_pinned(self.post_id)
-            assert pinned, 'post is already not pinned'
+            assert self._pinned(), 'post is already not pinned'
             assert actor_role >= ROLE_MOD, 'only mods can unpin posts'
         elif action == 'flagPost':
-            # TODO: assert user has not yet flagged post
             assert actor_role > ROLE_MUTED, 'muted users cannot flag posts'
+            assert not self._flagged(), 'user already flagged this post'
         elif action == 'subscribe':
-            active = Community.is_subscribed(community_id, self.actor_id)
-            assert not active, 'already subscribed'
+            assert not self._subscribed(self.actor_id), 'already subscribed'
         elif action == 'unsubscribe':
-            active = Community.is_subscribed(community_id, self.actor_id)
-            assert active, 'already unsubscribed'
+            assert self._subscribed(self.actor_id), 'already unsubscribed'
+
+    def _subscribed(self, account_id):
+        """Check an account's subscription status."""
+        sql = """SELECT 1 FROM hive_subscriptions
+                  WHERE community_id = :community_id
+                    AND account_id = :account_id"""
+        return bool(DB.query_one(
+            sql, community_id=self.community_id, account_id=account_id))
+
+    def _muted(self):
+        """Check post's muted status."""
+        sql = "SELECT is_muted FROM hive_posts WHERE id = :id"
+        return bool(DB.query_one(sql, id=self.post_id))
+
+    def _pinned(self):
+        """Check post's pinned status."""
+        sql = "SELECT is_pinned FROM hive_posts WHERE id = :id"
+        return bool(DB.query_one(sql, id=self.post_id))
+
+    def _flagged(self):
+        """Check user's flag status."""
+        from hive.indexer.notify import NotifyType
+        sql = """SELECT 1 FROM hive_notifs
+                  WHERE community_id = :community_id
+                    AND post_id = :post_id
+                    AND type_id = :type_id
+                    AND src_id = :src_id"""
+        return bool(DB.query_one(sql,
+                                 community_id=self.community_id,
+                                 post_id=self.post_id,
+                                 type_id=NotifyType['flag'],
+                                 src_id=self.actor_id))

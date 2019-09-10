@@ -241,74 +241,63 @@ def build_metadata_community(metadata=None):
 
     sa.Table(
         'hive_communities', metadata,
-        sa.Column('id', sa.Integer, primary_key=True, autoincrement=False),
-        sa.Column('name', VARCHAR(16), nullable=False),
-        sa.Column('type_id', SMALLINT, nullable=False),
-        sa.Column('title', sa.String(32), nullable=False, server_default=''),
-        sa.Column('about', sa.String(120), nullable=False, server_default=''),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.Column('pending_payout', sa.Integer, nullable=False, server_default='0'),
-        sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
-        sa.Column('subscribers', sa.Integer, nullable=False, server_default='0'),
-        sa.Column('lang', CHAR(2), nullable=False, server_default='en'),
-        sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
+        sa.Column('id',          sa.Integer,      primary_key=True, autoincrement=False),
+        sa.Column('type_id',     SMALLINT,        nullable=False),
+        sa.Column('lang',        CHAR(2),         nullable=False, server_default='en'),
+        sa.Column('name',        VARCHAR(16),     nullable=False),
+        sa.Column('title',       sa.String(32),   nullable=False, server_default=''),
+        sa.Column('created_at',  sa.DateTime,     nullable=False),
+        sa.Column('sum_pending', sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('rank',        sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('subscribers', sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('is_nsfw',     BOOLEAN,         nullable=False, server_default='0'),
+        sa.Column('about',       sa.String(120),  nullable=False, server_default=''),
         sa.Column('description', sa.String(5000), nullable=False, server_default=''),
-        sa.Column('flag_text', sa.String(5000), nullable=False, server_default=''),
-        sa.Column('settings', TEXT, nullable=False, server_default='{}'),
+        sa.Column('flag_text',   sa.String(5000), nullable=False, server_default=''),
+        sa.Column('settings',    TEXT,            nullable=False, server_default='{}'),
+
         sa.UniqueConstraint('name', name='hive_communities_ux1'),
+        sa.Index('hive_communities_ix1', 'rank', 'id')
     )
 
     sa.Table(
         'hive_roles', metadata,
-        sa.Column('account_id', sa.Integer, nullable=False),
-        sa.Column('community_id', sa.Integer, nullable=False),
-        sa.Column('role_id', SMALLINT, nullable=False, server_default='0'),
-        sa.Column('title', sa.String(140), nullable=False, server_default=''),
-        sa.Column('created_at', sa.DateTime, nullable=False),
+        sa.Column('account_id',   sa.Integer,     nullable=False),
+        sa.Column('community_id', sa.Integer,     nullable=False),
+        sa.Column('created_at',   sa.DateTime,    nullable=False),
+        sa.Column('role_id',      SMALLINT,       nullable=False, server_default='0'),
+        sa.Column('title',        sa.String(140), nullable=False, server_default=''),
+
         sa.UniqueConstraint('account_id', 'community_id', name='hive_roles_ux1'),
-        sa.Index('hive_roles_ix1', 'community_id', 'account_id', 'created_at'), # TODO: role or title instead of created_At
+        sa.Index('hive_roles_ix1', 'community_id', 'account_id', 'role_id'),
     )
 
     sa.Table(
         'hive_subscriptions', metadata,
-        sa.Column('account_id', sa.Integer, nullable=False),
-        sa.Column('community_id', sa.Integer, nullable=False),
-        sa.Column('created_at', sa.DateTime, nullable=False),
+        sa.Column('account_id',   sa.Integer,  nullable=False),
+        sa.Column('community_id', sa.Integer,  nullable=False),
+        sa.Column('created_at',   sa.DateTime, nullable=False),
+
         sa.UniqueConstraint('account_id', 'community_id', name='hive_subscriptions_ux1'),
         sa.Index('hive_subscriptions_ix1', 'community_id', 'account_id', 'created_at'),
     )
 
     sa.Table(
-        'hive_flags', metadata,
-        sa.Column('id', sa.Integer, primary_key=True),
-        sa.Column('account_id', sa.Integer, nullable=False),
-        sa.Column('community_id', sa.Integer, nullable=False),
-        sa.Column('post_id', sa.Integer, nullable=False),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.Column('notes', sa.String(255), nullable=False),
-        sa.UniqueConstraint('account_id', 'post_id', name='hive_flags_ux1'),
-    )
-
-    sa.Table(
-        'hive_modlog', metadata,
-        sa.Column('id', sa.Integer, primary_key=True),
-        sa.Column('community_id', sa.Integer, nullable=False),
-        sa.Column('account_id', sa.Integer, nullable=False),
-        sa.Column('action_id', SMALLINT, nullable=False),
-        sa.Column('params', sa.String(1000), nullable=False),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.Index('hive_modlog_ix1', 'community_id', 'created_at'),
-    )
-
-    sa.Table(
         'hive_notifs', metadata,
-        sa.Column('id', sa.Integer, primary_key=True),
-        sa.Column('account_id', sa.Integer, nullable=False),
-        sa.Column('type_id', SMALLINT, nullable=False),
-        sa.Column('score', SMALLINT, nullable=False),
-        sa.Column('params', sa.String(1000), nullable=False),
-        sa.Column('ts', sa.DateTime, nullable=False),
-        sa.Index('hive_notifs_ix1', 'account_id', 'ts'),
+        sa.Column('id',           sa.Integer,  primary_key=True),
+        sa.Column('type_id',      SMALLINT,    nullable=False),
+        sa.Column('score',        SMALLINT,    nullable=False),
+        sa.Column('created_at',   sa.DateTime, nullable=False),
+        sa.Column('src_id',       sa.Integer,  nullable=True),
+        sa.Column('dst_id',       sa.Integer,  nullable=True),
+        sa.Column('post_id',      sa.Integer,  nullable=True),
+        sa.Column('community_id', sa.Integer,  nullable=True),
+        sa.Column('payload',      sa.Text,     nullable=True),
+
+        sa.Index('hive_notifs_ix1', 'dst_id',                  'id', postgresql_where=sql_text("dst_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix2', 'community_id',            'id', postgresql_where=sql_text("community_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix3', 'community_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix4', 'community_id', 'post_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND post_id IS NOT NULL")),
     )
 
     return metadata
