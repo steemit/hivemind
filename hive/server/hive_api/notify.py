@@ -18,19 +18,20 @@ STRINGS = {
     NotifyType.unpin_post:     '<src> unpin <post>',
     NotifyType.flag_post:      '<src> flag <post>',
     NotifyType.error:          '<dst> error: <payload>',
+    NotifyType.subscribe:      'subscribed',
 
-    NotifyType.resteem:        '<src> resteemed <post>',
-    NotifyType.mention:        '<post> mentioned <dst>',
-    NotifyType.follow:         '<src> followed <dst>',
+    #NotifyType.resteem:        '<src> resteemed <post>',
+    #NotifyType.mention:        '<post> mentioned <dst>',
+    #NotifyType.follow:         '<src> followed <dst>',
 
-    NotifyType.vote_post:      '<src> voted on <post>',
-    NotifyType.vote_comment:   '<src> voted on <post>',
-    NotifyType.reply_post:     '<src> replied to <post>', # `dst` requires parent post?
-    NotifyType.reply_comment:  '<src> replied to <post>',
+    #NotifyType.vote_post:      '<src> voted on <post>',
+    #NotifyType.vote_comment:   '<src> voted on <post>',
+    #NotifyType.reply_post:     '<src> replied to <post>', # `dst` requires parent post?
+    #NotifyType.reply_comment:  '<src> replied to <post>',
 
-    NotifyType.update_account: '<dst> updated account',
-    NotifyType.receive:        '<src> sent <dst> <payload>',
-    NotifyType.send:           '<dst> sent <src> <payload>',
+    #NotifyType.update_account: '<dst> updated account',
+    #NotifyType.receive:        '<src> sent <dst> <payload>',
+    #NotifyType.send:           '<dst> sent <src> <payload>',
 
     #NotifyType.reward:         '<post> rewarded <payload>',
     #NotifyType.power_up:       '<dst> power up <payload>',
