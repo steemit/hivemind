@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 
 # steemd account 'tabs' - specific post list queries
 ACCOUNT_TAB_KEYS = {
+    'null': None,
     'blog': 'blog',
     'feed': 'feed',
     'comments': 'comments',
@@ -55,6 +56,7 @@ async def get_state(context, path, observer=None):
     """
     # pylint: disable=too-many-branches,too-many-locals,too-many-statements
     (path, part) = _normalize_path(path)
+    parts = len(part)
 
     db = context['db']
     observer_id = await get_account_id(db, observer) if observer else None
@@ -69,29 +71,20 @@ async def get_state(context, path, observer=None):
         'discussion_idx': {"": {}}, # {tag: sort: [keys]}
         'community': {}}
 
-    # account - `/@account` (minimal skeleton)
-    if part[0] and part[0][0] == '@' and part[1] == 'null':
-        assert not part[2], 'unexpected account path[2] %s' % path
-        account = valid_account(part[0][1:])
-        state['accounts'][account] = await _load_account(db, account, observer_id)
-
     # account - `/@account/tab` (feed, blog, comments, replies)
-    if part[0] and part[0][0] == '@':
-        assert part[1] in ACCOUNT_TAB_KEYS
-        assert not part[2], 'unexpected account path[2] %s' % path
+    if parts == 2 and part[0][0] == '@' and part[1] in ACCOUNT_TAB_KEYS:
         account = valid_account(part[0][1:])
-        key = ACCOUNT_TAB_KEYS[part[1]]
-
         state['accounts'][account] = await _load_account(db, account, observer_id)
-        posts = await _get_account_discussion_by_key(db, account, key)
-        state['content'] = _keyed_posts(posts)
-        state['accounts'][account][key] = list(state['content'].keys())
 
-        if key == 'feed':
+        key = ACCOUNT_TAB_KEYS[part[1]]
+        if key:
+            posts = await _get_account_discussion_by_key(db, account, key)
+            state['content'] = _keyed_posts(posts)
+            state['accounts'][account][key] = list(state['content'].keys())
             state['tag_idx']['trending'] = await get_top_trending_tags_summary(context, 10)
 
     # discussion - `/category/@account/permlink`
-    elif part[1] and part[1][0] == '@':
+    elif parts == 3 and part[1][0] == '@':
         tag = part[0]
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
@@ -106,10 +99,9 @@ async def get_state(context, path, observer=None):
             state['community'] = {tag: community}
 
     # ranked posts - `/sort/category`
-    elif part[0] in POST_LIST_SORTS:
-        assert not part[2], "unexpected discussion path part[2] %s" % path
+    elif parts <= 2 and part[0] in POST_LIST_SORTS:
         sort = valid_sort(part[0])
-        tag = valid_tag(part[1].lower(), allow_empty=True)
+        tag = valid_tag(part[1]) if parts == 2 else None
 
         community = await if_tag_community(context, tag, observer)
         if community: state['community'] = {tag: community}
@@ -162,12 +154,8 @@ def _normalize_path(path):
     assert path[-1] != '/', 'path cannot end with forward slash'
     assert '#' not in path, 'path contains hash mark (#)'
     assert '?' not in path, 'path contains query string: `%s`' % path
-
-    parts = path.split('/')
-    assert len(parts) < 4, 'too many parts in path: `%s`' % path
-    while len(parts) < 3:
-        parts.append('')
-    return (path, parts)
+    assert path.count('/') < 3, 'too many parts in path: `%s`' % path
+    return (path, path.split('/'))
 
 def _keyed_posts(posts):
     out = OrderedDict()
