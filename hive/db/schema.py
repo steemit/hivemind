@@ -198,11 +198,11 @@ def build_metadata():
         sa.Column('json', sa.Text),
         sa.Column('raw_json', sa.Text),
 
-        sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id',  postgresql_where=sql_text("is_paidout = '0'")),                   # core
+        # index: misc
+        sa.Index('hive_posts_cache_ix3',  'payout_at', 'post_id',           postgresql_where=sql_text("is_paidout = '0'")),         # core: payout sweep
+        sa.Index('hive_posts_cache_ix8',  'category', 'payout', 'depth',    postgresql_where=sql_text("is_paidout = '0'")),         # API: tag stats
 
-        sa.Index('hive_posts_cache_ix8',  'category', 'payout', 'depth',            postgresql_where=sql_text("is_paidout = '0'")), # API: tag stats
-
-        # post lists
+        # index: ranked posts
         sa.Index('hive_posts_cache_ix2',  'promoted',             postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")),  # API: promoted
 
         sa.Index('hive_posts_cache_ix6a', 'sc_trend', 'post_id',  postgresql_where=sql_text("is_paidout = '0'")),                   # API: trending             todo: depth=0
@@ -213,7 +213,7 @@ def build_metadata():
         sa.Index('hive_posts_cache_ix9a',             'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout               todo: rem depth
         sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout, filtered     todo: rem depth
 
-
+        # index: community ranked posts
         sa.Index('hive_posts_cache_ix30', 'community_id', 'sc_trend',   'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community trend
         sa.Index('hive_posts_cache_ix31', 'community_id', 'sc_hot',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community hot
         sa.Index('hive_posts_cache_ix32', 'community_id', 'created_at', 'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community created
