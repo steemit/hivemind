@@ -48,7 +48,9 @@ async def _follow_contexts(db, accounts, observer_id, include_mute=False):
     rows = await db.query_all(sql,
                               account_id=observer_id,
                               ids=tuple(accounts.keys()))
-    for following_id, state in rows:
+    for row in rows:
+        following_id = row[0]
+        state = row[1]
         context = {'followed': state == 1}
         if include_mute and state == 2:
             context['muted'] = True
