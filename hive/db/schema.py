@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 13
+DB_VERSION = 14
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -88,8 +88,7 @@ def build_metadata():
         sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
         sa.Index('hive_posts_ix3', 'author', 'depth', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: author blog/comments
         sa.Index('hive_posts_ix4', 'parent_id', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: fetching children
-
-        sa.Index('hive_posts_ix4', 'community', 'id', postgresql_where=sql_text("is_pinned = '1'")), # API: pinned posts in community
+        sa.Index('hive_posts_ix5', 'community', 'id', postgresql_where=sql_text("is_pinned = '1'")), # API: pinned posts in community
     )
 
     sa.Table(

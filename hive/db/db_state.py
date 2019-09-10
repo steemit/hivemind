@@ -273,7 +273,8 @@ class DbState:
 
         if cls._ver == 13:
             cls.db().query("ALTER TABLE hive_posts_cache ADD COLUMN community_id integer")
-            sqls = ("CREATE INDEX hive_posts_cache_ix30 ON hive_posts_cache (community_id, sc_trend,   post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
+            sqls = ("CREATE INDEX hive_posts_ix5 ON hive_posts (community, id) WHERE is_pinned = '1'",
+                    "CREATE INDEX hive_posts_cache_ix30 ON hive_posts_cache (community_id, sc_trend,   post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
                     "CREATE INDEX hive_posts_cache_ix31 ON hive_posts_cache (community_id, sc_hot,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
                     "CREATE INDEX hive_posts_cache_ix32 ON hive_posts_cache (community_id, created_at, post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
                     "CREATE INDEX hive_posts_cache_ix33 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND is_paidout = '0'",
