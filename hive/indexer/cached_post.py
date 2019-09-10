@@ -331,6 +331,8 @@ class CachedPost:
                         post['category'] = cat
                         if cat == 'hive-' and Accounts.exists(cat):
                             post['community_id'] = Accounts.get_id(cat)
+                        else:
+                            post['community_id'] = None
                     buffer.extend(cls._sql(pid, post, level=level))
                 else:
                     # When a post has been deleted (or otherwise DNE),
