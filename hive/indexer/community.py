@@ -297,6 +297,7 @@ class CommunityOp:
             DB.query("""UPDATE hive_communities
                            SET subscribers = subscribers + 1
                          WHERE id = :community_id""", **params)
+            self._notify('subscribe')
         elif action == 'unsubscribe':
             DB.query("""DELETE FROM hive_subscriptions
                          WHERE account_id = :actor_id
