@@ -47,13 +47,7 @@ ACCOUNT_TAB_IGNORE = [
 
 # misc dummy paths used by condenser - send minimal get_state structure
 CONDENSER_NOOP_URLS = [
-    'create_account',
-    'approval',
-    'recover_account_step_1',
-    'recover_account_step_2',
     'submit.html',
-    'market',
-    'change_password',
     'login.html',
     'welcome',
     'tos.html',
@@ -61,8 +55,6 @@ CONDENSER_NOOP_URLS = [
     'support.html',
     'faq.html',
     'about.html',
-    'pick_account',
-    'waiting_list.html',
 ]
 
 # post list sorts
@@ -93,8 +85,8 @@ async def get_state(context, path, observer=None):
         'tags': {},
         'accounts': {},
         'content': {},
-        'tag_idx': {'trending': []},
-        'discussion_idx': {"": {}},
+        'tag_idx': {'trending': await get_top_trending_tags_summary(context, 10)},
+        'discussion_idx': {"": {}}, # {tag: sort: [keys]}
         'community': {}}
 
     # account - `/@account/tab` (feed, blog, comments, replies)
@@ -111,14 +103,9 @@ async def get_state(context, path, observer=None):
             posts = await _get_account_discussion_by_key(db, account, key)
             state['content'] = _keyed_posts(posts)
             state['accounts'][account][key] = list(state['content'].keys())
-            if part[1] == 'feed':
-                state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context, 10)}
-        elif part[1] in ACCOUNT_TAB_IGNORE:
-            pass # condenser no-op URLs
         else:
-            # invalid/undefined case; probably requesting `@user/permlink`,
-            # but condenser still relies on a valid response for redirect.
-            state['error'] = 'invalid get_state account path %s' % path
+            # allow condenser no-op URLs
+            assert part[1] in ACCOUNT_TAB_IGNORE, 'invalid acct path %s' % path
 
     # discussion - `/category/@account/permlink`
     elif part[1] and part[1][0] == '@':
@@ -142,25 +129,21 @@ async def get_state(context, path, observer=None):
         tag = valid_tag(part[1].lower(), allow_empty=True)
 
         community = await if_tag_community(context, tag, observer)
-        if community:
-            state['community'] = {tag: community}
+        if community: state['community'] = {tag: community}
 
         pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag)
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-        state['tag_idx'] = {'trending': await get_top_trending_tags_summary(context, 10)}
 
     # tag "explorer" - `/tags`
     elif path == "tags":
+        state['tag_idx']['trending'] = []
         for tag in await get_trending_tags(context):
             state['tag_idx']['trending'].append(tag['name'])
             state['tags'][tag['name']] = tag
 
-    elif path in CONDENSER_NOOP_URLS:
-        pass
-
     else:
-        raise ApiError('unhandled path: /%s' % path)
+        assert path in CONDENSER_NOOP_URLS, 'unhandled path: /%s' % path
 
     for tag in state['tag_idx']['trending']:
         if tag in state['community']: continue
