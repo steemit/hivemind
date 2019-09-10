@@ -101,7 +101,7 @@ async def get_state(context, path, observer=None):
     # ranked posts - `/sort/category`
     elif parts <= 2 and part[0] in POST_LIST_SORTS:
         sort = valid_sort(part[0])
-        tag = valid_tag(part[1]) if parts == 2 else None
+        tag = valid_tag(part[1]) if parts == 2 else ''
 
         community = await if_tag_community(context, tag, observer)
         if community: state['community'] = {tag: community}
