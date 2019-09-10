@@ -270,7 +270,7 @@ Can be a topic or a comment.
 
 Any posts muted for spam should contain simply the string `spam` in the `notes` field. This standardized label will help train automated spam detection.
 
-#### Pin/unpin a post
+#### Pin/Unpin a post
 
 Stickies a post to the top of the community homepage. If multiple posts are stickied, the newest ones are shown first.
 
@@ -284,7 +284,7 @@ Stickies a post to the top of the community homepage. If multiple posts are stic
 
 
 ```
-["unPinPost", {
+["unpinPost", {
   "community": <community>,
   "account": <account>,
   "permlink": <permlink>
