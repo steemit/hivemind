@@ -35,7 +35,8 @@ ACCOUNT_TAB_KEYS = {
     'blog': 'blog',
     'feed': 'feed',
     'comments': 'comments',
-    'recent-replies': 'recent_replies'}
+    'recent-replies': 'recent_replies',
+    'payout': 'payout'}
 
 # post list sorts
 POST_LIST_SORTS = [
