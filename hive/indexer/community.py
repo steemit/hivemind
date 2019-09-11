@@ -285,7 +285,7 @@ class CommunityOp:
 
         # Community-level commands
         if action == 'updateProps':
-            bind = ', '.join([k+" = :"+k for k in list(self.props.keys())][1:])
+            bind = ', '.join([k+" = :"+k for k in list(self.props.keys())])
             DB.query("UPDATE hive_communities SET %s WHERE id = :id" % bind,
                      id=self.community_id, **self.props)
             self._notify('set_props', payload=json.dumps(read_key_dict(self.op, 'props')))
@@ -297,6 +297,7 @@ class CommunityOp:
             DB.query("""UPDATE hive_communities
                            SET subscribers = subscribers + 1
                          WHERE id = :community_id""", **params)
+            self._notify('subscribe')
         elif action == 'unsubscribe':
             DB.query("""DELETE FROM hive_subscriptions
                          WHERE account_id = :actor_id

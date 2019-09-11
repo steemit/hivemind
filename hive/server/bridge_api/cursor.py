@@ -29,6 +29,62 @@ async def _get_account_id(db, name):
     assert _id, "account not found: `%s`" % name
     return _id
 
+async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
+    """Get a list of post_ids for a given posts query.
+
+    `sort` can be trending, hot, created, promoted, payout, or payout_comments.
+    """
+    # pylint: disable=too-many-arguments,bad-whitespace,line-too-long
+
+    definitions = {#         field      pending toponly gray   promoted
+        'trending':        ('sc_trend', False,  True,   False, False),
+        'hot':             ('sc_hot',   False,  True,   False, False),
+        'created':         ('post_id',  False,  True,   False, False),
+        'promoted':        ('promoted', True,   True,   False, True),
+        'payout':          ('payout',   True,   False,  False, False),
+        'muted':           ('payout',   True,   False,  True,  False)}
+
+    # validate
+    assert ids, 'no community ids provided to query'
+    assert sort in definitions, 'unknown sort %s' % sort
+
+    # setup
+    field, pending, toponly, gray, promoted = definitions[sort]
+    table = 'hive_posts_cache'
+    where = ["community_id IN :ids"]
+
+    # select
+    if gray:     where.append("is_grayed = '1'")
+    if not gray: where.append("is_grayed = '0'")
+    if toponly:  where.append("depth = 0")
+    if pending:  where.append("is_paidout = '0'")
+    if promoted: where.append('promoted > 0')
+
+    # seek
+    seek_id = None
+    if start_permlink:
+        # simpler `%s <= %s` eval has edge case: many posts with payout 0
+        seek_id = await _get_post_id(db, start_author, start_permlink)
+        sval = "(SELECT %s FROM %s WHERE post_id = :seek_id)" % (field, table)
+        sql = """((%s < %s) OR (%s = %s AND post_id > :seek_id))"""
+        where.append(sql % (field, sval, field, sval))
+
+        #seek_id = await _get_post_id(db, start_author, start_permlink)
+        #sql = "SELECT %s FROM %s WHERE post_id = :id)"
+        #seek_val = await db.query_col(sql % (field, table), id=seek_id)
+        #sql = """((%s < :seek_val) OR
+        #          (%s = :seek_val AND post_id > :seek_id))"""
+        #where.append(sql % (field, sval, field, sval))
+
+    # build
+    sql = ("""SELECT post_id FROM %s WHERE %s
+              ORDER BY %s DESC, post_id LIMIT :limit
+              """ % (table, ' AND '.join(where), field))
+
+    # execute
+    return await db.query_col(sql, ids=tuple(ids), seek_id=seek_id, limit=limit)
+
+
 
 async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag):
     """Get a list of post_ids for a given posts query.
@@ -39,11 +95,11 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag):
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments']
 
-    params = {             # field      pending posts   comment promoted    todo        community
-        'trending':        ('sc_trend', True,   False,  False,  False),   # posts=True  pending=False
-        'hot':             ('sc_hot',   True,   False,  False,  False),   # posts=True  pending=False
+    params = {             # field      pending posts   comment promoted    todo
+        'trending':        ('sc_trend', True,   False,  False,  False),   # depth=0
+        'hot':             ('sc_hot',   True,   False,  False,  False),   # depth=0
         'created':         ('post_id',  False,  True,   False,  False),
-        'promoted':        ('promoted', True,   False,  False,  True),    # posts=True
+        'promoted':        ('promoted', True,   False,  False,  True),
         'payout':          ('payout',   True,   True,   False,  False),
         'payout_comments': ('payout',   True,   False,  True,   False),
     }[sort]
