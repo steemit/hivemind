@@ -80,6 +80,8 @@ async def list_all_subscriptions(context, account):
     if not ids: return []
     communities = await load_communities(db, ids, lite=True)
     await _append_observer_roles(db, communities, account_id)
+    for comm in communities.values():
+        comm['context']['subscribed'] = True
     return [communities[_id] for _id in ids]
 
 
