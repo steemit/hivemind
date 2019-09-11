@@ -7,7 +7,7 @@ import ujson as json
 
 from hive.server.common.mutes import Mutes
 
-from hive.server.hive_api.community import if_tag_community
+from hive.server.hive_api.community import if_tag_community, list_all_subscriptions
 from hive.server.hive_api.common import get_account_id
 
 from hive.server.bridge_api.objects import (
@@ -23,7 +23,6 @@ from hive.server.common.helpers import (
     valid_sort,
     valid_tag)
 from hive.server.bridge_api.tags import (
-    get_trending_tags,
     get_top_trending_tags_summary)
 
 import hive.server.bridge_api.cursor as cursor
@@ -111,19 +110,23 @@ async def get_state(context, path, observer=None):
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
         state['tag_idx']['trending'] = await get_top_trending_tags_summary(context, 10)
 
-    # tag "explorer" - `/tags`
-    elif path == "tags":
-        for tag in await get_trending_tags(context):
-            state['tag_idx']['trending'].append(tag['name'])
-            state['tags'][tag['name']] = tag
-
     else:
         raise ApiError("invalid path /%s" % path)
 
+    # ensure all comms objs are available
     for tag in state['tag_idx']['trending']:
         if tag in state['community']: continue
         obj = await if_tag_community(context, tag, observer)
         if obj: state['community'][tag] = obj
+
+    # if observer, add all subs
+    if observer:
+        comms = await list_all_subscriptions(context, observer)
+        for comm in comms:
+            tag = comm['name']
+            state['community'][tag] = comm
+            if tag not in state['tag_idx']['trending']:
+                state['tag_idx']['trending'].insert(0, tag)
 
     return state
 
