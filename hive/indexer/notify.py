@@ -90,7 +90,7 @@ class Notify:
     def write(self):
         """Store this notification."""
         assert not self._id, 'notify has id %d' % self._id
-        log.warning("notify --> %s src %s dst %s pid %s%s cid %s (%d/100)",
+        log.warning("[NOTIFY] %s - src %s dst %s pid %s%s cid %s (%d/100)",
                     self.enum.name, self.src_id, self.dst_id, self.post_id,
                     ' (%s)' % self.payload if self.payload else '',
                     self.community_id, self.score)
