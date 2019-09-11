@@ -58,13 +58,27 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
     return [communities[_id] for _id in ids]
 
 async def list_community_roles(context, community, last='', limit=50):
-    """List community account-roles (anyone with special status or title)."""
+    """List community account-roles (anyone with non-guest status)."""
+    db = context['db']
+    community_id = await get_community_id(db, community)
+    seek = ' AND a.name > :last' if last else ''
+    sql = """SELECT a.name, r.role_id FROM hive_roles r
+               JOIN hive_accounts a ON r.account_id = a.id
+              WHERE r.community_id = :id %s
+                AND r.role_id != 0
+           ORDER BY name LIMIT :limit""" % seek
+    rows = await db.query_all(sql, id=community_id, last=last, limit=limit)
+    return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
+
+async def list_community_titles(context, community, last='', limit=50):
+    """List community account-titles (anyone with custom title)."""
     db = context['db']
     community_id = await get_community_id(db, community)
     seek = ' AND a.name > :last' if last else ''
     sql = """SELECT a.name, r.role_id, r.title FROM hive_roles r
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :id %s
+                AND r.title != ''
            ORDER BY name LIMIT :limit""" % seek
     rows = await db.query_all(sql, id=community_id, last=last, limit=limit)
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
