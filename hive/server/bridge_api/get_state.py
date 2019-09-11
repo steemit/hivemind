@@ -146,6 +146,9 @@ async def _get_account_discussion_by_key(db, account, key):
     elif key == 'feed':
         res = await cursor.pids_by_feed_with_reblog(db, account, '', '', 20)
         posts = await load_posts_reblogs(db, res)
+    elif key == 'payout':
+        pids = await cursor.pids_by_payout(db, account, '', '', 20)
+        posts = await load_posts(db, pids)
     else:
         raise ApiError("unknown account discussion key %s" % key)
 
