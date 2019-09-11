@@ -8,12 +8,18 @@ from hive.server.common.helpers import (
     valid_permlink,
     valid_tag,
     valid_limit)
+from hive.server.hive_api.common import get_account_id
 
 #pylint: disable=too-many-arguments, no-else-return
 
 @return_error_info
-async def get_ranked_posts(context, sort, start_author='', start_permlink='', limit=20, tag=None):
+async def get_ranked_posts(context, sort, start_author='', start_permlink='',
+                           limit=20, tag=None, observer=None):
     """Query posts, sorted by given method."""
+
+    db = context['db']
+    observer_id = await get_account_id(db, observer) if observer else None
+
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments'], 'invalid sort'
     ids = await cursor.pids_by_ranked(
@@ -22,7 +28,9 @@ async def get_ranked_posts(context, sort, start_author='', start_permlink='', li
         valid_account(start_author, allow_empty=True),
         valid_permlink(start_permlink, allow_empty=True),
         valid_limit(limit, 100),
-        valid_tag(tag, allow_empty=True))
+        valid_tag(tag, allow_empty=True),
+        observer_id)
+
     return await load_posts(context['db'], ids)
 
 @return_error_info

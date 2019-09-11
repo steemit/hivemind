@@ -29,6 +29,13 @@ async def _get_account_id(db, name):
     assert _id, "account not found: `%s`" % name
     return _id
 
+async def _get_community_id(db, name):
+    """Get community id from hive db."""
+    assert name, 'no comm name specified'
+    _id = await db.query_one("SELECT id FROM hive_communities WHERE name = :n", n=name)
+    assert _id, "comm not found: `%s`" % name
+    return _id
+
 async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
     """Get a list of post_ids for a given posts query.
 
@@ -86,12 +93,25 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
 
 
 
-async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag):
+async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, observer_id=None):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
     # pylint: disable=too-many-arguments,bad-whitespace,line-too-long
+
+    # pylint: disable=too-many-locals,too-many-branches
+    # branch on tag/observer
+    if tag:
+        cids = []
+        if tag[:5] == 'hive-':
+            cids = [await _get_community_id(db, tag)]
+        elif tag == 'my':
+            cids = await _subscribed(db, observer_id)
+        if cids:
+            return await pids_by_community(db, cids, sort, start_author,
+                                           start_permlink, limit)
+
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments']
 
@@ -144,6 +164,10 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag):
 
     return pinned_ids + await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
 
+async def _subscribed(db, account_id):
+    sql = """SELECT community_id FROM hive_subscriptions
+              WHERE account_id = :account_id"""
+    return await db.query_col(sql, account_id=account_id)
 
 async def _pinned(db, community):
     """Get a list of pinned post `id`s in `community`."""

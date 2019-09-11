@@ -105,7 +105,7 @@ async def get_state(context, path, observer=None):
         community = await if_tag_community(context, tag, observer)
         if community: state['community'] = {tag: community}
 
-        pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag)
+        pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag, observer_id)
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
         state['tag_idx']['trending'] = await get_top_trending_tags_summary(context, 10)
