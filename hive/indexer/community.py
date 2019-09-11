@@ -429,6 +429,7 @@ class CommunityOp:
         self.title = _title
 
     def _read_props(self):
+        # TODO: assert props changed?
         props = read_key_dict(self.op, 'props')
         valid = ['title', 'about', 'lang', 'is_nsfw',
                  'description', 'flag_text', 'settings']
@@ -469,6 +470,7 @@ class CommunityOp:
         elif action == 'updateProps':
             assert actor_role >= ROLE_ADMIN, 'only admins can update props'
         elif action == 'setUserTitle':
+            # TODO: assert title changed?
             assert actor_role >= ROLE_MOD, 'only mods can set user titles'
         elif action == 'mutePost':
             assert not self._muted(), 'post is already muted'

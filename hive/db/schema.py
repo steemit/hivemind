@@ -58,6 +58,8 @@ def build_metadata():
         sa.Column('cached_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
         sa.Column('raw_json', sa.Text),
 
+        #sa.Column('last_read_notify_id', sa.Integer, nullable=False, server_default='0'), # TODO: last read
+
         sa.UniqueConstraint('name', name='hive_accounts_ux1'),
         sa.Index('hive_accounts_ix1', 'vote_weight', 'id'), # core: quick ranks
         sa.Index('hive_accounts_ix2', 'name', 'id'), # core: quick id map
@@ -211,6 +213,11 @@ def build_metadata():
 
         sa.Index('hive_posts_cache_ix9a',             'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout               todo: rem depth
         sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout, filtered     todo: rem depth
+
+        # TODO: index: account posts
+        #sa.Index('hive_posts_cache_ix2', 'author', 'post_id', 'payout',   postgresql_where=sql_text("is_paidout = '0' AND payout > 0")), # API: author pending
+        #sa.Index('hive_posts_cache_ix2', 'author', 'created_at', 'depth', postgresql_where=sql_text("depth = 0")),                       # API: author posts/comments
+        #sa.Index('hive_posts_cache_ix2', 'parent_id', 'created_at', 'id', postgresql_where=sql_text("is_paidout = '0' AND payout > 0")), # API: recent replies
 
         # index: community ranked posts
         sa.Index('hive_posts_cache_ix30', 'community_id', 'sc_trend',   'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community trend
