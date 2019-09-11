@@ -24,23 +24,23 @@ class NotifyType(IntEnum):
     subscribe = 11
 
     # inactive
-    #resteem = 11
-    #mention = 12
-    #follow = 13
+    #resteem = 12
+    #mention = 13
+    #follow = 14
 
-    #vote_post = 14
-    #vote_comment = 15
-    #reply_post = 16
-    #reply_comment = 17
+    #vote_post = 15
+    #vote_comment = 16
+    #reply_post = 17
+    #reply_comment = 18
 
-    #update_account = 18
-    #receive = 19
-    #send = 20
+    #update_account = 19
+    #receive = 20
+    #send = 21
 
-    #reward = 21
-    #power_up = 22
-    #power_down = 23
-    #message = 99
+    #reward = 22
+    #power_up = 23
+    #power_down = 24
+    #message = 25
 
 class Notify:
     """Handles writing notifications/messages."""
