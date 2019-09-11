@@ -34,7 +34,7 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
-    # pylint: disable=too-many-arguments,bad-whitespace,line-too-long
+    # pylint: disable=too-many-arguments,bad-whitespace,line-too-long,too-many-locals
 
     definitions = {#         field      pending toponly gray   promoted
         'trending':        ('sc_trend', False,  True,   False, False),
