@@ -157,6 +157,34 @@ async def _pinned(db, community):
     return await db.query_col(sql, community=community)
 
 
+async def pids_by_payout(db, account: str, start_author: str = '',
+                         start_permlink: str = '', limit: int = 20):
+    """Get a list of post_ids for an author's blog."""
+    seek = ''
+    start_id = None
+    if start_permlink:
+        start_id = await _get_post_id(db, start_author, start_permlink)
+        seek = """
+          AND rshares <= (
+            SELECT rshares
+              FROM hive_posts_cache
+             WHERE post_id = :start_id)
+        """
+
+    sql = """
+        SELECT hpc.post_id
+          FROM hive_posts_cache hpc
+          JOIN hive_posts hp ON hp.id = hpc.post_id
+         WHERE hp.author = :account
+           AND hp.is_deleted = '0'
+           AND hpc.is_paidout = '0' %s
+           AND hpc.rshares > 0
+      ORDER BY rshares DESC
+         LIMIT :limit
+    """ % seek
+
+    return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
+
 async def pids_by_blog(db, account: str, start_author: str = '',
                        start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids for an author's blog."""

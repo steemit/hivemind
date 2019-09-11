@@ -28,7 +28,7 @@ async def get_ranked_posts(context, sort, start_author='', start_permlink='', li
 @return_error_info
 async def get_account_posts(context, sort, account, start_author='', start_permlink='', limit=20):
     """Get posts for an account -- blog, feed, comments, or replies."""
-    assert sort in ['blog', 'feed', 'comments', 'replies'], 'invalid sort'
+    assert sort in ['blog', 'feed', 'comments', 'replies', 'payout'], 'invalid sort'
     assert account, 'account is required'
 
     db = context['db']
@@ -52,4 +52,8 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
     elif sort == 'replies':
         start = start if start_permlink else (account, None)
         ids = await cursor.pids_by_replies(db, *start, limit)
+        return await load_posts(context['db'], ids)
+    elif sort == 'payout':
+        start = start if start_permlink else (account, None)
+        ids = await cursor.pids_by_payout(db, account, *start, limit)
         return await load_posts(context['db'], ids)
