@@ -35,7 +35,7 @@ ACCOUNT_TAB_KEYS = {
     'blog': 'blog',
     'feed': 'feed',
     'comments': 'comments',
-    'recent-replies': 'recent_replies',
+    'recent-replies': 'replies',
     'payout': 'payout'}
 
 # post list sorts
@@ -135,7 +135,7 @@ async def _get_account_discussion_by_key(db, account, key):
     assert account, 'account must be specified'
     assert key, 'discussion key must be specified'
 
-    if key == 'recent_replies':
+    if key == 'replies':
         pids = await cursor.pids_by_replies(db, account, '', 20)
         posts = await load_posts(db, pids)
     elif key == 'comments':
