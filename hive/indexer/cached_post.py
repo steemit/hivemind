@@ -11,6 +11,7 @@ from hive.db.adapter import Db
 from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
+from hive.indexer.community import Community
 
 # pylint: disable=too-many-lines
 
@@ -323,17 +324,16 @@ class CachedPost:
             post_ids = [tup[1] for tup in tups]
             post_levels = [tup[2] for tup in tups]
 
-            catmap = cls._get_cat_map_for_insert(tups)
+            coremap = cls._get_core_fields(tups)
             for pid, post, level in zip(post_ids, posts, post_levels):
                 if post['author']:
-                    if pid in catmap:
-                        cat = catmap[pid]
-                        post['category'] = cat
-                        # TODO: comm table check
-                        if cat[0:5] == 'hive-' and Accounts.exists(cat):
-                            post['community_id'] = Accounts.get_id(cat)
-                        else:
-                            post['community_id'] = None
+                    assert pid in coremap, 'pid not in coremap'
+                    if pid in coremap:
+                        core = coremap[pid]
+                        post['category'] = core['category']
+                        post['community_id'] = core['community_id']
+                        post['gray'] = core['is_muted']
+                        post['hide'] = not core['is_valid']
                     buffer.extend(cls._sql(pid, post, level=level))
                 else:
                     # When a post has been deleted (or otherwise DNE),
@@ -377,19 +377,37 @@ class CachedPost:
         return cls._last_id
 
     @classmethod
-    def _get_cat_map_for_insert(cls, tups):
-        """Cached posts must use validated `category` from hive_posts.
+    def _community_id(cls, category, community):
+        if category == community:
+            # (heuristic may give false positives)
+            return Community.get_id(community)
+        return None
 
-        `category` returned from steemd is subject to change.
+    @classmethod
+    def _get_core_fields(cls, tups):
+        """Cached posts must inherit some properties from hive_posts.
+
+        Purpose
+         - immutable `category` (returned from steemd is subject to change)
+         - authoritative community_id can be determined and written
+         - community muted/valid cols override legacy gray/hide logic
         """
         # get list of ids of posts which are to be inserted
-        ids = [tup[1] for tup in tups if tup[2] == 'insert']
+        # TODO: try conditional. currently competes w/ legacy flags on vote
+        #ids = [tup[1] for tup in tups if tup[2] in ('insert', 'update')]
+        ids = [tup[1] for tup in tups]
         if not ids:
             return {}
-        # build a map of id->category for each of those posts
-        sql = "SELECT id, category FROM hive_posts WHERE id IN :ids"
-        cats = {r[0]: r[1] for r in DB.query_all(sql, ids=tuple(ids))}
-        return cats
+
+        # build a map of id->fields for each of those posts
+        sql = """SELECT id, category, community, is_muted, is_valid
+                   FROM hive_posts WHERE id IN :ids"""
+        core = {r[0]: {'category': r[1],
+                       'community': cls._community_id(r[1], r[2]),
+                       'is_muted': r[3],
+                       'is_valid': r[4]}
+                for r in DB.query_all(sql, ids=tuple(ids))}
+        return core
 
     @classmethod
     def _bump_last_id(cls, next_id):
@@ -421,9 +439,10 @@ class CachedPost:
 
         Valid levels are:
          - `insert`: post does not yet exist in cache
-         - `update`: post was modified
          - `payout`: post was paidout
+         - `update`: post was modified
          - `upvote`: post payout/votes changed
+         - `recount`: post child count changed
         """
 
         #pylint: disable=bad-whitespace
@@ -449,13 +468,13 @@ class CachedPost:
                 ('author',       post['author']),
                 ('permlink',     post['permlink']),
                 ('category',     post['category']),
-                ('community_id', post['community_id']),
                 ('depth',        post['depth'])])
 
         # always write, unless simple vote update
         if level in ['insert', 'payout', 'update']:
             basic = post_basic(post)
             values.extend([
+                ('community_id',  post['community_id']), # immutable*
                 ('created_at',    post['created']),    # immutable*
                 ('updated_at',    post['last_update']),
                 ('title',         post['title']),
@@ -484,6 +503,16 @@ class CachedPost:
         # update unconditionally
         payout = post_payout(post)
         stats = post_stats(post)
+
+        # //--
+        # if community - override fields.
+        # TODO: make conditional (date-based?)
+        assert 'community_id' in post, 'comm_id not loaded'
+        if post['community_id']:
+            stats['hide'] = post['hide']
+            stats['gray'] = post['gray']
+        # //--
+
         values.extend([
             ('payout',      "%f" % payout['payout']),
             ('rshares',     "%d" % payout['rshares']),
