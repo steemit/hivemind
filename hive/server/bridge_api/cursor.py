@@ -67,6 +67,8 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
     if pending:  where.append("is_paidout = '0'")
     if promoted: where.append('promoted > 0')
 
+    pinned_ids = []
+
     # seek
     seek_id = None
     if start_permlink:
@@ -82,6 +84,8 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
         #sql = """((%s < :seek_val) OR
         #          (%s = :seek_val AND post_id > :seek_id))"""
         #where.append(sql % (field, sval, field, sval))
+    elif len(ids) == 1:
+        pinned_ids = await _pinned(db, ids[0])
 
     # build
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -89,7 +93,7 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
               """ % (table, ' AND '.join(where), field))
 
     # execute
-    return await db.query_col(sql, ids=tuple(ids), seek_id=seek_id, limit=limit)
+    return pinned_ids + await db.query_col(sql, ids=tuple(ids), seek_id=seek_id, limit=limit)
 
 
 
@@ -134,43 +138,34 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     if params[3]: where.append('depth > 0')
     if params[4]: where.append('promoted > 0')
 
-    # filter by community, category, or tag
-    community = tag if tag[:5] == 'hive-' else None
-    if community:
-        where.append('category = :tag')
-        if sort not in ('payout', 'payout_comments'):
-            sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
-            where.append("post_id IN (%s)" % sql)
-        if sort in ('trending', 'hot'):
-            where.append('depth = 0')
-    elif tag:
+    # filter by category or tag
+    if tag:
         if sort in ['payout', 'payout_comments']:
             where.append('category = :tag')
         else:
             sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
             where.append("post_id IN (%s)" % sql)
 
-    pinned_ids = []
     start_id = None
     if start_permlink:
         start_id = await _get_post_id(db, start_author, start_permlink)
         sql = "%s <= (SELECT %s FROM %s WHERE post_id = :start_id)"
         where.append(sql % (field, field, table))
-    elif community:
-        pinned_ids = await _pinned(db, tag)
 
     sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
            % (table, ' AND '.join(where), field))
 
-    return pinned_ids + await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
+    return await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
 
 async def _subscribed(db, account_id):
     sql = """SELECT community_id FROM hive_subscriptions
               WHERE account_id = :account_id"""
     return await db.query_col(sql, account_id=account_id)
 
-async def _pinned(db, community):
+async def _pinned(db, community_id):
     """Get a list of pinned post `id`s in `community`."""
+    sql = "SELECT name FROM hive_communities WHERE id = :id"
+    community = db.query_one(sql, id=community_id)
     sql = """SELECT id FROM hive_posts
               WHERE is_pinned = '1'
                 AND is_deleted = '0'
