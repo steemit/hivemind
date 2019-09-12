@@ -43,7 +43,7 @@ async def _cids(db, tag, observer_id):
         return await _subscribed(db, observer_id)
     if tag[:5] == 'hive-':
         return [await _get_community_id(db, tag)]
-    return None
+    return []
 
 async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, observer_id=None):
     """Get a list of post_ids for a given posts query.
