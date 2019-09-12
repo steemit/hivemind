@@ -10,6 +10,7 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.community import Community
+from hive.indexer.notify import Notify
 
 log = logging.getLogger(__name__)
 DB = Db.instance()
@@ -122,6 +123,10 @@ class Posts:
         cls._set_id(op['author']+'/'+op['permlink'], post['id'])
 
         if not DbState.is_initial_sync():
+            if post['error']:
+                author_id = Accounts.get_id(post['author'])
+                Notify('error', dst_id=author_id, when=date,
+                       post_id=post['id'], payload=post['error']).write()
             CachedPost.insert(op['author'], op['permlink'], post['id'])
             if op['parent_author']: # update parent's child count
                 CachedPost.recount(op['parent_author'],
@@ -140,6 +145,11 @@ class Posts:
         DB.query(sql, **post)
 
         if not DbState.is_initial_sync():
+            if post['error']:
+                author_id = Accounts.get_id(post['author'])
+                Notify('error', dst_id=author_id, when=date,
+                       post_id=post['id'], payload=post['error']).write()
+
             CachedPost.undelete(pid, post['author'], post['permlink'],
                                 post['category'])
             cls._insert_feed_cache(post)
@@ -190,7 +200,17 @@ class Posts:
 
     @classmethod
     def _build_post(cls, op, date, pid=None):
-        """Validate and normalize a post operation."""
+        """Validate and normalize a post operation.
+
+        Post is muted if:
+         - parent was muted
+         - author unauthorized
+
+        Post is invalid if:
+         - parent is invalid
+         - author unauthorized
+        """
+        # TODO: non-nsfw post in nsfw community is `invalid`
 
         # if this is a top-level post:
         if not op['parent_author']:
@@ -208,26 +228,20 @@ class Posts:
                        FROM hive_posts WHERE id = :id"""
             parent_depth, category, community, is_valid, is_muted = DB.query_row(sql, id=parent_id)
             depth = parent_depth + 1
-            if is_muted: is_valid = False
+            if not is_valid: error = 'replying to invalid post'
+            elif is_muted: error = 'replying to muted post'
 
         # check post validity in specified context
-        community = Community.validated_name(community)
-        if community:
-            if is_valid:
-                is_valid = Community.is_post_valid(community, op)
-        else:
-            community = op['author']
-
-        # post is invalid if:
-        #  - author is muted in a community
-        #  - is a reply to a muted or invalid post
-        #  - (?) is non-nsfw post in nsfw community
-        if not is_valid:
+        error = None
+        community_id = Community.validated_id(community)
+        if not community_id:
+            community = op['author'] # TODO: catchall?
+        elif is_valid and not Community.is_post_valid(community_id, op):
+            error = 'not authorized'
+            is_valid = False
             is_muted = True
-            url = "@%s/%s" % (op['author'], op['permlink'])
-            log.info("Invalid post %s in @%s", url, community)
 
         return dict(author=op['author'], permlink=op['permlink'], id=pid,
                     is_valid=is_valid, is_muted=is_muted, parent_id=parent_id,
                     depth=depth, category=category, community=community,
-                    date=date)
+                    date=date, error=error)

@@ -78,6 +78,12 @@ def read_key_dict(obj, key):
 class Community:
     """Handles hive community registration and operations."""
 
+    # name->id map
+    _ids = {}
+
+    # id -> name map
+    _names = {}
+
     @classmethod
     def register(cls, names, block_date):
         """Block processing: hooks into new account registration.
@@ -102,6 +108,16 @@ class Community:
             Notify('new_community', src_id=None, dst_id=_id,
                    when=block_date, community_id=_id).write()
 
+    @classmethod
+    def validated_id(cls, name):
+        """Verify `name` as a candidate and check for record id."""
+        if name:
+            if name in cls._ids:
+                return cls._ids[name]
+            if cls.validated_name(name):
+                if Accounts.exists(name):
+                    return cls.get_id(name)
+        return None
 
     @classmethod
     def validated_name(cls, name):
@@ -113,25 +129,37 @@ class Community:
         return None
 
     @classmethod
-    def exists(cls, name):
-        """Check if a given community name exists."""
-        sql = "SELECT 1 FROM hive_communities WHERE name = :name"
-        return bool(DB.query_one(sql, name=name))
-
-    @classmethod
     def get_id(cls, name):
         """Given a community name, get its internal id."""
+        assert name, 'name is empty'
+        if name in cls._ids:
+            return cls._ids[name]
         sql = "SELECT id FROM hive_communities WHERE name = :name"
-        return DB.query_one(sql, name=name)
+        cid = DB.query_one(sql, name=name)
+        if cid:
+            cls._ids[name] = cid
+            cls._names[cid] = name
+        return cid
 
     @classmethod
-    def get_all_muted(cls, community):
+    def _get_name(cls, cid):
+        if cid in cls._names:
+            return cls._names[cid]
+        sql = "SELECT name FROM hive_communities WHERE id = :id"
+        name = DB.query_one(sql, id=cid)
+        if cid:
+            cls._ids[name] = cid
+            cls._names[cid] = name
+        return name
+
+    @classmethod
+    def get_all_muted(cls, community_id):
         """Return a list of all muted accounts."""
         return DB.query_col("""SELECT name FROM hive_accounts
                                 WHERE id IN (SELECT account_id FROM hive_roles
                                               WHERE community_id = :community_id
                                                 AND role_id < 0)""",
-                            community_id=cls.get_id(community))
+                            community_id=community_id)
 
     @classmethod
     def get_user_role(cls, community_id, account_id):
@@ -145,7 +173,7 @@ class Community:
                             account_id=account_id) or ROLE_GUEST
 
     @classmethod
-    def is_post_valid(cls, community, comment_op: dict):
+    def is_post_valid(cls, community_id, comment_op: dict):
         """ Given a new post/comment, check if valid as per community rules
 
         For a comment to be valid, these conditions apply:
@@ -155,9 +183,8 @@ class Community:
             - Community must exist
         """
 
-        community_id = cls.get_id(community)
-        #assert community_id, 'community not found'
-        if not community_id: return False # TODO
+        assert community_id, 'no community_id'
+        community = cls._get_name(community_id)
         account_id = Accounts.get_id(comment_op['author'])
         role = cls.get_user_role(community_id, account_id)
         type_id = int(community[5])
@@ -381,8 +408,7 @@ class CommunityOp:
     def _read_community(self):
         _name = read_key_str(self.op, 'community', 16)
         assert _name, 'must name a community'
-        assert Accounts.exists(_name), 'invalid name `%s`' % _name
-        _id = Community.get_id(_name)
+        _id = Community.validated_id(_name)
         assert _id, 'community `%s` does not exist' % _name
 
         self.community = _name
