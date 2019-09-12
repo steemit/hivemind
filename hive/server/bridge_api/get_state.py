@@ -47,6 +47,7 @@ POST_LIST_SORTS = [
     'created',
     'payout',
     'payout_comments',
+    'muted',
 ]
 
 @return_error_info
