@@ -9,6 +9,7 @@ import ujson as json
 from hive.db.adapter import Db
 from hive.indexer.accounts import Accounts
 from hive.indexer.notify import Notify
+from hive.db.db_state import DbState
 
 log = logging.getLogger(__name__)
 
@@ -295,6 +296,8 @@ class CommunityOp:
     def process(self):
         """Applies a validated operation."""
         assert self.valid, 'cannot apply invalid op'
+        from hive.indexer.cached_post import CachedPost
+
         action = self.action
         params = dict(
             date=self.date,
@@ -354,10 +357,16 @@ class CommunityOp:
             DB.query("""UPDATE hive_posts SET is_muted = '1'
                          WHERE id = :post_id""", **params)
             self._notify('mute_post', payload=self.notes)
+            if not DbState.is_initial_sync():
+                CachedPost.update(self.account, self.permlink, self.post_id)
+
         elif action == 'unmutePost':
             DB.query("""UPDATE hive_posts SET is_muted = '0'
                          WHERE id = :post_id""", **params)
             self._notify('unmute_post', payload=self.notes)
+            if not DbState.is_initial_sync():
+                CachedPost.update(self.account, self.permlink, self.post_id)
+
         elif action == 'pinPost':
             DB.query("""UPDATE hive_posts SET is_pinned = '1'
                          WHERE id = :post_id""", **params)
@@ -372,6 +381,11 @@ class CommunityOp:
         return True
 
     def _notify(self, op, **kwargs):
+        if DbState.is_initial_sync():
+            # TODO: set start date for notifs?
+            # TODO: address other callers
+            return
+
         dst_id = None
         score = 35
 
