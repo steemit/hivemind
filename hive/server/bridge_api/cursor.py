@@ -5,6 +5,8 @@ from dateutil.relativedelta import relativedelta
 
 # pylint: disable=too-many-lines
 
+DEFAULT_CID = 1317453
+
 def last_month():
     """Get the date 1 month ago."""
     return datetime.now() + relativedelta(months=-1)
@@ -36,6 +38,50 @@ async def _get_community_id(db, name):
     assert _id, "comm not found: `%s`" % name
     return _id
 
+async def _cids(db, tag, observer_id):
+    if tag == 'my':
+        return await _subscribed(db, observer_id)
+    if tag[:5] == 'hive-':
+        return [await _get_community_id(db, tag)]
+    return None
+
+async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, observer_id=None):
+    """Get a list of post_ids for a given posts query.
+
+    if `tag` is blank: global trending
+    if `tag` is `my`: personal trending
+    if `tag` is `hive-*`: community trending
+    else `tag` is a tag: tag trending
+
+    Valid `sort` values:
+     - legacy: trending, hot, created, promoted, payout, payout_comments
+     - hive: trending, hot, created, promoted, payout, muted
+    """
+    # pylint: disable=too-many-arguments,bad-whitespace,line-too-long
+
+    # pylint: disable=too-many-locals,too-many-branches
+    cids = await _cids(db, tag, observer_id)
+
+    #if not tag:              # global trending
+    #elif tag == 'my':        # personal trending
+    #elif tag[:5] == 'hive-': # community trending
+    #else:                    # tag trending
+
+    prepend = []
+    if not start_permlink:
+        cid = cids[0] if len(cids) == 1 else DEFAULT_CID
+        prepend = await _pinned(db, cid)
+
+    if cids:
+        pids = await pids_by_community(
+            db, cids, sort, start_author, start_permlink, limit)
+    else:
+        pids = await pids_by_tag(
+            db, sort, start_author, start_permlink, limit, tag)
+
+    return prepend + pids
+
+
 async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
     """Get a list of post_ids for a given posts query.
 
@@ -43,13 +89,13 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
     """
     # pylint: disable=too-many-arguments,bad-whitespace,line-too-long,too-many-locals
 
-    definitions = {#         field      pending toponly gray   promoted
-        'trending':        ('sc_trend', False,  True,   False, False),
-        'hot':             ('sc_hot',   False,  True,   False, False),
-        'created':         ('post_id',  False,  True,   False, False),
-        'promoted':        ('promoted', True,   True,   False, True),
-        'payout':          ('payout',   True,   False,  False, False),
-        'muted':           ('payout',   True,   False,  True,  False)}
+    definitions = {#         field         pending toponly gray   promoted
+        'trending':        ('sc_trend',    False,  True,   False, False),
+        'hot':             ('sc_hot',      False,  True,   False, False),
+        'created':         ('created_at',  False,  True,   False, False),
+        'promoted':        ('promoted',    True,   True,   False, True),
+        'payout':          ('payout',      True,   False,  False, False),
+        'muted':           ('payout',      True,   False,  True,  False)}
 
     # validate
     assert ids, 'no community ids provided to query'
@@ -67,8 +113,6 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
     if pending:  where.append("is_paidout = '0'")
     if promoted: where.append('promoted > 0')
 
-    pinned_ids = []
-
     # seek
     seek_id = None
     if start_permlink:
@@ -84,8 +128,6 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
         #sql = """((%s < :seek_val) OR
         #          (%s = :seek_val AND post_id > :seek_id))"""
         #where.append(sql % (field, sval, field, sval))
-    elif len(ids) == 1:
-        pinned_ids = await _pinned(db, ids[0])
 
     # build
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -93,29 +135,16 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
               """ % (table, ' AND '.join(where), field))
 
     # execute
-    return pinned_ids + await db.query_col(sql, ids=tuple(ids), seek_id=seek_id, limit=limit)
+    return await db.query_col(sql, ids=tuple(ids), seek_id=seek_id, limit=limit)
 
 
 
-async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, observer_id=None):
+async def pids_by_tag(db, sort, start_author, start_permlink, limit, tag):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
     # pylint: disable=too-many-arguments,bad-whitespace,line-too-long
-
-    # pylint: disable=too-many-locals,too-many-branches
-    # branch on tag/observer
-    if tag:
-        cids = []
-        if tag[:5] == 'hive-':
-            cids = [await _get_community_id(db, tag)]
-        elif tag == 'my':
-            cids = await _subscribed(db, observer_id)
-        if cids:
-            return await pids_by_community(db, cids, sort, start_author,
-                                           start_permlink, limit)
-
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments']
 
@@ -175,34 +204,6 @@ async def _pinned(db, community_id):
             ORDER BY id DESC"""
     return await db.query_col(sql, community=community)
 
-
-async def pids_by_payout(db, account: str, start_author: str = '',
-                         start_permlink: str = '', limit: int = 20):
-    """Get a list of post_ids for an author's blog."""
-    seek = ''
-    start_id = None
-    if start_permlink:
-        start_id = await _get_post_id(db, start_author, start_permlink)
-        seek = """
-          AND rshares <= (
-            SELECT rshares
-              FROM hive_posts_cache
-             WHERE post_id = :start_id)
-        """
-
-    sql = """
-        SELECT hpc.post_id
-          FROM hive_posts_cache hpc
-          JOIN hive_posts hp ON hp.id = hpc.post_id
-         WHERE hp.author = :account
-           AND hp.is_deleted = '0'
-           AND hpc.is_paidout = '0' %s
-           AND hpc.rshares > 0
-      ORDER BY rshares DESC
-         LIMIT :limit
-    """ % seek
-
-    return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
 
 async def pids_by_blog(db, account: str, start_author: str = '',
                        start_permlink: str = '', limit: int = 20):
@@ -334,3 +335,31 @@ async def pids_by_replies(db, start_author: str, start_permlink: str = '',
     """ % seek
 
     return await db.query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
+
+async def pids_by_payout(db, account: str, start_author: str = '',
+                         start_permlink: str = '', limit: int = 20):
+    """Get a list of post_ids for an author's blog."""
+    seek = ''
+    start_id = None
+    if start_permlink:
+        start_id = await _get_post_id(db, start_author, start_permlink)
+        seek = """
+          AND rshares <= (
+            SELECT rshares
+              FROM hive_posts_cache
+             WHERE post_id = :start_id)
+        """
+
+    sql = """
+        SELECT hpc.post_id
+          FROM hive_posts_cache hpc
+          JOIN hive_posts hp ON hp.id = hpc.post_id
+         WHERE hp.author = :account
+           AND hp.is_deleted = '0'
+           AND hpc.is_paidout = '0' %s
+      ORDER BY rshares DESC
+         LIMIT :limit
+    """ % seek
+    # AND hpc.rshares > 10e9
+
+    return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
