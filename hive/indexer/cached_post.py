@@ -403,7 +403,7 @@ class CachedPost:
         sql = """SELECT id, category, community, is_muted, is_valid
                    FROM hive_posts WHERE id IN :ids"""
         core = {r[0]: {'category': r[1],
-                       'community': cls._community_id(r[1], r[2]),
+                       'community_id': cls._community_id(r[1], r[2]),
                        'is_muted': r[3],
                        'is_valid': r[4]}
                 for r in DB.query_all(sql, ids=tuple(ids))}
