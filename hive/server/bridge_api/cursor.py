@@ -45,6 +45,7 @@ async def _cids(db, tag, observer_id):
         return [await _get_community_id(db, tag)]
     return []
 
+#TODO: async def posts_by_ranked
 async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, observer_id=None):
     """Get a list of post_ids for a given posts query.
 
@@ -57,37 +58,34 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
      - legacy: trending, hot, created, promoted, payout, payout_comments
      - hive: trending, hot, created, promoted, payout, muted
     """
-    # pylint: disable=too-many-arguments,bad-whitespace,line-too-long
+    # pylint: disable=too-many-arguments
 
-    # pylint: disable=too-many-locals,too-many-branches
+    # list of comm ids to query, if any
     cids = await _cids(db, tag, observer_id)
 
-    #if not tag:              # global trending
-    #elif tag == 'my':        # personal trending
-    #elif tag[:5] == 'hive-': # community trending
-    #else:                    # tag trending
-
     prepend = []
-    if not start_permlink:
+    if not start_permlink and sort in ('trending', 'hot'):
         cid = cids[0] if len(cids) == 1 else DEFAULT_CID
         prepend = await _pinned(db, cid)
 
+    start_id = None
+    if start_permlink:
+        start_id = await _get_post_id(db, start_author, start_permlink)
+
     if cids:
-        pids = await pids_by_community(
-            db, cids, sort, start_author, start_permlink, limit)
+        pids = await pids_by_community(db, cids, sort, start_id, limit)
     else:
-        pids = await pids_by_tag(
-            db, sort, start_author, start_permlink, limit, tag)
+        pids = await pids_by_category(db, tag, sort, start_id, limit)
 
     return prepend + pids
 
 
-async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
+async def pids_by_community(db, ids, sort, seek_id, limit):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
-    # pylint: disable=too-many-arguments,bad-whitespace,line-too-long,too-many-locals
+    # pylint: disable=bad-whitespace
 
     definitions = {#         field         pending toponly gray   promoted
         'trending':        ('sc_trend',    False,  True,   False, False),
@@ -114,15 +112,12 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
     if promoted: where.append('promoted > 0')
 
     # seek
-    seek_id = None
-    if start_permlink:
-        # simpler `%s <= %s` eval has edge case: many posts with payout 0
-        seek_id = await _get_post_id(db, start_author, start_permlink)
+    if seek_id:
         sval = "(SELECT %s FROM %s WHERE post_id = :seek_id)" % (field, table)
         sql = """((%s < %s) OR (%s = %s AND post_id > :seek_id))"""
         where.append(sql % (field, sval, field, sval))
 
-        #seek_id = await _get_post_id(db, start_author, start_permlink)
+        # simpler `%s <= %s` eval has edge case: many posts with payout 0
         #sql = "SELECT %s FROM %s WHERE post_id = :id)"
         #seek_val = await db.query_col(sql % (field, table), id=seek_id)
         #sql = """((%s < :seek_val) OR
@@ -139,12 +134,12 @@ async def pids_by_community(db, ids, sort, start_author, start_permlink, limit):
 
 
 
-async def pids_by_tag(db, sort, start_author, start_permlink, limit, tag):
+async def pids_by_category(db, tag, sort, start_id, limit):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
-    # pylint: disable=too-many-arguments,bad-whitespace,line-too-long
+    # pylint: disable=bad-whitespace
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments']
 
@@ -175,9 +170,7 @@ async def pids_by_tag(db, sort, start_author, start_permlink, limit, tag):
             sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
             where.append("post_id IN (%s)" % sql)
 
-    start_id = None
-    if start_permlink:
-        start_id = await _get_post_id(db, start_author, start_permlink)
+    if start_id:
         sql = "%s <= (SELECT %s FROM %s WHERE post_id = :start_id)"
         where.append(sql % (field, field, table))
 
