@@ -8,6 +8,8 @@ from hive.server.hive_api.objects import _follow_contexts
 
 log = logging.getLogger(__name__)
 
+# pylint: disable=too-many-lines
+
 async def load_accounts(db, names, observer_id=None):
     """`get_accounts`-style lookup for `get_state` compat layer."""
     sql = """SELECT id, name, display_name, about, reputation, vote_weight,
@@ -38,34 +40,75 @@ async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
 
     return posts
 
+ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'admin', 6: 'mod', 8: 'admin'}
+
 async def load_posts_keyed(db, ids, truncate_body=0):
     """Given an array of post ids, returns full posts objects keyed by id."""
+    # pylint: disable=too-many-locals
     assert ids, 'no ids passed to load_posts_keyed'
 
     # fetch posts and associated author reps
-    sql = """SELECT post_id, author, permlink, title, body, category, depth,
+    sql = """SELECT post_id, community_id, author, permlink, title, body, category, depth,
                     promoted, payout, payout_at, is_paidout, children, votes,
                     created_at, updated_at, rshares, raw_json, json,
                     is_hidden, is_grayed, total_votes
                FROM hive_posts_cache WHERE post_id IN :ids"""
     result = await db.query_all(sql, ids=tuple(ids))
-    author_reps = await _query_author_rep_map(db, result)
+    author_map = await _query_author_map(db, result)
 
+    # TODO: author affiliation?
+    ctx = {}
     posts_by_id = {}
+    author_ids = {}
+    post_cids = {}
     for row in result:
         row = dict(row)
-        row['author_rep'] = author_reps[row['author']]
+        author = author_map[row['author']]
+        author_ids[author['id']] = author['name']
+
+        row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
         posts_by_id[row['post_id']] = post
+        post_cids[row['post_id']] = row['community_id']
 
-    sql = """SELECT id, is_pinned, is_muted, is_valid
+        cid = row['community_id']
+        if cid:
+            if cid not in ctx:
+                ctx[cid] = []
+            ctx[cid].append(author['id'])
+
+    # TODO: optimize
+    titles = {}
+    roles = {}
+    for cid, account_ids in ctx.items():
+        sql = "SELECT title FROM hive_communities WHERE id = :id"
+        titles[cid] = await db.query_one(sql, id=cid)
+        sql = """SELECT account_id, role_id, title
+                   FROM hive_roles
+                  WHERE community_id = :cid
+                    AND account_id IN :ids"""
+        roles[cid] = {}
+        ret = await db.query_all(sql, cid=cid, ids=tuple(account_ids))
+        for row in ret:
+            name = author_ids[row['account_id']]
+            roles[cid][name] = (row['role_id'], row['title'])
+
+    for pid, post in posts_by_id.items():
+        author = post['author']
+        cid = post_cids[pid]
+        if cid:
+            post['community_title'] = titles[cid]
+            role = roles[cid][author] if author in roles[cid] else (0, '')
+            post['author_role'] = ROLES[role[0]]
+            post['author_title'] = role[1]
+
+
+    sql = """SELECT id, is_pinned
                FROM hive_posts WHERE id IN :ids"""
-    for row in await db.query_all(sql, ids=tuple(ids)):
+    for row in await db.query_all(sql, ids=tuple(ids), cids=tuple(ctx.keys())):
         if row['id'] in posts_by_id:
             post = posts_by_id[row['id']]
             post['stats']['is_pinned'] = row['is_pinned']
-            post['stats']['is_muted'] = row['is_muted']
-            post['stats']['is_valid'] = row['is_valid']
 
     return posts_by_id
 
@@ -80,7 +123,7 @@ async def load_posts(db, ids, truncate_body=0):
     # in rare cases of cache inconsistency, recover and warn
     missed = set(ids) - posts_by_id.keys()
     if missed:
-        log.warning("get_posts do not exist in cache: %s", repr(missed))
+        log.info("get_posts do not exist in cache: %s", repr(missed))
         for _id in missed:
             ids.remove(_id)
             sql = ("SELECT id, author, permlink, depth, created_at, is_deleted "
@@ -90,16 +133,16 @@ async def load_posts(db, ids, truncate_body=0):
                 # TODO: This should never happen. See #173 for analysis
                 log.error("missing post: %s", dict(post))
             else:
-                log.warning("requested deleted post: %s", dict(post))
+                log.info("requested deleted post: %s", dict(post))
 
     return [posts_by_id[_id] for _id in ids]
 
-async def _query_author_rep_map(db, posts):
+async def _query_author_map(db, posts):
     """Given a list of posts, returns an author->reputation map."""
     if not posts: return {}
     names = tuple({post['author'] for post in posts})
-    sql = "SELECT name, reputation FROM hive_accounts WHERE name IN :names"
-    return {r['name']: r['reputation'] for r in await db.query_all(sql, names=names)}
+    sql = "SELECT id, name, reputation FROM hive_accounts WHERE name IN :names"
+    return {r['name']: r for r in await db.query_all(sql, names=names)}
 
 def _condenser_account_object(row):
     """Convert an internal account record into legacy-steemd style."""
