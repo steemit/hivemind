@@ -147,7 +147,9 @@ async def get_state(context, path, observer=None):
         if name not in state['community']:
             state['community'][name] = {'title': title}
         state['tag_idx']['trending'].append(name)
-    state['tag_idx']['trending'].extend(['dtube', 'sct', 'photography', 'life', 'steem'])
+    state['tag_idx']['trending'].extend(['photography', 'travel', 'life',
+                                         'gaming', 'crypto', 'newsteem',
+                                         'music', 'food'])
 
     return state
 
