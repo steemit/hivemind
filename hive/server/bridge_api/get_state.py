@@ -106,7 +106,7 @@ async def get_state(context, path, observer=None):
 
     # account - `/@account/tab` (feed, blog, comments, replies)
     if page == 'account':
-        account = await _load_account(db, account, observer_id)
+        account = await _load_account(db, params['account'], observer_id)
         state['accounts'][params['account']] = account
 
         key = params['sort']
