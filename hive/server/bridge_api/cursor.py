@@ -64,7 +64,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     cids = await _cids(db, tag, observer_id)
 
     prepend = []
-    if not start_permlink and sort in ('trending', 'hot'):
+    if not tag and not start_permlink and sort in ('trending', 'hot'):
         cid = cids[0] if len(cids) == 1 else DEFAULT_CID
         prepend = await _pinned(db, cid)
 
