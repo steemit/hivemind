@@ -21,7 +21,7 @@ async def get_ranked_posts(context, sort, start_author='', start_permlink='',
     observer_id = await get_account_id(db, observer) if observer else None
 
     assert sort in ['trending', 'hot', 'created', 'promoted',
-                    'payout', 'payout_comments'], 'invalid sort'
+                    'payout', 'payout_comments', 'muted'], 'invalid sort'
     ids = await cursor.pids_by_ranked(
         context['db'],
         sort,
