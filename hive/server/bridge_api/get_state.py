@@ -8,7 +8,7 @@ from aiocache import cached
 
 from hive.server.common.mutes import Mutes
 
-from hive.server.hive_api.community import if_tag_community, list_all_subscriptions
+from hive.server.hive_api.community import if_tag_community, list_top_communities
 from hive.server.hive_api.common import get_account_id
 
 from hive.server.bridge_api.objects import (
@@ -23,8 +23,6 @@ from hive.server.common.helpers import (
     valid_permlink,
     valid_sort,
     valid_tag)
-from hive.server.bridge_api.tags import (
-    get_top_trending_tags_summary)
 
 import hive.server.bridge_api.cursor as cursor
 
@@ -50,15 +48,49 @@ POST_LIST_SORTS = [
     'muted',
 ]
 
+def _parse_route(path):
+    """`get_state` reimplementation.
+
+    See: https://github.com/steemit/steem/blob/master/libraries/plugins/apis/condenser_api/condenser_api.cpp
+    """
+    (path, part) = _normalize_path(path)
+    parts = len(part)
+
+    # account - `/@account/tab` (feed, blog, comments, replies)
+    if parts == 2 and part[0][0] == '@' and part[1] in ACCOUNT_TAB_KEYS:
+        return dict(
+            page='account',
+            account=valid_account(part[0][1:]),
+            sort=ACCOUNT_TAB_KEYS[part[1]])
+
+    # discussion - `/category/@account/permlink`
+    if parts == 3 and part[1][0] == '@':
+        return dict(
+            page='thread',
+            tag=part[0],
+            author=valid_account(part[1][1:]),
+            permlink=valid_permlink(part[2]))
+
+    # ranked posts - `/sort/category`
+    if parts <= 2 and part[0] in POST_LIST_SORTS:
+        return dict(
+            page='posts',
+            sort=valid_sort(part[0]),
+            tag=valid_tag(part[1]) if parts == 2 else '')
+
+    raise ApiError("invalid path /%s" % path)
+
+
+
 @return_error_info
 async def get_state(context, path, observer=None):
     """`get_state` reimplementation.
 
     See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
     """
-    # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-    (path, part) = _normalize_path(path)
-    parts = len(part)
+    # pylint: disable=too-many-locals
+    params = _parse_route(path)
+    page = params['page']
 
     db = context['db']
     observer_id = await get_account_id(db, observer) if observer else None
@@ -66,7 +98,6 @@ async def get_state(context, path, observer=None):
     state = {
         'feed_price': await _get_feed_price(db),
         'props': await _get_props_lite(db),
-        'tags': {},
         'accounts': {},
         'content': {},
         'tag_idx': {'trending': []},
@@ -74,36 +105,34 @@ async def get_state(context, path, observer=None):
         'community': {}}
 
     # account - `/@account/tab` (feed, blog, comments, replies)
-    if parts == 2 and part[0][0] == '@' and part[1] in ACCOUNT_TAB_KEYS:
-        account = valid_account(part[0][1:])
-        state['accounts'][account] = await _load_account(db, account, observer_id)
+    if page == 'account':
+        account = await _load_account(db, account, observer_id)
+        state['accounts'][params['account']] = account
 
-        key = ACCOUNT_TAB_KEYS[part[1]]
+        key = params['sort']
         if key:
-            posts = await _get_account_discussion_by_key(db, account, key)
+            posts = await _get_account_posts(db, params['account'], key)
             state['content'] = _keyed_posts(posts)
-            state['accounts'][account][key] = list(state['content'].keys())
-            state['tag_idx']['trending'] = await get_top_trending_tags_summary(context, 10)
+            account[key] = list(state['content'].keys())
 
     # discussion - `/category/@account/permlink`
-    elif parts == 3 and part[1][0] == '@':
-        tag = part[0]
-        author = valid_account(part[1][1:])
-        permlink = valid_permlink(part[2])
+    elif page == 'thread':
+        author = params['author']
+        permlink = params['permlink']
 
         state['content'] = await _load_discussion(db, author, permlink)
         state['accounts'] = await _load_content_accounts(db, state['content'], observer_id)
 
+        tag = params['tag']
         community = await if_tag_community(context, tag, observer)
         if community:
-            ref = author + '/' + permlink
-            assert state['content'][ref]['category'] == tag, 'invalid comm url'
+            _assert_post_community(state, author, permlink, tag)
             state['community'] = {tag: community}
 
     # ranked posts - `/sort/category`
-    elif parts <= 2 and part[0] in POST_LIST_SORTS:
-        sort = valid_sort(part[0])
-        tag = valid_tag(part[1]) if parts == 2 else ''
+    elif page == 'posts':
+        sort = params['sort']
+        tag = params['tag']
 
         community = await if_tag_community(context, tag, observer)
         if community: state['community'] = {tag: community}
@@ -111,29 +140,23 @@ async def get_state(context, path, observer=None):
         pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag, observer_id)
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-        state['tag_idx']['trending'] = await get_top_trending_tags_summary(context, 10)
 
-    else:
-        raise ApiError("invalid path /%s" % path)
-
-    # ensure all comms objs are available
-    for tag in state['tag_idx']['trending']:
-        if tag in state['community']: continue
-        obj = await if_tag_community(context, tag, observer)
-        if obj: state['community'][tag] = obj
-
-    # if observer, add all subs
-    if observer:
-        comms = await list_all_subscriptions(context, observer)
-        for comm in comms:
-            tag = comm['name']
-            state['community'][tag] = comm
-            if tag not in state['tag_idx']['trending']:
-                state['tag_idx']['trending'].insert(0, tag)
+    # build trending tags
+    cells = await list_top_communities(context, observer_id)
+    for name, title in cells:
+        if name not in state['community']:
+            state['community'][name] = {'title': title}
+        state['tag_idx']['trending'].append(name)
+    state['tag_idx']['trending'].extend(['dtube', 'sct', 'photography', 'life', 'steem'])
 
     return state
 
-async def _get_account_discussion_by_key(db, account, key):
+def _assert_post_community(state, author, permlink, community):
+    ref = author + '/' + permlink
+    category = state['content'][ref]['category']
+    assert category == community, 'invalid community url'
+
+async def _get_account_posts(db, account, key):
     assert account, 'account must be specified'
     assert key, 'discussion key must be specified'
 

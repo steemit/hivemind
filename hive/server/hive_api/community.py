@@ -36,6 +36,24 @@ async def get_community(context, name, observer=None):
 
     return communities[cid]
 
+async def list_top_communities(context, limit=25, observer_id=None):
+    """List all communities, paginated. Returns lite community list."""
+    db = context['db']
+
+    out = []
+    if observer_id:
+        sql = """SELECT name, title FROM hive_communities
+                  WHERE id IN (SELECT community_id
+                                 FROM hive_subscriptions
+                                WHERE account_id = :account_id)"""
+        out += await db.query_all(sql, account_id=observer_id)
+
+    sql = """SELECT name, title FROM hive_communities
+              WHERE rank > 0 AND title != '' ORDER BY rank LIMIT :limit"""
+    out += await db.query_all(sql, limit=limit)
+
+    return [(r[0], r[1]) for r in out]
+
 async def list_communities(context, last='', limit=25, query=None, observer=None):
     """List all communities, paginated. Returns lite community list."""
     db = context['db']
