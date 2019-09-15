@@ -15,6 +15,8 @@ from hive.indexer.notify import Notify
 log = logging.getLogger(__name__)
 DB = Db.instance()
 
+# pylint: disable=too-many-lines
+
 class Posts:
     """Handles critical/core post ops and data."""
 
@@ -127,6 +129,13 @@ class Posts:
                 author_id = Accounts.get_id(post['author'])
                 Notify('error', dst_id=author_id, when=date,
                        post_id=post['id'], payload=post['error']).write()
+            elif op['parent_author']:
+                author_id = Accounts.get_id(op['author'])
+                parent_id = Accounts.get_id(op['parent_author'])
+                notif_type = 'reply_post' if post['depth'] == 1 else 'reply_comment'
+                Notify(notif_type, src_id=author_id, dst_id=parent_id,
+                       post_id=post['id'], when=post['date']).write()
+
             CachedPost.insert(op['author'], op['permlink'], post['id'])
             if op['parent_author']: # update parent's child count
                 CachedPost.recount(op['parent_author'],

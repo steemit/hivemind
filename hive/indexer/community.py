@@ -4,6 +4,7 @@
 
 import logging
 import re
+from enum import IntEnum
 import ujson as json
 
 from hive.db.adapter import Db
@@ -14,6 +15,15 @@ from hive.db.db_state import DbState
 log = logging.getLogger(__name__)
 
 DB = Db.instance()
+
+class Role(IntEnum):
+    """Labels for `role_id` field."""
+    muted = -2
+    guest = 0
+    member = 2
+    mod = 4
+    admin = 6
+    owner = 8
 
 ROLES = {'owner': 8, 'admin': 6, 'mod': 4, 'member': 2, 'guest': 0, 'muted': -2}
 ROLE_OWNER = ROLES['owner']

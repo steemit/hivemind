@@ -9,6 +9,7 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
+from hive.indexer.notify import Notify
 
 from hive.indexer.community import process_json_community_op
 from hive.utils.normalize import load_json_key
@@ -98,15 +99,20 @@ class CustomOp:
             log.debug("reblog: post not found: %s/%s", author, permlink)
             return
 
+        author_id = Accounts.get_id(author)
+        blogger_id = Accounts.get_id(blogger)
+
         if 'delete' in op_json and op_json['delete'] == 'delete':
             DB.query("DELETE FROM hive_reblogs WHERE account = :a AND "
                      "post_id = :pid LIMIT 1", a=blogger, pid=post_id)
             if not DbState.is_initial_sync():
-                FeedCache.delete(post_id, Accounts.get_id(blogger))
+                FeedCache.delete(post_id, blogger_id)
 
         else:
             sql = ("INSERT INTO hive_reblogs (account, post_id, created_at) "
                    "VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING")
             DB.query(sql, a=blogger, pid=post_id, date=block_date)
             if not DbState.is_initial_sync():
-                FeedCache.insert(post_id, Accounts.get_id(blogger), block_date)
+                FeedCache.insert(post_id, blogger_id, block_date)
+                Notify('reblog', src_id=blogger_id, dst_id=author_id,
+                       post_id=post_id, when=block_date).write()

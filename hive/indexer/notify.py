@@ -23,15 +23,15 @@ class NotifyType(IntEnum):
     error = 10
     subscribe = 11
 
-    # inactive
-    #resteem = 12
-    #mention = 13
-    #follow = 14
+    reply_post = 12
+    reply_comment = 13
+    reblog = 14
+    follow = 15
 
+    # inactive
+    #mention = 13
     #vote_post = 15
     #vote_comment = 16
-    #reply_post = 17
-    #reply_comment = 18
 
     #update_account = 19
     #receive = 20
