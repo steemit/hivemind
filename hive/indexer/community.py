@@ -25,17 +25,6 @@ class Role(IntEnum):
     admin = 6
     owner = 8
 
-ROLES = {'owner': 8, 'admin': 6, 'mod': 4, 'member': 2, 'guest': 0, 'muted': -2}
-ROLE_OWNER = ROLES['owner']
-ROLE_ADMIN = ROLES['admin']
-ROLE_MOD = ROLES['mod']
-ROLE_MEMBER = ROLES['member']
-ROLE_GUEST = ROLES['guest']
-ROLE_MUTED = ROLES['muted']
-
-ROLE_NAMES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
-
-
 TYPE_TOPIC = 1
 TYPE_JOURNAL = 2
 TYPE_COUNCIL = 3
@@ -109,12 +98,16 @@ class Community:
             type_id = int(name[5])
             _id = Accounts.get_id(name)
 
+            # insert community
             sql = """INSERT INTO hive_communities (id, name, type_id, created_at)
                           VALUES (:id, :name, :type_id, :date)"""
             DB.query(sql, id=_id, name=name, type_id=type_id, date=block_date)
+
+            # insert owner
             sql = """INSERT INTO hive_roles (community_id, account_id, role_id, created_at)
                          VALUES (:community_id, :account_id, :role_id, :date)"""
-            DB.query(sql, community_id=_id, account_id=_id, role_id=ROLE_OWNER, date=block_date)
+            DB.query(sql, community_id=_id, account_id=_id,
+                     role_id=Role.owner.value, date=block_date)
 
             Notify('new_community', src_id=None, dst_id=_id,
                    when=block_date, community_id=_id).write()
@@ -181,7 +174,7 @@ class Community:
                                   AND account_id = :account_id
                                 LIMIT 1""",
                             community_id=community_id,
-                            account_id=account_id) or ROLE_GUEST
+                            account_id=account_id) or Role.guest.value
 
     @classmethod
     def is_post_valid(cls, community_id, comment_op: dict):
@@ -204,10 +197,10 @@ class Community:
 
         if type_id == TYPE_JOURNAL:
             if not comment_op['parent_author']:
-                return role >= ROLE_MEMBER
+                return role >= Role.member
         elif type_id == TYPE_COUNCIL:
-            return role >= ROLE_MEMBER
-        return role >= ROLE_GUEST # or at least not muted
+            return role >= Role.member
+        return role >= Role.guest # or at least not muted
 
     @classmethod
     def recalc_pending_payouts(cls):
@@ -279,7 +272,7 @@ class CommunityOp:
 
     def validate(self, raw_op):
         """Pre-processing and validation of custom_json payload."""
-        log.info("processing op: %s, %s", self.actor, raw_op)
+        log.info("validating @%s op %s", self.actor, raw_op)
 
         try:
             # validate basic structure
@@ -353,7 +346,7 @@ class CommunityOp:
                         VALUES (:account_id, :community_id, :role_id, :date)
                             ON CONFLICT (account_id, community_id)
                             DO UPDATE SET role_id = :role_id""", **params)
-            self._notify('set_role', payload=ROLE_NAMES[self.role_id])
+            self._notify('set_role', payload=Role(self.role_id).name)
         elif action == 'setUserTitle':
             DB.query("""INSERT INTO hive_roles
                                (account_id, community_id, title, created_at)
@@ -464,9 +457,9 @@ class CommunityOp:
     def _read_role(self):
         _role = read_key_str(self.op, 'role', 16)
         assert _role, 'must name a role'
-        assert _role in ROLES, 'invalid role'
+        assert _role in Role.__members__, 'invalid role'
         self.role = _role
-        self.role_id = ROLES[_role]
+        self.role_id = Role[_role].value
 
     def _read_notes(self):
         _notes = read_key_str(self.op, 'notes', 120)
@@ -511,31 +504,31 @@ class CommunityOp:
         new_role = self.role_id
 
         if action == 'setRole':
-            assert actor_role >= ROLE_MOD, 'only mods and up can alter roles'
+            assert actor_role >= Role.mod, 'only mods and up can alter roles'
             assert actor_role > new_role, 'cannot promote to or above own rank'
             if self.actor != self.account:
                 account_role = Community.get_user_role(community_id, self.account_id)
                 assert account_role < actor_role, 'cant modify higher-role user'
                 assert account_role != new_role, 'role would not change'
         elif action == 'updateProps':
-            assert actor_role >= ROLE_ADMIN, 'only admins can update props'
+            assert actor_role >= Role.admin, 'only admins can update props'
         elif action == 'setUserTitle':
             # TODO: assert title changed?
-            assert actor_role >= ROLE_MOD, 'only mods can set user titles'
+            assert actor_role >= Role.mod, 'only mods can set user titles'
         elif action == 'mutePost':
             assert not self._muted(), 'post is already muted'
-            assert actor_role >= ROLE_MOD, 'only mods can mute posts'
+            assert actor_role >= Role.mod, 'only mods can mute posts'
         elif action == 'unmutePost':
             assert self._muted(), 'post is already not muted'
-            assert actor_role >= ROLE_MOD, 'only mods can unmute posts'
+            assert actor_role >= Role.mod, 'only mods can unmute posts'
         elif action == 'pinPost':
             assert not self._pinned(), 'post is already pinned'
-            assert actor_role >= ROLE_MOD, 'only mods can pin posts'
+            assert actor_role >= Role.mod, 'only mods can pin posts'
         elif action == 'unpinPost':
             assert self._pinned(), 'post is already not pinned'
-            assert actor_role >= ROLE_MOD, 'only mods can unpin posts'
+            assert actor_role >= Role.mod, 'only mods can unpin posts'
         elif action == 'flagPost':
-            assert actor_role > ROLE_MUTED, 'muted users cannot flag posts'
+            assert actor_role > Role.muted, 'muted users cannot flag posts'
             assert not self._flagged(), 'user already flagged this post'
         elif action == 'subscribe':
             assert not self._subscribed(self.actor_id), 'already subscribed'
