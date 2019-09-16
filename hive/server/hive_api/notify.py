@@ -20,14 +20,14 @@ STRINGS = {
     NotifyType.error:          '<dst> error: <payload>',
     NotifyType.subscribe:      'subscribed',
 
-    #NotifyType.resteem:        '<src> resteemed <post>',
+    NotifyType.reblog:         '<src> resteemed <post>',
+    NotifyType.follow:         '<src> followed <dst>',
+    NotifyType.reply_post:     '<src> replied to you: <post>', # `dst` requires parent post?
+    NotifyType.reply_comment:  '<src> replied to you: <post>',
     #NotifyType.mention:        '<post> mentioned <dst>',
-    #NotifyType.follow:         '<src> followed <dst>',
 
     #NotifyType.vote_post:      '<src> voted on <post>',
     #NotifyType.vote_comment:   '<src> voted on <post>',
-    #NotifyType.reply_post:     '<src> replied to <post>', # `dst` requires parent post?
-    #NotifyType.reply_comment:  '<src> replied to <post>',
 
     #NotifyType.update_account: '<dst> updated account',
     #NotifyType.receive:        '<src> sent <dst> <payload>',
