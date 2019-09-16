@@ -113,6 +113,7 @@ class CustomOp:
                    "VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING")
             DB.query(sql, a=blogger, pid=post_id, date=block_date)
             if not DbState.is_initial_sync():
+                score = Accounts.default_score(blogger)
                 FeedCache.insert(post_id, blogger_id, block_date)
                 Notify('reblog', src_id=blogger_id, dst_id=author_id,
-                       post_id=post_id, when=block_date).write()
+                       post_id=post_id, when=block_date, score=score).write()

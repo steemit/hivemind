@@ -81,7 +81,13 @@ def _render(row):
     """Convert object to string rep."""
     # src dst payload community post
     enum = NotifyType(row['type_id'])
-    out = {'type': enum.name, 'score': row['score'], 'date': str(row['created_at'])}
+    out = {'id': row['id'],
+           'type': enum.name,
+           'score': row['score'],
+           'date': str(row['created_at']),
+           }
+    if row['community']:
+        out['community'] = (row['community'], row['community_title'])
     msg = STRINGS[enum.value]
     if '<src>' in msg:
         msg = msg.replace('<src>', '@' + row['src'])

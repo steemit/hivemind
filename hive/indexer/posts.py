@@ -130,11 +130,13 @@ class Posts:
                 Notify('error', dst_id=author_id, when=date,
                        post_id=post['id'], payload=post['error']).write()
             elif op['parent_author']:
+                # TODO: use child or parent post?
                 author_id = Accounts.get_id(op['author'])
                 parent_id = Accounts.get_id(op['parent_author'])
+                score = Accounts.default_score(op['author'])
                 notif_type = 'reply_post' if post['depth'] == 1 else 'reply_comment'
                 Notify(notif_type, src_id=author_id, dst_id=parent_id,
-                       post_id=post['id'], when=post['date']).write()
+                       post_id=post['id'], when=post['date'], score=score).write()
 
             CachedPost.insert(op['author'], op['permlink'], post['id'])
             if op['parent_author']: # update parent's child count
