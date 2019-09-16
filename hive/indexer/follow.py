@@ -56,7 +56,7 @@ class Follow:
             if new_state == 1:
                 Follow.follow(op['flr'], op['flg'])
                 if old_state is None:
-                    score = Accounts.default_score(op['follower'])
+                    score = Accounts.default_score(op_json['follower'])
                     Notify('follow', src_id=op['flr'], dst_id=op['flg'],
                            when=op['at'], score=score).write()
             if old_state == 1:
