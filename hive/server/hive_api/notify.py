@@ -24,7 +24,7 @@ STRINGS = {
     NotifyType.follow:         '<src> followed <dst>',
     NotifyType.reply_post:     '<src> replied to you: <post>', # `dst` requires parent post?
     NotifyType.reply_comment:  '<src> replied to you: <post>',
-    #NotifyType.mention:        '<post> mentioned <dst>',
+    NotifyType.mention:        '<post> mentioned <dst>',
 
     #NotifyType.vote_post:      '<src> voted on <post>',
     #NotifyType.vote_comment:   '<src> voted on <post>',

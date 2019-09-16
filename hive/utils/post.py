@@ -1,12 +1,18 @@
 """Methods for normalizing steemd post metadata."""
 #pylint: disable=line-too-long
 
+import re
 import math
 import ujson as json
 from funcy.seqs import first, distinct
 
 from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time, utc_timestamp
 
+def mentions(body):
+    """Given a post body, return proper @-mentioned account names."""
+    matches = re.findall('(?:^|[^a-zA-Z0-9_!#$%&*@])(:?@)([a-z\\d\\-.]+)', body)
+    names = [grp[1] for grp in matches]
+    return list(dict.fromkeys(names)) # uniq-ordered
 
 def post_basic(post):
     """Basic post normalization: json-md, tags, and flags."""
