@@ -173,10 +173,12 @@ class CachedPost:
 
         for url, _, _ in tuples:
             del cls._queue[url]
-            if url in cls._ids:
-                del cls._ids[url]
 
         cls._update_batch(steem, tuples, trx, full_total=full_total)
+
+        for url, _, _ in tuples:
+            if url not in cls._queue and url in cls._ids:
+                del cls._ids[url]
 
         return counts
 
