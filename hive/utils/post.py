@@ -22,7 +22,7 @@ def mentions(post):
 
     url = '@' + post['author'] + '/' + post['permlink']
     if d1: log.warning("%s detected - provided: %s", url, d1)
-    if d2: log.warning("%s provided - detected: %s", url, d1)
+    if d2: log.warning("%s provided - detected: %s", url, d2)
 
     return detected & provided
 
@@ -42,7 +42,7 @@ def _post_users(post):
         pass
 
     if 'users' in md and isinstance(md['users'], list):
-        return set(md['users'])
+        return {user.strip('.@') for user in md['users'] if user and isinstance(user, str)}
     return set()
 
 def post_basic(post):
