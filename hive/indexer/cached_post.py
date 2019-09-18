@@ -551,30 +551,38 @@ class CachedPost:
 
     @classmethod
     def _notifs(cls, post, pid, level):
+        author = post['author']
+        parent_author = post['parent_author']
+        date = post['last_update']
+
         # reply notif
-        if level == 'insert' and post['parent_author']:
-            score = Accounts.default_score(post['author'])
+        if level == 'insert' and parent_author:
+            score = Accounts.default_score(author)
+            # TODO: check muted
             notif_type = 'reply_post' if post['depth'] == 1 else 'reply_comment'
             Notify(notif_type,
-                   src_id=Accounts.get_id(post['author']),
-                   dst_id=Accounts.get_id(post['parent_author']),
-                   post_id=pid, when=post['last_update'], score=score).write()
+                   src_id=Accounts.get_id(author),
+                   dst_id=Accounts.get_id(parent_author),
+                   post_id=pid, when=date, score=score).write()
 
         # mentions notif
         if level in ('insert', 'update'):
-            accounts = list(filter(Accounts.exists, mentions(post['body'])))
+            # TODO: check muted
+            # TODO: check dupes on update
+            accounts = set(filter(Accounts.exists, mentions(post['body'])))
+            accounts -= {author, parent_author}
             if len(accounts) <= 10:
-                for acct in accounts:
-                    score = Accounts.default_score(post['author'])
+                for mention in accounts:
+                    score = Accounts.default_score(author)
                     penalty = min([score, 5 * (len(accounts) - 1)])
                     Notify('mention',
-                           src_id=Accounts.get_id(post['author']),
-                           dst_id=Accounts.get_id(acct),
-                           post_id=pid, when=post['last_update'],
+                           src_id=Accounts.get_id(author),
+                           dst_id=Accounts.get_id(mention),
+                           post_id=pid, when=date,
                            score=(score - penalty)).write()
             else:
-                log.warning("@%s/%s has %d mentions", post['author'],
-                            post['permlink'], len(accounts))
+                url = '@%s/%s' % (author, post['permlink'])
+                log.warning("%s - %d mentions", url, len(accounts))
 
 
     @classmethod
