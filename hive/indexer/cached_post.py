@@ -557,32 +557,47 @@ class CachedPost:
 
         # reply notif
         if level == 'insert' and parent_author and parent_author != author:
-            score = Accounts.default_score(author)
-            # TODO: check muted
-            Notify('reply',
-                   src_id=Accounts.get_id(author),
-                   dst_id=Accounts.get_id(parent_author),
-                   post_id=pid, when=date, score=score).write()
+            if not cls._muted(parent_author, author):
+                Notify('reply',
+                       src_id=Accounts.get_id(author),
+                       dst_id=Accounts.get_id(parent_author),
+                       score=Accounts.default_score(author),
+                       post_id=pid, when=date).write()
 
         # mentions notif
         if level in ('insert', 'update'):
-            # TODO: check muted
-            # TODO: check dupes on update
             accounts = set(filter(Accounts.exists, mentions(post['body'])))
             accounts -= {author, parent_author}
             if len(accounts) <= 10:
                 for mention in accounts:
-                    score = Accounts.default_score(author)
-                    penalty = min([score, 5 * (len(accounts) - 1)])
-                    Notify('mention',
-                           src_id=Accounts.get_id(author),
-                           dst_id=Accounts.get_id(mention),
-                           post_id=pid, when=date,
-                           score=(score - penalty)).write()
+                    mention_id = Accounts.get_id(mention)
+                    if (not cls._mentioned(pid, mention_id)
+                            and not cls._muted(mention, author)):
+                        score = Accounts.default_score(author)
+                        penalty = min([score, 5 * (len(accounts) - 1)])
+                        Notify('mention', src_id=Accounts.get_id(author),
+                               dst_id=mention_id, post_id=pid, when=date,
+                               score=(score - penalty)).write()
             else:
                 url = '@%s/%s' % (author, post['permlink'])
                 log.warning("%s - %d mentions", url, len(accounts))
 
+    @classmethod
+    def _muted(cls, account, target):
+        # TODO: optimize
+        sql = """SELECT 1 FROM hive_follows
+                  WHERE follower = :account
+                    AND following = :target
+                    AND state = 2"""
+        return DB.query_col(sql, account=account, target=target)
+
+    @classmethod
+    def _mentioned(cls, post_id, account_id):
+        sql = """SELECT 1
+                   FROM hive_notifs
+                  WHERE dst_id = :dst_id
+                    AND post_id = :post_id"""
+        return bool(DB.query_one(sql, dst_id=account_id, post_id=post_id))
 
     @classmethod
     def _tag_sqls(cls, pid, tags, diff=True):
