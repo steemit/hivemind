@@ -1,6 +1,7 @@
 """Methods for normalizing steemd post metadata."""
 #pylint: disable=line-too-long
 
+import logging
 import re
 import math
 import ujson as json
@@ -8,11 +9,41 @@ from funcy.seqs import first, distinct
 
 from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time, utc_timestamp
 
-def mentions(body):
+log = logging.getLogger(__name__)
+
+def mentions(post):
+    """Given a post, return proper @-mentioned account names."""
+    # pylint: disable=invalid-name
+    detected = text_mentions(post['body'])
+    provided = _post_users(post)
+
+    d1 = detected - provided
+    d2 = provided - detected
+
+    url = '@' + post['author'] + '/' + post['permlink']
+    if d1: log.warning("%s detected - provided: %s", url, d1)
+    if d2: log.warning("%s provided - detected: %s", url, d1)
+
+    return detected & provided
+
+def text_mentions(body):
     """Given a post body, return proper @-mentioned account names."""
     matches = re.findall('(?:^|[^a-zA-Z0-9_!#$%&*@])(:?@)([a-z\\d\\-.]+)', body)
-    names = [grp[1] for grp in matches]
-    return list(dict.fromkeys(names)) # uniq-ordered
+    return {grp[1] for grp in matches}
+
+def _post_users(post):
+    """Retrieve `users` key from json_metadata."""
+    md = {}
+    try:
+        md = json.loads(post['json_metadata'])
+        if not isinstance(md, dict):
+            md = {}
+    except Exception:
+        pass
+
+    if 'users' in md and isinstance(md['users'], list):
+        return set(md['users'])
+    return set()
 
 def post_basic(post):
     """Basic post normalization: json-md, tags, and flags."""
