@@ -551,7 +551,8 @@ class CachedPost:
 
     @classmethod
     def _notifs(cls, post, pid, level):
-        if False and level == 'insert' and post['parent_author']:
+        # reply notif
+        if level == 'insert' and post['parent_author']:
             # TODO: use child or parent post?
             author_id = Accounts.get_id(post['author'])
             parent_id = Accounts.get_id(post['parent_author'])
@@ -559,12 +560,22 @@ class CachedPost:
             notif_type = 'reply_post' if post['depth'] == 1 else 'reply_comment'
             Notify(notif_type, src_id=author_id, dst_id=parent_id,
                    post_id=pid, when=post['last_update'], score=score).write()
+
+        # mentions notif
         if level in ('insert', 'update'):
             accts = mentions(post['body'])
             for acct in accts:
                 if not Accounts.exists(acct):
                     url = '@' + post['author'] + '/' + post['permlink']
                     log.warning("bad mention [%s] in %s", acct, url)
+                else:
+                    author_id = Accounts.get_id(post['author'])
+                    account_id = Accounts.get_id(acct)
+                    score = Accounts.default_score(post['author'])
+                    # TODO: decrease score based on # of mentions
+                    Notify('mention', src_id=author_id, dst_id=account_id,
+                           post_id=pid, when=post['last_update'],
+                           score=score).write()
 
 
     @classmethod

@@ -129,7 +129,7 @@ class Posts:
                 author_id = Accounts.get_id(post['author'])
                 Notify('error', dst_id=author_id, when=date,
                        post_id=post['id'], payload=post['error']).write()
-            elif op['parent_author']:
+            elif False and op['parent_author']:
                 # TODO: use child or parent post?
                 author_id = Accounts.get_id(op['author'])
                 parent_id = Accounts.get_id(op['parent_author'])
