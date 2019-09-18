@@ -553,29 +553,28 @@ class CachedPost:
     def _notifs(cls, post, pid, level):
         # reply notif
         if level == 'insert' and post['parent_author']:
-            # TODO: use child or parent post?
-            author_id = Accounts.get_id(post['author'])
-            parent_id = Accounts.get_id(post['parent_author'])
             score = Accounts.default_score(post['author'])
             notif_type = 'reply_post' if post['depth'] == 1 else 'reply_comment'
-            Notify(notif_type, src_id=author_id, dst_id=parent_id,
+            Notify(notif_type,
+                   src_id=Accounts.get_id(post['author']),
+                   dst_id=Accounts.get_id(post['parent_author']),
                    post_id=pid, when=post['last_update'], score=score).write()
 
         # mentions notif
         if level in ('insert', 'update'):
-            accts = mentions(post['body'])
-            for acct in accts:
-                if not Accounts.exists(acct):
-                    url = '@' + post['author'] + '/' + post['permlink']
-                    log.warning("bad mention [%s] in %s", acct, url)
-                else:
-                    author_id = Accounts.get_id(post['author'])
-                    account_id = Accounts.get_id(acct)
+            accounts = list(filter(Accounts.exists, mentions(post['body'])))
+            if accounts <= 10:
+                for acct in accounts:
                     score = Accounts.default_score(post['author'])
-                    # TODO: decrease score based on # of mentions
-                    Notify('mention', src_id=author_id, dst_id=account_id,
+                    penalty = min([score, 5 * (len(accounts) - 1)])
+                    Notify('mention',
+                           src_id=Accounts.get_id(post['author']),
+                           dst_id=Accounts.get_id(acct),
                            post_id=pid, when=post['last_update'],
-                           score=score).write()
+                           score=(score - penalty)).write()
+            else:
+                log.warning("@%s/%s has %d mentions", post['author'],
+                            post['permlink'], len(accounts))
 
 
     @classmethod
