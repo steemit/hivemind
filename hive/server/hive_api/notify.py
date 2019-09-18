@@ -40,24 +40,18 @@ STRINGS = {
 }
 
 @return_error_info
-async def account_notifications(context, account, min_score=0, limit=100):
+async def account_notifications(context, account, min_score=0, last_id=None, limit=100):
     """Load notifications for named account."""
     db = context['db']
     limit = valid_limit(limit, 100)
     account_id = await get_account_id(db, account)
-    sql = _notifs_sql("dst_id = :dst_id")
-    rows = await db.query_all(sql, min_score=min_score, dst_id=account_id, limit=limit)
-    return [_render(row) for row in rows]
 
-@return_error_info
-async def community_notifications(context, community, limit=100):
-    """Load notifications for named community."""
-    db = context['db']
-    limit = valid_limit(limit, 100)
-    min_score = 0
-    account_id = await get_account_id(db, community)
-    sql = _notifs_sql("community_id = :dst_id")
-    rows = await db.query_all(sql, min_score=min_score, dst_id=account_id, limit=limit)
+    seek = ' AND id < :last_id' if last_id else ''
+    col = 'community_id' if account[:5] == 'hive-' else 'dst_id'
+    sql = _notifs_sql(col + " = :dst_id" + seek)
+
+    rows = await db.query_all(sql, min_score=min_score, dst_id=account_id,
+                              last_id=last_id, limit=limit)
     return [_render(row) for row in rows]
 
 def _notifs_sql(where):
@@ -72,7 +66,6 @@ def _notifs_sql(where):
           LEFT JOIN hive_communities hc ON hn.community_id = hc.id
           WHERE %s
             AND score >= :min_score
-            AND hn.id > 23
        ORDER BY hn.id DESC
           LIMIT :limit"""
     return sql % where
