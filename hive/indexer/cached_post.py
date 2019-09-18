@@ -563,7 +563,7 @@ class CachedPost:
         # mentions notif
         if level in ('insert', 'update'):
             accounts = list(filter(Accounts.exists, mentions(post['body'])))
-            if accounts <= 10:
+            if len(accounts) <= 10:
                 for acct in accounts:
                     score = Accounts.default_score(post['author'])
                     penalty = min([score, 5 * (len(accounts) - 1)])
