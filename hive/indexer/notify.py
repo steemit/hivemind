@@ -23,8 +23,8 @@ class NotifyType(IntEnum):
     error = 10
     subscribe = 11
 
-    reply_post = 12
-    reply_comment = 13
+    reply = 12
+    reply_comment = 13 # TODO: deprecated
     reblog = 14
     follow = 15
     mention = 16
@@ -90,7 +90,7 @@ class Notify:
     def write(self):
         """Store this notification."""
         assert not self._id, 'notify has id %d' % self._id
-        ignore = ('reply_comment', 'reply_post', 'reblog', 'follow')
+        ignore = ('reply', 'reblog', 'follow')
         if self.enum.name not in ignore:
             log.warning("[NOTIFY] %s - src %s dst %s pid %s%s cid %s (%d/100)",
                         self.enum.name, self.src_id, self.dst_id, self.post_id,

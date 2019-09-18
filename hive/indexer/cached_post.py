@@ -556,11 +556,10 @@ class CachedPost:
         date = post['last_update']
 
         # reply notif
-        if level == 'insert' and parent_author:
+        if level == 'insert' and parent_author and parent_author != author:
             score = Accounts.default_score(author)
             # TODO: check muted
-            notif_type = 'reply_post' if post['depth'] == 1 else 'reply_comment'
-            Notify(notif_type,
+            Notify('reply',
                    src_id=Accounts.get_id(author),
                    dst_id=Accounts.get_id(parent_author),
                    post_id=pid, when=date, score=score).write()

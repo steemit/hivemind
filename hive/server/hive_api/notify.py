@@ -22,8 +22,8 @@ STRINGS = {
 
     NotifyType.reblog:         '<src> resteemed <post>',
     NotifyType.follow:         '<src> followed <dst>',
-    NotifyType.reply_post:     '<src> replied to you: <post>', # `dst` requires parent post?
-    NotifyType.reply_comment:  '<src> replied to you: <post>',
+    NotifyType.reply:          '<src> replied to you: <post>',
+    NotifyType.reply_comment:  '<src> replied to you: <post>', # TODO: deprecated
     NotifyType.mention:        '<post> mentioned <dst>',
 
     #NotifyType.vote_post:      '<src> voted on <post>',
