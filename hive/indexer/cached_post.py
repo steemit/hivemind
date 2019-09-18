@@ -8,10 +8,11 @@ import ujson as json
 from toolz import partition_all
 from hive.db.adapter import Db
 
-from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
+from hive.utils.post import post_basic, post_legacy, post_payout, post_stats, mentions
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
 from hive.indexer.community import Community
+from hive.indexer.notify import Notify
 
 # pylint: disable=too-many-lines
 
@@ -538,12 +539,29 @@ class CachedPost:
         if level == 'recount' and post['depth']:
             cls.recount(post['parent_author'], post['parent_permlink'])
 
+        # trigger any notifications
+        cls._notifs(post, pid, level)
+
         # build the post insert/update SQL, add tag SQLs
         if level == 'insert':
             sql = cls._insert(values)
         else:
             sql = cls._update(values)
         return [sql] + tag_sqls
+
+    @classmethod
+    def _notifs(cls, post, pid, level):
+        if False and level == 'insert' and post['parent_author']:
+            # TODO: use child or parent post?
+            author_id = Accounts.get_id(post['author'])
+            parent_id = Accounts.get_id(post['parent_author'])
+            score = Accounts.default_score(post['author'])
+            notif_type = 'reply_post' if post['depth'] == 1 else 'reply_comment'
+            Notify(notif_type, src_id=author_id, dst_id=parent_id,
+                   post_id=pid, when=post['last_update'], score=score).write()
+        if level in ('insert', 'update'):
+            mentions(post)
+
 
     @classmethod
     def _tag_sqls(cls, pid, tags, diff=True):
