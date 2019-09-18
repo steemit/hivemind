@@ -560,7 +560,11 @@ class CachedPost:
             Notify(notif_type, src_id=author_id, dst_id=parent_id,
                    post_id=pid, when=post['last_update'], score=score).write()
         if level in ('insert', 'update'):
-            mentions(post)
+            accts = mentions(post['body'])
+            for acct in accts:
+                if not Accounts.exists(acct):
+                    url = '@' + post['author'] + '/' + post['permlink']
+                    log.warning("bad mention [%s] in %s", acct, url)
 
 
     @classmethod

@@ -3,7 +3,6 @@ from decimal import Decimal
 
 from hive.utils.post import (
     mentions,
-    text_mentions,
     post_basic,
     post_legacy,
     post_payout,
@@ -140,19 +139,17 @@ POST_2 = {
 }
 
 def test_mentions():
-    post = {'body': 'Who is @abc and @foo and @bar',
-            'json_metadata': '{"users":["foo","bar"]}'}
-    assert mentions(post) == {'foo', 'bar'}
-
-def test_text_mentions():
     # pylint: disable=invalid-name
-    m = text_mentions
+    m = mentions
     assert m('Hi @abc, meet @bob') == {'abc', 'bob'}
     assert m('Hi @abc, meet @abc') == {'abc'}
     assert not m('')
     assert not m('@')
-    assert m('steemit.com/@apple') == {'apple'}
+    assert not m('steemit.com/@apple')
     assert not m('joe@apple.com')
+    assert m('@longestokaccount') == {'longestokaccount'}
+    assert not m('@longestokaccountx')
+    assert m('@abc- @-foo @bar.') == {'abc', 'bar'}
 
 def test_post_basic():
     ret = post_basic(POST_1)
