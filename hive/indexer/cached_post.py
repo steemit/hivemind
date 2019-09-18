@@ -551,18 +551,19 @@ class CachedPost:
 
     @classmethod
     def _notifs(cls, post, pid, level):
+        # pylint: disable=too-many-locals
         author = post['author']
+        author_id = Accounts.get_id(author)
         parent_author = post['parent_author']
         date = post['last_update']
 
         # reply notif
         if level == 'insert' and parent_author and parent_author != author:
-            if not cls._muted(parent_author, author):
-                Notify('reply',
-                       src_id=Accounts.get_id(author),
-                       dst_id=Accounts.get_id(parent_author),
-                       score=Accounts.default_score(author),
-                       post_id=pid, when=date).write()
+            parent_author_id = Accounts.get_id(parent_author)
+            if not cls._muted(parent_author_id, author_id):
+                Notify('reply', src_id=author_id, dst_id=parent_author_id,
+                       score=Accounts.default_score(author), post_id=pid,
+                       when=date).write()
 
         # mentions notif
         if level in ('insert', 'update'):
@@ -572,10 +573,10 @@ class CachedPost:
                 for mention in accounts:
                     mention_id = Accounts.get_id(mention)
                     if (not cls._mentioned(pid, mention_id)
-                            and not cls._muted(mention, author)):
+                            and not cls._muted(mention_id, author_id)):
                         score = Accounts.default_score(author)
                         penalty = min([score, 5 * (len(accounts) - 1)])
-                        Notify('mention', src_id=Accounts.get_id(author),
+                        Notify('mention', src_id=author_id,
                                dst_id=mention_id, post_id=pid, when=date,
                                score=(score - penalty)).write()
             else:
@@ -584,7 +585,7 @@ class CachedPost:
 
     @classmethod
     def _muted(cls, account, target):
-        # TODO: optimize
+        # TODO: optimize (mem cache?)
         sql = """SELECT 1 FROM hive_follows
                   WHERE follower = :account
                     AND following = :target
@@ -593,6 +594,7 @@ class CachedPost:
 
     @classmethod
     def _mentioned(cls, post_id, account_id):
+        # TODO: optimize (add idx, mem cache?)
         sql = """SELECT 1
                    FROM hive_notifs
                   WHERE dst_id = :dst_id
