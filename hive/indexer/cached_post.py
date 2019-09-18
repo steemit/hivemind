@@ -111,8 +111,10 @@ class CachedPost:
 
         # if it was queued for a write, remove it
         url = author+'/'+permlink
+        log.warning("deleting %s", url)
         if url in cls._queue:
             del cls._queue[url]
+            log.warning("deleted %s", url)
             if url in cls._ids:
                 del cls._ids[url]
 
@@ -151,6 +153,7 @@ class CachedPost:
             'author': author,
             'permlink': permlink}))
         cls.update(author, permlink, post_id)
+        log.warning("undeleted %s/%s", author, permlink)
 
     @classmethod
     def flush(cls, steem, trx=False, spread=1, full_total=None):
