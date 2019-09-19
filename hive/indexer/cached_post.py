@@ -552,7 +552,7 @@ class CachedPost:
             cls.recount(post['parent_author'], post['parent_permlink'])
 
         # trigger any notifications
-        cls._notifs(post, pid, level)
+        cls._notifs(post, pid, level, payout['payout'])
 
         # build the post insert/update SQL, add tag SQLs
         if level == 'insert':
@@ -562,7 +562,7 @@ class CachedPost:
         return [sql] + tag_sqls
 
     @classmethod
-    def _notifs(cls, post, pid, level):
+    def _notifs(cls, post, pid, level, payout):
         # pylint: disable=too-many-locals
         author = post['author']
         author_id = Accounts.get_id(author)
@@ -599,7 +599,7 @@ class CachedPost:
         if url in cls._votes:
             voters = cls._votes[url]
             del cls._votes[url]
-            #log.warning("pid %d voters=%s", pid, voters)
+            ratio = payout / float(post['net_rshares']) if post['net_rshares'] else 0
             for vote in post['active_votes']:
                 voter = vote['voter']
                 rshares = int(vote['rshares'])
@@ -607,8 +607,11 @@ class CachedPost:
                     voter_id = Accounts.get_id(voter)
                     if not cls._voted(pid, author_id, voter_id):
                         score = 25 + (len(str(rshares)) - 10) * 15
+                        contrib = "$%.5f" % (ratio * rshares)
+                        log.warning("%d rshares = %s", rshares, contrib)
                         Notify('vote', src_id=voter_id, dst_id=author_id,
-                               post_id=pid, when=date, score=score).write()
+                               post_id=pid, when=date, score=score,
+                               payload=contrib).write()
 
 
     @classmethod
