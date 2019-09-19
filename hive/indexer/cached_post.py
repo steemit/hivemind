@@ -599,7 +599,8 @@ class CachedPost:
         if url in cls._votes:
             voters = cls._votes[url]
             del cls._votes[url]
-            ratio = payout / float(post['net_rshares']) if post['net_rshares'] else 0
+            net = float(post['net_rshares'])
+            ratio = float(payout) / net if net else 0
             for vote in post['active_votes']:
                 voter = vote['voter']
                 rshares = int(vote['rshares'])
