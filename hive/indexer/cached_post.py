@@ -610,9 +610,9 @@ class CachedPost:
 
                 voter_id = Accounts.get_id(vote['voter'])
                 if not cls._voted(pid, author_id, voter_id):
-                    score = min(100, len(str(contrib)) * 20)
+                    score = min(100, (len(str(contrib)) - 1) * 25) # $1 = 75
                     payload = "$%.3f" % (contrib / 1000)
-                    log.warning("%s -- %d/100 -- %d rshares", payload, score, rshares)
+                    #log.warning("%s -- %d/100 -- %d", payload, score, rshares)
                     Notify('vote', src_id=voter_id, dst_id=author_id, when=date,
                            post_id=pid, score=score, payload=payload).write()
 
