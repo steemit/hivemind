@@ -595,6 +595,7 @@ class CachedPost:
                 url = '@%s/%s' % (author, post['permlink'])
                 log.warning("%s - %d mentions", url, len(accounts))
 
+        # votes notif
         url = post['author'] + '/' + post['permlink']
         if url in cls._votes:
             voters = cls._votes[url]
@@ -602,17 +603,18 @@ class CachedPost:
             net = float(post['net_rshares'])
             ratio = float(payout) / net if net else 0
             for vote in post['active_votes']:
-                voter = vote['voter']
                 rshares = int(vote['rshares'])
-                if voter in voters and rshares > 10e9:
-                    voter_id = Accounts.get_id(voter)
-                    if not cls._voted(pid, author_id, voter_id):
-                        score = 25 + (len(str(rshares)) - 10) * 15
-                        contrib = "$%.5f" % (ratio * rshares)
-                        log.warning("%d rshares = %s", rshares, contrib)
-                        Notify('vote', src_id=voter_id, dst_id=author_id,
-                               post_id=pid, when=date, score=score,
-                               payload=contrib).write()
+                if vote['voter'] not in voters or rshares < 10e9: continue
+                contrib = int(1000 * ratio * rshares)
+                if contrib < 1: continue # < $0.001
+
+                voter_id = Accounts.get_id(vote['voter'])
+                if not cls._voted(pid, author_id, voter_id):
+                    score = min(100, len(str(contrib)) * 20)
+                    payload = "$%.3f" % (contrib / 1000)
+                    log.warning("%s -- %d/100 -- %d rshares", payload, score, rshares)
+                    Notify('vote', src_id=voter_id, dst_id=author_id, when=date,
+                           post_id=pid, score=score, payload=payload).write()
 
 
     @classmethod
