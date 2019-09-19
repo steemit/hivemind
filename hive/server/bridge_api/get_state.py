@@ -52,22 +52,25 @@ def _parse_route(path):
     # account - `/@account/tab` (feed, blog, comments, replies)
     if parts == 2 and part[0][0] == '@' and part[1] in ACCOUNT_TAB_KEYS:
         return dict(page='account',
-                    account=valid_account(part[0][1:]),
-                    sort=ACCOUNT_TAB_KEYS[part[1]])
+                    sort=ACCOUNT_TAB_KEYS[part[1]],
+                    tag=part[0],
+                    key=valid_account(part[0][1:]))
 
     # discussion - `/category/@account/permlink`
     if parts == 3 and part[1][0] == '@':
         author = valid_account(part[1][1:])
         permlink = valid_permlink(part[2])
         return dict(page='thread',
+                    sort=None,
                     tag=part[0],
                     key=author + '/' + permlink)
 
     # ranked posts - `/sort/category`
     if parts <= 2 and part[0] in POST_LIST_SORTS:
-        return dict(page='posts',
+        return dict(page='list',
                     sort=valid_sort(part[0]),
-                    tag=valid_tag(part[1]) if parts == 2 else '')
+                    tag=valid_tag(part[1]) if parts == 2 else '',
+                    key=None)
 
     raise ApiError("invalid path /%s" % path)
 
@@ -88,44 +91,46 @@ async def get_state(context, path, observer=None):
         'discussion_idx': {"": {}}, # {tag: sort: [keys]}
         'community': {}}
 
-    # account - `/@account/tab` (feed, blog, comments, replies)
-    if params['page'] == 'account':
-        account = params['account']
-        sort = params['sort']
+    page = params['page']
+    sort = params['sort']
+    tag = params['tag']
+    key = params['key']
 
-        state['accounts'][account] = await _load_account(db, account)
-        if sort:
-            posts = await get_account_posts(context, sort, account, '', '', 20, None)
-            state['content'] = _keyed_posts(posts)
-            state['discussion_idx'] = {'@' + account: {sort: list(state['content'].keys())}}
+    if page == 'account':
+        state['accounts'] = await _load_account(db, key)
+        state['content'] = await _key_account_posts(db, sort, key, observer)
 
-    # discussion - `/category/@account/permlink`
-    elif params['page'] == 'thread':
-        key = params['key']
-        tag = params['tag']
-
+    elif page == 'thread':
         state['content'] = await get_discussion(context, *key.split('/'))
-        state['accounts'] = await _load_content_accounts(db, state['content']) # TODO: del
-
-        community = await if_tag_community(context, tag, observer)
-        if community: state['community'] = {tag: community}
-        if community: assert _category(state, key) == tag, 'community url error'
-
-    # ranked posts - `/sort/category`
-    elif params['page'] == 'posts':
-        sort = params['sort']
-        tag = params['tag']
-
-        pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag, observer_id)
-        state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
+        state['community'] = await _comms_map(context, tag, observer)
+        if state['community']:
+            assert _category(state, key) == tag, 'url/category mismatch'
 
-        community = await if_tag_community(context, tag, observer)
-        if community: state['community'] = {tag: community}
+    elif page == 'list':
+        state['content'] = await _key_ranked_posts(db, sort, tag, observer_id)
+        state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
+        state['community'] = await _comms_map(context, tag, observer)
 
     await _add_trending_tags(context, state, observer_id)
 
     return state
+
+async def _key_account_posts(db, sort, account, observer):
+    if sort is None: return {}
+    context = {'db': db}
+    posts = await get_account_posts(context, sort, account, '', '', 20, observer)
+    return _keyed_posts(posts)
+
+async def _key_ranked_posts(db, sort, tag, observer_id):
+    pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag, observer_id)
+    posts = await load_posts(db, pids)
+    return _keyed_posts(posts)
+
+async def _comms_map(context, tag, observer):
+    if not tag: return {}
+    community = await if_tag_community(context, tag, observer)
+    return {tag: community} if community else {}
 
 async def _add_trending_tags(context, state, observer_id):
     cells = await list_top_communities(context, observer_id)
@@ -158,17 +163,10 @@ def _keyed_posts(posts):
 def _ref(post):
     return post['author'] + '/' + post['permlink']
 
-async def _load_content_accounts(db, content):
-    if not content: return {}
-    posts = content.values()
-    names = set(map(lambda p: p['author'], posts))
-    accounts = await load_accounts(db, names)
-    return {a['name']: a for a in accounts}
-
 async def _load_account(db, name):
     ret = await load_accounts(db, [name])
     assert ret, 'account not found: `%s`' % name
-    return ret[0]
+    return {row['name']: row for row in ret}
 
 @cached(ttl=1800, timeout=15)
 async def _get_feed_price(db):
