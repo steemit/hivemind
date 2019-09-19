@@ -44,6 +44,9 @@ class CachedPost:
     # new promoted values, pending write
     _pending_promoted = {}
 
+    # pending vote notifs {pid: [voters]}
+    _votes = {}
+
     @classmethod
     def update_promoted_amount(cls, post_id, amount):
         """Set a new pending amount for a post for its next update."""
@@ -84,10 +87,14 @@ class CachedPost:
         cls._dirty('recount', author, permlink, pid)
 
     @classmethod
-    def vote(cls, author, permlink, pid=None):
+    def vote(cls, author, permlink, pid=None, voter=None):
         """Handle a post dirtied by a `vote` op."""
         cls._dirty('upvote', author, permlink, pid)
         Accounts.dirty(set([author])) # rep changed
+        if voter:
+            if pid not in cls._votes:
+                cls._votes[pid] = []
+            cls._votes[pid].append(voter)
 
     @classmethod
     def insert(cls, author, permlink, pid):
@@ -587,6 +594,18 @@ class CachedPost:
                 url = '@%s/%s' % (author, post['permlink'])
                 log.warning("%s - %d mentions", url, len(accounts))
 
+        if pid in cls._votes:
+            voters = cls._votes[pid]
+            del cls._votes[pid]
+            for vote in post['active_votes']:
+                if vote['voter'] in voters and vote['rshares'] > 10e9:
+                    voter_id = Accounts.get_id(vote['voter'])
+                    if not cls._voted(pid, author_id, voter_id):
+                        score = 25 + (len(str(int(vote['rshares']))) - 10) * 15
+                        Notify('vote', src_id=voter_id, dst_id=author_id,
+                               post_id=pid, when=date, score=score).write()
+
+
     @classmethod
     def _muted(cls, account, target):
         # TODO: optimize (mem cache?)
@@ -597,12 +616,25 @@ class CachedPost:
         return DB.query_col(sql, account=account, target=target)
 
     @classmethod
+    def _voted(cls, post_id, account_id, voter_id):
+        # TODO: optimize (add idx, mem cache?)
+        sql = """SELECT 1
+                   FROM hive_notifs
+                  WHERE dst_id = :dst_id
+                    AND src_id = :voter_id
+                    AND post_id = :post_id
+                    AND type_id = 17"""
+        return bool(DB.query_one(sql, dst_id=account_id,
+                                 post_id=post_id, src_id=voter_id))
+
+    @classmethod
     def _mentioned(cls, post_id, account_id):
         # TODO: optimize (add idx, mem cache?)
         sql = """SELECT 1
                    FROM hive_notifs
                   WHERE dst_id = :dst_id
-                    AND post_id = :post_id"""
+                    AND post_id = :post_id
+                    AND type_id = 16"""
         return bool(DB.query_one(sql, dst_id=account_id, post_id=post_id))
 
     @classmethod

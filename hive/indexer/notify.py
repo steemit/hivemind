@@ -28,9 +28,9 @@ class NotifyType(IntEnum):
     reblog = 14
     follow = 15
     mention = 16
+    vote = 17
 
     # inactive
-    #vote_post = 15
     #vote_comment = 16
 
     #update_account = 19

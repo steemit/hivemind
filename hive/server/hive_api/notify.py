@@ -25,8 +25,7 @@ STRINGS = {
     NotifyType.reply:          '<src> replied to you: <post>',
     NotifyType.mention:        '<post> mentioned <dst>',
 
-    #NotifyType.vote_post:      '<src> voted on <post>',
-    #NotifyType.vote_comment:   '<src> voted on <post>',
+    NotifyType.vote:      '<src> voted on <post>',
 
     #NotifyType.update_account: '<dst> updated account',
     #NotifyType.receive:        '<src> sent <dst> <payload>',
