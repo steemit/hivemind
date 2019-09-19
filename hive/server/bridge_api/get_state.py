@@ -5,15 +5,12 @@ from collections import OrderedDict
 import ujson as json
 from aiocache import cached
 
-from hive.server.common.mutes import Mutes
-
 from hive.server.hive_api.community import if_tag_community, list_top_communities
 from hive.server.hive_api.common import get_account_id
+import hive.server.bridge_api.cursor as cursor
+from hive.server.bridge_api.thread import get_discussion
 from hive.server.bridge_api.methods import get_account_posts
-from hive.server.bridge_api.objects import (
-    load_accounts,
-    load_posts,
-    load_posts_keyed)
+from hive.server.bridge_api.objects import load_accounts, load_posts
 from hive.server.common.helpers import (
     ApiError,
     return_error_info,
@@ -21,8 +18,6 @@ from hive.server.common.helpers import (
     valid_permlink,
     valid_sort,
     valid_tag)
-
-import hive.server.bridge_api.cursor as cursor
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +104,7 @@ async def get_state(context, path, observer=None):
         key = params['key']
         tag = params['tag']
 
-        state['content'] = await _load_discussion(db, key)
+        state['content'] = await get_discussion(context, *key.split('/'))
 
         # TODO: remove.. load profile on dropdown
         state['accounts'] = await _load_content_accounts(db, state['content'])
@@ -180,62 +175,6 @@ async def _load_account(db, name):
     for key in ACCOUNT_TAB_KEYS.values():
         account[key] = []
     return account
-
-async def _child_ids(db, parent_ids):
-    """Load child ids for multuple parent ids."""
-    sql = """
-             SELECT parent_id, array_agg(id)
-               FROM hive_posts
-              WHERE parent_id IN :ids
-                AND is_deleted = '0'
-           GROUP BY parent_id
-    """
-    rows = await db.query_all(sql, ids=tuple(parent_ids))
-    return [[row[0], row[1]] for row in rows]
-
-async def _load_discussion(db, ref):
-    """Load a full discussion thread."""
-    root_id = await cursor.get_post_id(db, *ref.split('/'))
-    if not root_id:
-        return {}
-
-    # build `ids` list and `tree` map
-    ids = []
-    tree = {}
-    todo = [root_id]
-    while todo:
-        ids.extend(todo)
-        rows = await _child_ids(db, todo)
-        todo = []
-        for pid, cids in rows:
-            tree[pid] = cids
-            todo.extend(cids)
-
-    # load all post objects, build ref-map
-    posts = await load_posts_keyed(db, ids)
-
-    # remove posts/comments from muted accounts
-    muted_accounts = Mutes.all()
-    rem_pids = []
-    for pid, post in posts.items():
-        if post['author'] in muted_accounts:
-            rem_pids.append(pid)
-    for pid in rem_pids:
-        if pid in posts:
-            del posts[pid]
-        if pid in tree:
-            rem_pids.extend(tree[pid])
-
-    refs = {pid: _ref(post) for pid, post in posts.items()}
-
-    # add child refs to parent posts
-    for pid, post in posts.items():
-        if pid in tree:
-            post['replies'] = [refs[cid] for cid in tree[pid]
-                               if cid in refs]
-
-    # return all nodes keyed by ref
-    return {refs[pid]: post for pid, post in posts.items()}
 
 @cached(ttl=1800, timeout=15)
 async def _get_feed_price(db):
