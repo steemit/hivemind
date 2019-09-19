@@ -4,26 +4,19 @@ import logging
 import ujson as json
 
 from hive.utils.normalize import sbd_amount, rep_to_raw
-from hive.server.hive_api.objects import _follow_contexts
 
 log = logging.getLogger(__name__)
 
 # pylint: disable=too-many-lines
 
-async def load_accounts(db, names, observer_id=None):
+async def load_accounts(db, names):
     """`get_accounts`-style lookup for `get_state` compat layer."""
     sql = """SELECT id, name, display_name, about, reputation, vote_weight,
                     created_at, post_count, profile_image, location, website,
                     cover_image, rank, following, followers
                FROM hive_accounts WHERE name IN :names"""
     rows = await db.query_all(sql, names=tuple(names))
-    accounts = [_condenser_account_object(row) for row in rows]
-
-    if observer_id:
-        by_id = {account['id']: account for account in accounts}
-        await _follow_contexts(db, by_id, observer_id, include_mute=True)
-
-    return accounts
+    return [_condenser_account_object(row) for row in rows]
 
 async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
     """Given a list of (id, reblogged_by) tuples, return posts w/ reblog key."""

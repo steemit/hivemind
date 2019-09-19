@@ -1,6 +1,6 @@
 """Routes then builds a get_state response object"""
 
-#pylint: disable=line-too-long,too-many-lines
+# pylint: disable=too-many-lines
 import logging
 from collections import OrderedDict
 import ujson as json
@@ -49,9 +49,9 @@ POST_LIST_SORTS = [
 ]
 
 def _parse_route(path):
-    """`get_state` reimplementation.
+    """`get_state` routes reimplementation.
 
-    See: https://github.com/steemit/steem/blob/master/libraries/plugins/apis/condenser_api/condenser_api.cpp
+    See steem/libraries/plugins/apis/condenser_api/condenser_api.cpp
     """
     (path, part) = _normalize_path(path)
     parts = len(part)
@@ -80,14 +80,9 @@ def _parse_route(path):
 
     raise ApiError("invalid path /%s" % path)
 
-
-
 @return_error_info
 async def get_state(context, path, observer=None):
-    """`get_state` reimplementation.
-
-    See: https://github.com/steemit/steem/blob/06e67bd4aea73391123eca99e1a22a8612b0c47e/libraries/app/database_api.cpp#L1937
-    """
+    """Modified `get_state` implementation."""
     # pylint: disable=too-many-locals
     params = _parse_route(path)
     page = params['page']
@@ -106,14 +101,14 @@ async def get_state(context, path, observer=None):
 
     # account - `/@account/tab` (feed, blog, comments, replies)
     if page == 'account':
-        account = await _load_account(db, params['account'], observer_id)
-        state['accounts'][params['account']] = account
-
+        account = params['account']
         key = params['sort']
+
+        state['accounts'][account] = await _load_account(db, account)
         if key:
-            posts = await _get_account_posts(db, params['account'], key)
+            posts = await _get_account_posts(db, account, key)
             state['content'] = _keyed_posts(posts)
-            account[key] = list(state['content'].keys())
+            state['accounts'][account][key] = list(state['content'].keys())
 
     # discussion - `/category/@account/permlink`
     elif page == 'thread':
@@ -121,7 +116,9 @@ async def get_state(context, path, observer=None):
         permlink = params['permlink']
 
         state['content'] = await _load_discussion(db, author, permlink)
-        state['accounts'] = await _load_content_accounts(db, state['content'], observer_id)
+
+        # TODO: remove.. load profile on dropdown
+        state['accounts'] = await _load_content_accounts(db, state['content'])
 
         tag = params['tag']
         community = await if_tag_community(context, tag, observer)
@@ -140,7 +137,11 @@ async def get_state(context, path, observer=None):
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
 
-    # build trending tags
+    await _add_trending_tags(context, state, observer_id)
+
+    return state
+
+async def _add_trending_tags(context, state, observer_id):
     # TODO: hives{tag: label} key
     cells = await list_top_communities(context, observer_id)
     for name, title in cells:
@@ -150,8 +151,6 @@ async def get_state(context, path, observer=None):
     state['tag_idx']['trending'].extend(['photography', 'travel', 'life',
                                          'gaming', 'crypto', 'newsteem',
                                          'music', 'food'])
-
-    return state
 
 def _assert_post_community(state, author, permlink, community):
     ref = author + '/' + permlink
@@ -200,16 +199,16 @@ def _keyed_posts(posts):
 def _ref(post):
     return post['author'] + '/' + post['permlink']
 
-async def _load_content_accounts(db, content, observer_id):
+async def _load_content_accounts(db, content):
     if not content:
         return {}
     posts = content.values()
     names = set(map(lambda p: p['author'], posts))
-    accounts = await load_accounts(db, names, observer_id)
+    accounts = await load_accounts(db, names)
     return {a['name']: a for a in accounts}
 
-async def _load_account(db, name, observer_id):
-    ret = await load_accounts(db, [name], observer_id)
+async def _load_account(db, name):
+    ret = await load_accounts(db, [name])
     assert ret, 'account not found: `%s`' % name
     account = ret[0]
     for key in ACCOUNT_TAB_KEYS.values():
