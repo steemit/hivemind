@@ -91,13 +91,13 @@ async def get_state(context, path, observer=None):
     # account - `/@account/tab` (feed, blog, comments, replies)
     if params['page'] == 'account':
         account = params['account']
-        key = params['sort']
+        sort = params['sort']
 
         state['accounts'][account] = await _load_account(db, account)
-        if key:
-            posts = await get_account_posts(context, key, account, '', '', 20, None)
+        if sort:
+            posts = await get_account_posts(context, sort, account, '', '', 20, None)
             state['content'] = _keyed_posts(posts)
-            state['accounts'][account][key] = list(state['content'].keys())
+            state['discussion_idx'] = {'@' + account: {sort: list(state['content'].keys())}}
 
     # discussion - `/category/@account/permlink`
     elif params['page'] == 'thread':
@@ -168,10 +168,7 @@ async def _load_content_accounts(db, content):
 async def _load_account(db, name):
     ret = await load_accounts(db, [name])
     assert ret, 'account not found: `%s`' % name
-    account = ret[0]
-    for key in ACCOUNT_TAB_KEYS.values():
-        account[key] = []
-    return account
+    return ret[0]
 
 @cached(ttl=1800, timeout=15)
 async def _get_feed_price(db):
