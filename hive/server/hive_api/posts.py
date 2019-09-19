@@ -47,7 +47,6 @@ async def list_community_posts(context, community, sort='trending',
                                  limit=valid_limit(limit, 50),
                                  communities=communities)
 
-    # TODO: fetch account role/title, include in response
     # NOTE: consider including & interspercing promoted posts here
 
     posts = await posts_by_id(db, pinned_ids + post_ids, observer=observer)
@@ -105,8 +104,6 @@ async def ranked_pids(db, sort, start_id, limit, communities):
     elif sort == 'muted':
         field = 'payout'
 
-    # TODO: index hive_posts (is_muted, category, id)
-    # TODO: copy is_muted and category from hive_posts to hive_posts_cache?
     _filt = "is_muted = '%d'" % (1 if sort == 'muted' else 0)
     if communities: _filt += " AND category IN :communities"
     where.append("post_id IN (SELECT id FROM hive_posts WHERE %s)" % _filt)

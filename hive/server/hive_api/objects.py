@@ -139,7 +139,6 @@ async def posts_by_id(db, ids, observer=None, lite=True):
             'payout_at': str(row['payout_at']),
             'is_paidout': row['is_paidout'],
             'rshares' : row['rshares'],
-            'hide': False, # TODO
             'top_votes' : top_votes,
             'thumb_url': row['img_url'],
             'is_nsfw' : row['is_nsfw'],

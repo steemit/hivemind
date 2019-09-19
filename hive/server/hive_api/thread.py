@@ -32,7 +32,7 @@ async def fetch_more_children(context, root_id, last_sibling_id, sort='top',
 _SORTS = dict(hot='sc_hot', top='payout', new='post_id')
 async def _fetch_children(db, root_id, start_id, sort, limit, observer=None):
     """Fetch truncated children from tree."""
-    mutes = set() #TODO: Mutes.all(), author mutes
+    mutes = set()
     field = _SORTS[sort]
 
     # load id skeleton
@@ -64,8 +64,6 @@ async def _fetch_children(db, root_id, start_id, sort, limit, observer=None):
 
 def _build_tree(root_ids, tree, comments, sort_ids):
     # comments is sorted...
-
-    # TODO: fetch account role/title, include in response
 
     ret = []
     for root_id in sorted(root_ids, key=sort_ids.index):
