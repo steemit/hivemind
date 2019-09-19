@@ -8,7 +8,8 @@ from hive.server.hive_api.common import get_account_id, valid_limit
 log = logging.getLogger(__name__)
 
 STRINGS = {
-    NotifyType.new_community:  '<src> created <community>',
+    # community
+    NotifyType.new_community:  '<dst> was created', # no <src> available
     NotifyType.set_role:       '<src> set <dst> <payload>',
     NotifyType.set_props:      '<src> set properties <payload>',
     NotifyType.set_label:      '<src> label <dst> <payload>',
@@ -17,15 +18,15 @@ STRINGS = {
     NotifyType.pin_post:       '<src> pin <post>',
     NotifyType.unpin_post:     '<src> unpin <post>',
     NotifyType.flag_post:      '<src> flag <post>',
-    NotifyType.error:          '<dst> error: <payload>',
-    NotifyType.subscribe:      'subscribed',
+    NotifyType.subscribe:      '<src> subscribed to <comm>',
 
-    NotifyType.reblog:         '<src> resteemed <post>',
-    NotifyType.follow:         '<src> followed <dst>',
-    NotifyType.reply:          '<src> replied to you: <post>',
-    NotifyType.mention:        '<post> mentioned <dst>',
-
-    NotifyType.vote:      '<src> voted on <post>',
+    # personal
+    NotifyType.error:          'error: <payload>',
+    NotifyType.reblog:         '<src> resteemed your post',
+    NotifyType.follow:         '<src> followed you',
+    NotifyType.reply:          '<src> replied to you',
+    NotifyType.mention:        '<src> mentioned you',
+    NotifyType.vote:           '<src> voted on your post (<payload>)',
 
     #NotifyType.update_account: '<dst> updated account',
     #NotifyType.receive:        '<src> sent <dst> <payload>',
@@ -71,24 +72,35 @@ def _notifs_sql(where):
 def _render(row):
     """Convert object to string rep."""
     # src dst payload community post
-    enum = NotifyType(row['type_id'])
     out = {'id': row['id'],
-           'type': enum.name,
+           'type': NotifyType(row['type_id']).name,
            'score': row['score'],
            'date': str(row['created_at']),
-           }
-    if row['community']:
-        out['community'] = (row['community'], row['community_title'])
-    msg = STRINGS[enum.value]
-    if '<src>' in msg:
-        msg = msg.replace('<src>', '@' + row['src'])
-    if '<dst>' in msg:
-        msg = msg.replace('<dst>', '@' + (row['dst'] or '?'))
-    if '<community>' in msg:
-        msg = msg.replace('<community>', row['community'])
-    if '<post>' in msg:
-        msg = msg.replace('<post>', '@' + row['author'] + '/' + row['permlink'])
-    if '<payload>' in msg:
-        msg = msg.replace('<payload>', row['payload'])
-    out['msg'] = msg
+           'msg': _render_msg(row),
+           'url': _render_url(row),
+          }
+
+    #if row['community']:
+    #    out['community'] = (row['community'], row['community_title'])
+
     return out
+
+def _render_msg(row):
+    msg = STRINGS[row['type_id']]
+    if '<dst>' in msg: msg = msg.replace('<dst>', '@' + row['dst'])
+    if '<src>' in msg: msg = msg.replace('<src>', '@' + row['src'])
+    if '<post>' in msg: msg = msg.replace('<post>', _post_url(row))
+    if '<payload>' in msg: msg = msg.replace('<payload>', row['payload'])
+    if '<comm>' in msg: msg = msg.replace('<comm>', row['community_title'])
+    return msg
+
+def _post_url(row):
+    return '@' + row['author'] + '/' + row['permlink']
+
+def _render_url(row):
+    if row['permlink']: return '@' + row['author'] + '/' + row['permlink']
+    if row['community']: return row['community'] + '/trending'
+    if row['src']: return '@' + row['src']
+    if row['dst']: return '@' + row['dst']
+    assert False, 'no url for %s' % row
+    return None
