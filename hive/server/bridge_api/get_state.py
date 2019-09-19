@@ -105,9 +105,7 @@ async def get_state(context, path, observer=None):
         tag = params['tag']
 
         state['content'] = await get_discussion(context, *key.split('/'))
-
-        # TODO: remove.. load profile on dropdown
-        state['accounts'] = await _load_content_accounts(db, state['content'])
+        state['accounts'] = await _load_content_accounts(db, state['content']) # TODO: del
 
         community = await if_tag_community(context, tag, observer)
         if community: state['community'] = {tag: community}
@@ -118,19 +116,18 @@ async def get_state(context, path, observer=None):
         sort = params['sort']
         tag = params['tag']
 
-        community = await if_tag_community(context, tag, observer)
-        if community: state['community'] = {tag: community}
-
         pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag, observer_id)
         state['content'] = _keyed_posts(await load_posts(db, pids))
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
+
+        community = await if_tag_community(context, tag, observer)
+        if community: state['community'] = {tag: community}
 
     await _add_trending_tags(context, state, observer_id)
 
     return state
 
 async def _add_trending_tags(context, state, observer_id):
-    # TODO: hives{tag: label} key
     cells = await list_top_communities(context, observer_id)
     for name, title in cells:
         if name not in state['community']:

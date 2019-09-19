@@ -225,6 +225,7 @@ def build_metadata():
         sa.Index('hive_posts_cache_ix32', 'community_id', 'created_at', 'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community created
         sa.Index('hive_posts_cache_ix33', 'community_id', 'payout',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND is_paidout = '0'")), # API: community payout
         sa.Index('hive_posts_cache_ix34', 'community_id', 'payout',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '1' AND is_paidout = '0'")), # API: community muted
+        # TODO: add index? grayed=1, order by created
     )
 
     sa.Table(
@@ -305,6 +306,9 @@ def build_metadata_community(metadata=None):
         sa.Index('hive_notifs_ix2', 'community_id',            'id', postgresql_where=sql_text("community_id IS NOT NULL")),
         sa.Index('hive_notifs_ix3', 'community_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL")),
         sa.Index('hive_notifs_ix4', 'community_id', 'post_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND post_id IS NOT NULL")),
+
+        # TODO: fetch by post (non-comm?), fetch by src->dst/type (vote/mention unique idx)
+        #sa.Index('hive_notifs_ix5', 'post_id', 'type_id', 'dst_id', 'id', postgresql_where=sql_text("post_id IS NOT NULL")),
     )
 
     return metadata
