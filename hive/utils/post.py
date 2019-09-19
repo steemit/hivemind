@@ -1,7 +1,6 @@
 """Methods for normalizing steemd post metadata."""
 #pylint: disable=line-too-long
 
-import logging
 import re
 import math
 import ujson as json
@@ -9,19 +8,19 @@ from funcy.seqs import first, distinct
 
 from hive.utils.normalize import sbd_amount, rep_log10, safe_img_url, parse_time, utc_timestamp
 
-log = logging.getLogger(__name__)
-
 def mentions(body):
     """Given a post body, return proper @-mentioned account names."""
     # condenser:
     # /(^|[^a-zA-Z0-9_!#$%&*@＠\/]|(^|[^a-zA-Z0-9_+~.-\/#]))[@＠]([a-z][-\.a-z\d]+[a-z\d])/gi,
-
+    # twitter:
+    # validMentionPrecedingChars = /(?:^|[^a-zA-Z0-9_!#$%&*@＠]|(?:^|[^a-zA-Z0-9_+~.-])(?:rt|RT|rT|Rt):?)/
+    # endMentionMatch = regexSupplant(/^(?:#{atSigns}|[#{latinAccentChars}]|:\/\/)/);
     matches = re.findall(
         '(?:^|[^a-zA-Z0-9_!#$%&*@\\/])'
-        '(:?@)'
+        '(?:@)'
         '([a-zA-Z0-9][a-zA-Z0-9\\-.]{1,14}[a-zA-Z0-9])'
         '(?![a-z])', body)
-    return {grp[1].lower() for grp in matches}
+    return {grp.lower() for grp in matches}
 
 def post_basic(post):
     """Basic post normalization: json-md, tags, and flags."""

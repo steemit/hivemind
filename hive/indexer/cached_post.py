@@ -484,10 +484,10 @@ class CachedPost:
         # immutable; write only once (*edge case: undeleted posts)
         if level == 'insert':
             values.extend([
-                ('author',       post['author']),
-                ('permlink',     post['permlink']),
-                ('category',     post['category']),
-                ('depth',        post['depth'])])
+                ('author',   post['author']),
+                ('permlink', post['permlink']),
+                ('category', post['category']),
+                ('depth',    post['depth'])])
 
         # always write, unless simple vote update
         if level in ['insert', 'payout', 'update']:

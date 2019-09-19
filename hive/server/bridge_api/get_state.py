@@ -125,9 +125,8 @@ async def get_state(context, path, observer=None):
 
         tag = params['tag']
         community = await if_tag_community(context, tag, observer)
-        if community:
-            _assert_post_community(state, author, permlink, tag)
-            state['community'] = {tag: community}
+        if community: state['community'] = {tag: community}
+        if community: _assert_post_community(state, author, permlink, tag)
 
     # ranked posts - `/sort/category`
     elif page == 'posts':
@@ -142,6 +141,7 @@ async def get_state(context, path, observer=None):
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
 
     # build trending tags
+    # TODO: hives{tag: label} key
     cells = await list_top_communities(context, observer_id)
     for name, title in cells:
         if name not in state['community']:
