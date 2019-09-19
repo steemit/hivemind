@@ -1,6 +1,5 @@
 """Routes then builds a get_state response object"""
 
-# pylint: disable=too-many-lines
 import logging
 from collections import OrderedDict
 import ujson as json
@@ -10,12 +9,11 @@ from hive.server.common.mutes import Mutes
 
 from hive.server.hive_api.community import if_tag_community, list_top_communities
 from hive.server.hive_api.common import get_account_id
-
+from hive.server.bridge_api.methods import get_account_posts
 from hive.server.bridge_api.objects import (
     load_accounts,
     load_posts,
-    load_posts_keyed,
-    load_posts_reblogs)
+    load_posts_keyed)
 from hive.server.common.helpers import (
     ApiError,
     return_error_info,
@@ -58,34 +56,30 @@ def _parse_route(path):
 
     # account - `/@account/tab` (feed, blog, comments, replies)
     if parts == 2 and part[0][0] == '@' and part[1] in ACCOUNT_TAB_KEYS:
-        return dict(
-            page='account',
-            account=valid_account(part[0][1:]),
-            sort=ACCOUNT_TAB_KEYS[part[1]])
+        return dict(page='account',
+                    account=valid_account(part[0][1:]),
+                    sort=ACCOUNT_TAB_KEYS[part[1]])
 
     # discussion - `/category/@account/permlink`
     if parts == 3 and part[1][0] == '@':
-        return dict(
-            page='thread',
-            tag=part[0],
-            author=valid_account(part[1][1:]),
-            permlink=valid_permlink(part[2]))
+        author = valid_account(part[1][1:])
+        permlink = valid_permlink(part[2])
+        return dict(page='thread',
+                    tag=part[0],
+                    key=author + '/' + permlink)
 
     # ranked posts - `/sort/category`
     if parts <= 2 and part[0] in POST_LIST_SORTS:
-        return dict(
-            page='posts',
-            sort=valid_sort(part[0]),
-            tag=valid_tag(part[1]) if parts == 2 else '')
+        return dict(page='posts',
+                    sort=valid_sort(part[0]),
+                    tag=valid_tag(part[1]) if parts == 2 else '')
 
     raise ApiError("invalid path /%s" % path)
 
 @return_error_info
 async def get_state(context, path, observer=None):
     """Modified `get_state` implementation."""
-    # pylint: disable=too-many-locals
     params = _parse_route(path)
-    page = params['page']
 
     db = context['db']
     observer_id = await get_account_id(db, observer) if observer else None
@@ -100,33 +94,32 @@ async def get_state(context, path, observer=None):
         'community': {}}
 
     # account - `/@account/tab` (feed, blog, comments, replies)
-    if page == 'account':
+    if params['page'] == 'account':
         account = params['account']
         key = params['sort']
 
         state['accounts'][account] = await _load_account(db, account)
         if key:
-            posts = await _get_account_posts(db, account, key)
+            posts = await get_account_posts(context, key, account, '', '', 20, None)
             state['content'] = _keyed_posts(posts)
             state['accounts'][account][key] = list(state['content'].keys())
 
     # discussion - `/category/@account/permlink`
-    elif page == 'thread':
-        author = params['author']
-        permlink = params['permlink']
+    elif params['page'] == 'thread':
+        key = params['key']
+        tag = params['tag']
 
-        state['content'] = await _load_discussion(db, author, permlink)
+        state['content'] = await _load_discussion(db, key)
 
         # TODO: remove.. load profile on dropdown
         state['accounts'] = await _load_content_accounts(db, state['content'])
 
-        tag = params['tag']
         community = await if_tag_community(context, tag, observer)
         if community: state['community'] = {tag: community}
-        if community: _assert_post_community(state, author, permlink, tag)
+        if community: assert _category(state, key) == tag, 'community url error'
 
     # ranked posts - `/sort/category`
-    elif page == 'posts':
+    elif params['page'] == 'posts':
         sort = params['sort']
         tag = params['tag']
 
@@ -152,34 +145,8 @@ async def _add_trending_tags(context, state, observer_id):
                                          'gaming', 'crypto', 'newsteem',
                                          'music', 'food'])
 
-def _assert_post_community(state, author, permlink, community):
-    ref = author + '/' + permlink
-    category = state['content'][ref]['category']
-    assert category == community, 'invalid community url'
-
-async def _get_account_posts(db, account, key):
-    assert account, 'account must be specified'
-    assert key, 'discussion key must be specified'
-
-    if key == 'replies':
-        pids = await cursor.pids_by_replies(db, account, '', 20)
-        posts = await load_posts(db, pids)
-    elif key == 'comments':
-        pids = await cursor.pids_by_comments(db, account, '', 20)
-        posts = await load_posts(db, pids)
-    elif key == 'blog':
-        pids = await cursor.pids_by_blog(db, account, '', '', 20)
-        posts = await load_posts(db, pids)
-    elif key == 'feed':
-        res = await cursor.pids_by_feed_with_reblog(db, account, '', '', 20)
-        posts = await load_posts_reblogs(db, res)
-    elif key == 'payout':
-        pids = await cursor.pids_by_payout(db, account, '', '', 20)
-        posts = await load_posts(db, pids)
-    else:
-        raise ApiError("unknown account discussion key %s" % key)
-
-    return posts
+def _category(state, ref):
+    return state['content'][ref]['category']
 
 def _normalize_path(path):
     assert path, 'path cannot be blank'
@@ -200,8 +167,7 @@ def _ref(post):
     return post['author'] + '/' + post['permlink']
 
 async def _load_content_accounts(db, content):
-    if not content:
-        return {}
+    if not content: return {}
     posts = content.values()
     names = set(map(lambda p: p['author'], posts))
     accounts = await load_accounts(db, names)
@@ -227,9 +193,9 @@ async def _child_ids(db, parent_ids):
     rows = await db.query_all(sql, ids=tuple(parent_ids))
     return [[row[0], row[1]] for row in rows]
 
-async def _load_discussion(db, author, permlink):
+async def _load_discussion(db, ref):
     """Load a full discussion thread."""
-    root_id = await cursor.get_post_id(db, author, permlink)
+    root_id = await cursor.get_post_id(db, *ref.split('/'))
     if not root_id:
         return {}
 
@@ -271,14 +237,12 @@ async def _load_discussion(db, author, permlink):
     # return all nodes keyed by ref
     return {refs[pid]: post for pid, post in posts.items()}
 
-@cached(ttl=1800, timeout=1200)
+@cached(ttl=1800, timeout=15)
 async def _get_feed_price(db):
-    """Get a steemd-style ratio object representing feed price."""
     price = await db.query_one("SELECT usd_per_steem FROM hive_state")
     return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
 
-@cached(ttl=1800, timeout=1200)
+@cached(ttl=1800, timeout=15)
 async def _get_props_lite(db):
-    """Return a minimal version of get_dynamic_global_properties data."""
     raw = json.loads(await db.query_one("SELECT dgpo FROM hive_state"))
     return {'sbd_print_rate': raw['sbd_print_rate']}
