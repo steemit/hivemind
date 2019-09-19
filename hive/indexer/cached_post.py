@@ -613,8 +613,9 @@ class CachedPost:
                     score = min(100, (len(str(contrib)) - 1) * 25) # $1 = 75
                     payload = "$%.3f" % (contrib / 1000)
                     #log.warning("%s -- %d/100 -- %d", payload, score, rshares)
-                    Notify('vote', src_id=voter_id, dst_id=author_id, when=date,
-                           post_id=pid, score=score, payload=payload).write()
+                    Notify('vote', src_id=voter_id, dst_id=author_id,
+                           when=vote['time'], post_id=pid, score=score,
+                           payload=payload).write()
 
 
     @classmethod
