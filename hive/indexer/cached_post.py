@@ -596,14 +596,16 @@ class CachedPost:
 
         if pid in cls._votes:
             voters = cls._votes[pid]
-            del cls._votes[pid]
+            log.warning("pid %d voters=%s", pid, voters)
             for vote in post['active_votes']:
                 if vote['voter'] in voters and vote['rshares'] > 10e9:
+                    log.warning("pid %d vote by %s %d", pid, vote['voter'], vote['rshares'])
                     voter_id = Accounts.get_id(vote['voter'])
                     if not cls._voted(pid, author_id, voter_id):
                         score = 25 + (len(str(int(vote['rshares']))) - 10) * 15
                         Notify('vote', src_id=voter_id, dst_id=author_id,
                                post_id=pid, when=date, score=score).write()
+            del cls._votes[pid]
 
 
     @classmethod
