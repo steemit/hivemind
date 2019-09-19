@@ -626,7 +626,7 @@ class CachedPost:
         sql = """SELECT 1
                    FROM hive_notifs
                   WHERE dst_id = :dst_id
-                    AND src_id = :voter_id
+                    AND src_id = :src_id
                     AND post_id = :post_id
                     AND type_id = 17"""
         return bool(DB.query_one(sql, dst_id=account_id,
