@@ -2,6 +2,7 @@
 from decimal import Decimal
 
 from hive.utils.post import (
+    mentions,
     post_basic,
     post_legacy,
     post_payout,
@@ -136,6 +137,19 @@ POST_2 = {
     "url": "/spam/@test-safari/june-spam",
     "vote_rshares": 0
 }
+
+def test_mentions():
+    # pylint: disable=invalid-name
+    m = mentions
+    assert m('Hi @abc, meet @bob') == {'abc', 'bob'}
+    assert m('Hi @abc, meet @abc') == {'abc'}
+    assert not m('')
+    assert not m('@')
+    assert not m('steemit.com/@apple')
+    assert not m('joe@apple.com')
+    assert m('@longestokaccount') == {'longestokaccount'}
+    assert not m('@longestokaccountx')
+    assert m('@abc- @-foo @bar.') == {'abc', 'bar'}
 
 def test_post_basic():
     ret = post_basic(POST_1)

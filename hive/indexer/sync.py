@@ -198,7 +198,7 @@ class Sync:
                 Accounts.fetch_ranks()
                 Community.recalc_pending_payouts()
             if num % 100 == 0: #5min
-                log.warning("head block: %d", num)
+                log.warning("head block %d @ %s", num, block['timestamp'])
                 Accounts.dirty_oldest(500)
             if num % 20 == 0: #1min
                 self._update_chain_state()

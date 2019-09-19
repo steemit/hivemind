@@ -44,6 +44,18 @@ class Accounts:
         cls._ids = None
 
     @classmethod
+    def default_score(cls, name):
+        """Return default notification score based on rank."""
+        _id = cls.get_id(name)
+        rank = cls._ranks[_id] if _id in cls._ranks else 1000000
+        if rank < 200: return 70    # 0.02% 100k
+        if rank < 1000: return 60   # 0.1%  10k
+        if rank < 6500: return 50   # 0.5%  1k
+        if rank < 25000: return 40  # 2.0%  100
+        if rank < 100000: return 30 # 8.0%  15
+        return 20
+
+    @classmethod
     def get_id(cls, name):
         """Get account id by name. Throw if not found."""
         assert name in cls._ids, "account does not exist or was not registered"

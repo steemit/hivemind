@@ -97,7 +97,8 @@ class Blocks:
                     Posts.delete_op(op)
                 elif op_type == 'vote_operation':
                     if not is_initial_sync:
-                        CachedPost.vote(op['author'], op['permlink'])
+                        CachedPost.vote(op['author'], op['permlink'],
+                                        None, op['voter'])
 
                 # misc ops
                 elif op_type == 'transfer_operation':

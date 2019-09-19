@@ -8,10 +8,11 @@ import ujson as json
 from toolz import partition_all
 from hive.db.adapter import Db
 
-from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
+from hive.utils.post import post_basic, post_legacy, post_payout, post_stats, mentions
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
 from hive.indexer.community import Community
+from hive.indexer.notify import Notify
 
 # pylint: disable=too-many-lines
 
@@ -42,6 +43,9 @@ class CachedPost:
 
     # new promoted values, pending write
     _pending_promoted = {}
+
+    # pending vote notifs {pid: [voters]}
+    _votes = {}
 
     @classmethod
     def update_promoted_amount(cls, post_id, amount):
@@ -83,10 +87,15 @@ class CachedPost:
         cls._dirty('recount', author, permlink, pid)
 
     @classmethod
-    def vote(cls, author, permlink, pid=None):
+    def vote(cls, author, permlink, pid=None, voter=None):
         """Handle a post dirtied by a `vote` op."""
         cls._dirty('upvote', author, permlink, pid)
         Accounts.dirty(set([author])) # rep changed
+        if voter:
+            url = author + '/' + permlink
+            if url not in cls._votes:
+                cls._votes[url] = []
+            cls._votes[url].append(voter)
 
     @classmethod
     def insert(cls, author, permlink, pid):
@@ -298,7 +307,11 @@ class CachedPost:
         gap = cls.dirty_missing()
         log.info("[INIT] %d missing post cache entries", gap)
         while cls.flush(steem, trx=True, full_total=gap)['insert']:
+            last_gap = gap
             gap = cls.dirty_missing()
+            if gap == last_gap:
+                log.warning('ignoring %d inserts -- may be deleted')
+                break
 
     @classmethod
     def _update_batch(cls, steem, tuples, trx=True, full_total=None):
@@ -538,12 +551,102 @@ class CachedPost:
         if level == 'recount' and post['depth']:
             cls.recount(post['parent_author'], post['parent_permlink'])
 
+        # trigger any notifications
+        cls._notifs(post, pid, level, payout['payout'])
+
         # build the post insert/update SQL, add tag SQLs
         if level == 'insert':
             sql = cls._insert(values)
         else:
             sql = cls._update(values)
         return [sql] + tag_sqls
+
+    @classmethod
+    def _notifs(cls, post, pid, level, payout):
+        # pylint: disable=too-many-locals
+        author = post['author']
+        author_id = Accounts.get_id(author)
+        parent_author = post['parent_author']
+        date = post['last_update']
+
+        # reply notif
+        if level == 'insert' and parent_author and parent_author != author:
+            parent_author_id = Accounts.get_id(parent_author)
+            if not cls._muted(parent_author_id, author_id):
+                Notify('reply', src_id=author_id, dst_id=parent_author_id,
+                       score=Accounts.default_score(author), post_id=pid,
+                       when=date).write()
+
+        # mentions notif
+        if level in ('insert', 'update'):
+            accounts = set(filter(Accounts.exists, mentions(post['body'])))
+            accounts -= {author, parent_author}
+            if len(accounts) <= 10:
+                for mention in accounts:
+                    mention_id = Accounts.get_id(mention)
+                    if (not cls._mentioned(pid, mention_id)
+                            and not cls._muted(mention_id, author_id)):
+                        score = Accounts.default_score(author)
+                        penalty = min([score, 5 * (len(accounts) - 1)])
+                        Notify('mention', src_id=author_id,
+                               dst_id=mention_id, post_id=pid, when=date,
+                               score=(score - penalty)).write()
+            else:
+                url = '@%s/%s' % (author, post['permlink'])
+                log.warning("%s - %d mentions", url, len(accounts))
+
+        # votes notif
+        url = post['author'] + '/' + post['permlink']
+        if url in cls._votes:
+            voters = cls._votes[url]
+            del cls._votes[url]
+            net = float(post['net_rshares'])
+            ratio = float(payout) / net if net else 0
+            for vote in post['active_votes']:
+                rshares = int(vote['rshares'])
+                if vote['voter'] not in voters or rshares < 10e9: continue
+                contrib = int(1000 * ratio * rshares)
+                if contrib < 1: continue # < $0.001
+
+                voter_id = Accounts.get_id(vote['voter'])
+                if not cls._voted(pid, author_id, voter_id):
+                    score = min(100, len(str(contrib)) * 20)
+                    payload = "$%.3f" % (contrib / 1000)
+                    log.warning("%s -- %d/100 -- %d rshares", payload, score, rshares)
+                    Notify('vote', src_id=voter_id, dst_id=author_id, when=date,
+                           post_id=pid, score=score, payload=payload).write()
+
+
+    @classmethod
+    def _muted(cls, account, target):
+        # TODO: optimize (mem cache?)
+        sql = """SELECT 1 FROM hive_follows
+                  WHERE follower = :account
+                    AND following = :target
+                    AND state = 2"""
+        return DB.query_col(sql, account=account, target=target)
+
+    @classmethod
+    def _voted(cls, post_id, account_id, voter_id):
+        # TODO: optimize (add idx, mem cache?)
+        sql = """SELECT 1
+                   FROM hive_notifs
+                  WHERE dst_id = :dst_id
+                    AND src_id = :src_id
+                    AND post_id = :post_id
+                    AND type_id = 17"""
+        return bool(DB.query_one(sql, dst_id=account_id,
+                                 post_id=post_id, src_id=voter_id))
+
+    @classmethod
+    def _mentioned(cls, post_id, account_id):
+        # TODO: optimize (add idx, mem cache?)
+        sql = """SELECT 1
+                   FROM hive_notifs
+                  WHERE dst_id = :dst_id
+                    AND post_id = :post_id
+                    AND type_id = 16"""
+        return bool(DB.query_one(sql, dst_id=account_id, post_id=post_id))
 
     @classmethod
     def _tag_sqls(cls, pid, tags, diff=True):

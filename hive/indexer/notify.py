@@ -23,15 +23,15 @@ class NotifyType(IntEnum):
     error = 10
     subscribe = 11
 
-    # inactive
-    #resteem = 12
-    #mention = 13
-    #follow = 14
+    reply = 12
+    #reply_comment = 13
+    reblog = 14
+    follow = 15
+    mention = 16
+    vote = 17
 
-    #vote_post = 15
+    # inactive
     #vote_comment = 16
-    #reply_post = 17
-    #reply_comment = 18
 
     #update_account = 19
     #receive = 20
@@ -90,10 +90,12 @@ class Notify:
     def write(self):
         """Store this notification."""
         assert not self._id, 'notify has id %d' % self._id
-        log.warning("[NOTIFY] %s - src %s dst %s pid %s%s cid %s (%d/100)",
-                    self.enum.name, self.src_id, self.dst_id, self.post_id,
-                    ' (%s)' % self.payload if self.payload else '',
-                    self.community_id, self.score)
+        ignore = ('reply', 'reblog', 'follow', 'mention', 'vote')
+        if self.enum.name not in ignore:
+            log.warning("[NOTIFY] %s - src %s dst %s pid %s%s cid %s (%d/100)",
+                        self.enum.name, self.src_id, self.dst_id, self.post_id,
+                        ' (%s)' % self.payload if self.payload else '',
+                        self.community_id, self.score)
         sql = """INSERT INTO hive_notifs (type_id, score, created_at, src_id,
                                           dst_id, post_id, community_id,
                                           payload)
