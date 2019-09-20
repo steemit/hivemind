@@ -61,7 +61,8 @@ class Conf():
                   _sanitized_conf(parser))
 
         if conf.mode() == 'server':
-            DbStats.SLOW_QUERY_MS = 750
+            #DbStats.SLOW_QUERY_MS = 750
+            DbStats.SLOW_QUERY_MS = 200 # TODO
 
         return conf
 
