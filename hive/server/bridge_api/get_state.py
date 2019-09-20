@@ -10,7 +10,7 @@ from hive.server.hive_api.common import get_account_id
 import hive.server.bridge_api.cursor as cursor
 from hive.server.bridge_api.thread import get_discussion
 from hive.server.bridge_api.methods import get_account_posts
-from hive.server.bridge_api.objects import load_accounts, load_posts
+from hive.server.bridge_api.objects import load_posts
 from hive.server.common.helpers import (
     ApiError,
     return_error_info,
@@ -85,7 +85,6 @@ async def get_state(context, path, observer=None):
     state = {
         'feed_price': await _get_feed_price(db),
         'props': await _get_props_lite(db),
-        'accounts': {},
         'content': {},
         'tag_idx': {'trending': []},
         'discussion_idx': {"": {}}, # {tag: sort: [keys]}
@@ -97,19 +96,19 @@ async def get_state(context, path, observer=None):
     key = params['key']
 
     if page == 'account':
-        state['accounts'] = await _load_account(db, key)
         state['content'] = await _key_account_posts(db, sort, key, observer)
-        state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-
     elif page == 'thread':
         state['content'] = await get_discussion(context, *key.split('/'))
-
     elif page == 'list':
         state['content'] = await _key_ranked_posts(db, sort, tag, observer_id)
-        state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
 
     await _add_trending_tags(context, state, observer_id)
 
+    # account & list
+    if tag and sort:
+        state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
+
+    # move this logic to condenser
     if tag:
         state['community'] = await _comms_map(context, tag, observer)
     if page == 'thread' and state['community']:
@@ -163,11 +162,6 @@ def _keyed_posts(posts):
 
 def _ref(post):
     return post['author'] + '/' + post['permlink']
-
-async def _load_account(db, name):
-    ret = await load_accounts(db, [name])
-    assert ret, 'account not found: `%s`' % name
-    return {row['name']: row for row in ret}
 
 @cached(ttl=1800, timeout=15)
 async def _get_feed_price(db):
