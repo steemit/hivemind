@@ -105,11 +105,11 @@ async def get_state(context, path, observer=None):
     await _add_trending_tags(context, state, observer_id)
 
     # account & list
-    if tag and sort:
+    if page in ('account', 'list'):
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
 
     # move this logic to condenser
-    if tag:
+    if page in ('thread', 'list') and tag:
         state['community'] = await _comms_map(context, tag, observer)
     if page == 'thread' and state['community']:
         assert _category(state, key) == tag, 'url/category mismatch'
