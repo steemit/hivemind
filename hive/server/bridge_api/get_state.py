@@ -99,20 +99,21 @@ async def get_state(context, path, observer=None):
     if page == 'account':
         state['accounts'] = await _load_account(db, key)
         state['content'] = await _key_account_posts(db, sort, key, observer)
+        state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
 
     elif page == 'thread':
         state['content'] = await get_discussion(context, *key.split('/'))
-        state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-        state['community'] = await _comms_map(context, tag, observer)
-        if state['community']:
-            assert _category(state, key) == tag, 'url/category mismatch'
 
     elif page == 'list':
         state['content'] = await _key_ranked_posts(db, sort, tag, observer_id)
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
-        state['community'] = await _comms_map(context, tag, observer)
 
     await _add_trending_tags(context, state, observer_id)
+
+    if tag:
+        state['community'] = await _comms_map(context, tag, observer)
+    if page == 'thread' and state['community']:
+        assert _category(state, key) == tag, 'url/category mismatch'
 
     return state
 
