@@ -10,6 +10,7 @@ from hive.server.common.helpers import (
     valid_limit)
 from hive.server.hive_api.common import get_account_id
 from hive.server.hive_api.objects import _follow_contexts
+from hive.server.hive_api.community import list_top_communities
 
 #pylint: disable=too-many-arguments, no-else-return
 
@@ -25,6 +26,20 @@ async def get_profile(context, account, observer=None):
     if observer_id:
         await _follow_contexts(db, {ret[0]['id']: ret[0]}, observer_id, True)
     return ret[0]
+
+@return_error_info
+async def get_trending_topics(context, observer):
+    """Return top trending topics across pending posts."""
+    db = context['db']
+    out = []
+    observer_id = await get_account_id(db, observer) if observer else None
+    cells = await list_top_communities(context, observer_id)
+    for name, title in cells:
+        out.append((name, title))
+    for tag in ('photography', 'travel', 'life', 'gaming',
+                'crypto', 'newsteem', 'music', 'food'):
+        out.append((tag, None))
+    return out
 
 @return_error_info
 async def get_ranked_posts(context, sort, start_author='', start_permlink='',

@@ -3,11 +3,10 @@
 import logging
 from collections import OrderedDict
 
-from hive.server.hive_api.community import if_tag_community, list_top_communities
 from hive.server.hive_api.common import get_account_id
 import hive.server.bridge_api.cursor as cursor
 from hive.server.bridge_api.thread import get_discussion
-from hive.server.bridge_api.methods import get_account_posts
+from hive.server.bridge_api.methods import get_account_posts, get_trending_topics
 from hive.server.bridge_api.objects import load_posts
 from hive.server.common.helpers import (
     ApiError,
@@ -43,7 +42,14 @@ def _parse_route(path):
 
     See steem/libraries/plugins/apis/condenser_api/condenser_api.cpp
     """
-    (path, part) = _normalize_path(path)
+    assert path, 'path cannot be blank'
+    assert path[0] != '/', 'path cannot start with forward slash'
+    assert path[-1] != '/', 'path cannot end with forward slash'
+    assert '#' not in path, 'path contains hash mark (#)'
+    assert '?' not in path, 'path contains query string: `%s`' % path
+    assert path.count('/') < 3, 'too many parts in path: `%s`' % path
+
+    part = path.split('/')
     parts = len(part)
 
     # account - `/@account/tab` (feed, blog, comments, replies)
@@ -97,17 +103,15 @@ async def get_state(context, path, observer=None):
     elif page == 'list':
         state['content'] = await _key_ranked_posts(db, sort, tag, observer_id)
 
-    await _add_trending_tags(context, state, observer_id)
-
     # account & list
     if page in ('account', 'list'):
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
 
-    # move this logic to condenser
-    if page in ('thread', 'list') and tag:
-        state['community'] = await _comms_map(context, tag, observer)
-    if page == 'thread' and state['community']:
-        assert _category(state, key) == tag, 'url/category mismatch'
+    topics = await get_trending_topics(context, observer)
+    for (name, label) in topics:
+        state['tag_idx']['trending'].append(name)
+        if label:
+            state['community'][name] = {'title': label}
 
     return state
 
@@ -120,38 +124,8 @@ async def _key_ranked_posts(db, sort, tag, observer_id):
     posts = await load_posts(db, pids)
     return _keyed_posts(posts)
 
-async def _comms_map(context, tag, observer):
-    if not tag: return {}
-    community = await if_tag_community(context, tag, observer)
-    return {tag: community} if community else {}
-
-async def _add_trending_tags(context, state, observer_id):
-    cells = await list_top_communities(context, observer_id)
-    for name, title in cells:
-        if name not in state['community']:
-            state['community'][name] = {'title': title}
-        state['tag_idx']['trending'].append(name)
-    state['tag_idx']['trending'].extend(['photography', 'travel', 'life',
-                                         'gaming', 'crypto', 'newsteem',
-                                         'music', 'food'])
-
-def _category(state, ref):
-    return state['content'][ref]['category']
-
-def _normalize_path(path):
-    assert path, 'path cannot be blank'
-    assert path[0] != '/', 'path cannot start with forward slash'
-    assert path[-1] != '/', 'path cannot end with forward slash'
-    assert '#' not in path, 'path contains hash mark (#)'
-    assert '?' not in path, 'path contains query string: `%s`' % path
-    assert path.count('/') < 3, 'too many parts in path: `%s`' % path
-    return (path, path.split('/'))
-
 def _keyed_posts(posts):
     out = OrderedDict()
     for post in posts:
-        out[_ref(post)] = post
+        out[post['author'] + '/' + post['permlink']] = post
     return out
-
-def _ref(post):
-    return post['author'] + '/' + post['permlink']
