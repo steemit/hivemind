@@ -80,7 +80,7 @@ async def list_community_roles(context, community, last='', limit=50):
     db = context['db']
     community_id = await get_community_id(db, community)
     seek = ' AND a.name > :last' if last else ''
-    sql = """SELECT a.name, r.role_id FROM hive_roles r
+    sql = """SELECT a.name, r.role_id, r.title FROM hive_roles r
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :id %s
                 AND r.role_id != 0
