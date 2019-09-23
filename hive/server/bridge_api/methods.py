@@ -9,16 +9,22 @@ from hive.server.common.helpers import (
     valid_tag,
     valid_limit)
 from hive.server.hive_api.common import get_account_id
+from hive.server.hive_api.objects import _follow_contexts
 
 #pylint: disable=too-many-arguments, no-else-return
 
 @return_error_info
 async def get_profile(context, account, observer=None):
     """Load account/profile data."""
-    # pylint: disable=unused-argument
-    # TODO: observer
-    ret = await load_accounts(context['db'], [valid_account(account)])
-    return ret[0] if ret else None
+    db = context['db']
+    ret = await load_accounts(db, [valid_account(account)])
+    if not ret:
+        return None
+
+    observer_id = await get_account_id(db, observer) if observer else None
+    if observer_id:
+        await _follow_contexts(db, {ret[0]['id']: ret[0]}, observer_id, True)
+    return ret[0]
 
 @return_error_info
 async def get_ranked_posts(context, sort, start_author='', start_permlink='',
