@@ -2,8 +2,6 @@
 
 import logging
 from collections import OrderedDict
-import ujson as json
-from aiocache import cached
 
 from hive.server.hive_api.community import if_tag_community, list_top_communities
 from hive.server.hive_api.common import get_account_id
@@ -23,7 +21,6 @@ log = logging.getLogger(__name__)
 
 # steemd account 'tabs' - specific post list queries
 ACCOUNT_TAB_KEYS = {
-    'null': None,
     'blog': 'blog',
     'feed': 'feed',
     'comments': 'comments',
@@ -83,8 +80,6 @@ async def get_state(context, path, observer=None):
     observer_id = await get_account_id(db, observer) if observer else None
 
     state = {
-        'feed_price': await _get_feed_price(db),
-        'props': await _get_props_lite(db),
         'content': {},
         'tag_idx': {'trending': []},
         'discussion_idx': {"": {}}, # {tag: sort: [keys]}
@@ -117,9 +112,7 @@ async def get_state(context, path, observer=None):
     return state
 
 async def _key_account_posts(db, sort, account, observer):
-    if sort is None: return {}
-    context = {'db': db}
-    posts = await get_account_posts(context, sort, account, '', '', 20, observer)
+    posts = await get_account_posts({'db': db}, sort, account, '', '', 20, observer)
     return _keyed_posts(posts)
 
 async def _key_ranked_posts(db, sort, tag, observer_id):
@@ -162,13 +155,3 @@ def _keyed_posts(posts):
 
 def _ref(post):
     return post['author'] + '/' + post['permlink']
-
-@cached(ttl=1800, timeout=15)
-async def _get_feed_price(db):
-    price = await db.query_one("SELECT usd_per_steem FROM hive_state")
-    return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
-
-@cached(ttl=1800, timeout=15)
-async def _get_props_lite(db):
-    raw = json.loads(await db.query_one("SELECT dgpo FROM hive_state"))
-    return {'sbd_print_rate': raw['sbd_print_rate']}
