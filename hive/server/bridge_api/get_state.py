@@ -3,6 +3,7 @@
 import logging
 from collections import OrderedDict
 
+from hive.server.hive_api.community import if_tag_community
 from hive.server.hive_api.common import get_account_id
 import hive.server.bridge_api.cursor as cursor
 from hive.server.bridge_api.thread import get_discussion
@@ -107,6 +108,10 @@ async def get_state(context, path, observer=None):
     if page in ('account', 'list'):
         state['discussion_idx'] = {tag: {sort: list(state['content'].keys())}}
 
+    # move this logic to condenser
+    if page in ('thread', 'list') and tag:
+        state['community'] = await _comms_map(context, tag, observer)
+
     topics = await get_trending_topics(context, observer)
     for (name, label) in topics:
         state['tag_idx']['trending'].append(name)
@@ -123,6 +128,11 @@ async def _key_ranked_posts(db, sort, tag, observer_id):
     pids = await cursor.pids_by_ranked(db, sort, '', '', 20, tag, observer_id)
     posts = await load_posts(db, pids)
     return _keyed_posts(posts)
+
+async def _comms_map(context, tag, observer):
+    if not tag: return {}
+    community = await if_tag_community(context, tag, observer)
+    return {tag: community} if community else {}
 
 def _keyed_posts(posts):
     out = OrderedDict()
