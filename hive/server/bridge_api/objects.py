@@ -3,7 +3,7 @@
 import logging
 import ujson as json
 
-from hive.utils.normalize import sbd_amount, rep_to_raw
+from hive.utils.normalize import sbd_amount
 
 log = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ def _condenser_account_object(row):
         'name': row['name'],
         'created': _json_date(row['created_at']),
         'post_count': row['post_count'],
-        'reputation': rep_to_raw(row['reputation']),
+        'reputation': row['reputation'],
         'stats': {
             'sp': int(row['vote_weight'] * 0.0005037),
             'rank': row['rank'],
@@ -194,7 +194,7 @@ def _condenser_post_object(row, truncate_body=0):
     post['replies'] = []
     post['body_length'] = len(row['body'])
     post['active_votes'] = _hydrate_active_votes(row['votes'])
-    post['author_reputation'] = rep_to_raw(row['author_rep'])
+    post['author_reputation'] = row['author_rep']
 
     post['stats'] = {
         'hide': row['is_hidden'],
@@ -240,7 +240,7 @@ def _hydrate_active_votes(vote_csv):
         votes.append(dict(voter=voter,
                           rshares=rshares,
                           percent=percent,
-                          reputation=rep_to_raw(reputation)))
+                          reputation=reputation))
     return votes
 
 def _json_date(date=None):

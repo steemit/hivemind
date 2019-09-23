@@ -1,7 +1,7 @@
 """Bridge API public endpoints for posts"""
 
 import hive.server.bridge_api.cursor as cursor
-from hive.server.bridge_api.objects import load_posts, load_posts_reblogs
+from hive.server.bridge_api.objects import load_posts, load_posts_reblogs, load_accounts
 from hive.server.common.helpers import (
     return_error_info,
     valid_account,
@@ -11,6 +11,14 @@ from hive.server.common.helpers import (
 from hive.server.hive_api.common import get_account_id
 
 #pylint: disable=too-many-arguments, no-else-return
+
+@return_error_info
+async def get_profile(context, account, observer=None):
+    """Load account/profile data."""
+    # pylint: disable=unused-argument
+    # TODO: observer
+    ret = await load_accounts(context['db'], [valid_account(account)])
+    return ret[0] if ret else None
 
 @return_error_info
 async def get_ranked_posts(context, sort, start_author='', start_permlink='',
