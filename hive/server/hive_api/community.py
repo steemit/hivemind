@@ -129,7 +129,7 @@ async def load_communities(db, ids, lite=True):
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
                     subscribers, created_at %s
                FROM hive_communities WHERE id IN :ids"""
-    fields = ', description, settings' if not lite else ''
+    fields = ', description, flag_text, settings' if not lite else ''
     rows = await db.query_all(sql % fields, ids=tuple(ids))
 
     out = {}
@@ -149,6 +149,7 @@ async def load_communities(db, ids, lite=True):
 
         if not lite:
             ret['description'] = row['description']
+            ret['flag_text'] = row['flag_text']
             ret['settings'] = json.loads(row['settings'])
             ret['team'] = await _community_team(db, ret['id'])
 
