@@ -28,7 +28,7 @@ async def get_profile(context, account, observer=None):
     return ret[0]
 
 @return_error_info
-async def get_trending_topics(context, observer):
+async def get_trending_topics(context, observer=None):
     """Return top trending topics across pending posts."""
     db = context['db']
     out = []
