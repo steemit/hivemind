@@ -122,10 +122,10 @@ class CachedPost:
 
         # if it was queued for a write, remove it
         url = author+'/'+permlink
-        log.warning("deleting %s", url)
+        log.warning("deleting %s", url) #173
         if url in cls._queue:
             del cls._queue[url]
-            log.warning("deleted %s", url)
+            log.warning("deleted %s", url) #173
             if url in cls._ids:
                 del cls._ids[url]
 
@@ -165,7 +165,7 @@ class CachedPost:
             'permlink': permlink,
             'category': category}))
         cls.update(author, permlink, post_id)
-        log.warning("undeleted %s/%s", author, permlink)
+        log.warning("undeleted %s/%s", author, permlink) #173
 
     @classmethod
     def flush(cls, steem, trx=False, spread=1, full_total=None):
@@ -310,6 +310,9 @@ class CachedPost:
             last_gap = gap
             gap = cls.dirty_missing()
             if gap == last_gap:
+                # edge case -- if last post entry was deleted, this
+                # process would never reach condition where the last
+                # cached id == last post id. abort if progress stalls.
                 log.warning('ignoring %d inserts -- may be deleted')
                 break
 
@@ -594,7 +597,7 @@ class CachedPost:
                                score=(score - penalty)).write()
             else:
                 url = '@%s/%s' % (author, post['permlink'])
-                log.warning("%s - %d mentions", url, len(accounts))
+                log.info("skip %d mentions in %s", len(accounts), url)
 
         # votes notif
         url = post['author'] + '/' + post['permlink']
@@ -613,7 +616,6 @@ class CachedPost:
                 if not cls._voted(pid, author_id, voter_id):
                     score = min(100, (len(str(contrib)) - 1) * 25) # $1 = 75
                     payload = "$%.3f" % (contrib / 1000)
-                    #log.warning("%s -- %d/100 -- %d", payload, score, rshares)
                     Notify('vote', src_id=voter_id, dst_id=author_id,
                            when=vote['time'], post_id=pid, score=score,
                            payload=payload).write()
