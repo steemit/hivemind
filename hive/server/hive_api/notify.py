@@ -90,7 +90,7 @@ def _render_msg(row):
     if '<dst>' in msg: msg = msg.replace('<dst>', '@' + row['dst'])
     if '<src>' in msg: msg = msg.replace('<src>', '@' + row['src'])
     if '<post>' in msg: msg = msg.replace('<post>', _post_url(row))
-    if '<payload>' in msg: msg = msg.replace('<payload>', row['payload'])
+    if '<payload>' in msg: msg = msg.replace('<payload>', row['payload'] or 'null')
     if '<comm>' in msg: msg = msg.replace('<comm>', row['community_title'])
     return msg
 
