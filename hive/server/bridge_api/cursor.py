@@ -128,7 +128,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
 
 
 
-async def pids_by_category(db, tag, sort, start_id, limit):
+async def pids_by_category(db, tag, sort, last_id, limit):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
@@ -164,14 +164,16 @@ async def pids_by_category(db, tag, sort, start_id, limit):
             sql = "SELECT post_id FROM hive_post_tags WHERE tag = :tag"
             where.append("post_id IN (%s)" % sql)
 
-    if start_id:
-        sql = "%s <= (SELECT %s FROM %s WHERE post_id = :start_id)"
-        where.append(sql % (field, field, table))
+    if last_id:
+        sval = "(SELECT %s FROM %s WHERE post_id = :last_id)" % (field, table)
+        sql = """((%s < %s) OR (%s = %s AND post_id > :last_id))"""
+        where.append(sql % (field, sval, field, sval))
 
-    sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
-           % (table, ' AND '.join(where), field))
+    sql = ("""SELECT post_id FROM %s WHERE %s
+              ORDER BY %s DESC, post_id LIMIT :limit
+              """ % (table, ' AND '.join(where), field))
 
-    return await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
+    return await db.query_col(sql, tag=tag, last_id=last_id, limit=limit)
 
 async def _subscribed(db, account_id):
     sql = """SELECT community_id FROM hive_subscriptions
