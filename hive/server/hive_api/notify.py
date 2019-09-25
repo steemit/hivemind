@@ -13,11 +13,11 @@ STRINGS = {
     NotifyType.set_role:       '<src> set <dst> <payload>',
     NotifyType.set_props:      '<src> set properties <payload>',
     NotifyType.set_label:      '<src> label <dst> <payload>',
-    NotifyType.mute_post:      '<src> mute <post> <payload>',
-    NotifyType.unmute_post:    '<src> unmute <post> <payload>',
+    NotifyType.mute_post:      '<src> mute <post> - <payload>',
+    NotifyType.unmute_post:    '<src> unmute <post> - <payload>',
     NotifyType.pin_post:       '<src> pin <post>',
     NotifyType.unpin_post:     '<src> unpin <post>',
-    NotifyType.flag_post:      '<src> flag <post>',
+    NotifyType.flag_post:      '<src> flag <post> - <payload>',
     NotifyType.subscribe:      '<src> subscribed to <comm>',
 
     # personal
