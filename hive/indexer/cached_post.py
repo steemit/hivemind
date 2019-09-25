@@ -366,15 +366,16 @@ class CachedPost:
                                FROM hive_posts WHERE id = :id"""
                     row = DB.query_row(sql, id=pid)
                     if row['is_deleted']:
-                        log.info("found deleted post for %s: %s", level, row)
-                        if level == 'payout':
-                            log.warning("force delete %s", row)
-                            cls.delete(pid, row['author'], row['permlink'])
-                    elif level == 'insert':
-                        log.error("insert post not found -- DEFER %s", row)
-                        cls.insert(row['author'], row['permlink'], pid)
+                        # rare or impossible -- report if detected
+                        log.error("found deleted post for %s: %s", level, row)
                     else:
-                        log.warning("%s post not found -- DEFER %s", level, row)
+                        # most likely cause of this condition is that the post
+                        # has been deleted (e.g. sync trails by 2 blocks, post
+                        # was inserted at head-2, deleted at head). another
+                        # possible cause is that a node behind a load balancer
+                        # is behind; we detected a new post but querying a node
+                        # that hasn't seen it yet.
+                        log.warning("post not found -- DEFER %s %s", level, row)
                         cls._dirty(level, row['author'], row['permlink'], pid)
 
                 cls._bump_last_id(pid)
