@@ -224,7 +224,7 @@ class Community:
             community_id, pending = row
             sql = """UPDATE hive_communities
                         SET sum_pending = :pending, rank = :rank
-                      WHERE id = :community_id"""
+                      WHERE id = :id"""
             DB.query(sql, id=community_id, pending=pending, rank=rank+1)
 
 class CommunityOp:
