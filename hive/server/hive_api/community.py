@@ -137,7 +137,7 @@ async def load_communities(db, ids, lite=True):
         ret = {
             'id': row['id'],
             'name': row['name'],
-            'title': row['title'],
+            'title': row['title'] or ('@' + row['name']),
             'about': row['about'],
             'lang': row['lang'],
             'type_id': row['type_id'],
