@@ -205,7 +205,7 @@ class Community:
     @classmethod
     def recalc_pending_payouts(cls):
         """Update all pending payout and rank fields."""
-        sql = """SELECT c.id, p.pending
+        sql = """SELECT c.id, COALESCE(p.pending, 0) pending
                    FROM hive_communities c
               LEFT JOIN (
                              SELECT community_id, SUM(payout) pending
