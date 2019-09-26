@@ -33,7 +33,7 @@ async def get_trending_topics(context, observer=None):
     db = context['db']
     out = []
     observer_id = await get_account_id(db, observer) if observer else None
-    cells = await list_top_communities(context, observer_id)
+    cells = await list_top_communities(context, 5, observer_id)
     for name, title in cells:
         out.append((name, title or name))
     for tag in ('photography', 'travel', 'life', 'gaming',
