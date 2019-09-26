@@ -49,7 +49,7 @@ async def list_top_communities(context, limit=25, observer_id=None):
         out += await db.query_all(sql, account_id=observer_id)
 
     sql = """SELECT name, title FROM hive_communities
-              WHERE rank > 0 ORDER BY rank DESC LIMIT :limit"""
+              WHERE rank > 0 ORDER BY rank LIMIT :limit"""
     out += await db.query_all(sql, limit=limit)
 
     return [(r[0], r[1]) for r in out]
@@ -65,7 +65,7 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
                                    FROM hive_communities
                                   WHERE name = :last) """
 
-    sql = "SELECT id FROM hive_communities %s ORDER BY rank DESC" % seek
+    sql = "SELECT id FROM hive_communities %s WHERE rank > 0 ORDER BY rank" % seek
     ids = await db.query_col(sql, last=last, limit=limit)
     communities = await load_communities(db, ids, lite=True)
 
