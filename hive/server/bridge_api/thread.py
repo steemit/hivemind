@@ -63,7 +63,7 @@ async def _load_discussion(db, root_id):
     posts = await load_posts_keyed(db, ids)
 
     # remove posts/comments from muted accounts
-    muted_accounts = Mutes.all()
+    muted_accounts = set() #TODO: Mutes.all()
     rem_pids = []
     for pid, post in posts.items():
         if post['author'] in muted_accounts:
