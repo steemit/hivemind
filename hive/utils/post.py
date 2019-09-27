@@ -118,7 +118,7 @@ def post_payout(post):
 
     # trending scores
     _timestamp = utc_timestamp(parse_time(post['created']))
-    sc_trend = _score(rshares, _timestamp, 480000)
+    sc_trend = _score(rshares, _timestamp, 240000)
     sc_hot = _score(rshares, _timestamp, 10000)
 
     return {
