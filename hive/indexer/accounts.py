@@ -116,7 +116,7 @@ class Accounts:
     def dirty_oldest(cls, limit=50000):
         """Flag `limit` least-recently updated accounts for update."""
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
-        return cls.dirty(set(DB.query_col(sql, limit=limit)))
+        return cls.dirty_set(set(DB.query_col(sql, limit=limit)))
 
     @classmethod
     def flush(cls, steem, trx=False, spread=1):
