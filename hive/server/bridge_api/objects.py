@@ -13,7 +13,7 @@ async def load_accounts(db, names):
     """`get_accounts`-style lookup for `get_state` compat layer."""
     sql = """SELECT id, name, display_name, about, reputation, vote_weight,
                     created_at, post_count, profile_image, location, website,
-                    cover_image, rank, following, followers
+                    cover_image, rank, following, followers, active_at
                FROM hive_accounts WHERE name IN :names"""
     rows = await db.query_all(sql, names=tuple(names))
     return [_condenser_account_object(row) for row in rows]
@@ -143,6 +143,7 @@ def _condenser_account_object(row):
         'id': row['id'],
         'name': row['name'],
         'created': _json_date(row['created_at']),
+        'active': _json_date(row['active_at']),
         'post_count': row['post_count'],
         'reputation': row['reputation'],
         'stats': {
@@ -177,6 +178,7 @@ def _condenser_post_object(row, truncate_body=0):
     post['title'] = row['title']
     post['body'] = row['body'][0:truncate_body] if truncate_body else row['body']
     post['json_metadata'] = row['json']
+    # TODO: serve img_url instead of json_md?
 
     post['created'] = _json_date(row['created_at'])
     post['last_update'] = _json_date(row['updated_at'])
