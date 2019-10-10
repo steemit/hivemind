@@ -85,18 +85,22 @@ class Blocks:
                 # account metadata updates
                 elif op_type == 'account_update_operation':
                     if not is_initial_sync:
-                        Accounts.dirty(set([op['account']]))
+                        Accounts.dirty(op['account']) # full
                 elif op_type == 'account_update2_operation':
                     if not is_initial_sync:
-                        Accounts.dirty(set([op['account']]))
+                        Accounts.dirty(op['account']) # full
 
                 # post ops
                 elif op_type == 'comment_operation':
                     Posts.comment_op(op, date)
+                    if not is_initial_sync:
+                        Accounts.dirty(op['author']) # lite - stats
                 elif op_type == 'delete_comment_operation':
                     Posts.delete_op(op)
                 elif op_type == 'vote_operation':
                     if not is_initial_sync:
+                        Accounts.dirty(op['author']) # lite - rep
+                        Accounts.dirty(op['voter']) # lite - stats
                         CachedPost.vote(op['author'], op['permlink'],
                                         None, op['voter'])
 

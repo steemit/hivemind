@@ -98,7 +98,12 @@ class Accounts:
     # ---------------------
 
     @classmethod
-    def dirty(cls, accounts):
+    def dirty(cls, account):
+        """Marks given account as needing an update."""
+        return cls._dirty.add(account)
+
+    @classmethod
+    def dirty_set(cls, accounts):
         """Marks given accounts as needing an update."""
         return cls._dirty.extend(accounts)
 
@@ -177,6 +182,7 @@ class Accounts:
 
         active_at = max(account['created'],
                         account['last_post'],
+                        account['last_root_post'],
                         account['last_vote_time'])
 
         values = {

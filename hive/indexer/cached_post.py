@@ -90,7 +90,6 @@ class CachedPost:
     def vote(cls, author, permlink, pid=None, voter=None):
         """Handle a post dirtied by a `vote` op."""
         cls._dirty('upvote', author, permlink, pid)
-        Accounts.dirty(set([author])) # rep changed
         if voter:
             url = author + '/' + permlink
             if url not in cls._votes:
@@ -261,7 +260,7 @@ class CachedPost:
         for (pid, author, permlink) in paidout:
             authors.add(author)
             cls._dirty('payout', author, permlink, pid)
-        Accounts.dirty(authors) # force-update accounts on payout
+        Accounts.dirty_set(authors) # force-update accounts on payout
 
         if len(paidout) > 200:
             log.info("[PREP] Found %d payouts for %d authors since %s",

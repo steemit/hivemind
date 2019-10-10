@@ -193,7 +193,7 @@ def test_post_payout():
     expect = {'payout': Decimal('0.044'),
               'rshares': 2731865444,
               'csvotes': 'test-safari,1506388632,10000,49.03\ndarth-cryptic,110837437,200,49.23\ntest25,621340000,10000,25\nmysqlthrashmetal,493299375,10000,41.02',
-              'sc_trend': 3123.215690554685,
+              'sc_trend': 6243.994921804685,
               'sc_hot': 149799.83955930467}
     assert ret == expect
 
