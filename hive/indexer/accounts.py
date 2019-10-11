@@ -165,9 +165,15 @@ class Accounts:
     @classmethod
     def _sql(cls, account, cached_at):
         """Prepare a SQL query from a steemd account."""
-        vote_weight = (vests_amount(account['vesting_shares'])
+        vests = vests_amount(account['vesting_shares'])
+
+        vote_weight = (vests
                        + vests_amount(account['received_vesting_shares'])
                        - vests_amount(account['delegated_vesting_shares']))
+
+        proxy_weight = 0 if account['proxy'] else float(vests)
+        for satoshis in account['proxied_vsf_votes']:
+            proxy_weight += float(satoshis) / 1e6
 
         # remove empty keys
         useless = ['transfer_history', 'market_history', 'post_history',
@@ -181,6 +187,7 @@ class Accounts:
         del account['json_metadata']
 
         active_at = max(account['created'],
+                        account['last_account_update'],
                         account['last_post'],
                         account['last_root_post'],
                         account['last_vote_time'])
@@ -191,7 +198,7 @@ class Accounts:
             'proxy':        account['proxy'],
             'post_count':   account['post_count'],
             'reputation':   rep_log10(account['reputation']),
-            'proxy_weight': vests_amount(account['vesting_shares']),
+            'proxy_weight': proxy_weight,
             'vote_weight':  vote_weight,
             'active_at':    active_at,
             'cached_at':    cached_at,
