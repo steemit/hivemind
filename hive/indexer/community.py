@@ -48,12 +48,12 @@ def read_key_bool(op, key):
         return op[key]
     return None
 
-def read_key_str(op, key, maxlen=None, fmt=None):
+def read_key_str(op, key, maxlen=None, fmt=None, allow_blank=False):
     """Reads a key from a dict, ensuring non-blank str if present."""
     if key not in op:
         return None
     assert isinstance(op[key], str), 'key `%s` was not str' % key
-    assert op[key], 'key `%s` was blank' % key
+    assert allow_blank or op[key], 'key `%s` was blank' % key
     assert op[key] == op[key].strip(), 'invalid padding: %s' % key
     assert not maxlen or len(op[key]) <= maxlen, 'exceeds max len: %s' % key
 
@@ -476,7 +476,7 @@ class CommunityOp:
         self.notes = _notes
 
     def _read_title(self):
-        _title = read_key_str(self.op, 'title', 32) or ''
+        _title = read_key_str(self.op, 'title', 32, allow_blank=True) or ''
         _title = _title.strip()
         self.title = _title
 
