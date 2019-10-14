@@ -271,7 +271,6 @@ async def pids_by_comments(db, account: str, start_permlink: str = '', limit: in
     sql = """
         SELECT id FROM hive_posts
          WHERE author = :account %s
-           AND depth > 0
            AND is_deleted = '0'
       ORDER BY id DESC, depth
          LIMIT :limit

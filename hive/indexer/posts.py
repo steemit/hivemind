@@ -194,7 +194,7 @@ class Posts:
     @classmethod
     def _insert_feed_cache(cls, post):
         """Insert the new post into feed cache if it's not a comment."""
-        if not post['depth']:
+        if not post['depth'] and post['community'] != post['author']:
             account_id = Accounts.get_id(post['author'])
             FeedCache.insert(post['id'], account_id, post['date'])
 
