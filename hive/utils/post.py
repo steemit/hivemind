@@ -79,18 +79,18 @@ def post_to_internal(post, post_id, level='insert', promoted=None):
     # //--
 
     values.extend([
-        ('payout',      "%f" % payout['payout']),
-        ('rshares',     "%d" % payout['rshares']),
-        ('votes',       "%s" % payout['csvotes']),
-        ('sc_trend',    "%f" % payout['sc_trend']),
-        ('sc_hot',      "%f" % payout['sc_hot']),
-        ('flag_weight', "%f" % stats['flag_weight']),
-        ('total_votes', "%d" % stats['total_votes']),
-        ('up_votes',    "%d" % stats['up_votes']),
-        ('is_hidden',   "%d" % stats['hide']),
-        ('is_grayed',   "%d" % stats['gray']),
-        ('author_rep',  "%f" % stats['author_rep']),
-        ('children',    "%d" % min(post['children'], 32767)),
+        ('payout',      payout['payout']),
+        ('rshares',     payout['rshares']),
+        ('votes',       payout['csvotes']),
+        ('sc_trend',    payout['sc_trend']),
+        ('sc_hot',      payout['sc_hot']),
+        ('flag_weight', stats['flag_weight']),
+        ('total_votes', stats['total_votes']),
+        ('up_votes',    stats['up_votes']),
+        ('is_hidden',   stats['hide']),
+        ('is_grayed',   stats['gray']),
+        ('author_rep',  stats['author_rep']),
+        ('children',    min(post['children'], 32767)),
     ])
 
     return values

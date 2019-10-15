@@ -481,7 +481,6 @@ class CachedPost:
                             % (level, pid, cls.last_id(), repr(post)))
 
         # start building the queries
-        tag_sqls = []
         values = [('post_id', pid)]
 
         # immutable; write only once (*edge case: undeleted posts)
@@ -512,11 +511,6 @@ class CachedPost:
                 ('raw_json',      json.dumps(post_legacy(post))),
             ])
 
-        # update tags if action is insert/update and is root post
-        if level in ['insert', 'update'] and not post['depth']:
-            diff = level != 'insert' # do not attempt tag diff on insert
-            tag_sqls.extend(cls._tag_sqls(pid, basic['tags'], diff=diff))
-
         # if there's a pending promoted value to write, pull it out
         if pid in cls._pending_promoted:
             bal = cls._pending_promoted.pop(pid)
@@ -536,19 +530,25 @@ class CachedPost:
         # //--
 
         values.extend([
-            ('payout',      "%f" % payout['payout']),
-            ('rshares',     "%d" % payout['rshares']),
-            ('votes',       "%s" % payout['csvotes']),
-            ('sc_trend',    "%f" % payout['sc_trend']),
-            ('sc_hot',      "%f" % payout['sc_hot']),
-            ('flag_weight', "%f" % stats['flag_weight']),
-            ('total_votes', "%d" % stats['total_votes']),
-            ('up_votes',    "%d" % stats['up_votes']),
-            ('is_hidden',   "%d" % stats['hide']),
-            ('is_grayed',   "%d" % stats['gray']),
-            ('author_rep',  "%f" % stats['author_rep']),
-            ('children',    "%d" % min(post['children'], 32767)),
+            ('payout',      payout['payout']),
+            ('rshares',     payout['rshares']),
+            ('votes',       payout['csvotes']),
+            ('sc_trend',    payout['sc_trend']),
+            ('sc_hot',      payout['sc_hot']),
+            ('flag_weight', stats['flag_weight']),
+            ('total_votes', stats['total_votes']),
+            ('up_votes',    stats['up_votes']),
+            ('is_hidden',   stats['hide']),
+            ('is_grayed',   stats['gray']),
+            ('author_rep',  stats['author_rep']),
+            ('children',    min(post['children'], 32767)),
         ])
+
+        # update tags if action is insert/update and is root post
+        tag_sqls = []
+        if level in ['insert', 'update'] and not post['depth']:
+            diff = level != 'insert' # do not attempt tag diff on insert
+            tag_sqls.extend(cls._tag_sqls(pid, basic['tags'], diff=diff))
 
         # if recounting, update the parent next pass.
         if level == 'recount' and post['depth']:
