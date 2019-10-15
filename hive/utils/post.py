@@ -1,5 +1,5 @@
 """Methods for normalizing steemd post metadata."""
-#pylint: disable=line-too-long
+#pylint: disable=line-too-long,too-many-lines
 
 import re
 import math
@@ -21,6 +21,80 @@ def mentions(body):
         '([a-zA-Z0-9][a-zA-Z0-9\\-.]{1,14}[a-zA-Z0-9])'
         '(?![a-z])', body)
     return {grp.lower() for grp in matches}
+
+def post_to_internal(post, post_id, level='insert', promoted=None):
+    """Given a steemd post, build internal representation."""
+    # pylint: disable=bad-whitespace
+
+    #post['category'] = core['category']
+    #post['community_id'] = core['community_id']
+    #post['gray'] = core['is_muted']
+    #post['hide'] = not core['is_valid']
+
+    values = [('post_id', post_id)]
+
+    # immutable; write only once (*edge case: undeleted posts)
+    if level == 'insert':
+        values.extend([
+            ('author',   post['author']),
+            ('permlink', post['permlink']),
+            ('category', post['category']),
+            ('depth',    post['depth'])])
+
+    # always write, unless simple vote update
+    if level in ['insert', 'payout', 'update']:
+        basic = post_basic(post)
+        values.extend([
+            ('community_id',  post['community_id']), # immutable*
+            ('created_at',    post['created']),    # immutable*
+            ('updated_at',    post['last_update']),
+            ('title',         post['title']),
+            ('payout_at',     basic['payout_at']), # immutable*
+            ('preview',       basic['preview']),
+            ('body',          basic['body']),
+            ('img_url',       basic['image']),
+            ('is_nsfw',       basic['is_nsfw']),
+            ('is_declined',   basic['is_payout_declined']),
+            ('is_full_power', basic['is_full_power']),
+            ('is_paidout',    basic['is_paidout']),
+            ('json',          json.dumps(basic['json_metadata'])),
+            ('raw_json',      json.dumps(post_legacy(post))),
+        ])
+
+    # if there's a pending promoted value to write, pull it out
+    if promoted:
+        values.append(('promoted', promoted))
+
+    # update unconditionally
+    payout = post_payout(post)
+    stats = post_stats(post)
+
+    # //--
+    # if community - override fields.
+    # TODO: make conditional (date-based?)
+    assert 'community_id' in post, 'comm_id not loaded'
+    if post['community_id']:
+        stats['hide'] = post['hide']
+        stats['gray'] = post['gray']
+    # //--
+
+    values.extend([
+        ('payout',      "%f" % payout['payout']),
+        ('rshares',     "%d" % payout['rshares']),
+        ('votes',       "%s" % payout['csvotes']),
+        ('sc_trend',    "%f" % payout['sc_trend']),
+        ('sc_hot',      "%f" % payout['sc_hot']),
+        ('flag_weight', "%f" % stats['flag_weight']),
+        ('total_votes', "%d" % stats['total_votes']),
+        ('up_votes',    "%d" % stats['up_votes']),
+        ('is_hidden',   "%d" % stats['hide']),
+        ('is_grayed',   "%d" % stats['gray']),
+        ('author_rep',  "%f" % stats['author_rep']),
+        ('children',    "%d" % min(post['children'], 32767)),
+    ])
+
+    return values
+
 
 def post_basic(post):
     """Basic post normalization: json-md, tags, and flags."""
