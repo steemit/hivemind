@@ -152,14 +152,14 @@ def _condenser_account_object(row):
             'following': row['following'],
             'followers': row['followers'],
         },
-        'json_metadata': json.dumps({
+        'metadata': {
             'profile': {'name': row['display_name'],
                         'about': row['about'],
                         'website': row['website'],
                         'location': row['location'],
                         'cover_image': row['cover_image'],
                         'profile_image': row['profile_image'],
-                       }})}
+                       }}}
 
 def _condenser_post_object(row, truncate_body=0):
     """Given a hive_posts_cache row, create a legacy-style post object."""
