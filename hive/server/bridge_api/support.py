@@ -2,6 +2,7 @@
 
 import logging
 #import ujson as json
+import traceback
 
 from hive.server.bridge_api.objects import _condenser_post_object
 from hive.utils.post import post_to_internal
@@ -68,12 +69,23 @@ async def normalize_post(context, post):
     promoted = sbd_amount(post['promoted']) if post['promoted'] != '0.000 STEEM' else None
 
     # convert to internal object
-    row = post_to_internal(post, core['id'], level='insert', promoted=promoted)
-    row = dict(row)
-    if 'promoted' not in row: row['promoted'] = 0
-    row['author_rep'] = author['reputation']
-    print("GOING>>>%s" % row)
-    ret = _condenser_post_object(row)
+    row = None
+    try:
+        row = post_to_internal(post, core['id'], 'insert', promoted=promoted)
+        row = dict(row)
+    except Exception as e:
+        log.error("post_to_internal: %s %s", repr(e), traceback.format_exc())
+        raise e
+
+    # normalized response
+    ret = None
+    try:
+        if 'promoted' not in row: row['promoted'] = 0
+        row['author_rep'] = author['reputation']
+        ret = _condenser_post_object(row)
+    except Exception as e:
+        log.error("post_to_internal: %s %s", repr(e), traceback.format_exc())
+        raise e
 
     # decorate
     if community:
