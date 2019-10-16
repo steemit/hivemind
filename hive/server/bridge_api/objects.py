@@ -186,15 +186,14 @@ def _condenser_post_object(row, truncate_body=0):
     post['children'] = row['children']
     post['net_rshares'] = row['rshares']
 
-    post['last_payout'] = _json_date(row['payout_at'] if paid else None)
-    post['cashout_time'] = _json_date(None if paid else row['payout_at'])
+    post['payout_at'] = _json_date(row['payout_at'])
+    post['is_paidout'] = row['is_paidout']
     post['total_payout_value'] = _amount(row['payout'] if paid else 0)
     post['curator_payout_value'] = _amount(0)
     post['pending_payout_value'] = _amount(0 if paid else row['payout'])
-    post['promoted'] = "%.3f SBD" % row['promoted']
+    post['promoted'] = _amount(row['promoted'])
 
     post['replies'] = []
-    post['body_length'] = len(row['body'])
     post['active_votes'] = _hydrate_active_votes(row['votes'])
     post['author_reputation'] = row['author_rep']
 
