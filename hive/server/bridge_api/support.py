@@ -38,12 +38,6 @@ async def get_post_header(context, author, permlink):
 @return_error_info
 async def normalize_post(context, post):
     """Takes a steemd post object and outputs bridge-api normalized version."""
-
-    #post['category'] = core['category']
-    #post['community_id'] = core['community_id']
-    #post['gray'] = core['is_muted']
-    #post['hide'] = not core['is_valid']
-
     db = context['db']
 
     # load core md
@@ -51,10 +45,18 @@ async def normalize_post(context, post):
                FROM hive_posts
               WHERE author = :author AND permlink = :permlink"""
     core = await db.query_row(sql, author=post['author'], permlink=post['permlink'])
+    if not core:
+        core = dict(id=None,
+                    category=post['category'],
+                    community=post['category'],
+                    is_muted=False,
+                    is_valid=True)
 
     # load community
-    sql = """SELECT id, title FROM hive_communities WHERE name = :name"""
-    community = await db.query_row(sql, name=core['community'])
+    community = None
+    if core['community'] and core['community'] != post['author']:
+        sql = """SELECT id, title FROM hive_communities WHERE name = :name"""
+        community = await db.query_row(sql, name=core['community'])
 
     # load author
     sql = """SELECT id, reputation FROM hive_accounts WHERE name = :name"""
