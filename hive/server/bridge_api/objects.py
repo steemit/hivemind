@@ -237,11 +237,8 @@ def _hydrate_active_votes(vote_csv):
     if not vote_csv: return []
     votes = []
     for line in vote_csv.split("\n"):
-        voter, rshares, percent, reputation = line.split(',')
-        votes.append(dict(voter=voter,
-                          rshares=rshares,
-                          percent=percent,
-                          reputation=reputation))
+        voter, rshares, _, _ = line.split(',')
+        votes.append(dict(voter=voter, rshares=rshares))
     return votes
 
 def _json_date(date=None):
