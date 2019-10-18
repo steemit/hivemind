@@ -185,11 +185,12 @@ def _condenser_post_object(row, truncate_body=0):
     post['children'] = row['children']
     post['net_rshares'] = row['rshares']
 
-    post['payout_at'] = _json_date(row['payout_at'])
     post['is_paidout'] = row['is_paidout']
-    post['total_payout_value'] = _amount(row['payout'] if paid else 0)
-    post['curator_payout_value'] = _amount(0)
+    post['payout_at'] = _json_date(row['payout_at'])
+    post['payout'] = row['payout']
     post['pending_payout_value'] = _amount(0 if paid else row['payout'])
+    post['author_payout_value'] = _amount(row['payout'] if paid else 0)
+    post['curator_payout_value'] = _amount(0)
     post['promoted'] = _amount(row['promoted'])
 
     post['replies'] = []
@@ -221,8 +222,8 @@ def _condenser_post_object(row, truncate_body=0):
 
     if paid:
         curator_payout = sbd_amount(raw_json['curator_payout_value'])
+        post['author_payout_value'] = _amount(row['payout'] - curator_payout)
         post['curator_payout_value'] = _amount(curator_payout)
-        post['total_payout_value'] = _amount(row['payout'] - curator_payout)
 
     return post
 
