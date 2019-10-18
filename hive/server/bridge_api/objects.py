@@ -9,14 +9,14 @@ log = logging.getLogger(__name__)
 
 # pylint: disable=too-many-lines
 
-async def load_accounts(db, names):
+async def load_profiles(db, names):
     """`get_accounts`-style lookup for `get_state` compat layer."""
     sql = """SELECT id, name, display_name, about, reputation, vote_weight,
                     created_at, post_count, profile_image, location, website,
                     cover_image, rank, following, followers, active_at
                FROM hive_accounts WHERE name IN :names"""
     rows = await db.query_all(sql, names=tuple(names))
-    return [_condenser_account_object(row) for row in rows]
+    return [_condenser_profile_object(row) for row in rows]
 
 async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
     """Given a list of (id, reblogged_by) tuples, return posts w/ reblog key."""
@@ -137,7 +137,7 @@ async def _query_author_map(db, posts):
     sql = "SELECT id, name, reputation FROM hive_accounts WHERE name IN :names"
     return {r['name']: r for r in await db.query_all(sql, names=names)}
 
-def _condenser_account_object(row):
+def _condenser_profile_object(row):
     """Convert an internal account record into legacy-steemd style."""
     return {
         'id': row['id'],
@@ -187,7 +187,7 @@ def _condenser_post_object(row, truncate_body=0):
 
     post['is_paidout'] = row['is_paidout']
     post['payout_at'] = _json_date(row['payout_at'])
-    post['payout'] = row['payout']
+    post['payout'] = float(row['payout'])
     post['pending_payout_value'] = _amount(0 if paid else row['payout'])
     post['author_payout_value'] = _amount(row['payout'] if paid else 0)
     post['curator_payout_value'] = _amount(0)

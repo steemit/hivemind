@@ -1,7 +1,7 @@
 """Bridge API public endpoints for posts"""
 
 import hive.server.bridge_api.cursor as cursor
-from hive.server.bridge_api.objects import load_posts, load_posts_reblogs, load_accounts
+from hive.server.bridge_api.objects import load_posts, load_posts_reblogs, load_profiles
 from hive.server.common.helpers import (
     return_error_info,
     valid_account,
@@ -18,7 +18,7 @@ from hive.server.hive_api.community import list_top_communities
 async def get_profile(context, account, observer=None):
     """Load account/profile data."""
     db = context['db']
-    ret = await load_accounts(db, [valid_account(account)])
+    ret = await load_profiles(db, [valid_account(account)])
     if not ret:
         return None
 
