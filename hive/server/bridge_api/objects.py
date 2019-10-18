@@ -207,23 +207,24 @@ def _condenser_post_object(row, truncate_body=0):
     assert len(row['raw_json']) > 32
     raw_json = json.loads(row['raw_json'])
 
-    if row['depth'] > 0:
-        post['parent_author'] = raw_json['parent_author']
-        post['parent_permlink'] = raw_json['parent_permlink']
-    else:
-        post['parent_author'] = ''
-        post['parent_permlink'] = row['category']
-
-    post['url'] = raw_json['url']
-    post['root_title'] = raw_json['root_title']
+    # TODO: move to core, or payout_details
     post['beneficiaries'] = raw_json['beneficiaries']
     post['max_accepted_payout'] = raw_json['max_accepted_payout']
-    post['percent_steem_dollars'] = raw_json['percent_steem_dollars']
-
+    post['percent_steem_dollars'] = raw_json['percent_steem_dollars'] # TODO: systag?
     if paid:
         curator_payout = sbd_amount(raw_json['curator_payout_value'])
         post['author_payout_value'] = _amount(row['payout'] - curator_payout)
         post['curator_payout_value'] = _amount(curator_payout)
+
+    # TODO: re-evaluate
+    if row['depth'] > 0:
+        post['parent_author'] = raw_json['parent_author']
+        post['parent_permlink'] = raw_json['parent_permlink']
+    #else:
+    #    post['parent_author'] = ''
+    #    post['parent_permlink'] = ''
+    post['url'] = raw_json['url']
+    post['root_title'] = raw_json['root_title']
 
     return post
 
@@ -235,6 +236,7 @@ def _amount(amount, asset='SBD'):
 def _hydrate_active_votes(vote_csv):
     """Convert minimal CSV representation into steemd-style object."""
     if not vote_csv: return []
+    #return [line.split(',')[:2] for line in vote_csv.split("\n")]
     votes = []
     for line in vote_csv.split("\n"):
         voter, rshares, _, _ = line.split(',')

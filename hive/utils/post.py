@@ -99,6 +99,8 @@ def post_to_internal(post, post_id, level='insert', promoted=None):
 def post_basic(post):
     """Basic post normalization: json-md, tags, and flags."""
     md = {}
+    # At least one case where jsonMetadata was double-encoded: condenser#895
+    # jsonMetadata = JSON.parse(jsonMetadata);
     try:
         md = json.loads(post['json_metadata'])
         if not isinstance(md, dict):
@@ -119,6 +121,7 @@ def post_basic(post):
 
     # clean up tags, check if nsfw
     tags = [post['category']]
+    # if (typeof tags == 'string') tags = tags.split(' '); # legacy condenser compat
     if md and 'tags' in md and isinstance(md['tags'], list):
         tags = tags + md['tags']
     tags = map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags)
