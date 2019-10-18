@@ -220,11 +220,11 @@ def _condenser_post_object(row, truncate_body=0):
     if row['depth'] > 0:
         post['parent_author'] = raw_json['parent_author']
         post['parent_permlink'] = raw_json['parent_permlink']
+        post['title'] = 'RE: ' + raw_json['root_title'] # PostSummary & comment context
     #else:
     #    post['parent_author'] = ''
     #    post['parent_permlink'] = ''
     post['url'] = raw_json['url']
-    post['root_title'] = raw_json['root_title']
 
     return post
 
