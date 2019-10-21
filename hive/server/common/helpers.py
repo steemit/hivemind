@@ -3,6 +3,9 @@
 import re
 from functools import wraps
 import traceback
+import logging
+
+log = logging.getLogger(__name__)
 
 class ApiError(Exception):
     """API-specific errors: unimplemented/bad params. Pass back to client."""
@@ -18,13 +21,19 @@ def return_error_info(function):
             return await function(*args, **kwargs)
         except (ApiError, AssertionError, TypeError, Exception) as e:
             # one specific TypeError we want to silence; others need a trace.
-            #if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
-            #    raise e
-            return {
-                "error": {
-                    "code": -32000,
-                    "message": repr(e) + " (hivemind-beta)",
-                    "trace": traceback.format_exc()}}
+            if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
+                log.error("ERR1: %s\n%s", repr(e), traceback.format_exc())
+                raise e
+            if isinstance(e, AssertionError):
+                log.error("ERR2: %s\n%s", repr(e), traceback.format_exc())
+                raise e
+            log.error("ERR0: %s\n%s", repr(e), traceback.format_exc())
+            raise e
+            #return {
+            #    "error": {
+            #        "code": -32000,
+            #        "message": repr(e) + " (hivemind-beta)",
+            #        "trace": traceback.format_exc()}}
     return wrapper
 
 def valid_account(name, allow_empty=False):
