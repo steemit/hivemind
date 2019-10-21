@@ -456,9 +456,9 @@ class CommunityOp:
         _pid = Posts.get_id(self.account, _permlink)
         assert _pid, 'invalid post: %s/%s' % (self.account, _permlink)
 
-        sql = """SELECT community FROM hive_posts WHERE id = :id LIMIT 1"""
+        sql = """SELECT community_id FROM hive_posts WHERE id = :id LIMIT 1"""
         _comm = DB.query_one(sql, id=_pid)
-        assert self.community == _comm, 'post does not belong to community'
+        assert self.community_id == _comm, 'post does not belong to community'
 
         self.permlink = _permlink
         self.post_id = _pid

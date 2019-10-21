@@ -87,6 +87,7 @@ class DbState:
         to_locate = [
             'hive_posts_ix3', # (author, depth, id)
             'hive_posts_ix4', # (parent_id, id, is_deleted=0)
+            'hive_posts_ix5', # (community_id>0, is_pinned=1)
             'hive_follows_ix5a', # (following, state, created_at, follower)
             'hive_follows_ix5b', # (follower, state, created_at, following)
             'hive_reblogs_ix1', # (post_id, account, created_at)
@@ -97,6 +98,12 @@ class DbState:
             'hive_posts_cache_ix8', # (category, payout, depth, paidout=0)
             'hive_posts_cache_ix9a', # (depth, payout, post_id, paidout=0)
             'hive_posts_cache_ix9b', # (category, depth, payout, post_id, paidout=0)
+            'hive_posts_cache_ix10', # (post_id, payout, gray=1, payout>0)
+            'hive_posts_cache_ix30', # API: community trend
+            'hive_posts_cache_ix31', # API: community hot
+            'hive_posts_cache_ix32', # API: community created
+            'hive_posts_cache_ix33', # API: community payout
+            'hive_posts_cache_ix34', # API: community muted
             'hive_accounts_ix3', # (vote_weight, name VPO)
             'hive_accounts_ix4', # (id, name)
             'hive_accounts_ix5', # (cached_at, name)
@@ -176,7 +183,7 @@ class DbState:
             return bool(cls.db().query_one("""
                 SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'public'
             """))
-        elif engine == 'mysql':
+        if engine == 'mysql':
             return bool(cls.db().query_one('SHOW TABLES'))
         raise Exception("unknown db engine %s" % engine)
 
@@ -262,23 +269,35 @@ class DbState:
             cls.db().query("CREATE INDEX hive_posts_ix4 ON hive_posts (parent_id, id) WHERE is_deleted = '0'")
             cls._set_ver(12)
 
+        # TODO:remove
+        if cls._ver == 14: cls._ver = 12
+
         if cls._ver == 12: # community schema
             #assert False, 'community schema migration not finalized'
+            #---
+            cls.db().query("DROP INDEX hive_posts_ix5")
             for table in ['hive_members', 'hive_flags', 'hive_modlog',
                           'hive_communities', 'hive_subscriptions',
                           'hive_roles', 'hive_notifs']:
                 cls.db().query("DROP TABLE IF EXISTS %s" % table)
+            #---
             build_metadata_community().create_all(cls.db().engine())
             cls._set_ver(13)
 
         if cls._ver == 13:
-            cls.db().query("ALTER TABLE hive_posts_cache ADD COLUMN community_id integer")
-            sqls = ("CREATE INDEX hive_posts_ix5 ON hive_posts (community, id) WHERE is_pinned = '1'",
-                    "CREATE INDEX hive_posts_cache_ix30 ON hive_posts_cache (community_id, sc_trend,   post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
-                    "CREATE INDEX hive_posts_cache_ix31 ON hive_posts_cache (community_id, sc_hot,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
-                    "CREATE INDEX hive_posts_cache_ix32 ON hive_posts_cache (community_id, created_at, post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
-                    "CREATE INDEX hive_posts_cache_ix33 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND is_paidout = '0'",
-                    "CREATE INDEX hive_posts_cache_ix34 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '1' AND is_paidout = '0'")
+            cls.db().query("ALTER TABLE hive_posts DROP CONSTRAINT hive_posts_fk2")
+            cls.db().query("ALTER TABLE hive_posts DROP COLUMN community")
+            cls.db().query("ALTER TABLE hive_posts ADD COLUMN community_id integer")
+            cls.db().query("ALTER TABLE hive_accounts ADD COLUMN lr_notif_id integer")
+            #cls.db().query("ALTER TABLE hive_posts_cache ADD COLUMN community_id integer")
+            sqls = ("CREATE INDEX hive_posts_ix5 ON hive_posts (id) WHERE is_pinned = '1' AND is_deleted = '0'",
+                    "CREATE INDEX hive_posts_ix6 ON hive_posts (community_id, id) WHERE community_id IS NOT NULL AND is_pinned = '1' AND is_deleted = '0'",
+                    "CREATE INDEX hive_posts_cache_ix10 ON hive_posts_cache (post_id, payout) WHERE is_grayed = '1' AND payout > 0")
+            #        "CREATE INDEX hive_posts_cache_ix30 ON hive_posts_cache (community_id, sc_trend,   post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
+            #        "CREATE INDEX hive_posts_cache_ix31 ON hive_posts_cache (community_id, sc_hot,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
+            #        "CREATE INDEX hive_posts_cache_ix32 ON hive_posts_cache (community_id, created_at, post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
+            #        "CREATE INDEX hive_posts_cache_ix33 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND is_paidout = '0'",
+            #        "CREATE INDEX hive_posts_cache_ix34 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '1' AND is_paidout = '0'",
             for sql in sqls:
                 cls.db().query(sql)
             cls._set_ver(14)

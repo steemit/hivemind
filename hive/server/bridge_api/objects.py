@@ -97,12 +97,11 @@ async def load_posts_keyed(db, ids, truncate_body=0):
             post['author_title'] = role[1]
 
 
-    sql = """SELECT id, is_pinned
-               FROM hive_posts WHERE id IN :ids"""
-    for row in await db.query_all(sql, ids=tuple(ids), cids=tuple(ctx.keys())):
-        if row['id'] in posts_by_id:
-            post = posts_by_id[row['id']]
-            post['stats']['is_pinned'] = row['is_pinned']
+    sql = """SELECT id FROM hive_posts
+              WHERE id IN :ids AND is_pinned = '1' AND is_deleted = '0'"""
+    for pid in await db.query_col(sql, ids=tuple(ids)):
+        if pid in posts_by_id:
+            posts_by_id[pid]['stats']['is_pinned'] = True
 
     return posts_by_id
 
