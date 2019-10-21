@@ -80,6 +80,20 @@ async def list_top_communities(context, limit=25, observer_id=None):
     return [(r[0], r[1]) for r in out]
 
 @return_error_info
+async def list_all_subscriptions(context, account):
+    """Lists all communities `account` subscribes to."""
+    db = context['db']
+    account_id = await get_account_id(db, account)
+
+    sql = """SELECT name, title FROM hive_communities
+              WHERE id IN (SELECT community_id
+                             FROM hive_subscriptions
+                            WHERE account_id = :account_id)
+           ORDER BY rank"""
+    out = await db.query_all(sql, account_id=account_id)
+    return [(r[0], r[1]) for r in out]
+
+@return_error_info
 async def list_communities(context, last='', limit=25, query=None, observer=None):
     """List all communities, paginated. Returns lite community list."""
     db = context['db']
@@ -128,23 +142,6 @@ async def list_community_titles(context, community, last='', limit=50):
            ORDER BY name LIMIT :limit""" % seek
     rows = await db.query_all(sql, id=community_id, last=last, limit=limit)
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
-
-@return_error_info
-async def list_all_subscriptions(context, account):
-    """Lists all communities `account` subscribes to, and any role/title."""
-    db = context['db']
-    account_id = await get_account_id(db, account)
-
-    sql = """SELECT community_id FROM hive_subscriptions
-              WHERE account_id = :account_id"""
-    ids = await db.query_col(sql, account_id=account_id)
-    if not ids: return []
-    communities = await load_communities(db, ids, lite=True)
-    await _append_observer_roles(db, communities, account_id)
-    for comm in communities.values():
-        comm['context']['subscribed'] = True
-    return [communities[_id] for _id in ids]
-
 
 # Communities - internal
 # ----------------------
