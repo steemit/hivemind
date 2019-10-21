@@ -21,6 +21,8 @@ from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
 from hive.indexer.community import Community
 
+from hive.indexer.jobs import audit_cache_missing, audit_cache_deleted
+
 log = logging.getLogger(__name__)
 
 class Sync:
@@ -57,6 +59,9 @@ class Sync:
 
             # perform cleanup if process did not exit cleanly
             CachedPost.recover_missing_posts(self._steem)
+
+        audit_cache_missing(self._db, self._steem)
+        audit_cache_deleted(self._db)
 
         self._update_chain_state()
 
