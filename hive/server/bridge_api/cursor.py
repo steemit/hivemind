@@ -75,7 +75,8 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
 
     # remove any pids to be prepended
     for pid in prepend:
-        pids.remove(pid)
+        if pid in pids:
+            pids.remove(pid)
 
     return prepend + pids
 
