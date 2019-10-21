@@ -52,10 +52,12 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
      - legacy: trending, hot, created, promoted, payout, payout_comments
      - hive: trending, hot, created, promoted, payout, muted
     """
+    # TODO: `payout` should limit to ~24hrs
     # pylint: disable=too-many-arguments
 
     # list of comm ids to query, if any
     cids = await _cids(db, tag, observer_id)
+    if cids: tag = None
 
     prepend = []
     if not tag and not start_permlink and sort in ('trending', 'hot'):
@@ -71,6 +73,10 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     else:
         pids = await pids_by_category(db, tag, sort, start_id, limit)
 
+    # remove any pids to be prepended
+    for pid in prepend:
+        pids.remove(pid)
+
     return prepend + pids
 
 
@@ -81,6 +87,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     """
     # pylint: disable=bad-whitespace
 
+    # TODO: `payout` should limit to ~24hrs
     definitions = {#         field         pending toponly gray   promoted
         'trending':        ('sc_trend',    False,  True,   False, False),
         'hot':             ('sc_hot',      False,  True,   False, False),
