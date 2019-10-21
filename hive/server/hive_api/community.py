@@ -5,6 +5,8 @@ from hive.server.hive_api.common import (
     get_account_id, get_community_id)
 from hive.server.common.helpers import return_error_info
 
+# pylint: disable=too-many-lines
+
 log = logging.getLogger(__name__)
 
 ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
@@ -36,6 +38,29 @@ async def get_community(context, name, observer=None):
 
     return communities[cid]
 
+@return_error_info
+async def get_community_context(context, name, account):
+    """For a community/account: returns role, title, subscribed state"""
+    db = context['db']
+    cid = await get_community_id(db, name)
+    assert cid, 'community not found'
+    aid = await get_account_id(db, account)
+    assert aid, 'account not found'
+
+    sql = """SELECT role_id, title FROM hive_roles
+              WHERE account_id = :id
+                AND community_id = :cid"""
+    role = await db.query_row(sql, aid=aid, cid=cid) or (0, '')
+
+    sql = """SELECT 1 FROM hive_subscriptions
+              WHERE account_id = :aid
+                AND community_id = :cid"""
+    subscribed = bool(await db.query_one(sql, aid=aid, cid=cid))
+
+    return dict(role=ROLES[role[0]], title=role[1], subscribed=subscribed)
+
+
+@return_error_info
 async def list_top_communities(context, limit=25, observer_id=None):
     """List all communities, paginated. Returns lite community list."""
     db = context['db']
@@ -54,6 +79,7 @@ async def list_top_communities(context, limit=25, observer_id=None):
 
     return [(r[0], r[1]) for r in out]
 
+@return_error_info
 async def list_communities(context, last='', limit=25, query=None, observer=None):
     """List all communities, paginated. Returns lite community list."""
     db = context['db']
@@ -75,6 +101,7 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
 
     return [communities[_id] for _id in ids]
 
+@return_error_info
 async def list_community_roles(context, community, last='', limit=50):
     """List community account-roles (anyone with non-guest status)."""
     db = context['db']
@@ -88,6 +115,7 @@ async def list_community_roles(context, community, last='', limit=50):
     rows = await db.query_all(sql, id=community_id, last=last, limit=limit)
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
 
+@return_error_info
 async def list_community_titles(context, community, last='', limit=50):
     """List community account-titles (anyone with custom title)."""
     db = context['db']
@@ -101,6 +129,7 @@ async def list_community_titles(context, community, last='', limit=50):
     rows = await db.query_all(sql, id=community_id, last=last, limit=limit)
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
 
+@return_error_info
 async def list_all_subscriptions(context, account):
     """Lists all communities `account` subscribes to, and any role/title."""
     db = context['db']
