@@ -14,6 +14,16 @@ from hive.server.hive_api.community import list_top_communities
 
 #pylint: disable=too-many-arguments, no-else-return
 
+async def _get_post_id(db, author, permlink):
+    """Get post_id from hive db."""
+    sql = """SELECT id FROM hive_posts
+              WHERE author = :a
+                AND permlink = :p
+                AND is_deleted = '0'"""
+    post_id = await db.query_one(sql, a=author, p=permlink)
+    assert post_id, 'invalid author/permlink'
+    return post_id
+
 @return_error_info
 async def get_profile(context, account, observer=None):
     """Load account/profile data."""
@@ -40,6 +50,21 @@ async def get_trending_topics(context, observer=None):
                 'crypto', 'newsteem', 'music', 'food'):
         out.append((tag, '#' + tag))
     return out
+
+@return_error_info
+async def get_post(context, author, permlink, observer=None):
+    """Fetch a single post"""
+    # pylint: disable=unused-variable
+    #TODO: `observer` logic
+    db = context['db']
+    observer_id = await get_account_id(db, observer) if observer else None
+    pid = await _get_post_id(db,
+                             valid_account(author),
+                             valid_permlink(permlink))
+    posts = await load_posts(db, [pid])
+    assert len(posts) == 1, 'cache post not found'
+    return posts[0]
+
 
 @return_error_info
 async def get_ranked_posts(context, sort, start_author='', start_permlink='',
