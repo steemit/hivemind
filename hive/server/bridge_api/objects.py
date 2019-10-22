@@ -52,6 +52,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
     author_map = await _query_author_map(db, result)
 
     muted_accounts = Mutes.all()
+    blist = Mutes.listed()
 
     # TODO: author affiliation?
     ctx = {}
@@ -65,6 +66,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
 
         row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
+        if post['author'] in blist: post['body'] += ' [BLIST]'
 
         post['strikes'] = 0
         if post['author'] in muted_accounts: post['strikes'] += 2
@@ -107,6 +109,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
             post['author_title'] = role[1]
         else:
             post['stats']['gray'] = post['strikes'] >= 2
+            post['stats']['hide'] = post['strikes'] >= 3
 
 
     sql = """SELECT id FROM hive_posts

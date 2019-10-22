@@ -2,6 +2,7 @@
 
 import logging
 from urllib.request import urlopen
+import ujson as json
 
 log = logging.getLogger(__name__)
 
@@ -10,6 +11,7 @@ class Mutes:
 
     _instance = None
     accounts = set()
+    blist = set()
 
     @classmethod
     def instance(cls):
@@ -26,8 +28,17 @@ class Mutes:
         """Initialize a muted account list by loading from URL"""
         if url:
             self.accounts = set(urlopen(url).read().decode('utf8').split())
+            jsn = urlopen('http://blacklist.usesteem.com/blacklists').read()
+            self.blist = set(json.loads(jsn))
+            log.warning("%d muted, %d blacklisted", len(self.accounts), len(self.blist))
+
 
     @classmethod
     def all(cls):
         """Return the set of all muted accounts from singleton instance."""
         return cls.instance().accounts
+
+    @classmethod
+    def listed(cls):
+        """Return blacklisted accounts."""
+        return cls.instance().blist
