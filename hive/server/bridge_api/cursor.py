@@ -190,16 +190,12 @@ async def _subscribed(db, account_id):
 
 async def _pinned(db, community_id):
     """Get a list of pinned post `id`s in `community`."""
-    sql = "SELECT name FROM hive_communities WHERE id = :id"
-    community = await db.query_one(sql, id=community_id)
     sql = """SELECT id FROM hive_posts
               WHERE is_pinned = '1'
                 AND is_deleted = '0'
-                AND community = :community
-                AND id IN (SELECT post_id FROM hive_post_tags
-                            WHERE tag = :community)
+                AND community_id = :community_id
             ORDER BY id DESC"""
-    return await db.query_col(sql, community=community)
+    return await db.query_col(sql, community_id=community_id)
 
 
 async def pids_by_blog(db, account: str, start_author: str = '',

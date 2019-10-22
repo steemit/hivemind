@@ -41,22 +41,16 @@ async def normalize_post(context, post):
     db = context['db']
 
     # load core md
-    sql = """SELECT id, category, community, is_muted, is_valid
+    sql = """SELECT id, category, community_id, is_muted, is_valid
                FROM hive_posts
               WHERE author = :author AND permlink = :permlink"""
     core = await db.query_row(sql, author=post['author'], permlink=post['permlink'])
     if not core:
         core = dict(id=None,
                     category=post['category'],
-                    community=post['category'],
+                    community_id=None,
                     is_muted=False,
                     is_valid=True)
-
-    # load community
-    community = None
-    if core['community'] and core['community'] != post['author']:
-        sql = """SELECT id, title FROM hive_communities WHERE name = :name"""
-        community = await db.query_row(sql, name=core['community'])
 
     # load author
     sql = """SELECT id, reputation FROM hive_accounts WHERE name = :name"""
@@ -64,7 +58,7 @@ async def normalize_post(context, post):
 
     # append core md
     post['category'] = core['category']
-    post['community_id'] = community['id'] if community else None
+    post['community_id'] = core['community_id']
     post['gray'] = core['is_muted']
     post['hide'] = not core['is_valid']
 
@@ -90,23 +84,18 @@ async def normalize_post(context, post):
         raise e
 
     # decorate
-    if community:
+    if core['community_id']:
+        sql = """SELECT title FROM hive_communities WHERE id = :id"""
+        title = await db.query_one(sql, id=core['community_id'])
+
         sql = """SELECT role_id, title
                    FROM hive_roles
                   WHERE community_id = :cid
                     AND account_id = :aid"""
-        role = await db.query_row(sql, cid=community['id'], aid=author['id']) or (0, '')
+        role = await db.query_row(sql, cid=core['community_id'], aid=author['id'])
 
-        ret['community_title'] = community['title']
-        ret['author_role'] = ROLES[role[0] or 0]
-        ret['author_title'] = role[1] or ''
-
-
-    #sql = """SELECT id, is_pinned
-    #           FROM hive_posts WHERE id IN :ids"""
-    #for row in await db.query_all(sql, ids=tuple(ids), cids=tuple(ctx.keys())):
-    #    if row['id'] in posts_by_id:
-    #        post = posts_by_id[row['id']]
-    #        post['stats']['is_pinned'] = row['is_pinned']
+        ret['community_title'] = title
+        ret['author_role'] = ROLES[role[0] if role else 0]
+        ret['author_title'] = role[1] if role else ''
 
     return ret

@@ -172,12 +172,12 @@ async def posts_by_id(db, ids, observer=None, lite=True):
             'accounts': await accounts_by_name(db, authors, observer, lite=True)}
 
 async def _append_flags(db, posts):
-    sql = """SELECT id, parent_id, community, category, is_muted, is_valid
+    sql = """SELECT id, parent_id, community_id, category, is_muted, is_valid
                FROM hive_posts WHERE id IN :ids"""
     for row in await db.query_all(sql, ids=tuple(posts.keys())):
         post = posts[row['id']]
         post['parent_id'] = row['parent_id']
-        post['community'] = row['community']
+        post['community_id'] = row['community_id']
         post['category'] = row['category']
         post['is_muted'] = row['is_muted']
         post['is_valid'] = row['is_valid']

@@ -54,11 +54,11 @@ def build_metadata():
         sa.Column('kb_used', sa.Integer, nullable=False, server_default='0'), # deprecated
         sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
 
+        sa.Column('lr_notif_id', sa.Integer, nullable=True),
         sa.Column('active_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
         sa.Column('cached_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
         sa.Column('raw_json', sa.Text),
 
-        #sa.Column('last_read_notify_id', sa.Integer, nullable=False, server_default='0'), # TODO: last read
 
         sa.UniqueConstraint('name', name='hive_accounts_ux1'),
         sa.Index('hive_accounts_ix1', 'vote_weight', 'id'), # core: quick ranks
@@ -74,10 +74,10 @@ def build_metadata():
         sa.Column('parent_id', sa.Integer),
         sa.Column('author', VARCHAR(16), nullable=False),
         sa.Column('permlink', VARCHAR(255), nullable=False),
-        sa.Column('community', VARCHAR(16), nullable=False),
         sa.Column('category', VARCHAR(255), nullable=False, server_default=''),
-        sa.Column('depth', SMALLINT, nullable=False),
+        sa.Column('community_id', sa.Integer, nullable=True),
         sa.Column('created_at', sa.DateTime, nullable=False),
+        sa.Column('depth', SMALLINT, nullable=False),
         sa.Column('is_deleted', BOOLEAN, nullable=False, server_default='0'),
         sa.Column('is_pinned', BOOLEAN, nullable=False, server_default='0'),
         sa.Column('is_muted', BOOLEAN, nullable=False, server_default='0'),
@@ -85,12 +85,12 @@ def build_metadata():
         sa.Column('promoted', sa.types.DECIMAL(10, 3), nullable=False, server_default='0'),
 
         sa.ForeignKeyConstraint(['author'], ['hive_accounts.name'], name='hive_posts_fk1'),
-        sa.ForeignKeyConstraint(['community'], ['hive_accounts.name'], name='hive_posts_fk2'),
         sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
         sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
         sa.Index('hive_posts_ix3', 'author', 'depth', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: author blog/comments
         sa.Index('hive_posts_ix4', 'parent_id', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: fetching children
-        sa.Index('hive_posts_ix5', 'community', 'id', postgresql_where=sql_text("is_pinned = '1'")), # API: pinned posts in community
+        sa.Index('hive_posts_ix5', 'id', postgresql_where=sql_text("is_pinned = '1' AND is_deleted = '0'")), # API: pinned post status
+        sa.Index('hive_posts_ix6', 'community_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND is_pinned = '1' AND is_deleted = '0'")), # API: community pinned
     )
 
     sa.Table(
@@ -122,7 +122,7 @@ def build_metadata():
         sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_reblogs_fk1'),
         sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_reblogs_fk2'),
         sa.UniqueConstraint('account', 'post_id', name='hive_reblogs_ux1'), # core
-        sa.Index('hive_reblogs_ix1', 'post_id', 'account', 'created_at'), # API -- TODO: seemingly unused
+        sa.Index('hive_reblogs_ix1', 'post_id', 'account', 'created_at'), # API -- not yet used
     )
 
     sa.Table(
@@ -214,10 +214,7 @@ def build_metadata():
         sa.Index('hive_posts_cache_ix9a',             'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout               todo: rem depth
         sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout, filtered     todo: rem depth
 
-        # TODO: index: account posts
-        #sa.Index('hive_posts_cache_ix2', 'author', 'post_id', 'payout',   postgresql_where=sql_text("is_paidout = '0' AND payout > 0")), # API: author pending
-        #sa.Index('hive_posts_cache_ix2', 'author', 'created_at', 'depth', postgresql_where=sql_text("depth = 0")),                       # API: author posts/comments
-        #sa.Index('hive_posts_cache_ix2', 'parent_id', 'created_at', 'id', postgresql_where=sql_text("is_paidout = '0' AND payout > 0")), # API: recent replies
+        sa.Index('hive_posts_cache_ix10', 'post_id', 'payout',                      postgresql_where=sql_text("is_grayed = '1' AND payout > 0")), # API: muted, by filter/date/payout
 
         # index: community ranked posts
         sa.Index('hive_posts_cache_ix30', 'community_id', 'sc_trend',   'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community trend
@@ -225,7 +222,6 @@ def build_metadata():
         sa.Index('hive_posts_cache_ix32', 'community_id', 'created_at', 'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community created
         sa.Index('hive_posts_cache_ix33', 'community_id', 'payout',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND is_paidout = '0'")), # API: community payout
         sa.Index('hive_posts_cache_ix34', 'community_id', 'payout',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '1' AND is_paidout = '0'")), # API: community muted
-        # TODO: add index? grayed=1, order by created
     )
 
     sa.Table(
@@ -256,6 +252,7 @@ def build_metadata_community(metadata=None):
         sa.Column('title',       sa.String(32),   nullable=False, server_default=''),
         sa.Column('created_at',  sa.DateTime,     nullable=False),
         sa.Column('sum_pending', sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('num_pending', sa.Integer,      nullable=False, server_default='0'),
         sa.Column('rank',        sa.Integer,      nullable=False, server_default='0'),
         sa.Column('subscribers', sa.Integer,      nullable=False, server_default='0'),
         sa.Column('is_nsfw',     BOOLEAN,         nullable=False, server_default='0'),
@@ -300,15 +297,14 @@ def build_metadata_community(metadata=None):
         sa.Column('dst_id',       sa.Integer,  nullable=True),
         sa.Column('post_id',      sa.Integer,  nullable=True),
         sa.Column('community_id', sa.Integer,  nullable=True),
+        sa.Column('block_num',    sa.Integer,  nullable=True),
         sa.Column('payload',      sa.Text,     nullable=True),
 
         sa.Index('hive_notifs_ix1', 'dst_id',                  'id', postgresql_where=sql_text("dst_id IS NOT NULL")),
         sa.Index('hive_notifs_ix2', 'community_id',            'id', postgresql_where=sql_text("community_id IS NOT NULL")),
         sa.Index('hive_notifs_ix3', 'community_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL")),
         sa.Index('hive_notifs_ix4', 'community_id', 'post_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND post_id IS NOT NULL")),
-
-        # TODO: fetch by post (non-comm?), fetch by src->dst/type (vote/mention unique idx)
-        #sa.Index('hive_notifs_ix5', 'post_id', 'type_id', 'dst_id', 'id', postgresql_where=sql_text("post_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix5', 'post_id', 'type_id', 'dst_id', 'src_id', postgresql_where=sql_text("post_id IS NOT NULL AND type_id IN (16,17)")), # filter: dedupe
     )
 
     return metadata

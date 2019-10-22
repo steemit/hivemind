@@ -11,7 +11,6 @@ from hive.db.adapter import Db
 from hive.utils.post import post_basic, post_legacy, post_payout, post_stats, mentions
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
-from hive.indexer.community import Community
 from hive.indexer.notify import Notify
 
 # pylint: disable=too-many-lines
@@ -399,13 +398,6 @@ class CachedPost:
         return cls._last_id
 
     @classmethod
-    def _community_id(cls, category, community):
-        if category == community:
-            # (heuristic may give false positives)
-            return Community.get_id(community)
-        return None
-
-    @classmethod
     def _get_core_fields(cls, tups):
         """Cached posts must inherit some properties from hive_posts.
 
@@ -422,10 +414,10 @@ class CachedPost:
             return {}
 
         # build a map of id->fields for each of those posts
-        sql = """SELECT id, category, community, is_muted, is_valid
+        sql = """SELECT id, category, community_id, is_muted, is_valid
                    FROM hive_posts WHERE id IN :ids"""
         core = {r[0]: {'category': r[1],
-                       'community_id': cls._community_id(r[1], r[2]),
+                       'community_id': r[2],
                        'is_muted': r[3],
                        'is_valid': r[4]}
                 for r in DB.query_all(sql, ids=tuple(ids))}
@@ -631,7 +623,6 @@ class CachedPost:
 
     @classmethod
     def _voted(cls, post_id, account_id, voter_id):
-        # TODO: optimize (add idx, mem cache?)
         sql = """SELECT 1
                    FROM hive_notifs
                   WHERE dst_id = :dst_id
@@ -643,7 +634,6 @@ class CachedPost:
 
     @classmethod
     def _mentioned(cls, post_id, account_id):
-        # TODO: optimize (add idx, mem cache?)
         sql = """SELECT 1
                    FROM hive_notifs
                   WHERE dst_id = :dst_id

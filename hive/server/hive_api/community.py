@@ -1,8 +1,7 @@
 """Hive API: Community methods"""
 import logging
 import ujson as json
-from hive.server.hive_api.common import (
-    get_account_id, get_community_id)
+from hive.server.hive_api.common import (get_account_id, get_community_id)
 from hive.server.common.helpers import return_error_info
 
 # pylint: disable=too-many-lines
@@ -107,8 +106,9 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
 
     sql = "SELECT id FROM hive_communities %s WHERE rank > 0 ORDER BY rank" % seek
     ids = await db.query_col(sql, last=last, limit=limit)
-    communities = await load_communities(db, ids, lite=True)
+    if not ids: return []
 
+    communities = await load_communities(db, ids, lite=True)
     if observer:
         observer_id = await get_account_id(db, observer)
         await _append_observer_subs(db, communities, observer_id)
@@ -151,6 +151,7 @@ async def load_communities(db, ids, lite=True):
 
     Observer: adds subcription status, user title, user role.
     """
+    assert ids, 'no ids passed to load_communities'
 
     sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
                     subscribers, created_at %s
