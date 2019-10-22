@@ -295,7 +295,11 @@ class CachedPost:
         gap = cls.dirty_missing()
         log.info("[INIT] %d missing post cache entries", gap)
         while cls.flush(steem, trx=True, full_total=gap)['insert']:
+            last_gap = gap
             gap = cls.dirty_missing()
+            if gap == last_gap:
+                log.warning('ignoring %d inserts -- may be deleted')
+                break
 
     @classmethod
     def _update_batch(cls, steem, tuples, trx=True, full_total=None):
