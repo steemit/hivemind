@@ -9,7 +9,7 @@ from hive.db.db_state import DbState
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
-from hive.indexer.community import Community
+from hive.indexer.community import Community, START_DATE
 from hive.indexer.notify import Notify
 
 log = logging.getLogger(__name__)
@@ -217,7 +217,9 @@ class Posts:
             parent_id = None
             depth = 0
             category = op['parent_permlink']
-            community_id = Community.validated_id(category)
+            community_id = None
+            if date > START_DATE:
+                community_id = Community.validated_id(category)
             is_valid = True
             is_muted = False
 

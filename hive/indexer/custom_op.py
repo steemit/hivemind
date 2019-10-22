@@ -11,7 +11,7 @@ from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
 from hive.indexer.notify import Notify
 
-from hive.indexer.community import process_json_community_op
+from hive.indexer.community import process_json_community_op, START_BLOCK
 from hive.utils.normalize import load_json_key
 
 DB = Db.instance()
@@ -53,7 +53,7 @@ class CustomOp:
                     op_json = ['follow', op_json]  # legacy compat
                 cls._process_legacy(account, op_json, block_date)
             elif op['id'] == 'community':
-                if block_num > 30e6:
+                if block_num > START_BLOCK:
                     process_json_community_op(account, op_json, block_date)
 
     @classmethod

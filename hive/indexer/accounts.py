@@ -91,8 +91,9 @@ class Accounts:
             cls._ids[name] = _id
 
         # post-insert: pass to communities to check for new registrations
-        from hive.indexer.community import Community
-        Community.register(new_names, block_date)
+        from hive.indexer.community import Community, START_DATE
+        if block_date > START_DATE:
+            Community.register(new_names, block_date)
 
     # account cache methods
     # ---------------------
