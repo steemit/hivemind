@@ -495,15 +495,15 @@ class CommunityOp:
         if 'title' in props:
             out['title'] = read_key_str(props, 'title', 32)
         if 'about' in props:
-            out['about'] = read_key_str(props, 'about', 120)
+            out['about'] = read_key_str(props, 'about', 120, allow_blank=True)
         if 'lang' in props:
             out['lang'] = read_key_str(props, 'lang', 2, 'lang')
         if 'is_nsfw' in props:
             out['is_nsfw'] = read_key_bool(props, 'is_nsfw')
         if 'description' in props:
-            out['description'] = read_key_str(props, 'description', 5000)
+            out['description'] = read_key_str(props, 'description', 1000, allow_blank=True)
         if 'flag_text' in props:
-            out['flag_text'] = read_key_str(props, 'flag_text', 5000)
+            out['flag_text'] = read_key_str(props, 'flag_text', 1000, allow_blank=True)
         if 'settings' in props:
             out['settings'] = json.dumps(read_key_dict(props, 'settings'))
         assert out, 'props were blank'
