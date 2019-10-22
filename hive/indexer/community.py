@@ -533,6 +533,7 @@ class CommunityOp:
             assert actor_role >= Role.mod, 'only mods can mute posts'
         elif action == 'unmutePost':
             assert self._muted(), 'post is already not muted'
+            assert not self._parent_muted(), 'parent post is muted'
             assert actor_role >= Role.mod, 'only mods can unmute posts'
         elif action == 'pinPost':
             assert not self._pinned(), 'post is already pinned'
@@ -559,6 +560,12 @@ class CommunityOp:
     def _muted(self):
         """Check post's muted status."""
         sql = "SELECT is_muted FROM hive_posts WHERE id = :id"
+        return bool(DB.query_one(sql, id=self.post_id))
+
+    def _parent_muted(self):
+        """Check parent post's muted status."""
+        parent_id = "SELECT parent_id FROM hive_posts WHERE id = :id"
+        sql = "SELECT is_muted FROM hive_posts WHERE id = (%s)" % parent_id
         return bool(DB.query_one(sql, id=self.post_id))
 
     def _pinned(self):
