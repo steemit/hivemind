@@ -231,12 +231,13 @@ def post_stats(post):
     total_votes = 0
     up_votes = 0
     for vote in post['active_votes']:
-        if vote['percent'] == 0:
+        rshares = int(vote['rshares'])
+
+        if rshares == 0:
             continue
 
         total_votes += 1
-        rshares = int(vote['rshares'])
-        sign = 1 if vote['percent'] > 0 else -1
+        sign = 1 if rshares > 0 else -1
         if sign > 0:
             up_votes += 1
         if sign < 0:
