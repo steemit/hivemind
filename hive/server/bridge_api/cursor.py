@@ -29,14 +29,14 @@ async def _get_community_id(db, name):
     """Get community id from hive db."""
     assert name, 'no comm name specified'
     _id = await db.query_one("SELECT id FROM hive_communities WHERE name = :n", n=name)
-    assert _id, "comm not found: `%s`" % name
     return _id
 
 async def _cids(db, tag, observer_id):
     if tag == 'my':
         return await _subscribed(db, observer_id)
     if tag[:5] == 'hive-':
-        return [await _get_community_id(db, tag)]
+        cid = await _get_community_id(db, tag)
+        return [cid] if cid else []
     return []
 
 #TODO: async def posts_by_ranked
