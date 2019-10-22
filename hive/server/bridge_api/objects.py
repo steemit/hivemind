@@ -2,6 +2,7 @@
 
 import logging
 import ujson as json
+from hive.server.common.mutes import Mutes
 
 from hive.utils.normalize import sbd_amount
 
@@ -38,6 +39,7 @@ ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'admin', 6: 'mod', 8: 'admin'}
 async def load_posts_keyed(db, ids, truncate_body=0):
     """Given an array of post ids, returns full posts objects keyed by id."""
     # pylint: disable=too-many-locals
+    # pylint: disable=too-many-branches, too-many-statements
     assert ids, 'no ids passed to load_posts_keyed'
 
     # fetch posts and associated author reps
@@ -48,6 +50,8 @@ async def load_posts_keyed(db, ids, truncate_body=0):
                FROM hive_posts_cache WHERE post_id IN :ids"""
     result = await db.query_all(sql, ids=tuple(ids))
     author_map = await _query_author_map(db, result)
+
+    muted_accounts = Mutes.all()
 
     # TODO: author affiliation?
     ctx = {}
@@ -61,6 +65,12 @@ async def load_posts_keyed(db, ids, truncate_body=0):
 
         row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
+
+        post['strikes'] = 0
+        if post['author'] in muted_accounts: post['strikes'] += 2
+        if author['reputation'] < 1: post['strikes'] += 1
+        if post['net_rshares'] < -9999999999: post['strikes'] += 1
+
         posts_by_id[row['post_id']] = post
         post_cids[row['post_id']] = row['community_id']
 
@@ -95,6 +105,8 @@ async def load_posts_keyed(db, ids, truncate_body=0):
             role = roles[cid][author] if author in roles[cid] else (0, '')
             post['author_role'] = ROLES[role[0]]
             post['author_title'] = role[1]
+        else:
+            post['stats']['gray'] = post['strikes'] >= 2
 
 
     sql = """SELECT id FROM hive_posts
