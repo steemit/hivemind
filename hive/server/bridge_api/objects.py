@@ -90,7 +90,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
         author = post['author']
         cid = post_cids[pid]
         if cid:
-            #post['community'] = post['category'] # TODO: True?
+            post['community'] = post['category'] # TODO: True?
             post['community_title'] = titles[cid] or post['category']
             role = roles[cid][author] if author in roles[cid] else (0, '')
             post['author_role'] = ROLES[role[0]]
