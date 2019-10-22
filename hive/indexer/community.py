@@ -29,8 +29,8 @@ TYPE_TOPIC = 1
 TYPE_JOURNAL = 2
 TYPE_COUNCIL = 3
 
-START_BLOCK = 37495000
-START_DATE = '2019-10-22T03:09:42'
+START_BLOCK = 37500000
+START_DATE = '2019-10-22T07:12:36' # effectively 2019-10-22 12:00:00
 
 def assert_keys_match(keys, expected, allow_missing=True):
     """Compare a set of input keys to expected keys."""
