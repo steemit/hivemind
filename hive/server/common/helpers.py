@@ -20,8 +20,10 @@ def return_error_info(function):
         try:
             return await function(*args, **kwargs)
         except (ApiError, AssertionError, TypeError, Exception) as e:
-            # one specific TypeError we want to silence; others need a trace.
+            if isinstance(e, ApiError) and 'get_account_votes' in str(e):
+                raise e
             if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
+                # one specific TypeError we want to silence; others need a trace
                 log.error("ERR1: %s\n%s", repr(e), traceback.format_exc())
                 raise e
             if isinstance(e, AssertionError):
