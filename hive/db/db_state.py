@@ -270,7 +270,13 @@ class DbState:
             cls._set_ver(12)
 
         if cls._ver == 12: # community schema
+
+            for table in ['hive_members', 'hive_flags', 'hive_modlog',
+                          'hive_communities', 'hive_subscriptions',
+                          'hive_roles', 'hive_notifs']:
+                cls.db().query("DROP TABLE IF EXISTS %s" % table)
             build_metadata_community().create_all(cls.db().engine())
+
             cls.db().query("ALTER TABLE hive_accounts ADD COLUMN lr_notif_id integer")
             cls.db().query("ALTER TABLE hive_posts DROP CONSTRAINT hive_posts_fk2")
             cls.db().query("ALTER TABLE hive_posts DROP COLUMN community")
@@ -290,6 +296,14 @@ class DbState:
             for sql in sqls:
                 cls.db().query(sql)
             cls._set_ver(14)
+
+        if cls._ver == 14:
+            for table in ['hive_members', 'hive_flags', 'hive_modlog',
+                          'hive_communities', 'hive_subscriptions',
+                          'hive_roles', 'hive_notifs']:
+                cls.db().query("DROP TABLE IF EXISTS %s" % table)
+            build_metadata_community().create_all(cls.db().engine())
+
 
         reset_autovac(cls.db())
 
