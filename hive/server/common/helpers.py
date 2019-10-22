@@ -22,6 +22,8 @@ def return_error_info(function):
         except (ApiError, AssertionError, TypeError, Exception) as e:
             if isinstance(e, ApiError) and 'get_account_votes' in str(e):
                 raise e
+            if isinstance(e, AssertionError) and 'community not found' in str(e):
+                raise e
             if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
                 # one specific TypeError we want to silence; others need a trace
                 log.error("ERR1: %s\n%s", repr(e), traceback.format_exc())
