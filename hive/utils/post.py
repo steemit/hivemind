@@ -226,7 +226,6 @@ def post_stats(post):
 
     Source: contentStats - https://github.com/steemit/condenser/blob/master/src/app/utils/StateFunctions.js#L109
     """
-    net_rshares_adj = 0
     neg_rshares = 0
     total_votes = 0
     up_votes = 0
@@ -237,16 +236,8 @@ def post_stats(post):
             continue
 
         total_votes += 1
-        sign = 1 if rshares > 0 else -1
-        if sign > 0:
-            up_votes += 1
-        if sign < 0:
-            neg_rshares += rshares
-
-        # For graying: sum rshares, but ignore neg rep users and dust downvotes
-        neg_rep = str(vote['reputation'])[0] == '-'
-        if not (neg_rep and sign < 0 and len(str(rshares)) < 11):
-            net_rshares_adj += rshares
+        if rshares > 0: up_votes += 1
+        if rshares < 0: neg_rshares += rshares
 
     # take negative rshares, divide by 2, truncate 10 digits (plus neg sign),
     #   and count digits. creates a cheap log10, stake-based flag weight.
@@ -254,12 +245,11 @@ def post_stats(post):
     flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
 
     author_rep = rep_log10(post['author_reputation'])
-    is_low_value = net_rshares_adj < -9999999999
     has_pending_payout = sbd_amount(post['pending_payout_value']) >= 0.02
 
     return {
-        'hide': not has_pending_payout and (author_rep < 0),
-        'gray': not has_pending_payout and (author_rep < 1 or is_low_value),
+        'hide': author_rep < 0 and not has_pending_payout,
+        'gray': author_rep < 1,
         'author_rep': author_rep,
         'flag_weight': flag_weight,
         'total_votes': total_votes,
