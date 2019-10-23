@@ -93,7 +93,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
         'trending':        ('sc_trend',    False,  True,   False, False),
         'hot':             ('sc_hot',      False,  True,   False, False),
         'created':         ('created_at',  False,  True,   False, False),
-        'promoted':        ('promoted',    True,   True,   False, True),
+        #'promoted':        ('promoted',    True,   True,   False, True),
         'payout':          ('payout',      True,   False,  False, False),
         'muted':           ('payout',      True,   False,  True,  False)}
 
@@ -112,6 +112,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     if toponly:  where.append("depth = 0")
     if pending:  where.append("is_paidout = '0'")
     if promoted: where.append('promoted > 0')
+    if sort == 'payout': where.append("payout_at < TIMESTAMP 'tomorrow'")
 
     # seek
     if seek_id:
@@ -165,6 +166,7 @@ async def pids_by_category(db, tag, sort, last_id, limit):
     if params[3]: where.append('depth > 0')
     if params[4]: where.append('promoted > 0')
     if params[5]: where.append("is_grayed = '1' AND payout > 0")
+    if sort == 'payout': where.append("payout_at < TIMESTAMP 'tomorrow'")
 
     # filter by category or tag
     if tag:
