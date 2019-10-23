@@ -39,20 +39,12 @@ def estimated_sp(vests):
     """Convert VESTS to SP units for display."""
     return vests * 0.0005034
 
-VALID_SORTS = ['trending', 'created', 'hot', 'payout']
-def valid_sort(sort):
-    """Validate and return provided `sort`, otherwise throw."""
-    assert isinstance(sort, str), 'sort was not a string'
-    assert sort in VALID_SORTS, 'invalid sort `%s`' % sort
-    return sort
-
 VALID_COMMENT_SORTS = [
     'hot'  # hot algo
     'top', # payout
     'new', # newest
     #'votes', # highest number of votes (excludes comm. muted?)
 ]
-
 def valid_comment_sort(sort):
     """Validate and return provided `sort`, otherwise throw."""
     assert isinstance(sort, str), 'sort was not a string'
