@@ -6,12 +6,16 @@ import ujson as json
 
 log = logging.getLogger(__name__)
 
+def _read_url(url):
+    return urlopen(url).read()
+
 class Mutes:
     """Singleton tracking muted accounts."""
 
     _instance = None
     accounts = set()
     blist = set()
+    blist_map = dict()
 
     @classmethod
     def instance(cls):
@@ -27,8 +31,8 @@ class Mutes:
     def __init__(self, url):
         """Initialize a muted account list by loading from URL"""
         if url:
-            self.accounts = set(urlopen(url).read().decode('utf8').split())
-            jsn = urlopen('http://blacklist.usesteem.com/blacklists').read()
+            self.accounts = set(_read_url(url).decode('utf8').split())
+            jsn = _read_url('http://blacklist.usesteem.com/blacklists')
             self.blist = set(json.loads(jsn))
             log.warning("%d muted, %d blacklisted", len(self.accounts), len(self.blist))
 
@@ -42,3 +46,14 @@ class Mutes:
     def listed(cls):
         """Return blacklisted accounts."""
         return cls.instance().blist
+
+    @classmethod
+    def lists(cls, name):
+        """Return blacklists the account belongs to."""
+        assert name
+        inst = cls.instance().blist_map
+        if name not in inst:
+            url = 'http://blacklist.usesteem.com/user/' + name
+            lists = json.loads(_read_url(url))
+            inst[name] = lists['blacklisted']
+        return inst[name]

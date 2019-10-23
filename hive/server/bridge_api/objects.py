@@ -66,7 +66,9 @@ async def load_posts_keyed(db, ids, truncate_body=0):
 
         row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
-        if post['author'] in blist: post['body'] += ' [BLIST]'
+        if post['author'] in blist:
+            post['body'] += ' [BLIST]'
+            post['blacklists'] = Mutes.lists(post['author'])
 
         post['strikes'] = 0
         if post['author'] in muted_accounts: post['strikes'] += 2
@@ -154,6 +156,11 @@ async def _query_author_map(db, posts):
 
 def _condenser_profile_object(row):
     """Convert an internal account record into legacy-steemd style."""
+
+    blacklists = []
+    if row['name'] in Mutes.listed():
+        blacklists = Mutes.lists(row['name'])
+
     return {
         'id': row['id'],
         'name': row['name'],
@@ -161,6 +168,7 @@ def _condenser_profile_object(row):
         'active': _json_date(row['active_at']),
         'post_count': row['post_count'],
         'reputation': row['reputation'],
+        'blacklists': blacklists,
         'stats': {
             'sp': int(row['vote_weight'] * 0.0005037),
             'rank': row['rank'],
