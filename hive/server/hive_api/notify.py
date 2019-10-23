@@ -46,7 +46,7 @@ async def account_notifications(context, account, min_score=0, last_id=None, lim
     account_id = await get_account_id(db, account)
 
     seek = ' AND hn.id < :last_id' if last_id else ''
-    col = 'community_id' if account[:5] == 'hive-' else 'dst_id'
+    col = 'hn.community_id' if account[:5] == 'hive-' else 'dst_id'
     sql = _notifs_sql(col + " = :dst_id" + seek)
 
     rows = await db.query_all(sql, min_score=min_score, dst_id=account_id,
