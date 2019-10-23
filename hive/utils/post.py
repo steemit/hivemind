@@ -259,7 +259,7 @@ def post_stats(post):
 
     return {
         'hide': not has_pending_payout and (author_rep < 0),
-        'gray': not has_pending_payout and (author_rep < 1 or is_low_value),
+        'gray': (author_rep < 1 or is_low_value),
         'author_rep': author_rep,
         'flag_weight': flag_weight,
         'total_votes': total_votes,
