@@ -36,10 +36,26 @@ async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
 
 ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'admin', 6: 'mod', 8: 'admin'}
 
+def _blacklists(author, rep):
+    out = []
+
+    if author in Mutes.listed():
+        out = Mutes.lists(author).copy()
+
+    if int(rep) < 1:
+        out.append('reputation-0')
+    elif int(rep) == 1:
+        out.append('reputation-1')
+
+    if author in Mutes.all():
+        out.append('irredeemables')
+
+    return out
+
+
 async def load_posts_keyed(db, ids, truncate_body=0):
     """Given an array of post ids, returns full posts objects keyed by id."""
     # pylint: disable=too-many-locals
-    # pylint: disable=too-many-branches, too-many-statements
     assert ids, 'no ids passed to load_posts_keyed'
 
     # fetch posts and associated author reps
@@ -50,9 +66,6 @@ async def load_posts_keyed(db, ids, truncate_body=0):
                FROM hive_posts_cache WHERE post_id IN :ids"""
     result = await db.query_all(sql, ids=tuple(ids))
     author_map = await _query_author_map(db, result)
-
-    muted_accounts = Mutes.all()
-    blist = Mutes.listed()
 
     # TODO: author affiliation?
     ctx = {}
@@ -67,21 +80,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
         row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
 
-        blacklists = []
-        if post['author'] in blist:
-            blacklists = Mutes.lists(post['author']).copy()
-        if int(row['author_rep']) == 1:
-            blacklists.append('reputation-1')
-        elif int(row['author_rep']) < 1:
-            blacklists.append('reputation-0')
-        if post['author'] in muted_accounts:
-            blacklists.append('irredeemables')
-        post['blacklists'] = blacklists
-
-        post['strikes'] = 0
-        if post['author'] in muted_accounts: post['strikes'] += 2
-        if author['reputation'] < 1: post['strikes'] += 1
-        if post['net_rshares'] < -9999999999: post['strikes'] += 1
+        post['blacklists'] = _blacklists(post['author'], post['author_rep'])
 
         posts_by_id[row['post_id']] = post
         post_cids[row['post_id']] = row['community_id']
@@ -118,8 +117,8 @@ async def load_posts_keyed(db, ids, truncate_body=0):
             post['author_role'] = ROLES[role[0]]
             post['author_title'] = role[1]
         else:
-            post['stats']['gray'] = post['strikes'] >= 2
-            post['stats']['hide'] = post['strikes'] >= 3
+            post['stats']['gray'] = len(post['blacklists']) >= 2
+            post['stats']['hide'] = len(post['blacklists']) >= 3
 
 
     sql = """SELECT id FROM hive_posts
