@@ -64,20 +64,18 @@ async def load_posts_keyed(db, ids, truncate_body=0):
         author = author_map[row['author']]
         author_ids[author['id']] = author['name']
 
-        blacklists = []
         row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
-        if post['author'] in blist:
-            post['body'] += ' [BLIST]'
-            blacklists = Mutes.lists(post['author'])
 
+        blacklists = []
+        if post['author'] in blist:
+            blacklists = Mutes.lists(post['author']).copy()
         if int(row['author_rep']) == 1:
             blacklists.append('reputation-1')
         elif int(row['author_rep']) < 1:
             blacklists.append('reputation-0')
         if post['author'] in muted_accounts:
             blacklists.append('irredeemables')
-
         post['blacklists'] = blacklists
 
         post['strikes'] = 0
