@@ -80,7 +80,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
         row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
 
-        post['blacklists'] = _blacklists(post['author'], post['author_rep'])
+        post['blacklists'] = _blacklists(post['author'], author['reputation'])
 
         posts_by_id[row['post_id']] = post
         post_cids[row['post_id']] = row['community_id']
