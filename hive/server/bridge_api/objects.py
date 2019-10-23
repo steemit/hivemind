@@ -70,6 +70,15 @@ async def load_posts_keyed(db, ids, truncate_body=0):
             post['body'] += ' [BLIST]'
             post['blacklists'] = Mutes.lists(post['author'])
 
+        if int(row['author_rep']) == 1:
+            if 'blacklists' not in post:
+                post['blacklists'] = []
+            post['blacklists'].append('reputation-1')
+        elif int(row['author_rep']) < 1:
+            if 'blacklists' not in post:
+                post['blacklists'] = []
+            post['blacklists'].append('reputation-0')
+
         post['strikes'] = 0
         if post['author'] in muted_accounts: post['strikes'] += 2
         if author['reputation'] < 1: post['strikes'] += 1
