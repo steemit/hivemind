@@ -93,7 +93,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
         'trending':        ('sc_trend',    False,  True,   False, False),
         'hot':             ('sc_hot',      False,  True,   False, False),
         'created':         ('created_at',  False,  True,   False, False),
-        #'promoted':        ('promoted',    True,   True,   False, True),
+        'promoted':        ('promoted',    True,   True,   False, True),
         'payout':          ('payout',      True,   False,  False, False),
         'muted':           ('payout',      True,   False,  True,  False)}
 
@@ -146,14 +146,14 @@ async def pids_by_category(db, tag, sort, last_id, limit):
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments', 'muted']
 
-    params = {             # field      pending posts   comment promoted muted   todo
-        'trending':        ('sc_trend', True,   False,  False,  False,  False),   # depth=0
-        'hot':             ('sc_hot',   True,   False,  False,  False,  False),   # depth=0
-        'created':         ('post_id',  False,  True,   False,  False,  False),
-        'promoted':        ('promoted', True,   False,  False,  True,   False),
-        'payout':          ('payout',   True,   False,  False,  False,  False),
-        #'payout_comments': ('payout',   True,   False,  True,   False,  False),
-        'muted':           ('payout',   True,   False,  False,  False,  True),
+    params = {             # field      pending posts   comment promoted    todo
+        'trending':        ('sc_trend', True,   False,  False,  False),   # depth=0
+        'hot':             ('sc_hot',   True,   False,  False,  False),   # depth=0
+        'created':         ('post_id',  False,  True,   False,  False),
+        'promoted':        ('promoted', True,   False,  False,  True),
+        'payout':          ('payout',   True,   False,  False,  False),
+        'payout_comments': ('payout',   True,   False,  True,   False),
+        'muted':           ('payout',   True,   False,  False,  False),
     }[sort]
 
     table = 'hive_posts_cache'
@@ -165,7 +165,7 @@ async def pids_by_category(db, tag, sort, last_id, limit):
     if params[2]: where.append('depth = 0')
     if params[3]: where.append('depth > 0')
     if params[4]: where.append('promoted > 0')
-    if params[5]: where.append("is_grayed = '1' AND payout > 0")
+    if sort == 'muted': where.append("is_grayed = '1' AND payout > 0")
     if sort == 'payout': where.append("payout_at < TIMESTAMP 'tomorrow'")
 
     # filter by category or tag
