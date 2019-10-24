@@ -202,6 +202,8 @@ class Sync:
                 log.warning("head block %d @ %s", num, block['timestamp'])
                 log.info("[LIVE] hourly stats")
                 Accounts.fetch_ranks()
+                #Community.recalc_pending_payouts()
+            if num % 200 == 0: #10min
                 Community.recalc_pending_payouts()
             if num % 100 == 0: #5min
                 log.info("[LIVE] 5-min stats")

@@ -60,21 +60,12 @@ async def get_community_context(context, name, account):
 
 
 @return_error_info
-async def list_top_communities(context, limit=25, observer_id=None):
-    """List all communities, paginated. Returns lite community list."""
-    db = context['db']
-
-    out = []
-    if observer_id:
-        sql = """SELECT name, title FROM hive_communities
-                  WHERE id IN (SELECT community_id
-                                 FROM hive_subscriptions
-                                WHERE account_id = :account_id)"""
-        out += await db.query_all(sql, account_id=observer_id)
-
+async def list_top_communities(context, limit=25):
+    """List top communities. Returns lite community list."""
+    assert limit < 100
     sql = """SELECT name, title FROM hive_communities
               WHERE rank > 0 ORDER BY rank LIMIT :limit"""
-    out += await db.query_all(sql, limit=limit)
+    out = await context['db'].query_all(sql, limit=limit)
 
     return [(r[0], r[1]) for r in out]
 
