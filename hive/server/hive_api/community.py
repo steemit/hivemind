@@ -103,6 +103,7 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
     if observer:
         observer_id = await get_account_id(db, observer)
         await _append_observer_subs(db, communities, observer_id)
+        await _append_observer_roles(db, communities, observer_id)
 
     return [communities[_id] for _id in ids]
 
