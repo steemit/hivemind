@@ -493,7 +493,9 @@ class CommunityOp:
 
         out = {}
         if 'title' in props:
-            out['title'] = read_key_str(props, 'title', 32)
+            out['title'] = read_key_str(props, 'title', 20)
+            assert len(out['title']) >= 3, 'title too short'
+            assert out['title'][0] not in ('@', '#'), 'invalid title prefix'
         if 'about' in props:
             out['about'] = read_key_str(props, 'about', 120, allow_blank=True)
         if 'lang' in props:

@@ -34,6 +34,9 @@ async def _get_community_id(db, name):
 async def _cids(db, tag, observer_id):
     if tag == 'my':
         return await _subscribed(db, observer_id)
+    if tag == 'all':
+        # TODO: filter on not null
+        return await db.query_col("SELECT id FROM hive_communities")
     if tag[:5] == 'hive-':
         cid = await _get_community_id(db, tag)
         return [cid] if cid else []
