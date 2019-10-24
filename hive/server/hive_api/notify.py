@@ -99,7 +99,7 @@ def _post_url(row):
 
 def _render_url(row):
     if row['permlink']: return '@' + row['author'] + '/' + row['permlink']
-    if row['community']: return row['community'] + '/trending'
+    if row['community']: return 'trending/' + row['community']
     if row['src']: return '@' + row['src']
     if row['dst']: return '@' + row['dst']
     assert False, 'no url for %s' % row
