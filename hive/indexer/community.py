@@ -96,7 +96,8 @@ class Community:
         """
 
         for name in names:
-            if not re.match(r'^hive-[123]\d{4,6}$', name):
+            #if not re.match(r'^hive-[123]\d{4,6}$', name):
+            if not re.match(r'^hive-[1]\d{4,6}$', name):
                 continue
             type_id = int(name[5])
             _id = Accounts.get_id(name)
