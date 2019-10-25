@@ -5,6 +5,7 @@ import ujson as json
 
 from hive.utils.normalize import sbd_amount, rep_to_raw
 from hive.server.common.mutes import Mutes
+from hive.server.common.helpers import json_date
 
 log = logging.getLogger(__name__)
 
@@ -131,14 +132,14 @@ def _condenser_post_object(row, truncate_body=0):
     post['body'] = row['body'][0:truncate_body] if truncate_body else row['body']
     post['json_metadata'] = row['json']
 
-    post['created'] = _json_date(row['created_at'])
-    post['last_update'] = _json_date(row['updated_at'])
+    post['created'] = json_date(row['created_at'])
+    post['last_update'] = json_date(row['updated_at'])
     post['depth'] = row['depth']
     post['children'] = row['children']
     post['net_rshares'] = row['rshares']
 
-    post['last_payout'] = _json_date(row['payout_at'] if paid else None)
-    post['cashout_time'] = _json_date(None if paid else row['payout_at'])
+    post['last_payout'] = json_date(row['payout_at'] if paid else None)
+    post['cashout_time'] = json_date(None if paid else row['payout_at'])
     post['total_payout_value'] = _amount(row['payout'] if paid else 0)
     post['curator_payout_value'] = _amount(0)
     post['pending_payout_value'] = _amount(0 if paid else row['payout'])
@@ -197,9 +198,3 @@ def _hydrate_active_votes(vote_csv):
                           percent=percent,
                           reputation=rep_to_raw(reputation)))
     return votes
-
-def _json_date(date=None):
-    """Given a db datetime, return a steemd/json-friendly version."""
-    if not date:
-        return '1969-12-31T23:59:59'
-    return 'T'.join(str(date).split(' '))

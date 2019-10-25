@@ -2,6 +2,7 @@
 
 import logging
 import ujson as json
+from hive.server.common.helpers import json_date
 
 from hive.utils.normalize import sbd_amount
 
@@ -142,8 +143,8 @@ def _condenser_profile_object(row):
     return {
         'id': row['id'],
         'name': row['name'],
-        'created': _json_date(row['created_at']),
-        'active': _json_date(row['active_at']),
+        'created': json_date(row['created_at']),
+        'active': json_date(row['active_at']),
         'post_count': row['post_count'],
         'reputation': row['reputation'],
         'stats': {
@@ -179,14 +180,14 @@ def _condenser_post_object(row, truncate_body=0):
     post['body'] = row['body'][0:truncate_body] if truncate_body else row['body']
     post['json_metadata'] = json.loads(row['json'])
 
-    post['created'] = _json_date(row['created_at'])
-    post['updated'] = _json_date(row['updated_at'])
+    post['created'] = json_date(row['created_at'])
+    post['updated'] = json_date(row['updated_at'])
     post['depth'] = row['depth']
     post['children'] = row['children']
     post['net_rshares'] = row['rshares']
 
     post['is_paidout'] = row['is_paidout']
-    post['payout_at'] = _json_date(row['payout_at'])
+    post['payout_at'] = json_date(row['payout_at'])
     post['payout'] = float(row['payout'])
     post['pending_payout_value'] = _amount(0 if paid else row['payout'])
     post['author_payout_value'] = _amount(row['payout'] if paid else 0)
@@ -242,8 +243,3 @@ def _hydrate_active_votes(vote_csv):
         voter, rshares, _, _ = line.split(',')
         votes.append(dict(voter=voter, rshares=rshares))
     return votes
-
-def _json_date(date=None):
-    """Given a db datetime, return a steemd/json-friendly version."""
-    if not date: return '1969-12-31T23:59:59'
-    return 'T'.join(str(date).split(' '))
