@@ -1,7 +1,7 @@
 """Hive API: Notifications"""
 import logging
 
-from hive.server.common.helpers import return_error_info
+from hive.server.common.helpers import return_error_info, json_date
 from hive.indexer.notify import NotifyType
 from hive.server.hive_api.common import get_account_id, valid_limit
 
@@ -75,7 +75,7 @@ def _render(row):
     out = {'id': row['id'],
            'type': NotifyType(row['type_id']).name,
            'score': row['score'],
-           'date': str(row['created_at']),
+           'date': json_date(row['created_at']),
            'msg': _render_msg(row),
            'url': _render_url(row),
           }

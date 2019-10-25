@@ -42,6 +42,11 @@ def return_error_info(function):
             #        "trace": traceback.format_exc()}}
     return wrapper
 
+def json_date(date=None):
+    """Given a db datetime, return a steemd/json-friendly version."""
+    if not date: return '1969-12-31T23:59:59'
+    return 'T'.join(str(date).split(' '))
+
 def valid_account(name, allow_empty=False):
     """Returns validated account name or throws Assert."""
     if not name:
