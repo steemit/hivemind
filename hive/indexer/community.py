@@ -219,7 +219,7 @@ class Community:
                            GROUP BY community_id
                         ) p
                      ON p.community_id = c.id
-               ORDER BY COALESCE(p.ttl, 0) DESC,
+               ORDER BY ROUND(COALESCE(p.ttl, 0), 1) DESC,
                         c.subscribers DESC,
                         COALESCE(p.cnt, 0) DESC,
                         (CASE WHEN c.title = '' THEN 1 ELSE 0 END)
