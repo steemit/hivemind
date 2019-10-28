@@ -43,7 +43,7 @@ async def get_trending_topics(context, limit=10, observer=None):
     # pylint: disable=unused-argument
     #db = context['db']
     #observer_id = await get_account_id(db, observer) if observer else None
-    assert not observer, 'observer not supported'
+    #assert not observer, 'observer not supported'
     limit = valid_limit(limit, 25)
     out = []
     cells = await list_top_communities(context, limit)
