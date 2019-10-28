@@ -38,13 +38,15 @@ async def get_profile(context, account, observer=None):
     return ret[0]
 
 @return_error_info
-async def get_trending_topics(context, observer=None):
+async def get_trending_topics(context, limit=10, observer=None):
     """Return top trending topics across pending posts."""
     # pylint: disable=unused-argument
     #db = context['db']
     #observer_id = await get_account_id(db, observer) if observer else None
+    assert not observer, 'observer not supported'
+    limit = valid_limit(limit, 25)
     out = []
-    cells = await list_top_communities(context, 8)
+    cells = await list_top_communities(context, limit)
     for name, title in cells:
         out.append((name, title or name))
     for tag in ('photography', 'travel', 'gaming',
