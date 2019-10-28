@@ -51,7 +51,8 @@ async def get_trending_topics(context, limit=10, observer=None):
         out.append((name, title or name))
     for tag in ('photography', 'travel', 'gaming',
                 'crypto', 'newsteem', 'music', 'food'):
-        out.append((tag, '#' + tag))
+        if len(out) < limit:
+            out.append((tag, '#' + tag))
     return out
 
 @return_error_info
