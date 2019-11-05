@@ -587,5 +587,5 @@ class CommunityOp:
         return bool(DB.query_one(sql,
                                  community_id=self.community_id,
                                  post_id=self.post_id,
-                                 type_id=NotifyType['flag'],
+                                 type_id=NotifyType['flag_post'],
                                  src_id=self.actor_id))
