@@ -34,7 +34,7 @@ async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
 
     return posts
 
-ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'admin', 6: 'mod', 8: 'admin'}
+ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
 
 async def load_posts_keyed(db, ids, truncate_body=0):
     """Given an array of post ids, returns full posts objects keyed by id."""
