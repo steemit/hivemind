@@ -95,7 +95,9 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
                                    FROM hive_communities
                                   WHERE name = :last) """
 
-    sql = "SELECT id FROM hive_communities %s WHERE rank > 0 ORDER BY rank" % seek
+    sql = """SELECT id FROM hive_communities %s
+              WHERE rank > 0 AND (num_pending > 0 OR LENGTH(about) > 3)
+           ORDER BY rank""" % seek
     ids = await db.query_col(sql, last=last, limit=limit)
     if not ids: return []
 
@@ -111,14 +113,23 @@ async def list_communities(context, last='', limit=25, query=None, observer=None
 async def list_community_roles(context, community, last='', limit=50):
     """List community account-roles (anyone with non-guest status)."""
     db = context['db']
-    community_id = await get_community_id(db, community)
-    seek = ' AND a.name > :last' if last else ''
+    cid = await get_community_id(db, community)
+
+    seek = ''
+    lrole = None
+    if last:
+        sql = "SELECT role_id FROM hive_roles WHERE name = :name"
+        lrole = await db.query_one(sql, name=last)
+        assert lrole is not None, 'invalid start'
+        seek = """AND (a.role_id < :lrole OR
+                      (a.role_id = :lrole AND a.name > :last))"""
+
     sql = """SELECT a.name, r.role_id, r.title FROM hive_roles r
                JOIN hive_accounts a ON r.account_id = a.id
               WHERE r.community_id = :id %s
                 AND r.role_id != 0
-           ORDER BY name LIMIT :limit""" % seek
-    rows = await db.query_all(sql, id=community_id, last=last, limit=limit)
+           ORDER BY r.role_id DESC, name LIMIT :limit""" % seek
+    rows = await db.query_all(sql, id=cid, last=last, lrole=lrole, limit=limit)
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
 
 @return_error_info
