@@ -193,7 +193,12 @@ async def pids_by_category(db, tag, sort, last_id, limit):
 async def _subscribed(db, account_id):
     sql = """SELECT community_id FROM hive_subscriptions
               WHERE account_id = :account_id"""
-    return await db.query_col(sql, account_id=account_id)
+    ids = await db.query_col(sql, account_id=account_id)
+    if not ids:
+        # TODO: evaluate handling of `all` when no subs
+        ids = await db.query_col("""SELECT id FROM hive_communities
+                                     WHERE rank > 0 AND rank < 10""")
+    return ids
 
 async def _pinned(db, community_id):
     """Get a list of pinned post `id`s in `community`."""
