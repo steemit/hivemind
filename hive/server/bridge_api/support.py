@@ -22,7 +22,9 @@ async def get_post_header(context, author, permlink):
 
     sql = """SELECT id, parent_id, author, permlink, category, depth
                FROM hive_posts
-              WHERE author = :author AND permlink = :permlink"""
+              WHERE author = :author
+                AND permlink = :permlink
+                AND is_deleted = '0'"""
     row = await db.query_row(sql, author=author, permlink=permlink)
 
     if not row:
