@@ -65,6 +65,7 @@ def _notifs_sql(where):
           LEFT JOIN hive_communities hc ON hn.community_id = hc.id
           WHERE %s
             AND score >= :min_score
+            AND COALESCE(hp.is_deleted, False) = False
        ORDER BY hn.id DESC
           LIMIT :limit"""
     return sql % where
