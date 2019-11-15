@@ -32,6 +32,17 @@ TYPE_COUNCIL = 3
 START_BLOCK = 37500000
 START_DATE = '2019-10-22T07:12:36' # effectively 2019-10-22 12:00:00
 
+# https://en.wikipedia.org/wiki/ISO_639-1
+LANGS = ("ab,aa,af,ak,sq,am,ar,an,hy,as,av,ae,ay,az,bm,ba,eu,be,bn,bh,bi,"
+         "bs,br,bg,my,ca,ch,ce,ny,zh,cv,kw,co,cr,hr,cs,da,dv,nl,dz,en,eo,"
+         "et,ee,fo,fj,fi,fr,ff,gl,ka,de,el,gn,gu,ht,ha,he,hz,hi,ho,hu,ia,"
+         "id,ie,ga,ig,ik,io,is,it,iu,ja,jv,kl,kn,kr,ks,kk,km,ki,rw,ky,kv,"
+         "kg,ko,ku,kj,la,lb,lg,li,ln,lo,lt,lu,lv,gv,mk,mg,ms,ml,mt,mi,mr,"
+         "mh,mn,na,nv,nd,ne,ng,nb,nn,no,ii,nr,oc,oj,cu,om,or,os,pa,pi,fa,"
+         "pl,ps,pt,qu,rm,rn,ro,ru,sa,sc,sd,se,sm,sg,sr,gd,sn,si,sk,sl,so,"
+         "st,es,su,sw,ss,sv,ta,te,tg,th,ti,bo,tk,tl,tn,to,tr,ts,tt,tw,ty,"
+         "ug,uk,ur,uz,ve,vi,vo,wa,cy,wo,fy,xh,yi,yo,za").split(',')
+
 def assert_keys_match(keys, expected, allow_missing=True):
     """Compare a set of input keys to expected keys."""
     if not allow_missing:
@@ -63,8 +74,7 @@ def read_key_str(op, key, maxlen=None, fmt=None, allow_blank=False):
     if fmt == 'hex':
         assert re.match(r'^#[0-9a-f]{6}$', op[key]), 'invalid HEX: %s' % key
     elif fmt == 'lang':
-        # TODO: https://en.wikipedia.org/wiki/ISO_639-1
-        assert re.match(r'^[a-z]{2}$', op[key]), 'invalid lang: %s' % key
+        assert op[key] in LANGS, 'invalid lang: %s' % key
     else:
         assert fmt is None, 'invalid fmt: %s' % fmt
 
