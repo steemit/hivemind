@@ -37,23 +37,6 @@ async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
 
 ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
 
-def _blacklists(author, rep):
-    out = []
-
-    if author in Mutes.listed():
-        out = Mutes.lists(author).copy()
-
-    if int(rep) < 1:
-        out.append('reputation-0')
-    elif int(rep) == 1:
-        out.append('reputation-1')
-
-    if author in Mutes.all():
-        out.append('irredeemables')
-
-    return out
-
-
 async def load_posts_keyed(db, ids, truncate_body=0):
     """Given an array of post ids, returns full posts objects keyed by id."""
     # pylint: disable=too-many-locals
@@ -81,7 +64,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
         row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
 
-        post['blacklists'] = _blacklists(post['author'], author['reputation'])
+        post['blacklists'] = Mutes.lists(post['author'], author['reputation'])
 
         posts_by_id[row['post_id']] = post
         post_cids[row['post_id']] = row['community_id']
@@ -118,8 +101,9 @@ async def load_posts_keyed(db, ids, truncate_body=0):
             post['author_role'] = ROLES[role[0]]
             post['author_title'] = role[1]
         else:
-            post['stats']['gray'] = len(post['blacklists']) >= 2
-            post['stats']['hide'] = len(post['blacklists']) >= 3
+            post['stats']['gray'] = ('irredeemables' in post['blacklists']
+                                     or len(post['blacklists']) >= 2)
+        post['stats']['hide'] = 'irredeemables' in post['blacklists']
 
 
     sql = """SELECT id FROM hive_posts
@@ -165,9 +149,7 @@ async def _query_author_map(db, posts):
 def _condenser_profile_object(row):
     """Convert an internal account record into legacy-steemd style."""
 
-    blacklists = []
-    if row['name'] in Mutes.listed():
-        blacklists = Mutes.lists(row['name'])
+    blacklists = Mutes.lists(row['name'], row['reputation'])
 
     return {
         'id': row['id'],

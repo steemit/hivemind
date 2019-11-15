@@ -43,17 +43,25 @@ class Mutes:
         return cls.instance().accounts
 
     @classmethod
-    def listed(cls):
-        """Return blacklisted accounts."""
-        return cls.instance().blist
-
-    @classmethod
-    def lists(cls, name):
+    def lists(cls, name, rep):
         """Return blacklists the account belongs to."""
         assert name
         inst = cls.instance().blist_map
         if name not in inst:
-            url = 'http://blacklist.usesteem.com/user/' + name
-            lists = json.loads(_read_url(url))
-            inst[name] = lists['blacklisted']
+            out = []
+            if name in cls.instance().blist:
+                url = 'http://blacklist.usesteem.com/user/' + name
+                lists = json.loads(_read_url(url))
+                out.extend(lists['blacklisted'])
+
+            if name in cls.instance().accounts:
+                out.append('irredeemables')
+
+            if int(rep) < 1:
+                out.append('reputation-0')
+            elif int(rep) == 1:
+                out.append('reputation-1')
+
+            inst[name] = out
+
         return inst[name]
