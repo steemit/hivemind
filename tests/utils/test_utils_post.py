@@ -150,6 +150,7 @@ def test_mentions():
     assert m('@longestokaccount') == {'longestokaccount'}
     assert not m('@longestokaccountx')
     assert m('@abc- @-foo @bar.') == {'abc', 'bar'}
+    assert m('_[@foo](https://steemit.com/@foo)_') == {'foo'}
 
 def test_post_basic():
     ret = post_basic(POST_1)
