@@ -227,15 +227,27 @@ async def pids_by_blog(db, account: str, start_author: str = '',
                AND post_id = :start_id)
         """
 
+    # ignore community posts which were not reblogged
+    skip = """
+        SELECT id FROM hive_posts
+         WHERE author = :account
+           AND is_deleted = '0'
+           AND depth = 0
+           AND community_id IS NOT NULL
+           AND id NOT IN (SELECT post_id FROM hive_reblogs
+                           WHERE account = :account)"""
+
     sql = """
         SELECT post_id
           FROM hive_feed_cache
          WHERE account_id = :account_id %s
+           AND post_id NOT IN (%s)
       ORDER BY created_at DESC
          LIMIT :limit
-    """ % seek
+    """ % (seek, skip)
 
-    return await db.query_col(sql, account_id=account_id, start_id=start_id, limit=limit)
+    return await db.query_col(sql, account_id=account_id, account=account,
+                              start_id=start_id, limit=limit)
 
 async def pids_by_feed_with_reblog(db, account: str, start_author: str = '',
                                    start_permlink: str = '', limit: int = 20):
