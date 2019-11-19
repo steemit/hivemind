@@ -373,23 +373,17 @@ async def pids_by_payout(db, account: str, start_author: str = '',
     start_id = None
     if start_permlink:
         start_id = await _get_post_id(db, start_author, start_permlink)
-        seek = """
-          AND rshares <= (
-            SELECT rshares
-              FROM hive_posts_cache
-             WHERE post_id = :start_id)
-        """
+        last = "(SELECT payout FROM hive_posts_cache WHERE post_id = :start_id)"
+        seek = ("""AND (payout < %s OR (payout = %s AND post_id > :start_id))"""
+                % (last, last))
 
     sql = """
-        SELECT hpc.post_id
-          FROM hive_posts_cache hpc
-          JOIN hive_posts hp ON hp.id = hpc.post_id
-         WHERE hp.author = :account
-           AND hp.is_deleted = '0'
-           AND hpc.is_paidout = '0' %s
-      ORDER BY rshares DESC
+        SELECT post_id
+          FROM hive_posts_cache
+         WHERE author = :account
+           AND is_paidout = '0' %s
+      ORDER BY payout DESC, post_id
          LIMIT :limit
     """ % seek
-    # AND hpc.rshares > 10e9
 
     return await db.query_col(sql, account=account, start_id=start_id, limit=limit)

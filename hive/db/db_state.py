@@ -270,6 +270,7 @@ class DbState:
             cls._set_ver(12)
 
         if cls._ver == 12: # community schema
+            assert False, 'not finalized'
             for table in ['hive_members', 'hive_flags', 'hive_modlog',
                           'hive_communities', 'hive_subscriptions',
                           'hive_roles', 'hive_notifs']:
@@ -295,6 +296,13 @@ class DbState:
             for sql in sqls:
                 cls.db().query(sql)
             cls._set_ver(14)
+
+        if cls._ver == 14:
+            cls.db().query("ALTER TABLE hive_communities ADD COLUMN primary_tag VARCHAR(32)   NOT NULL DEFAULT ''")
+            cls.db().query("ALTER TABLE hive_communities ADD COLUMN avatar_url  VARCHAR(1024) NOT NULL DEFAULT ''")
+            cls.db().query("CREATE INDEX hive_posts_cache_ix20 ON hive_posts_cache (community_id, author, payout, post_id) WHERE is_paidout = '0'")
+            cls._set_ver(15)
+
 
         reset_autovac(cls.db())
 

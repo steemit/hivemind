@@ -216,6 +216,9 @@ def build_metadata():
 
         sa.Index('hive_posts_cache_ix10', 'post_id', 'payout',                      postgresql_where=sql_text("is_grayed = '1' AND payout > 0")), # API: muted, by filter/date/payout
 
+        # index: stats
+        sa.Index('hive_posts_cache_ix20', 'community_id', 'author', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: pending distribution; author payout
+
         # index: community ranked posts
         sa.Index('hive_posts_cache_ix30', 'community_id', 'sc_trend',   'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community trend
         sa.Index('hive_posts_cache_ix31', 'community_id', 'sc_hot',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community hot
@@ -257,6 +260,8 @@ def build_metadata_community(metadata=None):
         sa.Column('subscribers', sa.Integer,      nullable=False, server_default='0'),
         sa.Column('is_nsfw',     BOOLEAN,         nullable=False, server_default='0'),
         sa.Column('about',       sa.String(120),  nullable=False, server_default=''),
+        sa.Column('primary_tag', sa.String(32),   nullable=False, server_default=''),
+        sa.Column('avatar_url',  sa.String(1024), nullable=False, server_default=''),
         sa.Column('description', sa.String(5000), nullable=False, server_default=''),
         sa.Column('flag_text',   sa.String(5000), nullable=False, server_default=''),
         sa.Column('settings',    TEXT,            nullable=False, server_default='{}'),
