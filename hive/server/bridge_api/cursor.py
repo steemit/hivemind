@@ -246,6 +246,20 @@ async def pids_by_blog(db, account: str, start_author: str = '',
          LIMIT :limit
     """ % (seek, skip)
 
+    # alternate implementation -- may be more efficient
+    #sql = """
+    #    SELECT id
+    #      FROM (
+    #             SELECT id, author account, created_at FROM hive_posts
+    #              WHERE depth = 0 AND is_deleted = '0' AND community_id IS NULL
+    #              UNION ALL
+    #             SELECT post_id id, account, created_at FROM hive_reblogs
+    #           ) blog
+    #     WHERE account = :account %s
+    #  ORDER BY created_at DESC
+    #     LIMIT :limit
+    #""" % seek
+
     return await db.query_col(sql, account_id=account_id, account=account,
                               start_id=start_id, limit=limit)
 
