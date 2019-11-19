@@ -261,6 +261,7 @@ def build_metadata_community(metadata=None):
         sa.Column('is_nsfw',     BOOLEAN,         nullable=False, server_default='0'),
         sa.Column('about',       sa.String(120),  nullable=False, server_default=''),
         sa.Column('primary_tag', sa.String(32),   nullable=False, server_default=''),
+        sa.Column('category',    sa.String(32),   nullable=False, server_default=''),
         sa.Column('avatar_url',  sa.String(1024), nullable=False, server_default=''),
         sa.Column('description', sa.String(5000), nullable=False, server_default=''),
         sa.Column('flag_text',   sa.String(5000), nullable=False, server_default=''),

@@ -299,6 +299,7 @@ class DbState:
 
         if cls._ver == 14:
             cls.db().query("ALTER TABLE hive_communities ADD COLUMN primary_tag VARCHAR(32)   NOT NULL DEFAULT ''")
+            cls.db().query("ALTER TABLE hive_communities ADD COLUMN category    VARCHAR(32)   NOT NULL DEFAULT ''")
             cls.db().query("ALTER TABLE hive_communities ADD COLUMN avatar_url  VARCHAR(1024) NOT NULL DEFAULT ''")
             cls.db().query("CREATE INDEX hive_posts_cache_ix20 ON hive_posts_cache (community_id, author, payout, post_id) WHERE is_paidout = '0'")
             cls._set_ver(15)
