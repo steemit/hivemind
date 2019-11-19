@@ -39,11 +39,13 @@ STRINGS = {
 }
 
 @return_error_info
-async def account_notifications(context, account, min_score=0, last_id=None, limit=100):
+async def account_notifications(context, account, min_score=25, last_id=None, limit=100):
     """Load notifications for named account."""
     db = context['db']
     limit = valid_limit(limit, 100)
     account_id = await get_account_id(db, account)
+
+    if account[:5] == 'hive-': min_score = 0
 
     seek = ' AND hn.id < :last_id' if last_id else ''
     col = 'hn.community_id' if account[:5] == 'hive-' else 'dst_id'
