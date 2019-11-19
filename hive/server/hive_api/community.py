@@ -1,7 +1,7 @@
 """Hive API: Community methods"""
 import logging
 import ujson as json
-from hive.server.hive_api.common import (get_account_id, get_community_id)
+from hive.server.hive_api.common import (get_account_id, get_community_id, valid_limit)
 from hive.server.common.helpers import return_error_info
 
 # pylint: disable=too-many-lines
@@ -100,20 +100,22 @@ async def list_subscribers(context, community):
     return [(r['name'], ROLES[r['role_id'] or 0], r['title']) for r in rows]
 
 @return_error_info
-async def list_communities(context, last='', limit=25, query=None, observer=None):
+async def list_communities(context, last='', limit=100, query=None, observer=None):
     """List all communities, paginated. Returns lite community list."""
+    limit = valid_limit(limit, 100)
+
     db = context['db']
     assert not query, 'query not yet supported'
 
     seek = ''
     if last:
-        seek = """ WHERE rank > (SELECT rank
-                                   FROM hive_communities
-                                  WHERE name = :last) """
+        seek = """AND rank > (SELECT rank
+                                FROM hive_communities
+                               WHERE name = :last)"""
 
-    sql = """SELECT id FROM hive_communities %s
-              WHERE rank > 0 AND (num_pending > 0 OR LENGTH(about) > 3)
-           ORDER BY rank""" % seek
+    sql = """SELECT id FROM hive_communities
+              WHERE rank > 0 AND (num_pending > 0 OR LENGTH(about) > 3) %s
+           ORDER BY rank LIMIT :limit""" % seek
     ids = await db.query_col(sql, last=last, limit=limit)
     if not ids: return []
 
