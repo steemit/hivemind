@@ -207,6 +207,7 @@ class Community:
         role = cls.get_user_role(community_id, account_id)
         type_id = int(community[5])
 
+        # TODO: check `nsfw` tag requirement #267
         # TODO: (1.5) check that beneficiaries are valid
 
         if type_id == TYPE_JOURNAL:
