@@ -238,7 +238,7 @@ class Posts:
         error = None
         if community_id and is_valid and not Community.is_post_valid(community_id, op):
             error = 'not authorized'
-            is_valid = False
+            #is_valid = False # TODO: reserved for future blacklist status?
             is_muted = True
 
         return dict(author=op['author'], permlink=op['permlink'], id=pid,
