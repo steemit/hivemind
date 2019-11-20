@@ -2,6 +2,7 @@
 
 import logging
 import ujson as json
+from hive.server.common.mutes import Mutes
 from hive.server.common.helpers import json_date
 
 from hive.utils.normalize import sbd_amount
@@ -62,6 +63,9 @@ async def load_posts_keyed(db, ids, truncate_body=0):
 
         row['author_rep'] = author['reputation']
         post = _condenser_post_object(row, truncate_body=truncate_body)
+
+        post['blacklists'] = Mutes.lists(post['author'], author['reputation'])
+
         posts_by_id[row['post_id']] = post
         post_cids[row['post_id']] = row['community_id']
 
@@ -96,6 +100,10 @@ async def load_posts_keyed(db, ids, truncate_body=0):
             role = roles[cid][author] if author in roles[cid] else (0, '')
             post['author_role'] = ROLES[role[0]]
             post['author_title'] = role[1]
+        else:
+            post['stats']['gray'] = ('irredeemables' in post['blacklists']
+                                     or len(post['blacklists']) >= 2)
+        post['stats']['hide'] = 'irredeemables' in post['blacklists']
 
 
     sql = """SELECT id FROM hive_posts
@@ -140,6 +148,9 @@ async def _query_author_map(db, posts):
 
 def _condenser_profile_object(row):
     """Convert an internal account record into legacy-steemd style."""
+
+    blacklists = Mutes.lists(row['name'], row['reputation'])
+
     return {
         'id': row['id'],
         'name': row['name'],
@@ -147,6 +158,7 @@ def _condenser_profile_object(row):
         'active': json_date(row['active_at']),
         'post_count': row['post_count'],
         'reputation': row['reputation'],
+        'blacklists': blacklists,
         'stats': {
             'sp': int(row['vote_weight'] * 0.0005037),
             'rank': row['rank'],

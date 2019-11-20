@@ -2,7 +2,6 @@
 
 import logging
 
-from hive.server.common.mutes import Mutes
 from hive.server.bridge_api.objects import load_posts_keyed
 from hive.server.common.helpers import (
     return_error_info,
@@ -63,10 +62,9 @@ async def _load_discussion(db, root_id):
     posts = await load_posts_keyed(db, ids)
 
     # remove posts/comments from muted accounts
-    muted_accounts = set() #TODO: Mutes.all()
     rem_pids = []
     for pid, post in posts.items():
-        if post['author'] in muted_accounts:
+        if post['stats']['hide']:
             rem_pids.append(pid)
     for pid in rem_pids:
         if pid in posts:
