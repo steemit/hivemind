@@ -96,8 +96,8 @@ def post_to_internal(post, post_id, level='insert', promoted=None):
     return values
 
 
-def post_basic(post):
-    """Basic post normalization: json-md, tags, and flags."""
+def parse_md(post):
+    """Safely parse json_metadata from post object."""
     md = {}
     # At least one case where jsonMetadata was double-encoded: condenser#895
     # jsonMetadata = JSON.parse(jsonMetadata);
@@ -107,6 +107,18 @@ def post_basic(post):
             md = {}
     except Exception:
         pass
+    return md
+
+def parse_tags(md):
+    """Safely read `tags` list from metadata dict."""
+    # if (typeof tags == 'string') tags = tags.split(' '); # legacy condenser compat
+    if md and 'tags' in md and isinstance(md['tags'], list):
+        return md['tags']
+    return []
+
+def post_basic(post):
+    """Basic post normalization: json-md, tags, and flags."""
+    md = parse_md(post)
 
     thumb_url = ''
     if md and 'image' in md:
@@ -120,10 +132,7 @@ def post_basic(post):
             del md['image']
 
     # clean up tags, check if nsfw
-    tags = [post['category']]
-    # if (typeof tags == 'string') tags = tags.split(' '); # legacy condenser compat
-    if md and 'tags' in md and isinstance(md['tags'], list):
-        tags = tags + md['tags']
+    tags = [post['category']] + parse_tags(md)
     tags = map(lambda tag: (str(tag) or '').strip('# ').lower()[:32], tags)
     tags = filter(None, tags)
     tags = list(distinct(tags))[:5]

@@ -11,6 +11,7 @@ from hive.db.adapter import Db
 from hive.indexer.accounts import Accounts
 from hive.indexer.notify import Notify
 from hive.db.db_state import DbState
+from hive.utils.post import parse_md, parse_tags
 
 log = logging.getLogger(__name__)
 
@@ -171,6 +172,11 @@ class Community:
         return name
 
     @classmethod
+    def _is_nsfw(cls, cid):
+        sql = "SELECT is_nsfw FROM hive_communities WHERE id = :id"
+        return DB.query_one(sql, id=cid)
+
+    @classmethod
     def get_all_muted(cls, community_id):
         """Return a list of all muted accounts."""
         return DB.query_col("""SELECT name FROM hive_accounts
@@ -207,15 +213,30 @@ class Community:
         role = cls.get_user_role(community_id, account_id)
         type_id = int(community[5])
 
-        # TODO: check `nsfw` tag requirement #267
+        # role checking
+        if role < Role.guest:
+            # mutes cannot post/comment
+            return False
+        if type_id == TYPE_JOURNAL:
+            # posting restricted to members
+            if not comment_op['parent_author']:
+                if role < Role.member:
+                    return False
+        elif type_id == TYPE_COUNCIL:
+            # posting/commenting restricted to members
+            if role < Role.member:
+                return False
+
+        # nsfw tag compliance
+        if cls._is_nsfw(community_id):
+            md = parse_md(comment_op)
+            tags = parse_tags(md)
+            if 'nsfw' not in tags:
+                return False
+
         # TODO: (1.5) check that beneficiaries are valid
 
-        if type_id == TYPE_JOURNAL:
-            if not comment_op['parent_author']:
-                return role >= Role.member
-        elif type_id == TYPE_COUNCIL:
-            return role >= Role.member
-        return role >= Role.guest # or at least not muted
+        return True
 
     @classmethod
     def recalc_pending_payouts(cls):
