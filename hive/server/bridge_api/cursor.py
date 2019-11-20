@@ -39,8 +39,8 @@ async def _cids(db, tag, observer_id):
         return await db.query_col("SELECT id FROM hive_communities")
     if tag[:5] == 'hive-':
         cid = await _get_community_id(db, tag)
-        return [cid] if cid else []
-    return []
+        if cid: return [cid]
+    return None
 
 #TODO: async def posts_by_ranked
 async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, observer_id=None):
@@ -60,11 +60,14 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
 
     # list of comm ids to query, if any
     cids = await _cids(db, tag, observer_id)
-    if cids: tag = None
+    if cids is not None:
+        if not cids:
+            return []
+        tag = None
 
     prepend = []
     if not tag and not start_permlink and sort in ('trending', 'hot'):
-        cid = cids[0] if len(cids) == 1 else DEFAULT_CID
+        cid = cids[0] if cids and len(cids) == 1 else DEFAULT_CID
         prepend = await _pinned(db, cid)
 
     start_id = None
@@ -193,12 +196,7 @@ async def pids_by_category(db, tag, sort, last_id, limit):
 async def _subscribed(db, account_id):
     sql = """SELECT community_id FROM hive_subscriptions
               WHERE account_id = :account_id"""
-    ids = await db.query_col(sql, account_id=account_id)
-    if not ids:
-        # TODO: evaluate handling of `all` when no subs
-        ids = await db.query_col("""SELECT id FROM hive_communities
-                                     WHERE rank > 0 AND rank < 10""")
-    return ids
+    return await db.query_col(sql, account_id=account_id)
 
 async def _pinned(db, community_id):
     """Get a list of pinned post `id`s in `community`."""
