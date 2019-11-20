@@ -31,17 +31,6 @@ async def _get_community_id(db, name):
     _id = await db.query_one("SELECT id FROM hive_communities WHERE name = :n", n=name)
     return _id
 
-async def _cids(db, tag, observer_id):
-    if tag == 'my':
-        return await _subscribed(db, observer_id)
-    if tag == 'all':
-        # TODO: filter on not null
-        return await db.query_col("SELECT id FROM hive_communities")
-    if tag[:5] == 'hive-':
-        cid = await _get_community_id(db, tag)
-        if cid: return [cid]
-    return None
-
 #TODO: async def posts_by_ranked
 async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, observer_id=None):
     """Get a list of post_ids for a given posts query.
@@ -58,33 +47,39 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     # TODO: `payout` should limit to ~24hrs
     # pylint: disable=too-many-arguments
 
-    # list of comm ids to query, if any
-    cids = await _cids(db, tag, observer_id)
-    if cids is not None:
-        if not cids:
-            return []
-        tag = None
+    # list of comm ids to query, if tag is comms key
+    cids = None
+    single = None
+    if tag == 'my':
+        cids = await _subscribed(db, observer_id)
+        if not cids: return []
+    elif tag == 'all':
+        cids = []
+    elif tag[:5] == 'hive-':
+        single = await _get_community_id(db, tag)
+        if single: cids = [single]
 
-    prepend = []
-    if not tag and not start_permlink and sort in ('trending', 'hot'):
-        cid = cids[0] if cids and len(cids) == 1 else DEFAULT_CID
-        prepend = await _pinned(db, cid)
+    # if tag was comms key, then no tag filter
+    if cids is not None: tag = None
 
     start_id = None
     if start_permlink:
         start_id = await _get_post_id(db, start_author, start_permlink)
 
-    if cids:
-        pids = await pids_by_community(db, cids, sort, start_id, limit)
-    else:
+    if cids is None:
         pids = await pids_by_category(db, tag, sort, start_id, limit)
+    else:
+        pids = await pids_by_community(db, cids, sort, start_id, limit)
 
-    # remove any pids to be prepended
-    for pid in prepend:
-        if pid in pids:
-            pids.remove(pid)
+    # if not filtered by tag, is first page trending: prepend pinned
+    if not tag and not start_id and sort == 'trending':
+        prepend = await _pinned(db, single or DEFAULT_CID)
+        for pid in prepend:
+            if pid in pids:
+                pids.remove(pid)
+        pids = prepend + pids
 
-    return prepend + pids
+    return pids
 
 
 async def pids_by_community(db, ids, sort, seek_id, limit):
@@ -104,13 +99,12 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
         'muted':           ('payout',      True,   False,  True,  False)}
 
     # validate
-    assert ids, 'no community ids provided to query'
     assert sort in definitions, 'unknown sort %s' % sort
 
     # setup
     field, pending, toponly, gray, promoted = definitions[sort]
     table = 'hive_posts_cache'
-    where = ["community_id IN :ids"]
+    where = ["community_id IN :ids"] if ids else ["community_id IS NOT NULL"]
 
     # select
     if gray:     where.append("is_grayed = '1'")
