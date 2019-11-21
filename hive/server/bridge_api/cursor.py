@@ -290,6 +290,29 @@ async def pids_by_feed_with_reblog(db, account: str, start_author: str = '',
     return [(row[0], row[1]) for row in result]
 
 
+async def pids_by_posts(db, account: str, start_permlink: str = '', limit: int = 20):
+    """Get a list of post_ids representing top-level posts by an author."""
+    seek = ''
+    start_id = None
+    if start_permlink:
+        start_id = await _get_post_id(db, account, start_permlink)
+        if not start_id:
+            return []
+
+        seek = "AND id <= :start_id"
+
+    # `depth` in ORDER BY is a no-op, but forces an ix3 index scan (see #189)
+    sql = """
+        SELECT id FROM hive_posts
+         WHERE author = :account %s
+           AND is_deleted = '0'
+           AND depth = '0'
+      ORDER BY id DESC
+         LIMIT :limit
+    """ % seek
+
+    return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
+
 async def pids_by_comments(db, account: str, start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids representing comments by an author."""
     seek = ''
@@ -306,6 +329,7 @@ async def pids_by_comments(db, account: str, start_permlink: str = '', limit: in
         SELECT id FROM hive_posts
          WHERE author = :account %s
            AND is_deleted = '0'
+           AND depth > 0
       ORDER BY id DESC, depth
          LIMIT :limit
     """ % seek

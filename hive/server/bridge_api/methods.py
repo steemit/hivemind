@@ -95,7 +95,8 @@ async def get_ranked_posts(context, sort, start_author='', start_permlink='',
 async def get_account_posts(context, sort, account, start_author='', start_permlink='',
                             limit=20, observer=None):
     """Get posts for an account -- blog, feed, comments, or replies."""
-    assert sort in ['blog', 'feed', 'comments', 'replies', 'payout'], 'invalid sort'
+    valid_sorts = ['blog', 'feed', 'posts', 'comments', 'replies', 'payout']
+    assert sort in valid_sorts, 'invalid account sort'
     assert account, 'account is required'
 
     db = context['db']
@@ -114,6 +115,11 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
     elif sort == 'feed':
         res = await cursor.pids_by_feed_with_reblog(db, account, *start, limit)
         return await load_posts_reblogs(context['db'], res)
+    elif sort == 'posts':
+        start = start if start_permlink else (account, None)
+        assert account == start[0], 'comments - account must match start author'
+        ids = await cursor.pids_by_posts(db, *start, limit)
+        return await load_posts(context['db'], ids)
     elif sort == 'comments':
         start = start if start_permlink else (account, None)
         assert account == start[0], 'comments - account must match start author'
