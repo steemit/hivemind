@@ -111,7 +111,11 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
 
     if sort == 'blog':
         ids = await cursor.pids_by_blog(db, account, *start, limit)
-        return await load_posts(context['db'], ids)
+        posts = await load_posts(context['db'], ids)
+        for post in posts:
+            if post['author'] != account:
+                post['reblogged_by'] = [account]
+        return posts
     elif sort == 'feed':
         res = await cursor.pids_by_feed_with_reblog(db, account, *start, limit)
         return await load_posts_reblogs(context['db'], res)
