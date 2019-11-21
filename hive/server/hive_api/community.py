@@ -174,8 +174,8 @@ async def load_communities(db, ids, lite=True):
     """
     assert ids, 'no ids passed to load_communities'
 
-    sql = """SELECT id, name, title, about, lang, type_id, is_nsfw,
-                    subscribers, created_at, sum_pending, num_pending %s
+    sql = """SELECT id, name, title, about, lang, type_id, is_nsfw, subscribers,
+                    created_at, sum_pending, num_pending, num_authors %s
                FROM hive_communities WHERE id IN :ids"""
     fields = ', description, flag_text, settings' if not lite else ''
     rows = await db.query_all(sql % fields, ids=tuple(ids))
@@ -193,6 +193,7 @@ async def load_communities(db, ids, lite=True):
             'subscribers': row['subscribers'],
             'sum_pending': row['sum_pending'],
             'num_pending': row['num_pending'],
+            'num_authors': row['num_authors'],
             'created_at': str(row['created_at']),
             'context': {},
         }

@@ -256,6 +256,7 @@ def build_metadata_community(metadata=None):
         sa.Column('created_at',  sa.DateTime,     nullable=False),
         sa.Column('sum_pending', sa.Integer,      nullable=False, server_default='0'),
         sa.Column('num_pending', sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('num_authors', sa.Integer,      nullable=False, server_default='0'),
         sa.Column('rank',        sa.Integer,      nullable=False, server_default='0'),
         sa.Column('subscribers', sa.Integer,      nullable=False, server_default='0'),
         sa.Column('is_nsfw',     BOOLEAN,         nullable=False, server_default='0'),

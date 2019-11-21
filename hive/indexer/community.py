@@ -220,28 +220,37 @@ class Community:
     @classmethod
     def recalc_pending_payouts(cls):
         """Update all pending payout and rank fields."""
-        sql = """SELECT c.id, COALESCE(p.ttl, 0) ttl, COALESCE(p.cnt, 0) cnt
+        sql = """SELECT id,
+                        COALESCE(posts, 0),
+                        COALESCE(payouts, 0),
+                        COALESCE(authors, 0)
                    FROM hive_communities c
               LEFT JOIN (
-                             SELECT community_id, SUM(payout) ttl, COUNT(*) cnt
+                             SELECT community_id,
+                                    COUNT(*) posts,
+                                    ROUND(SUM(payout)) payouts,
+                                    COUNT(DISTINCT author) authors
                                FROM hive_posts_cache
                               WHERE community_id IS NOT NULL
                                 AND is_paidout = '0'
                            GROUP BY community_id
                         ) p
-                     ON p.community_id = c.id
-               ORDER BY ROUND(COALESCE(p.ttl, 0), 1) DESC,
-                        c.subscribers DESC,
-                        COALESCE(p.cnt, 0) DESC,
+                     ON community_id = id
+               ORDER BY COALESCE(payouts, 0) DESC,
+                        COALESCE(authors, 0) DESC,
+                        COALESCE(posts, 0) DESC,
+                        subscribers DESC,
                         (CASE WHEN c.title = '' THEN 1 ELSE 0 END)
         """
 
         for rank, row in enumerate(DB.query_all(sql)):
-            community_id, ttl, cnt = row
+            cid, posts, payouts, authors = row
             sql = """UPDATE hive_communities
-                        SET sum_pending = :ttl, num_pending = :cnt, rank = :rank
+                        SET sum_pending = :payouts, num_pending = :posts,
+                            num_authors = :authors, rank = :rank
                       WHERE id = :id"""
-            DB.query(sql, id=community_id, ttl=ttl, cnt=cnt, rank=rank+1)
+            DB.query(sql, id=cid, payouts=payouts, posts=posts,
+                     authors=authors, rank=rank+1)
 
 class CommunityOp:
     """Handles validating and processing of community custom_json ops."""
