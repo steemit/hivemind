@@ -90,16 +90,17 @@ def _render(row):
 
 def _render_msg(row):
     msg = STRINGS[row['type_id']]
-    if row['type_id'] == NotifyType.vote and row['payload']:
-        amt = float(row['payload'][1:])
+    payload = row['payload']
+    if row['type_id'] == NotifyType.vote and payload:
+        amt = float(payload[1:])
         if amt >= 0.01:
             msg += ' (<payload>)'
-            row['payload'] = "%.2f" % amt
+            payload = "%.2f" % amt
 
     if '<dst>' in msg: msg = msg.replace('<dst>', '@' + row['dst'])
     if '<src>' in msg: msg = msg.replace('<src>', '@' + row['src'])
     if '<post>' in msg: msg = msg.replace('<post>', _post_url(row))
-    if '<payload>' in msg: msg = msg.replace('<payload>', row['payload'] or 'null')
+    if '<payload>' in msg: msg = msg.replace('<payload>', payload or 'null')
     if '<comm>' in msg: msg = msg.replace('<comm>', row['community_title'])
     return msg
 
