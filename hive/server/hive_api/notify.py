@@ -95,7 +95,7 @@ def _render_msg(row):
         amt = float(payload[1:])
         if amt >= 0.01:
             msg += ' (<payload>)'
-            payload = "%.2f" % amt
+            payload = "$%.2f" % amt
 
     if '<dst>' in msg: msg = msg.replace('<dst>', '@' + row['dst'])
     if '<src>' in msg: msg = msg.replace('<src>', '@' + row['src'])
