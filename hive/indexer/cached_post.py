@@ -558,7 +558,7 @@ class CachedPost:
 
     @classmethod
     def _notifs(cls, post, pid, level, payout):
-        # pylint: disable=too-many-locals
+        # pylint: disable=too-many-locals,too-many-branches
         author = post['author']
         author_id = Accounts.get_id(author)
         parent_author = post['parent_author']
@@ -576,13 +576,16 @@ class CachedPost:
         if level in ('insert', 'update'):
             accounts = set(filter(Accounts.exists, mentions(post['body'])))
             accounts -= {author, parent_author}
-            if len(accounts) <= 10:
+            score = Accounts.default_score(author)
+            if score < 30: max_mentions = 5
+            elif score < 60: max_mentions = 10
+            else: max_mentions = 25
+            if len(accounts) <= max_mentions:
+                penalty = min([score, 2 * (len(accounts) - 1)])
                 for mention in accounts:
                     mention_id = Accounts.get_id(mention)
                     if (not cls._mentioned(pid, mention_id)
                             and not cls._muted(mention_id, author_id)):
-                        score = Accounts.default_score(author)
-                        penalty = min([score, 5 * (len(accounts) - 1)])
                         Notify('mention', src_id=author_id,
                                dst_id=mention_id, post_id=pid, when=date,
                                score=(score - penalty)).write()
