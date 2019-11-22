@@ -26,7 +26,7 @@ STRINGS = {
     NotifyType.follow:         '<src> followed you',
     NotifyType.reply:          '<src> replied to you',
     NotifyType.mention:        '<src> mentioned you',
-    NotifyType.vote:           '<src> voted on your post (<payload>)',
+    NotifyType.vote:           '<src> voted on your post',
 
     #NotifyType.update_account: '<dst> updated account',
     #NotifyType.receive:        '<src> sent <dst> <payload>',
@@ -90,6 +90,12 @@ def _render(row):
 
 def _render_msg(row):
     msg = STRINGS[row['type_id']]
+    if row['type_id'] == NotifyType.vote and row['payload']:
+        amt = float(row['payload'][1:])
+        if amt >= 0.01:
+            msg += ' (<payload>)'
+            row['payload'] = "%.2f" % amt
+
     if '<dst>' in msg: msg = msg.replace('<dst>', '@' + row['dst'])
     if '<src>' in msg: msg = msg.replace('<src>', '@' + row['src'])
     if '<post>' in msg: msg = msg.replace('<post>', _post_url(row))
