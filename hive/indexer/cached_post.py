@@ -568,7 +568,8 @@ class CachedPost:
         if level == 'insert' and parent_author and parent_author != author:
             parent_author_id = Accounts.get_id(parent_author)
             if not cls._muted(parent_author_id, author_id):
-                Notify('reply', src_id=author_id, dst_id=parent_author_id,
+                ntype = 'reply' if post['depth'] == 1 else 'reply_comment'
+                Notify(ntype, src_id=author_id, dst_id=parent_author_id,
                        score=Accounts.default_score(author), post_id=pid,
                        when=date).write()
 

@@ -24,7 +24,8 @@ STRINGS = {
     NotifyType.error:          'error: <payload>',
     NotifyType.reblog:         '<src> resteemed your post',
     NotifyType.follow:         '<src> followed you',
-    NotifyType.reply:          '<src> replied to you',
+    NotifyType.reply:          '<src> replied to your post',
+    NotifyType.reply_comment:  '<src> replied to your comment',
     NotifyType.mention:        '<src> mentioned you',
     NotifyType.vote:           '<src> voted on your post',
 
