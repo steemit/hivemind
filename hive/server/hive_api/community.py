@@ -1,8 +1,16 @@
 """Hive API: Community methods"""
 import logging
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 import ujson as json
+
 from hive.server.hive_api.common import (get_account_id, get_community_id, valid_limit)
 from hive.server.common.helpers import return_error_info
+
+def days_ago(days):
+    """Get the date `n` days ago."""
+    return datetime.now() + relativedelta(days=-days)
+
 
 # pylint: disable=too-many-lines
 
@@ -68,6 +76,27 @@ async def list_top_communities(context, limit=25):
     out = await context['db'].query_all(sql, limit=limit)
 
     return [(r[0], r[1]) for r in out]
+
+
+@return_error_info
+async def list_pop_communities(context, limit=25):
+    """List communities by new subscriber count. Returns lite community list."""
+    limit = valid_limit(limit, 25)
+    sql = """SELECT name, title
+               FROM hive_communities
+               JOIN (
+                         SELECT community_id, COUNT(*) newsubs
+                           FROM hive_subscriptions
+                          WHERE created_at > :cutoff
+                       GROUP BY community_id
+                    ) stats
+                 ON stats.community_id = id
+           ORDER BY newsubs DESC
+              LIMIT :limit"""
+    out = await context['db'].query_all(sql, limit=limit)
+
+    return [(r[0], r[1]) for r in out]
+
 
 @return_error_info
 async def list_all_subscriptions(context, account):
