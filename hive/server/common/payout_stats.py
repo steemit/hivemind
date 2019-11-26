@@ -63,7 +63,7 @@ class PayoutStats:
         await self._db.query("""
             BEGIN;
               DROP TABLE IF EXISTS payout_stats;
-            CREATE TEMPORARY TABLE payout_stats AS %s;
+            CREATE TABLE payout_stats AS %s;
             CREATE INDEX payout_stats_ix1
                 ON payout_stats (community_id, author, payout);
             COMMIT;

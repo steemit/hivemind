@@ -20,6 +20,12 @@ def return_error_info(function):
         try:
             return await function(*args, **kwargs)
         except (ApiError, AssertionError, TypeError, Exception) as e:
+            if isinstance(e, KeyError):
+                #TODO: KeyError overloaded for method not found. Any KeyErrors
+                #      captured in this decorater are likely irrelevant to
+                #      json_rpc_server. Verify. (e.g. `KeyError: 'flag_weight'`)
+                log.error("ERR3: %s\n%s", repr(e), traceback.format_exc())
+                raise ApiError('ErrKey: ' + str(e))
             if isinstance(e, ApiError) and 'get_account_votes' in str(e):
                 raise e
             if isinstance(e, AssertionError) and 'account not found' in str(e):

@@ -46,7 +46,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
     sql = """SELECT post_id, community_id, author, permlink, title, body, category, depth,
                     promoted, payout, payout_at, is_paidout, children, votes,
                     created_at, updated_at, rshares, raw_json, json,
-                    is_hidden, is_grayed, total_votes
+                    is_hidden, is_grayed, total_votes, flag_weight
                FROM hive_posts_cache WHERE post_id IN :ids"""
     result = await db.query_all(sql, ids=tuple(ids))
     author_map = await _query_author_map(db, result)
@@ -213,7 +213,8 @@ def _condenser_post_object(row, truncate_body=0):
     post['stats'] = {
         'hide': row['is_hidden'],
         'gray': row['is_grayed'],
-        'total_votes': row['total_votes']}
+        'total_votes': row['total_votes'],
+        'flag_weight': row['flag_weight']}
 
     # import fields from legacy object
     assert row['raw_json']

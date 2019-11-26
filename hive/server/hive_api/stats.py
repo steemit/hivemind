@@ -7,6 +7,16 @@ from hive.server.hive_api.common import valid_limit
 
 log = logging.getLogger(__name__)
 
+def _row(row):
+    if row['name']:
+        url = 'trending/' + row['name']
+        label = row['title']
+    else:
+        url = '@' + row['author']
+        label = url
+
+    return (url, label, float(row['payout']), row['posts'], row['authors'])
+
 @return_error_info
 async def get_payout_stats(context, limit=100):
     """Get payout stats for building treemap."""
@@ -17,7 +27,7 @@ async def get_payout_stats(context, limit=100):
     await stats.generate()
 
     sql = """
-        SELECT hc.title, author, payout, posts, authors
+        SELECT hc.name, hc.title, author, payout, posts, authors
           FROM payout_stats
      LEFT JOIN hive_communities hc ON hc.id = community_id
          WHERE (community_id IS NULL AND author IS NOT NULL)
@@ -27,8 +37,7 @@ async def get_payout_stats(context, limit=100):
     """
 
     rows = await db.query_all(sql, limit=limit)
-    items = [(r['title'], r['author'], float(r['payout']),
-              r['posts'], r['authors']) for r in rows]
+    items = list(map(_row, rows))
 
     sql = """SELECT SUM(payout) FROM payout_stats WHERE author IS NULL"""
     total = await db.query_one(sql)

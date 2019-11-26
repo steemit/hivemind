@@ -242,7 +242,7 @@ def post_stats(post):
     # take negative rshares, divide by 2, truncate 10 digits (plus neg sign),
     #   and count digits. creates a cheap log10, stake-based flag weight.
     #   result: 1 = approx $400 of downvoting stake; 2 = $4,000; etc
-    flag_weight = max((len(str(neg_rshares / 2)) - 11, 0))
+    flag_weight = max((len(str(int(neg_rshares / 2))) - 11, 0))
 
     author_rep = rep_log10(post['author_reputation'])
     has_pending_payout = sbd_amount(post['pending_payout_value']) >= 0.02

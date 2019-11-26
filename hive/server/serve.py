@@ -128,6 +128,7 @@ def build_methods():
         hive_api_community.get_community,
         hive_api_community.get_community_context,
         hive_api_community.list_communities,
+        hive_api_community.list_pop_communities,
         hive_api_community.list_community_roles,
         hive_api_community.list_subscribers,
         hive_api_community.list_all_subscriptions,

@@ -85,7 +85,7 @@ class Sync:
                 self.listen()
             except MicroForkException as e:
                 # attempt to recover by restarting stream
-                log.error("micro fork: %s", repr(e))
+                log.error("NOTIFYALERT microfork: %s", repr(e))
 
     def initial(self):
         """Initial sync routine."""
