@@ -305,6 +305,11 @@ class DbState:
             cls.db().query("CREATE INDEX hive_posts_cache_ix20 ON hive_posts_cache (community_id, author, payout, post_id) WHERE is_paidout = '0'")
             cls._set_ver(15)
 
+        if cls._ver == 15:
+            cls.db().query("ALTER TABLE hive_accounts DROP COLUMN lr_notif_id")
+            cls.db().query("ALTER TABLE hive_accounts ADD COLUMN lastread_at TIMESTAMP WITHOUT TIME ZONE DEFAULT '1970-01-01 00:00:00' NOT NULL")
+            cls.db().query("CREATE INDEX hive_notifs_ix6 ON hive_notifs (dst_id, created_at, score, id) WHERE dst_id IS NOT NULL")
+            cls._set_ver(16)
 
         reset_autovac(cls.db())
 
