@@ -21,7 +21,7 @@ def valid_keys(obj, required=[], optional=[]):
     keys = obj.keys()
     missing = required - keys
     assert not missing, 'missing required keys: %s' % missing
-    extra = keys - required - optional
+    extra = keys - (required + optional)
     assert not extra, 'extraneous keys: %s' % extra
     return keys
 
