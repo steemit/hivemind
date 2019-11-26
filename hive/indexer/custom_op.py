@@ -13,6 +13,7 @@ from hive.indexer.notify import Notify
 
 from hive.indexer.community import process_json_community_op, START_BLOCK
 from hive.utils.normalize import load_json_key
+from hive.utils.json import valid_op_json, valid_date, valid_command, valid_keys
 
 DB = Db.instance()
 
@@ -40,7 +41,7 @@ class CustomOp:
     def process_ops(cls, ops, block_num, block_date):
         """Given a list of operation in block, filter and process them."""
         for op in ops:
-            if op['id'] not in ['follow', 'community']:
+            if op['id'] not in ['follow', 'community', 'notify']:
                 continue
 
             account = _get_auth(op)
@@ -55,10 +56,38 @@ class CustomOp:
             elif op['id'] == 'community':
                 if block_num > START_BLOCK:
                     process_json_community_op(account, op_json, block_date)
+            elif op['id'] == 'notify':
+                cls._process_notify(account, op_json, block_date)
+
+    @classmethod
+    def _process_notify(cls, account, op_json, block_date):
+        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog)
+
+        mark_read {date: {type: 'date'}}
+        """
+        try:
+            command, payload = valid_op_json(op_json)
+            valid_command(command, valid=('setLastRead'))
+            if command == 'setLastRead':
+                valid_keys(payload, required=['date'])
+                date = valid_date(payload['date'])
+                assert date <= block_date
+                Notify.set_lastread(account, date)
+        except AssertionError as e:
+            log.warning("notify op fail: %s in %s", e, op_json)
 
     @classmethod
     def _process_legacy(cls, account, op_json, block_date):
-        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog)"""
+        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog)
+
+        follow {follower: {type: 'account'},
+                following: {type: 'account'},
+                what: {type: 'list'}}
+        reblog {account: {type: 'account'},
+                author: {type: 'account'},
+                permlink: {type: 'permlink'},
+                delete: {type: 'str', optional: True}}
+        """
         if not isinstance(op_json, list):
             return
         if len(op_json) != 2:
