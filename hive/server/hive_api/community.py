@@ -104,11 +104,13 @@ async def list_all_subscriptions(context, account):
     db = context['db']
     account_id = await get_account_id(db, account)
 
-    sql = """SELECT name, title FROM hive_communities
-              WHERE id IN (SELECT community_id
-                             FROM hive_subscriptions
-                            WHERE account_id = :account_id)
-           ORDER BY rank"""
+    sql = """SELECT c.name, c.title
+               FROM hive_communities c
+               JOIN hive_subscriptions s ON c.id = s.community_id
+          LEFT JOIN hive_roles r ON r.account_id = s.account_id
+                                AND r.community_id = c.id
+              WHERE s.account_id = :account_id
+           ORDER BY COALESCE(role_id, 0) DESC, c.rank"""
     out = await db.query_all(sql, account_id=account_id)
     return [(r[0], r[1]) for r in out]
 
