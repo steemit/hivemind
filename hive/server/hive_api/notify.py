@@ -45,13 +45,14 @@ async def unread_notifications(context, account, min_score=25):
     db = context['db']
     account_id = await get_account_id(db, account)
 
-    sql = """SELECT COUNT(*) FROM hive_notifs
-              WHERE dst_id = :account_id
-                AND score >= :min_score
-                AND created_at > (SELECT lastread_at
-                                    FROM hive_accounts
-                                   WHERE id = :account_id)"""
-    return await db.query_one(sql, account_id=account_id, min_score=min_score)
+    sql = """SELECT lastread_at,
+                    (SELECT COUNT(*) FROM hive_notifs
+                      WHERE dst_id = ha.id
+                        AND score >= :min_score
+                        AND created_at > lastread_at) unread
+               FROM hive_accounts ha
+              WHERE id = :account_id)"""
+    return await db.query_row(sql, account_id=account_id, min_score=min_score)
 
 @return_error_info
 async def account_notifications(context, account, min_score=25, last_id=None, limit=100):

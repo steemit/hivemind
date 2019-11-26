@@ -74,6 +74,12 @@ class Notify:
         """Instantiate from db row."""
         return Notify(**dict(row))
 
+    @classmethod
+    def set_lastread(cls, account, date):
+        """Update `lastread` column for a named account."""
+        sql = "UPDATE hive_accounts SET lastread_at = :date WHERE name = :name"
+        DB.query(sql, date=date, name=account)
+
     def to_dict(self):
         """Generate a db row."""
         return dict(
