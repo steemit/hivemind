@@ -40,6 +40,22 @@ STRINGS = {
 }
 
 @return_error_info
+async def unread_notifications(context, account, min_score=25):
+    """Load notification status for a named account."""
+    db = context['db']
+    account_id = await get_account_id(db, account)
+
+    sql = """SELECT lastread_at,
+                    (SELECT COUNT(*) FROM hive_notifs
+                      WHERE dst_id = ha.id
+                        AND score >= :min_score
+                        AND created_at > lastread_at) unread
+               FROM hive_accounts ha
+              WHERE id = :account_id"""
+    row = await db.query_row(sql, account_id=account_id, min_score=min_score)
+    return dict(lastread=str(row['lastread_at']), unread=row['unread'])
+
+@return_error_info
 async def account_notifications(context, account, min_score=25, last_id=None, limit=100):
     """Load notifications for named account."""
     db = context['db']

@@ -123,6 +123,7 @@ def build_methods():
         bridge_api.get_profile,
         bridge_api.get_trending_topics,
         hive_api_notify.account_notifications,
+        hive_api_notify.unread_notifications,
         hive_api_stats.get_payout_stats,
         hive_api_community.get_community,
         hive_api_community.get_community_context,
