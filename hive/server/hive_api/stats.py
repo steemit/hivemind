@@ -18,10 +18,10 @@ def _row(row):
     return (url, label, float(row['payout']), row['posts'], row['authors'])
 
 @return_error_info
-async def get_payout_stats(context, limit=100):
+async def get_payout_stats(context, limit=250):
     """Get payout stats for building treemap."""
     db = context['db']
-    limit = valid_limit(limit, 100)
+    limit = valid_limit(limit, 250)
 
     stats = PayoutStats.instance()
     await stats.generate()
