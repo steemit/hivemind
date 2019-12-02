@@ -87,7 +87,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
-    # pylint: disable=bad-whitespace
+    # pylint: disable=bad-whitespace, line-too-long
 
     # TODO: `payout` should limit to ~24hrs
     definitions = {#         field         pending toponly gray   promoted
@@ -104,7 +104,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     # setup
     field, pending, toponly, gray, promoted = definitions[sort]
     table = 'hive_posts_cache'
-    where = ["community_id IN :ids"] if ids else ["community_id IS NOT NULL"]
+    where = ["community_id IN :ids"] if ids else ["community_id IS NOT NULL AND community_id != 1337319"]
 
     # select
     if gray:     where.append("is_grayed = '1'")
@@ -112,7 +112,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     if toponly:  where.append("depth = 0")
     if pending:  where.append("is_paidout = '0'")
     if promoted: where.append('promoted > 0')
-    if sort == 'payout': where.append("payout_at < TIMESTAMP 'tomorrow'")
+    if sort == 'payout': where.append("payout_at < now() + interval '24 hours'")
 
     # seek
     if seek_id:
@@ -166,7 +166,7 @@ async def pids_by_category(db, tag, sort, last_id, limit):
     if params[3]: where.append('depth > 0')
     if params[4]: where.append('promoted > 0')
     if sort == 'muted': where.append("is_grayed = '1' AND payout > 0")
-    if sort == 'payout': where.append("payout_at < TIMESTAMP 'tomorrow'")
+    if sort == 'payout': where.append("payout_at < now() + interval '24 hours'")
 
     # filter by category or tag
     if tag:
