@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 
 def _row(row):
     if row['name']:
-        url = 'trending/' + row['name']
+        url = row['name']
         label = row['title']
     else:
         url = '@' + row['author']
