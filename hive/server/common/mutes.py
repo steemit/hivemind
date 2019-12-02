@@ -55,7 +55,8 @@ class Mutes:
                 out.extend(lists['blacklisted'])
 
             if name in cls.instance().accounts:
-                out.append('irredeemables')
+                if 'irredeemables' not in out:
+                    out.append('irredeemables')
 
             if int(rep) < 1:
                 out.append('reputation-0')
