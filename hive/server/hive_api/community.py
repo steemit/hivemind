@@ -117,18 +117,21 @@ async def list_all_subscriptions(context, account):
 @return_error_info
 async def list_subscribers(context, community):
     """Lists subscribers of `community`."""
+    #limit = valid_limit(limit, 100)
     db = context['db']
     cid = await get_community_id(db, community)
 
-    sql = """SELECT ha.name, hr.role_id, hr.title
+    sql = """SELECT ha.name, hr.role_id, hr.title, hs.created_at
                FROM hive_subscriptions hs
           LEFT JOIN hive_roles hr ON hs.account_id = hr.account_id
                                  AND hs.community_id = hr.community_id
                JOIN hive_accounts ha ON hs.account_id = ha.id
               WHERE hs.community_id = :cid
-           ORDER BY hs.created_at DESC"""
+           ORDER BY hs.created_at DESC
+              LIMIT 250"""
     rows = await db.query_all(sql, cid=cid)
-    return [(r['name'], ROLES[r['role_id'] or 0], r['title']) for r in rows]
+    return [(r['name'], ROLES[r['role_id'] or 0], r['title'],
+             str(r['created_at'])) for r in rows]
 
 @return_error_info
 async def list_communities(context, last='', limit=100, query=None, observer=None):
