@@ -71,8 +71,13 @@ async def get_community_context(context, name, account):
 async def list_top_communities(context, limit=25):
     """List top communities. Returns lite community list."""
     assert limit < 100
+    #sql = """SELECT name, title FROM hive_communities
+    #          WHERE rank > 0 ORDER BY rank LIMIT :limit"""
     sql = """SELECT name, title FROM hive_communities
-              WHERE rank > 0 ORDER BY rank LIMIT :limit"""
+              WHERE id = 1344247 OR rank > 0
+           ORDER BY (CASE WHEN id = 1344247 THEN 0 ELSE rank END)
+              LIMIT :limit"""
+
     out = await context['db'].query_all(sql, limit=limit)
 
     return [(r[0], r[1]) for r in out]
