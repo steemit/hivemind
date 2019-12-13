@@ -4,6 +4,9 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 from hive.utils.normalize import rep_to_raw
+from hive.server.common.mutes import Mutes
+
+#pylint: disable=too-many-lines
 
 def last_month():
     """Get the date 1 month ago."""
@@ -114,6 +117,7 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
     """
+    #pylint: disable=too-many-arguments
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments']
 
@@ -316,7 +320,8 @@ async def pids_by_account_comments(db, account: str, start_permlink: str = '', l
     return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
 
 
-async def pids_by_replies_to_account(db, start_author: str, start_permlink: str = '', limit: int = 20):
+async def pids_by_replies_to_account(db, start_author: str, start_permlink: str = '',
+                                     limit: int = 20):
     """Get a list of post_ids representing replies to an author.
 
     To get the first page of results, specify `start_author` as the
@@ -346,6 +351,11 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
     else:
         parent_account = start_author
 
+    mute = ''
+    muted_accounts = Mutes.all()
+    if muted_accounts:
+        mute = " AND author NOT IN :mutes"
+
     sql = """
        SELECT id FROM hive_posts
         WHERE parent_id IN (SELECT id FROM hive_posts
@@ -353,9 +363,10 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
                                AND is_deleted = '0'
                           ORDER BY id DESC
                              LIMIT 10000) %s
-          AND is_deleted = '0'
+          AND is_deleted = '0' %s
      ORDER BY id DESC
         LIMIT :limit
-    """ % seek
+    """ % (seek, mute)
 
-    return await db.query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
+    return await db.query_col(sql, parent=parent_account, start_id=start_id,
+                              limit=limit, mutes=tuple(muted_accounts))
