@@ -3,7 +3,7 @@ import logging
 
 from hive.server.common.helpers import return_error_info, json_date
 from hive.indexer.notify import NotifyType
-from hive.server.hive_api.common import get_account_id, valid_limit
+from hive.server.hive_api.common import get_account_id, valid_limit, get_post_id
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +69,21 @@ async def account_notifications(context, account, min_score=25, last_id=None, li
     sql = _notifs_sql(col + " = :dst_id" + seek)
 
     rows = await db.query_all(sql, min_score=min_score, dst_id=account_id,
+                              last_id=last_id, limit=limit)
+    return [_render(row) for row in rows]
+
+@return_error_info
+async def post_notifications(context, author, permlink, min_score=25, last_id=None, limit=100):
+    """Load notifications for a specific post."""
+    # pylint: disable=too-many-arguments
+    db = context['db']
+    limit = valid_limit(limit, 100)
+    post_id = await get_post_id(db, author, permlink)
+
+    seek = ' AND hn.id < :last_id' if last_id else ''
+    sql = _notifs_sql("post_id = :post_id" + seek)
+
+    rows = await db.query_all(sql, min_score=min_score, post_id=post_id,
                               last_id=last_id, limit=limit)
     return [_render(row) for row in rows]
 
