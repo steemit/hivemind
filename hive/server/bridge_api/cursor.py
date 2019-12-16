@@ -6,6 +6,7 @@ from dateutil.relativedelta import relativedelta
 # pylint: disable=too-many-lines
 
 DEFAULT_CID = 1317453
+PAYOUT_WINDOW = "now() + interval '12 hours' AND now() + interval '36 hours'"
 
 def last_month():
     """Get the date 1 month ago."""
@@ -112,7 +113,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     if toponly:  where.append("depth = 0")
     if pending:  where.append("is_paidout = '0'")
     if promoted: where.append('promoted > 0')
-    if sort == 'payout': where.append("payout_at < now() + interval '24 hours'")
+    if sort == 'payout': where.append("payout_at BETWEEN %s" % PAYOUT_WINDOW)
 
     # seek
     if seek_id:
@@ -166,7 +167,7 @@ async def pids_by_category(db, tag, sort, last_id, limit):
     if params[3]: where.append('depth > 0')
     if params[4]: where.append('promoted > 0')
     if sort == 'muted': where.append("is_grayed = '1' AND payout > 0")
-    if sort == 'payout': where.append("payout_at < now() + interval '24 hours'")
+    if sort == 'payout': where.append("payout_at BETWEEN %s" % PAYOUT_WINDOW)
 
     # filter by category or tag
     if tag:
