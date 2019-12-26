@@ -105,11 +105,11 @@ async def list_pop_communities(context, limit=25):
 
 @return_error_info
 async def list_all_subscriptions(context, account):
-    """Lists all communities `account` subscribes to."""
+    """Lists all communities `account` subscribes to, plus role and title in each."""
     db = context['db']
     account_id = await get_account_id(db, account)
 
-    sql = """SELECT c.name, c.title
+    sql = """SELECT c.name, c.title, COALESCE(r.role_id, 0), COALESCE(r.title, '')
                FROM hive_communities c
                JOIN hive_subscriptions s ON c.id = s.community_id
           LEFT JOIN hive_roles r ON r.account_id = s.account_id
@@ -117,7 +117,7 @@ async def list_all_subscriptions(context, account):
               WHERE s.account_id = :account_id
            ORDER BY COALESCE(role_id, 0) DESC, c.rank"""
     out = await db.query_all(sql, account_id=account_id)
-    return [(r[0], r[1]) for r in out]
+    return [(r[0], r[1], ROLES[r[2]], r[3]) for r in out]
 
 @return_error_info
 async def list_subscribers(context, community):
