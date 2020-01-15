@@ -55,7 +55,7 @@ async def get_community_context(context, name, account):
     assert aid, 'account not found'
 
     sql = """SELECT role_id, title FROM hive_roles
-              WHERE account_id = :id
+              WHERE account_id = :aid
                 AND community_id = :cid"""
     role = await db.query_row(sql, aid=aid, cid=cid) or (0, '')
 
