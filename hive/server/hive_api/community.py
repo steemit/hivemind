@@ -164,6 +164,16 @@ async def list_communities(context, last='', limit=100, query=None, observer=Non
         await _append_observer_subs(db, communities, observer_id)
         await _append_observer_roles(db, communities, observer_id)
 
+    sql = """SELECT community_id, ha.name FROM hive_roles hr
+               JOIN hive_accounts ha ON hr.account_id = ha.id
+              WHERE role_id = 6 AND community_id IN :ids"""
+    admins = await db.query_all(sql, ids=tuple(ids))
+    for row in admins:
+        _id = row[0]
+        if 'admins' not in communities[_id]:
+            communities[_id]['admins'] = list()
+        communities[_id]['admins'].append(row[1])
+
     return [communities[_id] for _id in ids]
 
 @return_error_info
