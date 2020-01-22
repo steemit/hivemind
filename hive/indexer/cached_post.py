@@ -605,7 +605,7 @@ class CachedPost:
                 rshares = int(vote['rshares'])
                 if vote['voter'] not in voters or rshares < 10e9: continue
                 contrib = int(1000 * ratio * rshares)
-                if contrib < 1: continue # < $0.001
+                if contrib < 20: continue # < $0.020
 
                 voter_id = Accounts.get_id(vote['voter'])
                 if not cls._voted(pid, author_id, voter_id):
