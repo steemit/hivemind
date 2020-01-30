@@ -7,6 +7,7 @@ from funcy.seqs import first
 from hive.db.adapter import Db
 from hive.db.db_state import DbState
 from hive.indexer.accounts import Accounts
+from hive.indexer.notify import Notify
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,10 @@ class Follow:
         if not DbState.is_initial_sync():
             if new_state == 1:
                 Follow.follow(op['flr'], op['flg'])
+                if old_state is None:
+                    score = Accounts.default_score(op_json['follower'])
+                    Notify('follow', src_id=op['flr'], dst_id=op['flg'],
+                           when=op['at'], score=score).write()
             if old_state == 1:
                 Follow.unfollow(op['flr'], op['flg'])
 
@@ -64,18 +69,18 @@ class Follow:
            or not isinstance(op['what'], list)
            or not 'follower' in op
            or not 'following' in op):
-            return
+            return None
 
         what = first(op['what']) or ''
         defs = {'': 0, 'blog': 1, 'ignore': 2}
         if what not in defs:
-            return
+            return None
 
         if(op['follower'] == op['following']        # can't follow self
            or op['follower'] != account             # impersonation
            or not Accounts.exists(op['following'])  # invalid account
            or not Accounts.exists(op['follower'])): # invalid account
-            return
+            return None
 
         return dict(flr=Accounts.get_id(op['follower']),
                     flg=Accounts.get_id(op['following']),

@@ -1,7 +1,7 @@
 """condenser_api trending tag fetching methods"""
 
 from aiocache import cached
-from hive.server.condenser_api.common import (return_error_info, valid_tag, valid_limit)
+from hive.server.common.helpers import (return_error_info, valid_tag, valid_limit)
 
 @return_error_info
 @cached(ttl=7200, timeout=1200)

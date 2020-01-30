@@ -8,9 +8,10 @@ import ujson as json
 from toolz import partition_all
 from hive.db.adapter import Db
 
-from hive.utils.post import post_basic, post_legacy, post_payout, post_stats
+from hive.utils.post import post_basic, post_legacy, post_payout, post_stats, mentions
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
+from hive.indexer.notify import Notify
 
 # pylint: disable=too-many-lines
 
@@ -41,6 +42,9 @@ class CachedPost:
 
     # new promoted values, pending write
     _pending_promoted = {}
+
+    # pending vote notifs {pid: [voters]}
+    _votes = {}
 
     @classmethod
     def update_promoted_amount(cls, post_id, amount):
@@ -82,10 +86,14 @@ class CachedPost:
         cls._dirty('recount', author, permlink, pid)
 
     @classmethod
-    def vote(cls, author, permlink, pid=None):
+    def vote(cls, author, permlink, pid=None, voter=None):
         """Handle a post dirtied by a `vote` op."""
         cls._dirty('upvote', author, permlink, pid)
-        Accounts.dirty(set([author])) # rep changed
+        if voter:
+            url = author + '/' + permlink
+            if url not in cls._votes:
+                cls._votes[url] = []
+            cls._votes[url].append(voter)
 
     @classmethod
     def insert(cls, author, permlink, pid):
@@ -108,16 +116,19 @@ class CachedPost:
          - you can always get_content on any author/permlink you see in an op
         """
         DB.query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
+        DB.query("DELETE FROM hive_post_tags   WHERE post_id = :id", id=post_id)
 
         # if it was queued for a write, remove it
         url = author+'/'+permlink
+        log.warning("deleting %s", url) #173
         if url in cls._queue:
             del cls._queue[url]
+            log.warning("deleted %s", url) #173
             if url in cls._ids:
                 del cls._ids[url]
 
     @classmethod
-    def undelete(cls, post_id, author, permlink):
+    def undelete(cls, post_id, author, permlink, category):
         """Handle a post 'undeleted' by a `comment` op.
 
         'Undeletion' occurs when hive detects that a previously deleted
@@ -149,8 +160,10 @@ class CachedPost:
         DB.query(cls._insert({
             'post_id': post_id,
             'author': author,
-            'permlink': permlink}))
+            'permlink': permlink,
+            'category': category}))
         cls.update(author, permlink, post_id)
+        log.warning("undeleted %s/%s", author, permlink) #173
 
     @classmethod
     def flush(cls, steem, trx=False, spread=1, full_total=None):
@@ -171,10 +184,13 @@ class CachedPost:
             summary = ', '.join(summary) if summary else 'none'
             log.info("[PREP] posts cache process: %s", summary)
 
-        cls._update_batch(steem, tuples, trx, full_total=full_total)
         for url, _, _ in tuples:
             del cls._queue[url]
-            if url in cls._ids:
+
+        cls._update_batch(steem, tuples, trx, full_total=full_total)
+
+        for url, _, _ in tuples:
+            if url not in cls._queue and url in cls._ids:
                 del cls._ids[url]
 
         return counts
@@ -243,7 +259,7 @@ class CachedPost:
         for (pid, author, permlink) in paidout:
             authors.add(author)
             cls._dirty('payout', author, permlink, pid)
-        Accounts.dirty(authors) # force-update accounts on payout
+        Accounts.dirty_set(authors) # force-update accounts on payout
 
         if len(paidout) > 200:
             log.info("[PREP] Found %d payouts for %d authors since %s",
@@ -289,7 +305,14 @@ class CachedPost:
         gap = cls.dirty_missing()
         log.info("[INIT] %d missing post cache entries", gap)
         while cls.flush(steem, trx=True, full_total=gap)['insert']:
+            last_gap = gap
             gap = cls.dirty_missing()
+            if gap == last_gap:
+                # edge case -- if last post entry was deleted, this
+                # process would never reach condition where the last
+                # cached id == last post id. abort if progress stalls.
+                log.warning('ignoring %d inserts -- may be deleted')
+                break
 
     @classmethod
     def _update_batch(cls, steem, tuples, trx=True, full_total=None):
@@ -321,10 +344,16 @@ class CachedPost:
             post_ids = [tup[1] for tup in tups]
             post_levels = [tup[2] for tup in tups]
 
-            catmap = cls._get_cat_map_for_insert(tups)
+            coremap = cls._get_core_fields(tups)
             for pid, post, level in zip(post_ids, posts, post_levels):
                 if post['author']:
-                    if pid in catmap: post['category'] = catmap[pid]
+                    assert pid in coremap, 'pid not in coremap'
+                    if pid in coremap:
+                        core = coremap[pid]
+                        post['category'] = core['category']
+                        post['community_id'] = core['community_id']
+                        post['gray'] = core['is_muted']
+                        post['hide'] = not core['is_valid']
                     buffer.extend(cls._sql(pid, post, level=level))
                 else:
                     # When a post has been deleted (or otherwise DNE),
@@ -338,15 +367,16 @@ class CachedPost:
                                FROM hive_posts WHERE id = :id"""
                     row = DB.query_row(sql, id=pid)
                     if row['is_deleted']:
-                        log.info("found deleted post for %s: %s", level, row)
-                        if level == 'payout':
-                            log.warning("force delete %s", row)
-                            cls.delete(pid, row['author'], row['permlink'])
-                    elif level == 'insert':
-                        log.error("insert post not found -- DEFER %s", row)
-                        cls.insert(row['author'], row['permlink'], pid)
+                        # rare or impossible -- report if detected
+                        log.error("found deleted post for %s: %s", level, row)
                     else:
-                        log.warning("%s post not found -- DEFER %s", level, row)
+                        # most likely cause of this condition is that the post
+                        # has been deleted (e.g. sync trails by 2 blocks, post
+                        # was inserted at head-2, deleted at head). another
+                        # possible cause is that a node behind a load balancer
+                        # is behind; we detected a new post but querying a node
+                        # that hasn't seen it yet.
+                        log.warning("post not found -- DEFER %s %s", level, row)
                         cls._dirty(level, row['author'], row['permlink'], pid)
 
                 cls._bump_last_id(pid)
@@ -368,19 +398,30 @@ class CachedPost:
         return cls._last_id
 
     @classmethod
-    def _get_cat_map_for_insert(cls, tups):
-        """Cached posts must use validated `category` from hive_posts.
+    def _get_core_fields(cls, tups):
+        """Cached posts must inherit some properties from hive_posts.
 
-        `category` returned from steemd is subject to change.
+        Purpose
+         - immutable `category` (returned from steemd is subject to change)
+         - authoritative community_id can be determined and written
+         - community muted/valid cols override legacy gray/hide logic
         """
         # get list of ids of posts which are to be inserted
-        ids = [tup[1] for tup in tups if tup[2] == 'insert']
+        # TODO: try conditional. currently competes w/ legacy flags on vote
+        #ids = [tup[1] for tup in tups if tup[2] in ('insert', 'update')]
+        ids = [tup[1] for tup in tups]
         if not ids:
             return {}
-        # build a map of id->category for each of those posts
-        sql = "SELECT id, category FROM hive_posts WHERE id IN :ids"
-        cats = {r[0]: r[1] for r in DB.query_all(sql, ids=tuple(ids))}
-        return cats
+
+        # build a map of id->fields for each of those posts
+        sql = """SELECT id, category, community_id, is_muted, is_valid
+                   FROM hive_posts WHERE id IN :ids"""
+        core = {r[0]: {'category': r[1],
+                       'community_id': r[2],
+                       'is_muted': r[3],
+                       'is_valid': r[4]}
+                for r in DB.query_all(sql, ids=tuple(ids))}
+        return core
 
     @classmethod
     def _bump_last_id(cls, next_id):
@@ -412,9 +453,10 @@ class CachedPost:
 
         Valid levels are:
          - `insert`: post does not yet exist in cache
-         - `update`: post was modified
          - `payout`: post was paidout
+         - `update`: post was modified
          - `upvote`: post payout/votes changed
+         - `recount`: post child count changed
         """
 
         #pylint: disable=bad-whitespace
@@ -431,7 +473,6 @@ class CachedPost:
                             % (level, pid, cls.last_id(), repr(post)))
 
         # start building the queries
-        tag_sqls = []
         values = [('post_id', pid)]
 
         # immutable; write only once (*edge case: undeleted posts)
@@ -446,6 +487,7 @@ class CachedPost:
         if level in ['insert', 'payout', 'update']:
             basic = post_basic(post)
             values.extend([
+                ('community_id',  post['community_id']), # immutable*
                 ('created_at',    post['created']),    # immutable*
                 ('updated_at',    post['last_update']),
                 ('title',         post['title']),
@@ -461,11 +503,6 @@ class CachedPost:
                 ('raw_json',      json.dumps(post_legacy(post))),
             ])
 
-        # update tags if action is insert/update and is root post
-        if level in ['insert', 'update'] and not post['depth']:
-            diff = level != 'insert' # do not attempt tag diff on insert
-            tag_sqls.extend(cls._tag_sqls(pid, basic['tags'], diff=diff))
-
         # if there's a pending promoted value to write, pull it out
         if pid in cls._pending_promoted:
             bal = cls._pending_promoted.pop(pid)
@@ -474,24 +511,43 @@ class CachedPost:
         # update unconditionally
         payout = post_payout(post)
         stats = post_stats(post)
+
+        # //--
+        # if community - override fields.
+        # TODO: make conditional (date-based?)
+        assert 'community_id' in post, 'comm_id not loaded'
+        if post['community_id']:
+            stats['hide'] = post['hide']
+            stats['gray'] = post['gray']
+        # //--
+
         values.extend([
-            ('payout',      "%f" % payout['payout']),
-            ('rshares',     "%d" % payout['rshares']),
-            ('votes',       "%s" % payout['csvotes']),
-            ('sc_trend',    "%f" % payout['sc_trend']),
-            ('sc_hot',      "%f" % payout['sc_hot']),
-            ('flag_weight', "%f" % stats['flag_weight']),
-            ('total_votes', "%d" % stats['total_votes']),
-            ('up_votes',    "%d" % stats['up_votes']),
-            ('is_hidden',   "%d" % stats['hide']),
-            ('is_grayed',   "%d" % stats['gray']),
-            ('author_rep',  "%f" % stats['author_rep']),
-            ('children',    "%d" % min(post['children'], 32767)),
+            ('payout',      payout['payout']),
+            ('rshares',     payout['rshares']),
+            ('votes',       payout['csvotes']),
+            ('sc_trend',    payout['sc_trend']),
+            ('sc_hot',      payout['sc_hot']),
+            ('flag_weight', stats['flag_weight']),
+            ('total_votes', stats['total_votes']),
+            ('up_votes',    stats['up_votes']),
+            ('is_hidden',   stats['hide']),
+            ('is_grayed',   stats['gray']),
+            ('author_rep',  stats['author_rep']),
+            ('children',    min(post['children'], 32767)),
         ])
+
+        # update tags if action is insert/update and is root post
+        tag_sqls = []
+        if level in ['insert', 'update'] and not post['depth']:
+            diff = level != 'insert' # do not attempt tag diff on insert
+            tag_sqls.extend(cls._tag_sqls(pid, basic['tags'], diff=diff))
 
         # if recounting, update the parent next pass.
         if level == 'recount' and post['depth']:
             cls.recount(post['parent_author'], post['parent_permlink'])
+
+        # trigger any notifications
+        cls._notifs(post, pid, level, payout['payout'])
 
         # build the post insert/update SQL, add tag SQLs
         if level == 'insert':
@@ -499,6 +555,95 @@ class CachedPost:
         else:
             sql = cls._update(values)
         return [sql] + tag_sqls
+
+    @classmethod
+    def _notifs(cls, post, pid, level, payout):
+        # pylint: disable=too-many-locals,too-many-branches
+        author = post['author']
+        author_id = Accounts.get_id(author)
+        parent_author = post['parent_author']
+        date = post['last_update']
+
+        # reply notif
+        if level == 'insert' and parent_author and parent_author != author:
+            parent_author_id = Accounts.get_id(parent_author)
+            if not cls._muted(parent_author_id, author_id):
+                ntype = 'reply' if post['depth'] == 1 else 'reply_comment'
+                Notify(ntype, src_id=author_id, dst_id=parent_author_id,
+                       score=Accounts.default_score(author), post_id=pid,
+                       when=date).write()
+
+        # mentions notif
+        if level in ('insert', 'update'):
+            accounts = set(filter(Accounts.exists, mentions(post['body'])))
+            accounts -= {author, parent_author}
+            score = Accounts.default_score(author)
+            if score < 30: max_mentions = 5
+            elif score < 60: max_mentions = 10
+            else: max_mentions = 25
+            if len(accounts) <= max_mentions:
+                penalty = min([score, 2 * (len(accounts) - 1)])
+                for mention in accounts:
+                    mention_id = Accounts.get_id(mention)
+                    if (not cls._mentioned(pid, mention_id)
+                            and not cls._muted(mention_id, author_id)):
+                        Notify('mention', src_id=author_id,
+                               dst_id=mention_id, post_id=pid, when=date,
+                               score=(score - penalty)).write()
+            else:
+                url = '@%s/%s' % (author, post['permlink'])
+                log.info("skip %d mentions in %s", len(accounts), url)
+
+        # votes notif
+        url = post['author'] + '/' + post['permlink']
+        if url in cls._votes:
+            voters = cls._votes[url]
+            del cls._votes[url]
+            net = float(post['net_rshares'])
+            ratio = float(payout) / net if net else 0
+            for vote in post['active_votes']:
+                rshares = int(vote['rshares'])
+                if vote['voter'] not in voters or rshares < 10e9: continue
+                contrib = int(1000 * ratio * rshares)
+                if contrib < 20: continue # < $0.020
+
+                voter_id = Accounts.get_id(vote['voter'])
+                if not cls._voted(pid, author_id, voter_id):
+                    score = min(100, (len(str(contrib)) - 1) * 25) # $1 = 75
+                    payload = "$%.3f" % (contrib / 1000)
+                    Notify('vote', src_id=voter_id, dst_id=author_id,
+                           when=vote['time'], post_id=pid, score=score,
+                           payload=payload).write()
+
+
+    @classmethod
+    def _muted(cls, account, target):
+        # TODO: optimize (mem cache?)
+        sql = """SELECT 1 FROM hive_follows
+                  WHERE follower = :account
+                    AND following = :target
+                    AND state = 2"""
+        return DB.query_col(sql, account=account, target=target)
+
+    @classmethod
+    def _voted(cls, post_id, account_id, voter_id):
+        sql = """SELECT 1
+                   FROM hive_notifs
+                  WHERE dst_id = :dst_id
+                    AND src_id = :src_id
+                    AND post_id = :post_id
+                    AND type_id = 17"""
+        return bool(DB.query_one(sql, dst_id=account_id,
+                                 post_id=post_id, src_id=voter_id))
+
+    @classmethod
+    def _mentioned(cls, post_id, account_id):
+        sql = """SELECT 1
+                   FROM hive_notifs
+                  WHERE dst_id = :dst_id
+                    AND post_id = :post_id
+                    AND type_id = 16"""
+        return bool(DB.query_one(sql, dst_id=account_id, post_id=post_id))
 
     @classmethod
     def _tag_sqls(cls, pid, tags, diff=True):

@@ -1,4 +1,4 @@
-#pylint: disable=missing-docstring
+#pylint: disable=missing-docstring, invalid-name
 from hive.utils.unique_fifo import UniqueFIFO
 
 def test_unique_queue():
@@ -10,7 +10,7 @@ def test_unique_queue():
     assert len(q) == 3
 
     pop1 = q.shift_portion(3)
-    assert pop1 == ['tim'] or pop1 == ['bob']
+    assert pop1 == ['tim']
     assert len(q) == 2
 
     assert q.extend(set()) == 0
@@ -20,8 +20,8 @@ def test_unique_queue():
     assert len(q) == 2
 
     pop2 = q.shift_portion(1)
-    assert pop2 == ['bob', 'foo'] or pop2 == ['tim', 'foo']
-    assert len(q) == 0
+    assert pop2 == ['bob', 'foo']
+    assert not q
 
     assert q.shift_portion(500) == []
 
@@ -33,3 +33,10 @@ def test_unique_queue():
     assert q.shift_count(1) == ['tom']
     assert q.shift_count(400) == ['foo']
     assert q.shift_count(400) == []
+
+    q.extend(set(['foo', 'bar']))
+    q.add('foo')
+    q.add('cat')
+    assert len(q) == 3
+    pop3 = q.shift_portion(1)
+    assert pop3 == ['foo', 'bar', 'cat']

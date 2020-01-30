@@ -8,6 +8,15 @@ class UniqueFIFO:
         self._queue = []
         self._set = set()
 
+    def add(self, item):
+        """Push a single item onto the queue."""
+        if item in self._set:
+            return 0
+
+        self._queue.append(item)
+        self._set.add(item)
+        return 1
+
     def extend(self, items):
         """Push multiple items onto the queue.
 

@@ -37,7 +37,6 @@ class StatsAbstract:
 
     def check_timing(self, call, ms, batch_size):
         """Override for service-specific QA"""
-        pass
 
     def ms(self):
         """Get total time spent in service"""
@@ -124,7 +123,7 @@ class DbStats(StatsAbstract):
 
 class Stats:
     """Container for steemd and db timing data."""
-    PRINT_THRESH_MINS = 5
+    PRINT_THRESH_MINS = 1
 
     _db = DbStats()
     _steemd = SteemStats()

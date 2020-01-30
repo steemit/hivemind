@@ -8,9 +8,9 @@ from sqlalchemy.types import VARCHAR
 from sqlalchemy.types import TEXT
 from sqlalchemy.types import BOOLEAN
 
-#pylint: disable=line-too-long, too-many-lines
+#pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 12
+DB_VERSION = 16
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -27,8 +27,6 @@ def build_metadata():
 
         sa.UniqueConstraint('hash', name='hive_blocks_ux1'),
         sa.ForeignKeyConstraint(['prev'], ['hive_blocks.hash'], name='hive_blocks_fk1'),
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
     )
 
     sa.Table(
@@ -56,9 +54,11 @@ def build_metadata():
         sa.Column('kb_used', sa.Integer, nullable=False, server_default='0'), # deprecated
         sa.Column('rank', sa.Integer, nullable=False, server_default='0'),
 
+        sa.Column('lastread_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
         sa.Column('active_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
         sa.Column('cached_at', sa.DateTime, nullable=False, server_default='1970-01-01 00:00:00'),
         sa.Column('raw_json', sa.Text),
+
 
         sa.UniqueConstraint('name', name='hive_accounts_ux1'),
         sa.Index('hive_accounts_ix1', 'vote_weight', 'id'), # core: quick ranks
@@ -66,8 +66,6 @@ def build_metadata():
         sa.Index('hive_accounts_ix3', 'vote_weight', 'name', postgresql_ops=dict(name='varchar_pattern_ops')), # API: lookup
         sa.Index('hive_accounts_ix4', 'id', 'name'), # API: quick filter/sort
         sa.Index('hive_accounts_ix5', 'cached_at', 'name'), # core/listen sweep
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
     )
 
     sa.Table(
@@ -76,10 +74,10 @@ def build_metadata():
         sa.Column('parent_id', sa.Integer),
         sa.Column('author', VARCHAR(16), nullable=False),
         sa.Column('permlink', VARCHAR(255), nullable=False),
-        sa.Column('community', VARCHAR(16), nullable=False),
         sa.Column('category', VARCHAR(255), nullable=False, server_default=''),
-        sa.Column('depth', SMALLINT, nullable=False),
+        sa.Column('community_id', sa.Integer, nullable=True),
         sa.Column('created_at', sa.DateTime, nullable=False),
+        sa.Column('depth', SMALLINT, nullable=False),
         sa.Column('is_deleted', BOOLEAN, nullable=False, server_default='0'),
         sa.Column('is_pinned', BOOLEAN, nullable=False, server_default='0'),
         sa.Column('is_muted', BOOLEAN, nullable=False, server_default='0'),
@@ -87,23 +85,13 @@ def build_metadata():
         sa.Column('promoted', sa.types.DECIMAL(10, 3), nullable=False, server_default='0'),
 
         sa.ForeignKeyConstraint(['author'], ['hive_accounts.name'], name='hive_posts_fk1'),
-        sa.ForeignKeyConstraint(['community'], ['hive_accounts.name'], name='hive_posts_fk2'),
         sa.ForeignKeyConstraint(['parent_id'], ['hive_posts.id'], name='hive_posts_fk3'),
         sa.UniqueConstraint('author', 'permlink', name='hive_posts_ux1'),
         sa.Index('hive_posts_ix3', 'author', 'depth', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: author blog/comments
         sa.Index('hive_posts_ix4', 'parent_id', 'id', postgresql_where=sql_text("is_deleted = '0'")), # API: fetching children
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
+        sa.Index('hive_posts_ix5', 'id', postgresql_where=sql_text("is_pinned = '1' AND is_deleted = '0'")), # API: pinned post status
+        sa.Index('hive_posts_ix6', 'community_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND is_pinned = '1' AND is_deleted = '0'")), # API: community pinned
     )
-
-    #sa.Table(
-    #    'hive_tags', metadata,
-    #    sa.Column('id', sa.Integer, primary_key=True),
-    #    sa.Column('name', CHAR(64), nullable=False),
-    #    sa.UniqueConstraint('name', name='hive_tags_ux1'),
-    #    mysql_engine='InnoDB',
-    #    mysql_default_charset='utf8mb4'
-    #)
 
     sa.Table(
         'hive_post_tags', metadata,
@@ -111,8 +99,6 @@ def build_metadata():
         sa.Column('tag', sa.String(32), nullable=False),
         sa.UniqueConstraint('tag', 'post_id', name='hive_post_tags_ux1'), # core
         sa.Index('hive_post_tags_ix1', 'post_id'), # core
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
     )
 
     sa.Table(
@@ -125,8 +111,6 @@ def build_metadata():
         sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'), # core
         sa.Index('hive_follows_ix5a', 'following', 'state', 'created_at', 'follower'),
         sa.Index('hive_follows_ix5b', 'follower', 'state', 'created_at', 'following'),
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
     )
 
     sa.Table(
@@ -138,9 +122,7 @@ def build_metadata():
         sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_reblogs_fk1'),
         sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_reblogs_fk2'),
         sa.UniqueConstraint('account', 'post_id', name='hive_reblogs_ux1'), # core
-        sa.Index('hive_reblogs_ix1', 'post_id', 'account', 'created_at'), # API -- TODO: seemingly unused
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
+        sa.Index('hive_reblogs_ix1', 'post_id', 'account', 'created_at'), # API -- not yet used
     )
 
     sa.Table(
@@ -157,68 +139,6 @@ def build_metadata():
         sa.ForeignKeyConstraint(['from_account'], ['hive_accounts.id'], name='hive_payments_fk1'),
         sa.ForeignKeyConstraint(['to_account'], ['hive_accounts.id'], name='hive_payments_fk2'),
         sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_payments_fk3'),
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
-    )
-
-    sa.Table(
-        'hive_communities', metadata,
-        sa.Column('name', VARCHAR(16), primary_key=True),
-        sa.Column('title', sa.String(32), nullable=False),
-        sa.Column('about', sa.String(255), nullable=False, server_default=''),
-        sa.Column('description', sa.String(5000), nullable=False, server_default=''),
-        sa.Column('lang', CHAR(2), nullable=False, server_default='en'),
-        sa.Column('settings', TEXT, nullable=False),
-        sa.Column('type_id', SMALLINT, nullable=False, server_default='0'),
-        sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.ForeignKeyConstraint(['name'], ['hive_accounts.name'], name='hive_communities_fk1'),
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
-    )
-
-    sa.Table(
-        'hive_members', metadata,
-        sa.Column('community', VARCHAR(16), nullable=False),
-        sa.Column('account', VARCHAR(16), nullable=False),
-        sa.Column('is_admin', BOOLEAN, nullable=False),
-        sa.Column('is_mod', BOOLEAN, nullable=False),
-        sa.Column('is_approved', BOOLEAN, nullable=False),
-        sa.Column('is_muted', BOOLEAN, nullable=False),
-        sa.Column('title', sa.String(255), nullable=False, server_default=''),
-        sa.ForeignKeyConstraint(['community'], ['hive_communities.name'], name='hive_members_fk1'),
-        sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_members_fk2'),
-        sa.UniqueConstraint('community', 'account', name='hive_members_ux1'),
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
-    )
-
-    sa.Table(
-        'hive_flags', metadata,
-        sa.Column('account', VARCHAR(16), nullable=False),
-        sa.Column('post_id', sa.Integer, nullable=False),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.Column('notes', sa.String(255), nullable=False),
-        sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_flags_fk1'),
-        sa.ForeignKeyConstraint(['post_id'], ['hive_posts.id'], name='hive_flags_fk2'),
-        sa.UniqueConstraint('account', 'post_id', name='hive_flags_ux1'),
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
-    )
-
-    sa.Table(
-        'hive_modlog', metadata,
-        sa.Column('id', sa.Integer, primary_key=True),
-        sa.Column('community', VARCHAR(16), nullable=False),
-        sa.Column('account', VARCHAR(16), nullable=False),
-        sa.Column('action', sa.String(32), nullable=False),
-        sa.Column('params', sa.String(1000), nullable=False),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.ForeignKeyConstraint(['community'], ['hive_communities.name'], name='hive_modlog_fk1'),
-        sa.ForeignKeyConstraint(['account'], ['hive_accounts.name'], name='hive_modlog_fk2'),
-        sa.Index('hive_modlog_ix1', 'community', 'created_at'),
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
     )
 
     sa.Table(
@@ -228,18 +148,17 @@ def build_metadata():
         sa.Column('created_at', sa.DateTime, nullable=False),
         sa.UniqueConstraint('post_id', 'account_id', name='hive_feed_cache_ux1'), # core
         sa.Index('hive_feed_cache_ix1', 'account_id', 'post_id', 'created_at'), # API (and rebuild?)
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
     )
 
     sa.Table(
         'hive_posts_cache', metadata,
-        sa.Column('post_id', sa.Integer, primary_key=True),
+        sa.Column('post_id', sa.Integer, primary_key=True, autoincrement=False),
         sa.Column('author', VARCHAR(16), nullable=False),
         sa.Column('permlink', VARCHAR(255), nullable=False),
         sa.Column('category', VARCHAR(255), nullable=False, server_default=''),
 
         # important/index
+        sa.Column('community_id', sa.Integer, nullable=True),
         sa.Column('depth', SMALLINT, nullable=False, server_default='0'),
         sa.Column('children', SMALLINT, nullable=False, server_default='0'),
 
@@ -280,18 +199,32 @@ def build_metadata():
         sa.Column('json', sa.Text),
         sa.Column('raw_json', sa.Text),
 
-        sa.Index('hive_posts_cache_ix2', 'promoted', postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")), # API
-        sa.Index('hive_posts_cache_ix3', 'payout_at', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # core
-        sa.Index('hive_posts_cache_ix6a', 'sc_trend', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: global trending
-        sa.Index('hive_posts_cache_ix7a', 'sc_hot', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: global hot
-        sa.Index('hive_posts_cache_ix6b', 'post_id', 'sc_trend', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered trending
-        sa.Index('hive_posts_cache_ix7b', 'post_id', 'sc_hot', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered hot
-        sa.Index('hive_posts_cache_ix8', 'category', 'payout', 'depth', postgresql_where=sql_text("is_paidout = '0'")), # API: tag stats
-        sa.Index('hive_posts_cache_ix9a', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout
-        sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: filtered payout
+        # index: misc
+        sa.Index('hive_posts_cache_ix3',  'payout_at', 'post_id',           postgresql_where=sql_text("is_paidout = '0'")),         # core: payout sweep
+        sa.Index('hive_posts_cache_ix8',  'category', 'payout', 'depth',    postgresql_where=sql_text("is_paidout = '0'")),         # API: tag stats
 
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
+        # index: ranked posts
+        sa.Index('hive_posts_cache_ix2',  'promoted',             postgresql_where=sql_text("is_paidout = '0' AND promoted > 0")),  # API: promoted
+
+        sa.Index('hive_posts_cache_ix6a', 'sc_trend', 'post_id',  postgresql_where=sql_text("is_paidout = '0'")),                   # API: trending             todo: depth=0
+        sa.Index('hive_posts_cache_ix7a', 'sc_hot',   'post_id',  postgresql_where=sql_text("is_paidout = '0'")),                   # API: hot                  todo: depth=0
+        sa.Index('hive_posts_cache_ix6b', 'post_id',  'sc_trend', postgresql_where=sql_text("is_paidout = '0'")),                   # API: trending, filtered   todo: depth=0
+        sa.Index('hive_posts_cache_ix7b', 'post_id',  'sc_hot',   postgresql_where=sql_text("is_paidout = '0'")),                   # API: hot, filtered        todo: depth=0
+
+        sa.Index('hive_posts_cache_ix9a',             'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout               todo: rem depth
+        sa.Index('hive_posts_cache_ix9b', 'category', 'depth', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: payout, filtered     todo: rem depth
+
+        sa.Index('hive_posts_cache_ix10', 'post_id', 'payout',                      postgresql_where=sql_text("is_grayed = '1' AND payout > 0")), # API: muted, by filter/date/payout
+
+        # index: stats
+        sa.Index('hive_posts_cache_ix20', 'community_id', 'author', 'payout', 'post_id', postgresql_where=sql_text("is_paidout = '0'")), # API: pending distribution; author payout
+
+        # index: community ranked posts
+        sa.Index('hive_posts_cache_ix30', 'community_id', 'sc_trend',   'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community trend
+        sa.Index('hive_posts_cache_ix31', 'community_id', 'sc_hot',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community hot
+        sa.Index('hive_posts_cache_ix32', 'community_id', 'created_at', 'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),        # API: community created
+        sa.Index('hive_posts_cache_ix33', 'community_id', 'payout',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND is_paidout = '0'")), # API: community payout
+        sa.Index('hive_posts_cache_ix34', 'community_id', 'payout',     'post_id',  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '1' AND is_paidout = '0'")), # API: community muted
     )
 
     sa.Table(
@@ -302,12 +235,88 @@ def build_metadata():
         sa.Column('usd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
         sa.Column('sbd_per_steem', sa.types.DECIMAL(8, 3), nullable=False),
         sa.Column('dgpo', sa.Text, nullable=False),
+    )
 
-        mysql_engine='InnoDB',
-        mysql_default_charset='utf8mb4'
+    metadata = build_metadata_community(metadata)
+
+    return metadata
+
+def build_metadata_community(metadata=None):
+    """Build community schema defs"""
+    if not metadata:
+        metadata = sa.MetaData()
+
+    sa.Table(
+        'hive_communities', metadata,
+        sa.Column('id',          sa.Integer,      primary_key=True, autoincrement=False),
+        sa.Column('type_id',     SMALLINT,        nullable=False),
+        sa.Column('lang',        CHAR(2),         nullable=False, server_default='en'),
+        sa.Column('name',        VARCHAR(16),     nullable=False),
+        sa.Column('title',       sa.String(32),   nullable=False, server_default=''),
+        sa.Column('created_at',  sa.DateTime,     nullable=False),
+        sa.Column('sum_pending', sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('num_pending', sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('num_authors', sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('rank',        sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('subscribers', sa.Integer,      nullable=False, server_default='0'),
+        sa.Column('is_nsfw',     BOOLEAN,         nullable=False, server_default='0'),
+        sa.Column('about',       sa.String(120),  nullable=False, server_default=''),
+        sa.Column('primary_tag', sa.String(32),   nullable=False, server_default=''),
+        sa.Column('category',    sa.String(32),   nullable=False, server_default=''),
+        sa.Column('avatar_url',  sa.String(1024), nullable=False, server_default=''),
+        sa.Column('description', sa.String(5000), nullable=False, server_default=''),
+        sa.Column('flag_text',   sa.String(5000), nullable=False, server_default=''),
+        sa.Column('settings',    TEXT,            nullable=False, server_default='{}'),
+
+        sa.UniqueConstraint('name', name='hive_communities_ux1'),
+        sa.Index('hive_communities_ix1', 'rank', 'id')
+    )
+
+    sa.Table(
+        'hive_roles', metadata,
+        sa.Column('account_id',   sa.Integer,     nullable=False),
+        sa.Column('community_id', sa.Integer,     nullable=False),
+        sa.Column('created_at',   sa.DateTime,    nullable=False),
+        sa.Column('role_id',      SMALLINT,       nullable=False, server_default='0'),
+        sa.Column('title',        sa.String(140), nullable=False, server_default=''),
+
+        sa.UniqueConstraint('account_id', 'community_id', name='hive_roles_ux1'),
+        sa.Index('hive_roles_ix1', 'community_id', 'account_id', 'role_id'),
+    )
+
+    sa.Table(
+        'hive_subscriptions', metadata,
+        sa.Column('account_id',   sa.Integer,  nullable=False),
+        sa.Column('community_id', sa.Integer,  nullable=False),
+        sa.Column('created_at',   sa.DateTime, nullable=False),
+
+        sa.UniqueConstraint('account_id', 'community_id', name='hive_subscriptions_ux1'),
+        sa.Index('hive_subscriptions_ix1', 'community_id', 'account_id', 'created_at'),
+    )
+
+    sa.Table(
+        'hive_notifs', metadata,
+        sa.Column('id',           sa.Integer,  primary_key=True),
+        sa.Column('type_id',      SMALLINT,    nullable=False),
+        sa.Column('score',        SMALLINT,    nullable=False),
+        sa.Column('created_at',   sa.DateTime, nullable=False),
+        sa.Column('src_id',       sa.Integer,  nullable=True),
+        sa.Column('dst_id',       sa.Integer,  nullable=True),
+        sa.Column('post_id',      sa.Integer,  nullable=True),
+        sa.Column('community_id', sa.Integer,  nullable=True),
+        sa.Column('block_num',    sa.Integer,  nullable=True),
+        sa.Column('payload',      sa.Text,     nullable=True),
+
+        sa.Index('hive_notifs_ix1', 'dst_id',                  'id', postgresql_where=sql_text("dst_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix2', 'community_id',            'id', postgresql_where=sql_text("community_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix3', 'community_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix4', 'community_id', 'post_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND post_id IS NOT NULL")),
+        sa.Index('hive_notifs_ix5', 'post_id', 'type_id', 'dst_id', 'src_id', postgresql_where=sql_text("post_id IS NOT NULL AND type_id IN (16,17)")), # filter: dedupe
+        sa.Index('hive_notifs_ix6', 'dst_id', 'created_at', 'score', 'id', postgresql_where=sql_text("dst_id IS NOT NULL")), # unread
     )
 
     return metadata
+
 
 def teardown(db):
     """Drop all tables"""

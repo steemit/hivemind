@@ -3,11 +3,11 @@
 import logging
 from time import perf_counter as perf
 
-from hive.utils.stats import Stats
-
 import sqlalchemy
 from sqlalchemy.engine.url import make_url
 from aiopg.sa import create_engine
+
+from hive.utils.stats import Stats
 
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 log = logging.getLogger(__name__)

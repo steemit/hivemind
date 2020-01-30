@@ -9,12 +9,22 @@ from hive.db.adapter import Db
 logging.basicConfig()
 
 def run():
-    """Run the proper routine as indicated by hive --mode argument."""
+    """Run the service specified in the `--mode` argument."""
 
     conf = Conf.init_argparse()
     Db.set_shared_instance(conf.db())
     mode = conf.mode()
 
+    if conf.get('test_profile'):
+        from hive.utils.profiler import Profiler
+        with Profiler():
+            launch_mode(mode, conf)
+    else:
+        launch_mode(mode, conf)
+
+
+def launch_mode(mode, conf):
+    """Launch a routine as indicated by `mode`."""
     if mode == 'server':
         from hive.server.serve import run_server
         run_server(conf=conf)
@@ -26,12 +36,6 @@ def run():
     elif mode == 'status':
         from hive.db.db_state import DbState
         print(DbState.status())
-
-    #elif mode == 'sync-profile':
-    #    from hive.indexer.sync import Sync
-    #    from hive.utils.profiler import Profiler
-    #    with Profiler():
-    #        Sync(conf=conf).run()
 
     else:
         raise Exception("unknown run mode %s" % mode)

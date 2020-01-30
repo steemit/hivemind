@@ -4,7 +4,7 @@ from functools import wraps
 
 import hive.server.condenser_api.cursor as cursor
 from hive.server.condenser_api.objects import load_posts, load_posts_reblogs
-from hive.server.condenser_api.common import (
+from hive.server.common.helpers import (
     ApiError,
     return_error_info,
     valid_account,
@@ -12,9 +12,9 @@ from hive.server.condenser_api.common import (
     valid_tag,
     valid_offset,
     valid_limit,
-    valid_follow_type,
-    get_post_id,
-    get_child_ids)
+    valid_follow_type)
+
+# pylint: disable=too-many-arguments,line-too-long,too-many-lines
 
 
 # Dummy
@@ -101,7 +101,7 @@ async def get_content(context, author: str, permlink: str):
     db = context['db']
     valid_account(author)
     valid_permlink(permlink)
-    post_id = await get_post_id(db, author, permlink)
+    post_id = await cursor.get_post_id(db, author, permlink)
     if not post_id:
         return {'id': 0, 'author': '', 'permlink': ''}
     posts = await load_posts(db, [post_id])
@@ -115,9 +115,9 @@ async def get_content_replies(context, author: str, permlink: str):
     db = context['db']
     valid_account(author)
     valid_permlink(permlink)
-    parent_id = await get_post_id(db, author, permlink)
+    parent_id = await cursor.get_post_id(db, author, permlink)
     if parent_id:
-        child_ids = await get_child_ids(db, parent_id)
+        child_ids = await cursor.get_child_ids(db, parent_id)
         if child_ids:
             return await load_posts(db, child_ids)
     return []
@@ -320,6 +320,7 @@ async def get_comment_discussions_by_payout(context, start_author: str = '', sta
                                             limit: int = 20, tag: str = None,
                                             truncate_body: int = 0):
     """Query comments, sorted by payout."""
+    # pylint: disable=invalid-name
     ids = await cursor.pids_by_query(
         context['db'],
         'payout_comments',
@@ -373,7 +374,7 @@ async def _get_blog(db, account: str, start_index: int, limit: int = None):
     if not limit:
         limit = start_index + 1
 
-    ids = await cursor.pids_by_blog_by_index(
+    start_index, ids = await cursor.pids_by_blog_by_index(
         db,
         valid_account(account),
         valid_offset(start_index),

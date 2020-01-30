@@ -4,6 +4,7 @@
 import logging
 from collections import OrderedDict
 import ujson as json
+from aiocache import cached
 
 from hive.utils.normalize import legacy_amount
 from hive.server.common.mutes import Mutes
@@ -13,14 +14,13 @@ from hive.server.condenser_api.objects import (
     load_posts,
     load_posts_keyed,
     load_posts_reblogs)
-from hive.server.condenser_api.common import (
+from hive.server.common.helpers import (
     ApiError,
     return_error_info,
     valid_account,
     valid_permlink,
     valid_sort,
-    valid_tag,
-    get_post_id)
+    valid_tag)
 from hive.server.condenser_api.tags import (
     get_trending_tags,
     get_top_trending_tags_summary)
@@ -236,7 +236,7 @@ async def _child_ids(db, parent_ids):
 
 async def _load_discussion(db, author, permlink):
     """Load a full discussion thread."""
-    root_id = await get_post_id(db, author, permlink)
+    root_id = await cursor.get_post_id(db, author, permlink)
     if not root_id:
         return {}
 
@@ -278,11 +278,13 @@ async def _load_discussion(db, author, permlink):
     # return all nodes keyed by ref
     return {refs[pid]: post for pid, post in posts.items()}
 
+@cached(ttl=1800, timeout=1200)
 async def _get_feed_price(db):
     """Get a steemd-style ratio object representing feed price."""
     price = await db.query_one("SELECT usd_per_steem FROM hive_state")
     return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
 
+@cached(ttl=1800, timeout=1200)
 async def _get_props_lite(db):
     """Return a minimal version of get_dynamic_global_properties data."""
     raw = json.loads(await db.query_one("SELECT dgpo FROM hive_state"))
