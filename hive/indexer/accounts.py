@@ -185,6 +185,7 @@ class Accounts:
 
         # pull out valid profile md and delete the key
         profile = safe_profile_metadata(account)
+        del account['json_metadata']
         del account['posting_json_metadata']
 
         active_at = max(account['created'],
