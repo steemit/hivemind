@@ -20,6 +20,7 @@ from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
 from hive.indexer.community import Community
+from hive.server.common.mutes import Mutes
 
 #from hive.indexer.jobs import audit_cache_missing, audit_cache_deleted
 
@@ -46,6 +47,11 @@ class Sync:
         Accounts.load_ids()
         Accounts.fetch_ranks()
 
+        # load irredeemables
+        mutes = Mutes(self._conf.get('muted_accounts_url'))
+        Mutes.set_shared_instance(mutes)
+
+        # community stats
         Community.recalc_pending_payouts()
 
         if DbState.is_initial_sync():

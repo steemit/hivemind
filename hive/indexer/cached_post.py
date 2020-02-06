@@ -12,6 +12,7 @@ from hive.utils.post import post_basic, post_legacy, post_payout, post_stats, me
 from hive.utils.timer import Timer
 from hive.indexer.accounts import Accounts
 from hive.indexer.notify import Notify
+from hive.server.common.mutes import Mutes
 
 # pylint: disable=too-many-lines
 
@@ -566,8 +567,9 @@ class CachedPost:
 
         # reply notif
         if level == 'insert' and parent_author and parent_author != author:
+            irredeemable = parent_author in Mutes.all()
             parent_author_id = Accounts.get_id(parent_author)
-            if not cls._muted(parent_author_id, author_id):
+            if not irredeemable and not cls._muted(parent_author_id, author_id):
                 ntype = 'reply' if post['depth'] == 1 else 'reply_comment'
                 Notify(ntype, src_id=author_id, dst_id=parent_author_id,
                        score=Accounts.default_score(author), post_id=pid,
