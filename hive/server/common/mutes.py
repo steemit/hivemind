@@ -1,6 +1,7 @@
 """List of muted accounts for server process."""
 
 import logging
+from time import perf_counter as perf
 from urllib.request import urlopen
 import ujson as json
 
@@ -13,9 +14,11 @@ class Mutes:
     """Singleton tracking muted accounts."""
 
     _instance = None
-    accounts = set()
-    blist = set()
-    blist_map = dict()
+    url = None
+    accounts = set() # list/irredeemables
+    blist = set() # list/any-blacklist
+    blist_map = dict() # cached account-list map
+    fetched = None
 
     @classmethod
     def instance(cls):
@@ -30,12 +33,18 @@ class Mutes:
 
     def __init__(self, url):
         """Initialize a muted account list by loading from URL"""
+        self.url = url
         if url:
-            self.accounts = set(_read_url(url).decode('utf8').split())
-            jsn = _read_url('http://blacklist.usesteem.com/blacklists')
-            self.blist = set(json.loads(jsn))
-            log.warning("%d muted, %d blacklisted", len(self.accounts), len(self.blist))
+            self.load()
 
+    def load(self):
+        """Reload all accounts from irredeemables endpoint and global lists."""
+        self.accounts = set(_read_url(self.url).decode('utf8').split())
+        jsn = _read_url('http://blacklist.usesteem.com/blacklists')
+        self.blist = set(json.loads(jsn))
+        self.blist_map = dict()
+        log.warning("%d muted, %d blacklisted", len(self.accounts), len(self.blist))
+        self.fetched = perf()
 
     @classmethod
     def all(cls):
@@ -46,15 +55,20 @@ class Mutes:
     def lists(cls, name, rep):
         """Return blacklists the account belongs to."""
         assert name
-        inst = cls.instance().blist_map
-        if name not in inst:
+        inst = cls.instance()
+
+        # update hourly
+        if perf() - inst.fetched > 3600:
+            inst.load()
+
+        if name not in inst.blist_map:
             out = []
-            if name in cls.instance().blist:
+            if name in inst.blist:
                 url = 'http://blacklist.usesteem.com/user/' + name
                 lists = json.loads(_read_url(url))
                 out.extend(lists['blacklisted'])
 
-            if name in cls.instance().accounts:
+            if name in inst.accounts:
                 if 'irredeemables' not in out:
                     out.append('irredeemables')
 
@@ -63,6 +77,6 @@ class Mutes:
             elif int(rep) == 1:
                 out.append('reputation-1')
 
-            inst[name] = out
+            inst.blist_map[name] = out
 
-        return inst[name]
+        return inst.blist_map[name]
