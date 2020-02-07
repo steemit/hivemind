@@ -139,40 +139,43 @@ async def list_subscribers(context, community):
              str(r['created_at'])) for r in rows]
 
 @return_error_info
-async def list_communities(context, last='', limit=100, query=None, observer=None):
+async def list_communities(context, last='', limit=100, query=None, sort='rank', observer=None):
     """List all communities, paginated. Returns lite community list."""
+    # pylint: disable=too-many-arguments, too-many-locals
     limit = valid_limit(limit, 100)
 
     db = context['db']
     assert not query, 'query not yet supported'
+    assert sort in ('rank', 'new', 'subs'), 'invalid sort'
 
-    seek = ''
+    where = []
+    field, order = dict(
+        rank=('rank', 'ASC'),
+        new=('created_at', 'DESC'),
+        subs=('subscribers', 'DESC'))[sort]
+
+    if field == 'rank':
+        where.append('rank > 0')
+
     if last:
-        seek = """AND rank > (SELECT rank
-                                FROM hive_communities
-                               WHERE name = :last)"""
+        field_cmp = '>' if order == 'ASC' else '<'
+        where.append("""%s %s (SELECT %s FROM hive_communities
+                                WHERE name = :last)"""
+                     % (field, field_cmp, field))
 
-    sql = """SELECT id FROM hive_communities
-              WHERE rank > 0 AND (num_pending > 0 OR LENGTH(about) > 3) %s
-           ORDER BY rank LIMIT :limit""" % seek
+    filt = 'WHERE ' + ' AND '.join(where) if where else ''
+    sql = """SELECT id FROM hive_communities %s
+           ORDER BY %s %s LIMIT :limit""" % (filt, field, order)
     ids = await db.query_col(sql, last=last, limit=limit)
     if not ids: return []
 
+    # append observer context, leadership data
     communities = await load_communities(db, ids, lite=True)
     if observer:
         observer_id = await get_account_id(db, observer)
         await _append_observer_subs(db, communities, observer_id)
         await _append_observer_roles(db, communities, observer_id)
-
-    sql = """SELECT community_id, ha.name FROM hive_roles hr
-               JOIN hive_accounts ha ON hr.account_id = ha.id
-              WHERE role_id = 6 AND community_id IN :ids"""
-    admins = await db.query_all(sql, ids=tuple(ids))
-    for row in admins:
-        _id = row[0]
-        if 'admins' not in communities[_id]:
-            communities[_id]['admins'] = list()
-        communities[_id]['admins'].append(row[1])
+    await _append_admins(db, communities)
 
     return [communities[_id] for _id in ids]
 
@@ -290,6 +293,17 @@ async def _append_observer_subs(db, communities, observer_id):
 
     for cid, comm in communities.items():
         comm['context']['subscribed'] = cid in subs
+
+async def _append_admins(db, communities):
+    ids = communities.keys()
+    sql = """SELECT community_id, ha.name FROM hive_roles hr
+               JOIN hive_accounts ha ON hr.account_id = ha.id
+              WHERE role_id = 6 AND community_id IN :ids"""
+    for row in await db.query_all(sql, ids=tuple(ids)):
+        _id = row[0]
+        if 'admins' not in communities[_id]:
+            communities[_id]['admins'] = list()
+        communities[_id]['admins'].append(row[1])
 
 
 # Stats
