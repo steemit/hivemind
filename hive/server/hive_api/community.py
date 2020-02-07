@@ -145,7 +145,6 @@ async def list_communities(context, last='', limit=100, query=None, sort='rank',
     limit = valid_limit(limit, 100)
 
     db = context['db']
-    assert not query, 'query not yet supported'
     assert sort in ('rank', 'new', 'subs'), 'invalid sort'
 
     where = []
@@ -153,6 +152,14 @@ async def list_communities(context, last='', limit=100, query=None, sort='rank',
         rank=('rank', 'ASC'),
         new=('created_at', 'DESC'),
         subs=('subscribers', 'DESC'))[sort]
+
+    search = None
+    if query:
+        where.append("to_tsvector('english', title || ' ' || about) @@ plainto_tsquery(:search)")
+        search = query
+        #where.append("to_tsvector('english', title || ' ' || about) @@ to_tsquery(:search)")
+        #assert not query, 'query not yet supported'
+        #search = ' | '.join(query.split(' '))
 
     if field == 'rank':
         where.append('rank > 0')
@@ -166,7 +173,7 @@ async def list_communities(context, last='', limit=100, query=None, sort='rank',
     filt = 'WHERE ' + ' AND '.join(where) if where else ''
     sql = """SELECT id FROM hive_communities %s
            ORDER BY %s %s LIMIT :limit""" % (filt, field, order)
-    ids = await db.query_col(sql, last=last, limit=limit)
+    ids = await db.query_col(sql, last=last, limit=limit, search=search)
     if not ids: return []
 
     # append observer context, leadership data
