@@ -311,6 +311,10 @@ class DbState:
             cls.db().query("CREATE INDEX hive_notifs_ix6 ON hive_notifs (dst_id, created_at, score, id) WHERE dst_id IS NOT NULL")
             cls._set_ver(16)
 
+        if cls._ver == 16:
+            cls.db().query("CREATE INDEX hive_communities_ft1 ON hive_communities USING GIN (to_tsvector('english', title || ' ' || about))")
+            cls._set_ver(17)
+
         reset_autovac(cls.db())
 
         log.info("[HIVE] db version: %d", cls._ver)
