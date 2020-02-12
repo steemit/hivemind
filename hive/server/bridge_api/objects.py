@@ -214,7 +214,7 @@ def _condenser_post_object(row, truncate_body=0):
         'hide': row['is_hidden'],
         'gray': row['is_grayed'],
         'total_votes': row['total_votes'],
-        'flag_weight': row['flag_weight']}
+        'flag_weight': row['flag_weight']} # TODO: down_weight
 
     # import fields from legacy object
     assert row['raw_json']

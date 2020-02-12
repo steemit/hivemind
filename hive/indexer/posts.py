@@ -163,6 +163,7 @@ class Posts:
         if not DbState.is_initial_sync():
             CachedPost.delete(pid, op['author'], op['permlink'])
             if depth == 0:
+                # TODO: delete from hive_reblogs -- otherwise feed cache gets populated with deleted posts somwrimas
                 FeedCache.delete(pid)
             else:
                 # force parent child recount when child is deleted

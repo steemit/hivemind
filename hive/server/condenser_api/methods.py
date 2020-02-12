@@ -385,11 +385,11 @@ async def _get_blog(db, account: str, start_index: int, limit: int = None):
     idx = int(start_index)
     for post in await load_posts(db, ids):
         reblog = post['author'] != account
-        reblog_on = post['created'] if reblog else "1970-01-01T00"
+        reblog_on = post['created'] if reblog else "1970-01-01T00:00:00"
         out.append({"blog": account,
                     "entry_id": idx,
                     "comment": post,
-                    "reblog_on": reblog_on})
+                    "reblogged_on": reblog_on})
         idx -= 1
 
     return out
