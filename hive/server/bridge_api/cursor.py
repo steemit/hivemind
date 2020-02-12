@@ -73,7 +73,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
         pids = await pids_by_community(db, cids, sort, start_id, limit)
 
     # if not filtered by tag, is first page trending: prepend pinned
-    if not tag and not start_id and sort == 'trending':
+    if not tag and not start_id and sort in ('trending', 'created'):
         prepend = await _pinned(db, single or DEFAULT_CID)
         for pid in prepend:
             if pid in pids:
@@ -147,9 +147,9 @@ async def pids_by_category(db, tag, sort, last_id, limit):
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments', 'muted']
 
-    params = {             # field      pending posts   comment promoted    todo
-        'trending':        ('sc_trend', True,   False,  False,  False),   # depth=0
-        'hot':             ('sc_hot',   True,   False,  False,  False),   # depth=0
+    params = {             # field      pending posts   comment promoted
+        'trending':        ('sc_trend', True,   True,   False,  False),
+        'hot':             ('sc_hot',   True,   True,   False,  False),
         'created':         ('post_id',  False,  True,   False,  False),
         'promoted':        ('promoted', True,   False,  False,  True),
         'payout':          ('payout',   True,   False,  False,  False),
