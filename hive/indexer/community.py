@@ -528,7 +528,11 @@ class CommunityOp:
         if 'flag_text' in props:
             out['flag_text'] = read_key_str(props, 'flag_text', 1000, allow_blank=True)
         if 'settings' in props:
-            out['settings'] = json.dumps(read_key_dict(props, 'settings'))
+            settings = read_key_dict(props, 'settings')
+            out['settings'] = json.dumps(settings)
+            if 'avatar_url' in settings:
+                # TODO: enforce https://
+                out['avatar_url'] = settings['avatar_url']
         assert out, 'props were blank'
         self.props = out
 
