@@ -43,6 +43,12 @@ LANGS = ("ab,aa,af,ak,sq,am,ar,an,hy,as,av,ae,ay,az,bm,ba,eu,be,bn,bh,bi,"
          "st,es,su,sw,ss,sv,ta,te,tg,th,ti,bo,tk,tl,tn,to,tr,ts,tt,tw,ty,"
          "ug,uk,ur,uz,ve,vi,vo,wa,cy,wo,fy,xh,yi,yo,za").split(',')
 
+def _valid_url_proto(url):
+    assert url
+    assert isinstance(url, str), 'url was not string'
+    assert len(url) < 1024, 'url must be shorter than 1024 characters'
+    return url[0:7] == 'http://' or url[0:8] == 'https://'
+
 def assert_keys_match(keys, expected, allow_missing=True):
     """Compare a set of input keys to expected keys."""
     if not allow_missing:
@@ -528,7 +534,12 @@ class CommunityOp:
         if 'flag_text' in props:
             out['flag_text'] = read_key_str(props, 'flag_text', 1000, allow_blank=True)
         if 'settings' in props:
-            out['settings'] = json.dumps(read_key_dict(props, 'settings'))
+            settings = read_key_dict(props, 'settings')
+            out['settings'] = json.dumps(settings)
+            if 'avatar_url' in settings:
+                avatar_url = settings['avatar_url']
+                assert not avatar_url or _valid_url_proto(avatar_url)
+                out['avatar_url'] = avatar_url
         assert out, 'props were blank'
         self.props = out
 

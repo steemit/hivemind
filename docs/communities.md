@@ -147,6 +147,9 @@ Can be stored as a JSON dictionary.
  - `description`: a blob of markdown to describe purpose, enumerate rules, etc. (5000 chars)
  - `flag_text`: custom text for reporting content
  - `settings': json dict; recognized keys:
+   - `avatar_url` - same format as account avatars; usually rendered as a circle
+   - `cover_url` - same format as account covers; used as header background image
+   - `default_view` = `list | blog | grid` - default post display
    - `bg_color`: background color - hex-encoded RGB value (e.g. `#EEDDCC`)
    - `bg_color2`: background color - hex-encoded RGB value (if provided, creates a gradient)
 
