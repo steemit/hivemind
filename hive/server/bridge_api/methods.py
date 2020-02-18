@@ -59,7 +59,7 @@ async def get_trending_topics(context, limit=10, observer=None):
 async def get_post(context, author, permlink, observer=None):
     """Fetch a single post"""
     # pylint: disable=unused-variable
-    #TODO: `observer` logic
+    #TODO: `observer` logic for user-post state
     db = context['db']
     observer_id = await get_account_id(db, observer) if observer else None
     pid = await _get_post_id(db,

@@ -206,7 +206,13 @@ class Blocks:
             sql = "SELECT id FROM hive_posts WHERE created_at >= :date"
             post_ids = tuple(DB.query_col(sql, date=date))
 
-            # remove all recent records
+            # remove all recent records -- communities
+            DB.query("DELETE FROM hive_notifs        WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_subscriptions WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_roles         WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_communities   WHERE created_at >= :date", date=date)
+
+            # remove all recent records -- core
             DB.query("DELETE FROM hive_feed_cache  WHERE created_at >= :date", date=date)
             DB.query("DELETE FROM hive_reblogs     WHERE created_at >= :date", date=date)
             DB.query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
