@@ -45,6 +45,7 @@ LANGS = ("ab,aa,af,ak,sq,am,ar,an,hy,as,av,ae,ay,az,bm,ba,eu,be,bn,bh,bi,"
 
 def _valid_url_proto(url):
     assert url
+    assert isinstance(url, str), 'url was not string'
     assert len(url) < 1024, 'url must be shorter than 1024 characters'
     return url[0:7] == 'http://' or url[0:8] == 'https://'
 
