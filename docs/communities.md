@@ -178,7 +178,7 @@ The standard format for `custom_json` ops:
 {
   required_auths: [],
   required_posting_auths: [<account>],
-  id: "hive.community",
+  id: "community",
   json: [
     <action>, 
     {
