@@ -237,6 +237,12 @@ def build_metadata():
         sa.Column('dgpo', sa.Text, nullable=False),
     )
 
+    sa.Table(
+        'hive_posts_status', metadata,
+        sa.Column('post_id', sa.Integer, primary_key=True, autoincrement=False),
+        sa.Column('status', SMALLINT, nullable=False, server_default='0'),
+    )
+
     metadata = build_metadata_community(metadata)
 
     return metadata

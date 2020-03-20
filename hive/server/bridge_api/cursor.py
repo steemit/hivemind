@@ -80,6 +80,20 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
                 pids.remove(pid)
         pids = prepend + pids
 
+    # first page prepend pinned
+    if not tag and not cids and start_id:
+        first_prepend = await _pids_by_status(db, '2')
+        for pid in first_prepend:
+            if pid in pids:
+                pids.remove(pid)
+        pids = first_prepend + pids
+
+    # hide posts
+    hide_pids = await _pids_by_status(db, '1')
+    for pid in hide_pids:
+        if pid in pids:
+            pids.remove(pid)
+
     return pids
 
 
@@ -188,10 +202,12 @@ async def pids_by_category(db, tag, sort, last_id, limit):
 
     return await db.query_col(sql, tag=tag, last_id=last_id, limit=limit)
 
+
 async def _subscribed(db, account_id):
     sql = """SELECT community_id FROM hive_subscriptions
               WHERE account_id = :account_id"""
     return await db.query_col(sql, account_id=account_id)
+
 
 async def _pinned(db, community_id):
     """Get a list of pinned post `id`s in `community`."""
@@ -201,6 +217,14 @@ async def _pinned(db, community_id):
                 AND community_id = :community_id
             ORDER BY id DESC"""
     return await db.query_col(sql, community_id=community_id)
+
+
+async def _pids_by_status(db, status):
+    """Get a list of hided post `id`s."""
+    sql = """SELECT post_id FROM hive_posts_status
+              WHERE status = :status
+            ORDER BY post_id DESC"""
+    return await db.query_col(sql, status=status)
 
 
 async def pids_by_blog(db, account: str, start_author: str = '',
