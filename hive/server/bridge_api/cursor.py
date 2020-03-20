@@ -51,7 +51,9 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     # list of comm ids to query, if tag is comms key
     cids = None
     single = None
+    is_my = False
     if tag == 'my':
+        is_my = True
         cids = await _subscribed(db, observer_id)
         if not cids: return []
     elif tag == 'all':
@@ -70,7 +72,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     if cids is None:
         pids = await pids_by_category(db, tag, sort, start_id, limit)
     else:
-        pids = await pids_by_community(db, cids, sort, start_id, limit)
+        pids = await pids_by_community(db, cids, sort, start_id, limit, is_my)
 
     # if not filtered by tag, is first page trending: prepend pinned
     if not tag and not start_id and sort in ('trending', 'created'):
@@ -81,7 +83,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
         pids = prepend + pids
 
     # first page prepend pinned
-    if not tag and not cids and start_id:
+    if not tag and not cids and not start_id:
         first_prepend = await _pids_by_status(db, '2')
         for pid in first_prepend:
             if pid in pids:
@@ -91,7 +93,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     return pids
 
 
-async def pids_by_community(db, ids, sort, seek_id, limit):
+async def pids_by_community(db, ids, sort, seek_id, limit, is_my):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
@@ -137,9 +139,9 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
         #where.append(sql % (field, sval, field, sval))
 
     # hide posts
-    hide_pids = await _pids_by_status(db, '1')
-    if hide_pids:
-        where.append("post_id NOT IN (%s)" % hide_pids)
+    if not is_my:
+        sql = "SELECT post_id FROM hive_posts_status WHERE status = '1'"
+        where.append("post_id NOT IN (%s)" % sql)
 
     # build
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -196,9 +198,8 @@ async def pids_by_category(db, tag, sort, last_id, limit):
         where.append(sql % (field, sval, field, sval))
 
     # hide posts
-    hide_pids = await _pids_by_status(db, '1')
-    if hide_pids:
-        where.append("post_id NOT IN (%s)" % hide_pids)
+    sql = "SELECT post_id FROM hive_posts_status WHERE status = '1'"
+    where.append("post_id NOT IN (%s)" % sql)
 
     sql = ("""SELECT post_id FROM %s WHERE %s
               ORDER BY %s DESC, post_id LIMIT :limit
