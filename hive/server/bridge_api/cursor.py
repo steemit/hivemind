@@ -88,12 +88,6 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
                 pids.remove(pid)
         pids = first_prepend + pids
 
-    # hide posts
-    hide_pids = await _pids_by_status(db, '1')
-    for pid in hide_pids:
-        if pid in pids:
-            pids.remove(pid)
-
     return pids
 
 
@@ -141,6 +135,11 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
         #sql = """((%s < :seek_val) OR
         #          (%s = :seek_val AND post_id > :seek_id))"""
         #where.append(sql % (field, sval, field, sval))
+
+    # hide posts
+    hide_pids = await _pids_by_status(db, '1')
+    if hide_pids:
+        where.append("post_id NOT IN (%s)" % hide_pids)
 
     # build
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -195,6 +194,11 @@ async def pids_by_category(db, tag, sort, last_id, limit):
         sval = "(SELECT %s FROM %s WHERE post_id = :last_id)" % (field, table)
         sql = """((%s < %s) OR (%s = %s AND post_id > :last_id))"""
         where.append(sql % (field, sval, field, sval))
+
+    # hide posts
+    hide_pids = await _pids_by_status(db, '1')
+    if hide_pids:
+        where.append("post_id NOT IN (%s)" % hide_pids)
 
     sql = ("""SELECT post_id FROM %s WHERE %s
               ORDER BY %s DESC, post_id LIMIT :limit
