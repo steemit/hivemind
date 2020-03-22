@@ -140,8 +140,12 @@ async def pids_by_community(db, ids, sort, seek_id, limit, is_my):
 
     # hide posts
     if not is_my:
-        sql = "SELECT post_id FROM hive_posts_status WHERE status = '1'"
+        sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1' AND is_deleted = '0'"
         where.append("post_id NOT IN (%s)" % sql)
+
+    # hide author
+    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3' AND is_deleted = '0'"
+    where.append("author NOT IN (%s)" % sql)
 
     # build
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -198,8 +202,12 @@ async def pids_by_category(db, tag, sort, last_id, limit):
         where.append(sql % (field, sval, field, sval))
 
     # hide posts
-    sql = "SELECT post_id FROM hive_posts_status WHERE status = '1'"
+    sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1' AND is_deleted = '0'"
     where.append("post_id NOT IN (%s)" % sql)
+
+    # hide author
+    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3' AND is_deleted = '0'"
+    where.append("author NOT IN (%s)" % sql)
 
     sql = ("""SELECT post_id FROM %s WHERE %s
               ORDER BY %s DESC, post_id LIMIT :limit
@@ -224,12 +232,12 @@ async def _pinned(db, community_id):
     return await db.query_col(sql, community_id=community_id)
 
 
-async def _pids_by_status(db, status):
+async def _pids_by_status(db, list_type):
     """Get a list of hided post `id`s."""
     sql = """SELECT post_id FROM hive_posts_status
-              WHERE status = :status
-            ORDER BY post_id DESC"""
-    return await db.query_col(sql, status=status)
+              WHERE list_type = :list_type AND is_deleted = '0'
+            ORDER BY created_at DESC"""
+    return await db.query_col(sql, list_type=list_type)
 
 
 async def pids_by_blog(db, account: str, start_author: str = '',

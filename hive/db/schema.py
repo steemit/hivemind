@@ -239,8 +239,12 @@ def build_metadata():
 
     sa.Table(
         'hive_posts_status', metadata,
-        sa.Column('post_id', sa.Integer, primary_key=True, autoincrement=False),
-        sa.Column('status', SMALLINT, nullable=False, server_default='0'),
+        sa.Column('id', sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column('post_id', sa.Integer, nullable=False, server_default='0'),
+        sa.Column('author', VARCHAR(16), nullable=False, server_default=''),
+        sa.Column('list_type', SMALLINT, nullable=False, server_default='0'),
+        sa.Column('created_at', sa.DateTime, nullable=False),
+        sa.Column('is_deleted', BOOLEAN, nullable=False, server_default='0'),
     )
 
     metadata = build_metadata_community(metadata)
