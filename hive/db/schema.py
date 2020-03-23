@@ -244,7 +244,7 @@ def build_metadata():
         sa.Column('author', VARCHAR(16), nullable=False, server_default=''),
         sa.Column('list_type', SMALLINT, nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.Column('is_deleted', BOOLEAN, nullable=False, server_default='0'),
+        sa.UniqueConstraint('list_type', 'post_id', 'author', name='hive_posts_status_ux1'),
     )
 
     metadata = build_metadata_community(metadata)

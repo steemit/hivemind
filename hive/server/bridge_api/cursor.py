@@ -84,7 +84,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
 
     # first page prepend pinned
     if not tag and not cids and not start_id:
-        first_prepend = await _pids_by_status(db, '2')
+        first_prepend = await _pids_by_type(db, '2')
         for pid in first_prepend:
             if pid in pids:
                 pids.remove(pid)
@@ -140,11 +140,11 @@ async def pids_by_community(db, ids, sort, seek_id, limit, is_my):
 
     # hide posts
     if not is_my:
-        sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1' AND is_deleted = '0'"
+        sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
         where.append("post_id NOT IN (%s)" % sql)
 
     # hide author
-    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3' AND is_deleted = '0'"
+    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
     where.append("author NOT IN (%s)" % sql)
 
     # build
@@ -202,11 +202,11 @@ async def pids_by_category(db, tag, sort, last_id, limit):
         where.append(sql % (field, sval, field, sval))
 
     # hide posts
-    sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1' AND is_deleted = '0'"
+    sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
     where.append("post_id NOT IN (%s)" % sql)
 
     # hide author
-    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3' AND is_deleted = '0'"
+    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
     where.append("author NOT IN (%s)" % sql)
 
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -232,10 +232,10 @@ async def _pinned(db, community_id):
     return await db.query_col(sql, community_id=community_id)
 
 
-async def _pids_by_status(db, list_type):
-    """Get a list of hided post `id`s."""
+async def _pids_by_type(db, list_type):
+    """Get a list of post `id`s."""
     sql = """SELECT post_id FROM hive_posts_status
-              WHERE list_type = :list_type AND is_deleted = '0'
+              WHERE list_type = :list_type
             ORDER BY created_at DESC"""
     return await db.query_col(sql, list_type=list_type)
 
