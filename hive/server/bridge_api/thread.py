@@ -18,7 +18,8 @@ async def get_discussion(context, author, permlink):
     author = valid_account(author)
     permlink = valid_permlink(permlink)
     root_id = await _get_post_id(db, author, permlink)
-    if not root_id:
+    hide_id = await _get_author_hide_id(db, author)
+    if not root_id or hide_id:
         return {}
 
     return await _load_discussion(db, root_id)
@@ -29,18 +30,27 @@ async def _get_post_id(db, author, permlink):
            "AND permlink = :p AND is_deleted = '0' LIMIT 1")
     return await db.query_one(sql, a=author, p=permlink)
 
+
+async def _get_author_hide_id(db, author):
+    """Given an author, retrieve the id from db."""
+    sql = ("SELECT id FROM hive_posts_status WHERE author = :a "
+           "AND list_type = '3' LIMIT 1")
+    return await db.query_one(sql, a=author)
+
 def _ref(post):
     return post['author'] + '/' + post['permlink']
 
 async def _child_ids(db, parent_ids):
     """Load child ids for multuple parent ids."""
+    hide = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
     sql = """
              SELECT parent_id, array_agg(id)
                FROM hive_posts
               WHERE parent_id IN :ids
                 AND is_deleted = '0'
+                AND author NOT IN (%s)
            GROUP BY parent_id
-    """
+    """ % hide
     rows = await db.query_all(sql, ids=tuple(parent_ids))
     return [[row[0], row[1]] for row in rows]
 

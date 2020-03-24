@@ -267,14 +267,18 @@ async def pids_by_blog(db, account: str, start_author: str = '',
            AND id NOT IN (SELECT post_id FROM hive_reblogs
                            WHERE account = :account)"""
 
+    # hide posts
+    hide = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
+
     sql = """
         SELECT post_id
           FROM hive_feed_cache
          WHERE account_id = :account_id %s
            AND post_id NOT IN (%s)
+           AND post_id NOT IN (%s)
       ORDER BY created_at DESC
          LIMIT :limit
-    """ % (seek, skip)
+    """ % (seek, skip, hide)
 
     # alternate implementation -- may be more efficient
     #sql = """
@@ -339,15 +343,19 @@ async def pids_by_posts(db, account: str, start_permlink: str = '', limit: int =
 
         seek = "AND id <= :start_id"
 
+    # hide posts
+    hide = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
+
     # `depth` in ORDER BY is a no-op, but forces an ix3 index scan (see #189)
     sql = """
         SELECT id FROM hive_posts
          WHERE author = :account %s
            AND is_deleted = '0'
            AND depth = '0'
+           AND id NOT IN (%s)
       ORDER BY id DESC
          LIMIT :limit
-    """ % seek
+    """ % (seek, hide)
 
     return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
 
@@ -431,13 +439,17 @@ async def pids_by_payout(db, account: str, start_author: str = '',
         seek = ("""AND (payout < %s OR (payout = %s AND post_id > :start_id))"""
                 % (last, last))
 
+    # hide posts
+    hide = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
+
     sql = """
         SELECT post_id
           FROM hive_posts_cache
          WHERE author = :account
            AND is_paidout = '0' %s
+           AND post_id NOT IN (%s)
       ORDER BY payout DESC, post_id
          LIMIT :limit
-    """ % seek
+    """ % (seek, hide)
 
     return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
