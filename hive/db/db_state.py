@@ -317,8 +317,8 @@ class DbState:
             cls._set_ver(17)
 
         if cls._ver == 17:
-            cls.db().query("DROP TABLE IF EXISTS hive_posts_status")
-            build_metadata_blacklist().create_all(cls.db().engine())
+            if not cls.db().query_col("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_posts_status')"):
+                build_metadata_blacklist().create_all(cls.db().engine())
             cls._set_ver(18)
 
         reset_autovac(cls.db())
