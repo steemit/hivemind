@@ -6,7 +6,8 @@ import time
 import logging
 
 from hive.db.schema import (setup, reset_autovac, build_metadata,
-                            build_metadata_community, teardown, DB_VERSION)
+                            build_metadata_community, teardown, DB_VERSION,
+                            build_metadata_blacklist)
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -314,6 +315,11 @@ class DbState:
         if cls._ver == 16:
             cls.db().query("CREATE INDEX hive_communities_ft1 ON hive_communities USING GIN (to_tsvector('english', title || ' ' || about))")
             cls._set_ver(17)
+
+        if cls._ver == 17:
+            cls.db().query("DROP TABLE IF EXISTS hive_posts_status")
+            build_metadata_blacklist().create_all(cls.db().engine())
+            cls._set_ver(18)
 
         reset_autovac(cls.db())
 

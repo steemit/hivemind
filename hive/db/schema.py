@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 17
+DB_VERSION = 18
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -237,17 +237,9 @@ def build_metadata():
         sa.Column('dgpo', sa.Text, nullable=False),
     )
 
-    sa.Table(
-        'hive_posts_status', metadata,
-        sa.Column('id', sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column('post_id', sa.Integer, nullable=False, server_default='0'),
-        sa.Column('author', VARCHAR(16), nullable=False, server_default=''),
-        sa.Column('list_type', SMALLINT, nullable=False, server_default='0'),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.UniqueConstraint('list_type', 'post_id', 'author', name='hive_posts_status_ux1'),
-    )
-
     metadata = build_metadata_community(metadata)
+
+    metadata = build_metadata_blacklist(metadata)
 
     return metadata
 
@@ -323,6 +315,23 @@ def build_metadata_community(metadata=None):
         sa.Index('hive_notifs_ix4', 'community_id', 'post_id', 'type_id', 'id', postgresql_where=sql_text("community_id IS NOT NULL AND post_id IS NOT NULL")),
         sa.Index('hive_notifs_ix5', 'post_id', 'type_id', 'dst_id', 'src_id', postgresql_where=sql_text("post_id IS NOT NULL AND type_id IN (16,17)")), # filter: dedupe
         sa.Index('hive_notifs_ix6', 'dst_id', 'created_at', 'score', 'id', postgresql_where=sql_text("dst_id IS NOT NULL")), # unread
+    )
+
+    return metadata
+
+
+def build_metadata_blacklist(metadata=None):
+    if not metadata:
+        metadata = sa.MetaData()
+
+    sa.Table(
+        'hive_posts_status', metadata,
+        sa.Column('id', sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column('post_id', sa.Integer, nullable=False, server_default='0'),
+        sa.Column('author', VARCHAR(16), nullable=False, server_default=''),
+        sa.Column('list_type', SMALLINT, nullable=False, server_default='0'),
+        sa.Column('created_at', sa.DateTime, nullable=False, server_default='1990-01-01'),
+        sa.UniqueConstraint('list_type', 'post_id', 'author', name='hive_posts_status_ux1'),
     )
 
     return metadata
