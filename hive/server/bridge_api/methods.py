@@ -115,6 +115,11 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
 
     if sort == 'blog':
         ids = await cursor.pids_by_blog(db, account, *start, limit)
+        # hide posts
+        hide_pids = await cursor.hide_pids_by_ids(db, ids)
+        for pid in hide_pids:
+            if pid in ids:
+                ids.remove(pid)
         posts = await load_posts(context['db'], ids)
         for post in posts:
             if post['author'] != account:
@@ -127,6 +132,11 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
         start = start if start_permlink else (account, None)
         assert account == start[0], 'comments - account must match start author'
         ids = await cursor.pids_by_posts(db, *start, limit)
+        # hide posts
+        hide_pids = await cursor.hide_pids_by_ids(db, ids)
+        for pid in hide_pids:
+            if pid in ids:
+                ids.remove(pid)
         return await load_posts(context['db'], ids)
     elif sort == 'comments':
         start = start if start_permlink else (account, None)
@@ -140,4 +150,9 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
     elif sort == 'payout':
         start = start if start_permlink else (account, None)
         ids = await cursor.pids_by_payout(db, account, *start, limit)
+        # hide posts
+        hide_pids = await cursor.hide_pids_by_ids(db, ids)
+        for pid in hide_pids:
+            if pid in ids:
+                ids.remove(pid)
         return await load_posts(context['db'], ids)
