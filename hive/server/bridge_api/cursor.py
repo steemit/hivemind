@@ -51,9 +51,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     # list of comm ids to query, if tag is comms key
     cids = None
     single = None
-    is_my = False
     if tag == 'my':
-        is_my = True
         cids = await _subscribed(db, observer_id)
         if not cids: return []
     elif tag == 'all':
@@ -72,7 +70,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     if cids is None:
         pids = await pids_by_category(db, tag, sort, start_id, limit)
     else:
-        pids = await pids_by_community(db, cids, sort, start_id, limit, is_my)
+        pids = await pids_by_community(db, cids, sort, start_id, limit)
 
     # if not filtered by tag, is first page trending: prepend pinned
     if not tag and not start_id and sort in ('trending', 'created'):
@@ -93,7 +91,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     return pids
 
 
-async def pids_by_community(db, ids, sort, seek_id, limit, is_my):
+async def pids_by_community(db, ids, sort, seek_id, limit):
     """Get a list of post_ids for a given posts query.
 
     `sort` can be trending, hot, created, promoted, payout, or payout_comments.
@@ -139,9 +137,8 @@ async def pids_by_community(db, ids, sort, seek_id, limit, is_my):
         #where.append(sql % (field, sval, field, sval))
 
     # hide posts
-    if not is_my:
-        sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
-        where.append("post_id NOT IN (%s)" % sql)
+    sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
+    where.append("post_id NOT IN (%s)" % sql)
 
     # hide author
     sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"

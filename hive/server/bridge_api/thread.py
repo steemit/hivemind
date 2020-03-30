@@ -22,6 +22,10 @@ async def get_discussion(context, author, permlink):
     if not root_id or hide_id:
         return {}
 
+    post_hide_id = await _check_posts_hide_id(db, root_id)
+    if post_hide_id:
+        return {}
+
     return await _load_discussion(db, root_id)
 
 async def _get_post_id(db, author, permlink):
@@ -36,6 +40,13 @@ async def _get_author_hide_id(db, author):
     sql = ("SELECT id FROM hive_posts_status WHERE author = :a "
            "AND list_type = '3' LIMIT 1")
     return await db.query_one(sql, a=author)
+
+
+async def _check_posts_hide_id(db, post_id):
+    """Given an post_id, retrieve the id from db."""
+    sql = ("SELECT id FROM hive_posts_status WHERE post_id = :post_id "
+           "AND list_type = '1' LIMIT 1")
+    return await db.query_one(sql, post_id=post_id)
 
 def _ref(post):
     return post['author'] + '/' + post['permlink']
