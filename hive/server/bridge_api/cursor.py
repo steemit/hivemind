@@ -245,6 +245,9 @@ async def _pids_by_type(db, list_type):
 
 async def hide_pids_by_ids(db, ids):
     """Get a list of hided post `id`s."""
+    if not ids:
+        return []
+
     sql = """SELECT post_id FROM hive_posts_status
               WHERE list_type = '1' 
               AND post_id IN :ids"""
