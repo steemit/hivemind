@@ -34,6 +34,10 @@ serve-local:
 db-head-state:
 	curl -H 'Content-Type: application/json' -d '{"id":1,"jsonrpc":"2.0","method":"db_head_state"}' http://localhost:8080
 
+.PHONY: dump-schema
+dump-schema:
+	pg_dump -s -x --use-set-session-authorization hivepytest  | sed -e '/^--/d' | awk -v RS= -v ORS='\n\n' '1' > schema.sql
+
 ipython:
 	docker run -it $(PROJECT_DOCKER_RUN_ARGS) $(PROJECT_DOCKER_TAG) ipython
 

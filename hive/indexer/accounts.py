@@ -44,6 +44,18 @@ class Accounts:
         cls._ids = None
 
     @classmethod
+    def default_score(cls, name):
+        """Return default notification score based on rank."""
+        _id = cls.get_id(name)
+        rank = cls._ranks[_id] if _id in cls._ranks else 1000000
+        if rank < 200: return 70    # 0.02% 100k
+        if rank < 1000: return 60   # 0.1%  10k
+        if rank < 6500: return 50   # 0.5%  1k
+        if rank < 25000: return 40  # 2.0%  100
+        if rank < 100000: return 30 # 8.0%  15
+        return 20
+
+    @classmethod
     def get_id(cls, name):
         """Get account id by name. Throw if not found."""
         assert name in cls._ids, "account does not exist or was not registered"
@@ -78,12 +90,21 @@ class Accounts:
         for name, _id in DB.query_all(sql, names=tuple(new_names)):
             cls._ids[name] = _id
 
+        # post-insert: pass to communities to check for new registrations
+        from hive.indexer.community import Community, START_DATE
+        if block_date > START_DATE:
+            Community.register(new_names, block_date)
 
     # account cache methods
     # ---------------------
 
     @classmethod
-    def dirty(cls, accounts):
+    def dirty(cls, account):
+        """Marks given account as needing an update."""
+        return cls._dirty.add(account)
+
+    @classmethod
+    def dirty_set(cls, accounts):
         """Marks given accounts as needing an update."""
         return cls._dirty.extend(accounts)
 
@@ -96,7 +117,7 @@ class Accounts:
     def dirty_oldest(cls, limit=50000):
         """Flag `limit` least-recently updated accounts for update."""
         sql = "SELECT name FROM hive_accounts ORDER BY cached_at LIMIT :limit"
-        return cls.dirty(set(DB.query_col(sql, limit=limit)))
+        return cls.dirty_set(set(DB.query_col(sql, limit=limit)))
 
     @classmethod
     def flush(cls, steem, trx=False, spread=1):
@@ -145,9 +166,15 @@ class Accounts:
     @classmethod
     def _sql(cls, account, cached_at):
         """Prepare a SQL query from a steemd account."""
-        vote_weight = (vests_amount(account['vesting_shares'])
+        vests = vests_amount(account['vesting_shares'])
+
+        vote_weight = (vests
                        + vests_amount(account['received_vesting_shares'])
                        - vests_amount(account['delegated_vesting_shares']))
+
+        proxy_weight = 0 if account['proxy'] else float(vests)
+        for satoshis in account['proxied_vsf_votes']:
+            proxy_weight += float(satoshis) / 1e6
 
         # remove empty keys
         useless = ['transfer_history', 'market_history', 'post_history',
@@ -159,9 +186,12 @@ class Accounts:
         # pull out valid profile md and delete the key
         profile = safe_profile_metadata(account)
         del account['json_metadata']
+        del account['posting_json_metadata']
 
         active_at = max(account['created'],
+                        account['last_account_update'],
                         account['last_post'],
+                        account['last_root_post'],
                         account['last_vote_time'])
 
         values = {
@@ -170,7 +200,7 @@ class Accounts:
             'proxy':        account['proxy'],
             'post_count':   account['post_count'],
             'reputation':   rep_log10(account['reputation']),
-            'proxy_weight': vests_amount(account['vesting_shares']),
+            'proxy_weight': proxy_weight,
             'vote_weight':  vote_weight,
             'active_at':    active_at,
             'cached_at':    cached_at,

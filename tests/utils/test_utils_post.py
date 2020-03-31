@@ -2,6 +2,7 @@
 from decimal import Decimal
 
 from hive.utils.post import (
+    mentions,
     post_basic,
     post_legacy,
     post_payout,
@@ -137,6 +138,20 @@ POST_2 = {
     "vote_rshares": 0
 }
 
+def test_mentions():
+    # pylint: disable=invalid-name
+    m = mentions
+    assert m('Hi @abc, meet @bob') == {'abc', 'bob'}
+    assert m('Hi @abc, meet @abc') == {'abc'}
+    assert not m('')
+    assert not m('@')
+    assert not m('steemit.com/@apple')
+    assert not m('joe@apple.com')
+    assert m('@longestokaccount') == {'longestokaccount'}
+    assert not m('@longestokaccountx')
+    assert m('@abc- @-foo @bar.') == {'abc', 'bar'}
+    assert m('_[@foo](https://steemit.com/@foo)_') == {'foo'}
+
 def test_post_basic():
     ret = post_basic(POST_1)
     expect = {'json_metadata': {'tags': ['spam'], 'image': ['https://pbs.twimg.com/media/DBgNm3jXoAAioyE.jpg', 'https://example.com/image.jpg'], 'app': 'steemit/0.1', 'format': 'markdown'},
@@ -179,7 +194,7 @@ def test_post_payout():
     expect = {'payout': Decimal('0.044'),
               'rshares': 2731865444,
               'csvotes': 'test-safari,1506388632,10000,49.03\ndarth-cryptic,110837437,200,49.23\ntest25,621340000,10000,25\nmysqlthrashmetal,493299375,10000,41.02',
-              'sc_trend': 3123.215690554685,
+              'sc_trend': 6243.994921804685,
               'sc_hot': 149799.83955930467}
     assert ret == expect
 

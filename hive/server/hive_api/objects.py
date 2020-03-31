@@ -48,11 +48,17 @@ async def _follow_contexts(db, accounts, observer_id, include_mute=False):
     rows = await db.query_all(sql,
                               account_id=observer_id,
                               ids=tuple(accounts.keys()))
-    for following_id, state in rows:
+    for row in rows:
+        following_id = row[0]
+        state = row[1]
         context = {'followed': state == 1}
         if include_mute and state == 2:
             context['muted'] = True
         accounts[following_id]['context'] = context
+
+    for account in accounts.values():
+        if 'context' not in account:
+            account['context'] = {'followed': False}
 
 
 # Comment objects
@@ -133,7 +139,6 @@ async def posts_by_id(db, ids, observer=None, lite=True):
             'payout_at': str(row['payout_at']),
             'is_paidout': row['is_paidout'],
             'rshares' : row['rshares'],
-            'hide': False, # TODO
             'top_votes' : top_votes,
             'thumb_url': row['img_url'],
             'is_nsfw' : row['is_nsfw'],
@@ -167,12 +172,12 @@ async def posts_by_id(db, ids, observer=None, lite=True):
             'accounts': await accounts_by_name(db, authors, observer, lite=True)}
 
 async def _append_flags(db, posts):
-    sql = """SELECT id, parent_id, community, category, is_muted, is_valid
+    sql = """SELECT id, parent_id, community_id, category, is_muted, is_valid
                FROM hive_posts WHERE id IN :ids"""
     for row in await db.query_all(sql, ids=tuple(posts.keys())):
         post = posts[row['id']]
         post['parent_id'] = row['parent_id']
-        post['community'] = row['community']
+        post['community_id'] = row['community_id']
         post['category'] = row['category']
         post['is_muted'] = row['is_muted']
         post['is_valid'] = row['is_valid']

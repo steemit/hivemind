@@ -61,7 +61,7 @@ All communities and posts are viewable and readable by all, and there is a gover
 #### User Roles Overview
 
 1. **Owner**: can assign admins. 
-2. **Admin**: can edit admin settings, display settings, and assign mods.
+2. **Admin**: can edit community properties and assign mods.
 3. **Mod**: can mute posts/users, add/remove members, pin posts, set user titles.
 4. **Member**: in restricted (journal/council) communities, an approved member.
 5. **Guest**: can post/comment in topics and comment in journals.
@@ -136,19 +136,22 @@ Core settings which will influence community logic and validation rules.
     - specifies required minimum beneficiary amount per post for it to be considered valid
     - can be blank or contain up to 8 entries
 
-##### Editable by Admins - Display Settings
+##### Editable by Admins - Community Properties
 
 Can be stored as a JSON dictionary.
 
- - `name`: the display name of this community (32 chars)
- - `about`: short blurb about this community (512 chars)
+ - `title`: the display name of this community (32 chars)
+ - `about`: short blurb about this community (120 chars)
+ - `lang`: primary language. `en`, `es`, `ru`, etc (https://en.wikipedia.org/wiki/ISO_639-3 ?)
+ - `is_nsfw`: `true` if this community is 18+. UI to automatically tag all posts/comments `nsfw`
  - `description`: a blob of markdown to describe purpose, enumerate rules, etc. (5000 chars)
  - `flag_text`: custom text for reporting content
- - `language`: primary language. `en`, `es`, `ru`, etc (https://en.wikipedia.org/wiki/ISO_639-3 ?)
- - `nsfw`: `true` if this community is 18+. UI to automatically tag all posts/comments `nsfw`
- - `bg_color`: background color - hex-encoded RGB value (e.g. `#EEDDCC`)
- - `bg_color2`: background color - hex-encoded RGB value (if provided, creates a gradient)
- - `primary_tag`: the preferred tag for the community, set on each post; potential custom URL later 
+ - `settings': json dict; recognized keys:
+   - `avatar_url` - same format as account avatars; usually rendered as a circle
+   - `cover_url` - same format as account covers; used as header background image
+   - `default_view` = `list | blog | grid` - default post display
+   - `bg_color`: background color - hex-encoded RGB value (e.g. `#EEDDCC`)
+   - `bg_color2`: background color - hex-encoded RGB value (if provided, creates a gradient)
 
 Extra settings (v1.5)
 
@@ -175,7 +178,7 @@ The standard format for `custom_json` ops:
 {
   required_auths: [],
   required_posting_auths: [<account>],
-  id: "hive.community",
+  id: "community",
   json: [
     <action>, 
     {
@@ -215,13 +218,13 @@ In addition to editing user roles (e.g. appointing mods), admins can define the 
 #### Update display settings
 
 ```
-["updateSettings", {
+["updateProps", {
   "community": <community>, 
-  "settings": { <key:value>, ... }
+  "props": { <key:value>, ... }
 }]
 ```
 
-Valid keys are `name`, `about`, `description`, `language`, `nsfw`, `flag_text`.
+Valid keys are `title`, `about`, `lang`, `is_nsfw`, `description`, `flag_text`, `settings`.
 
 #### Set reward share (v1.5)
 
@@ -284,7 +287,7 @@ Stickies a post to the top of the community homepage. If multiple posts are stic
 
 
 ```
-["unPinPost", {
+["unpinPost", {
   "community": <community>,
   "account": <account>,
   "permlink": <permlink>
@@ -316,7 +319,7 @@ Places a post in the review queue. It's up to the community to define what const
 ```
 ["flagPost", {
   "community": <community>,
-  "author": <author>,
+  "account": <account>,
   "permlink": <permlink>,
   "comment": <comment>
 }]

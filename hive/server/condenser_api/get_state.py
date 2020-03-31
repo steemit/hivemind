@@ -14,14 +14,13 @@ from hive.server.condenser_api.objects import (
     load_posts,
     load_posts_keyed,
     load_posts_reblogs)
-from hive.server.condenser_api.common import (
+from hive.server.common.helpers import (
     ApiError,
     return_error_info,
     valid_account,
     valid_permlink,
     valid_sort,
-    valid_tag,
-    get_post_id)
+    valid_tag)
 from hive.server.condenser_api.tags import (
     get_trending_tags,
     get_top_trending_tags_summary)
@@ -237,7 +236,7 @@ async def _child_ids(db, parent_ids):
 
 async def _load_discussion(db, author, permlink):
     """Load a full discussion thread."""
-    root_id = await get_post_id(db, author, permlink)
+    root_id = await cursor.get_post_id(db, author, permlink)
     if not root_id:
         return {}
 

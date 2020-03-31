@@ -27,6 +27,7 @@ setup(
     setup_requires=['pytest-runner'],
     tests_require=tests_require,
     install_requires=[
+        #'aiopg==0.16.0',
         'aiopg @ https://github.com/aio-libs/aiopg/tarball/862fff97e4ae465333451a4af2a838bfaa3dd0bc',
         'jsonrpcserver==4.0.1',
         'aiohttp',

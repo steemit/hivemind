@@ -48,6 +48,7 @@ class Conf():
         add('--log-level', env_var='LOG_LEVEL', default='INFO')
         add('--test-disable-sync', type=strtobool, env_var='TEST_DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
         add('--test-max-block', type=int, env_var='TEST_MAX_BLOCK', help='(debug) only sync to given block, for running sync test', default=None)
+        add('--test-profile', type=strtobool, env_var='TEST_PROFILE', help='(debug) profile execution', default=False)
 
         # needed for e.g. tests - other args may be present
         args = (parser.parse_args() if strict
@@ -61,7 +62,8 @@ class Conf():
                   _sanitized_conf(parser))
 
         if conf.mode() == 'server':
-            DbStats.SLOW_QUERY_MS = 750
+            #DbStats.SLOW_QUERY_MS = 750
+            DbStats.SLOW_QUERY_MS = 200 # TODO
 
         return conf
 

@@ -1,9 +1,13 @@
 """Hive db state manager. Check if schema loaded, init synced, etc."""
 
+#pylint: disable=too-many-lines
+
 import time
 import logging
 
-from hive.db.schema import setup, reset_autovac, build_metadata, teardown, DB_VERSION
+from hive.db.schema import (setup, reset_autovac, build_metadata,
+                            build_metadata_community, teardown, DB_VERSION,
+                            build_metadata_blacklist)
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -84,6 +88,7 @@ class DbState:
         to_locate = [
             'hive_posts_ix3', # (author, depth, id)
             'hive_posts_ix4', # (parent_id, id, is_deleted=0)
+            'hive_posts_ix5', # (community_id>0, is_pinned=1)
             'hive_follows_ix5a', # (following, state, created_at, follower)
             'hive_follows_ix5b', # (follower, state, created_at, following)
             'hive_reblogs_ix1', # (post_id, account, created_at)
@@ -94,6 +99,12 @@ class DbState:
             'hive_posts_cache_ix8', # (category, payout, depth, paidout=0)
             'hive_posts_cache_ix9a', # (depth, payout, post_id, paidout=0)
             'hive_posts_cache_ix9b', # (category, depth, payout, post_id, paidout=0)
+            'hive_posts_cache_ix10', # (post_id, payout, gray=1, payout>0)
+            'hive_posts_cache_ix30', # API: community trend
+            'hive_posts_cache_ix31', # API: community hot
+            'hive_posts_cache_ix32', # API: community created
+            'hive_posts_cache_ix33', # API: community payout
+            'hive_posts_cache_ix34', # API: community muted
             'hive_accounts_ix3', # (vote_weight, name VPO)
             'hive_accounts_ix4', # (id, name)
             'hive_accounts_ix5', # (cached_at, name)
@@ -173,7 +184,7 @@ class DbState:
             return bool(cls.db().query_one("""
                 SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'public'
             """))
-        elif engine == 'mysql':
+        if engine == 'mysql':
             return bool(cls.db().query_one('SHOW TABLES'))
         raise Exception("unknown db engine %s" % engine)
 
@@ -188,7 +199,7 @@ class DbState:
     @classmethod
     def _check_migrations(cls):
         """Check current migration version and perform updates as needed."""
-        #pylint: disable=line-too-long
+        #pylint: disable=line-too-long,too-many-branches,too-many-statements
         cls._ver = cls.db().query_one("SELECT db_version FROM hive_state LIMIT 1")
         assert cls._ver is not None, 'could not load state record'
 
@@ -258,6 +269,57 @@ class DbState:
             cls.db().query("CREATE INDEX hive_posts_ix3 ON hive_posts (author, depth, id) WHERE is_deleted = '0'")
             cls.db().query("CREATE INDEX hive_posts_ix4 ON hive_posts (parent_id, id) WHERE is_deleted = '0'")
             cls._set_ver(12)
+
+        if cls._ver == 12: # community schema
+            assert False, 'not finalized'
+            for table in ['hive_members', 'hive_flags', 'hive_modlog',
+                          'hive_communities', 'hive_subscriptions',
+                          'hive_roles', 'hive_notifs']:
+                cls.db().query("DROP TABLE IF EXISTS %s" % table)
+            build_metadata_community().create_all(cls.db().engine())
+
+            cls.db().query("ALTER TABLE hive_accounts ADD COLUMN lr_notif_id integer")
+            cls.db().query("ALTER TABLE hive_posts DROP CONSTRAINT hive_posts_fk2")
+            cls.db().query("ALTER TABLE hive_posts DROP COLUMN community")
+            cls.db().query("ALTER TABLE hive_posts ADD COLUMN community_id integer")
+            cls.db().query("ALTER TABLE hive_posts_cache ADD COLUMN community_id integer")
+            cls._set_ver(13)
+
+        if cls._ver == 13:
+            sqls = ("CREATE INDEX hive_posts_ix5 ON hive_posts (id) WHERE is_pinned = '1' AND is_deleted = '0'",
+                    "CREATE INDEX hive_posts_ix6 ON hive_posts (community_id, id) WHERE community_id IS NOT NULL AND is_pinned = '1' AND is_deleted = '0'",
+                    "CREATE INDEX hive_posts_cache_ix10 ON hive_posts_cache (post_id, payout) WHERE is_grayed = '1' AND payout > 0",
+                    "CREATE INDEX hive_posts_cache_ix30 ON hive_posts_cache (community_id, sc_trend,   post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
+                    "CREATE INDEX hive_posts_cache_ix31 ON hive_posts_cache (community_id, sc_hot,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
+                    "CREATE INDEX hive_posts_cache_ix32 ON hive_posts_cache (community_id, created_at, post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0",
+                    "CREATE INDEX hive_posts_cache_ix33 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND is_paidout = '0'",
+                    "CREATE INDEX hive_posts_cache_ix34 ON hive_posts_cache (community_id, payout,     post_id) WHERE community_id IS NOT NULL AND is_grayed = '1' AND is_paidout = '0'")
+            for sql in sqls:
+                cls.db().query(sql)
+            cls._set_ver(14)
+
+        if cls._ver == 14:
+            cls.db().query("ALTER TABLE hive_communities ADD COLUMN primary_tag VARCHAR(32)   NOT NULL DEFAULT ''")
+            cls.db().query("ALTER TABLE hive_communities ADD COLUMN category    VARCHAR(32)   NOT NULL DEFAULT ''")
+            cls.db().query("ALTER TABLE hive_communities ADD COLUMN avatar_url  VARCHAR(1024) NOT NULL DEFAULT ''")
+            cls.db().query("ALTER TABLE hive_communities ADD COLUMN num_authors INTEGER       NOT NULL DEFAULT 0")
+            cls.db().query("CREATE INDEX hive_posts_cache_ix20 ON hive_posts_cache (community_id, author, payout, post_id) WHERE is_paidout = '0'")
+            cls._set_ver(15)
+
+        if cls._ver == 15:
+            cls.db().query("ALTER TABLE hive_accounts DROP COLUMN lr_notif_id")
+            cls.db().query("ALTER TABLE hive_accounts ADD COLUMN lastread_at TIMESTAMP WITHOUT TIME ZONE DEFAULT '1970-01-01 00:00:00' NOT NULL")
+            cls.db().query("CREATE INDEX hive_notifs_ix6 ON hive_notifs (dst_id, created_at, score, id) WHERE dst_id IS NOT NULL")
+            cls._set_ver(16)
+
+        if cls._ver == 16:
+            cls.db().query("CREATE INDEX hive_communities_ft1 ON hive_communities USING GIN (to_tsvector('english', title || ' ' || about))")
+            cls._set_ver(17)
+
+        if cls._ver == 17:
+            if not cls.db().query_col("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_posts_status')"):
+                build_metadata_blacklist().create_all(cls.db().engine())
+            cls._set_ver(18)
 
         reset_autovac(cls.db())
 

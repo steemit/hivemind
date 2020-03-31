@@ -1,6 +1,6 @@
 """Handles legacy `call` method."""
 
-from hive.server.condenser_api.common import (
+from hive.server.common.helpers import (
     ApiError,
     return_error_info,
 )
@@ -81,7 +81,7 @@ async def call(context, api, method, params):
     {"id":0,"jsonrpc":"2.0","method":"call",
      "params":["database_api","get_state",["trending"]]}
     ```"""
-    # pylint: disable=too-many-return-statements, too-many-branches
+    # pylint: disable=too-many-return-statements, too-many-branches, no-else-return
     assert api == 'condenser_api', "`call` requires condenser_api"
 
     # Follows
