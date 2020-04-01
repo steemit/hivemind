@@ -7,6 +7,7 @@ from hive.server.common.helpers import (
     return_error_info,
     valid_account,
     valid_permlink)
+from hive.server.bridge_api.cursor import hide_pids_by_ids
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,12 @@ async def _load_discussion(db, root_id):
         rows = await _child_ids(db, todo)
         todo = []
         for pid, cids in rows:
+            if cids:
+                hide_pids = await hide_pids_by_ids(db, cids)
+                for hide_pid in hide_pids:
+                    if hide_pid in cids:
+                        cids.remove(hide_pid)
+
             tree[pid] = cids
             todo.extend(cids)
 
