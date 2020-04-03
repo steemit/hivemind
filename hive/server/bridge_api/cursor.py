@@ -80,6 +80,20 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
                 pids.remove(pid)
         pids = prepend + pids
 
+    # first page prepend pinned
+    if not tag and not cids and not start_id:
+        first_prepend = await _pids_by_type(db, '2')
+        for pid in first_prepend:
+            if pid in pids:
+                pids.remove(pid)
+        pids = first_prepend + pids
+
+    # hide posts
+    hide_pids = await hide_pids_by_ids(db, pids)
+    for pid in hide_pids:
+        if pid in pids:
+            pids.remove(pid)
+
     return pids
 
 
@@ -127,6 +141,14 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
         #sql = """((%s < :seek_val) OR
         #          (%s = :seek_val AND post_id > :seek_id))"""
         #where.append(sql % (field, sval, field, sval))
+
+    # hide posts
+    #sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
+    #where.append("post_id NOT IN (%s)" % sql)
+
+    # hide author
+    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
+    where.append("author NOT IN (%s)" % sql)
 
     # build
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -182,16 +204,26 @@ async def pids_by_category(db, tag, sort, last_id, limit):
         sql = """((%s < %s) OR (%s = %s AND post_id > :last_id))"""
         where.append(sql % (field, sval, field, sval))
 
+    # hide posts
+    #sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
+    #where.append("post_id NOT IN (%s)" % sql)
+
+    # hide author
+    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
+    where.append("author NOT IN (%s)" % sql)
+
     sql = ("""SELECT post_id FROM %s WHERE %s
               ORDER BY %s DESC, post_id LIMIT :limit
               """ % (table, ' AND '.join(where), field))
 
     return await db.query_col(sql, tag=tag, last_id=last_id, limit=limit)
 
+
 async def _subscribed(db, account_id):
     sql = """SELECT community_id FROM hive_subscriptions
               WHERE account_id = :account_id"""
     return await db.query_col(sql, account_id=account_id)
+
 
 async def _pinned(db, community_id):
     """Get a list of pinned post `id`s in `community`."""
@@ -201,6 +233,25 @@ async def _pinned(db, community_id):
                 AND community_id = :community_id
             ORDER BY id DESC"""
     return await db.query_col(sql, community_id=community_id)
+
+
+async def _pids_by_type(db, list_type):
+    """Get a list of post `id`s."""
+    sql = """SELECT post_id FROM hive_posts_status
+              WHERE list_type = :list_type
+            ORDER BY created_at DESC"""
+    return await db.query_col(sql, list_type=list_type)
+
+
+async def hide_pids_by_ids(db, ids):
+    """Get a list of hided post `id`s."""
+    if not ids:
+        return []
+
+    sql = """SELECT post_id FROM hive_posts_status
+              WHERE list_type = '1' 
+              AND post_id IN :ids"""
+    return await db.query_col(sql, ids=tuple(ids))
 
 
 async def pids_by_blog(db, account: str, start_author: str = '',
@@ -229,6 +280,9 @@ async def pids_by_blog(db, account: str, start_author: str = '',
            AND community_id IS NOT NULL
            AND id NOT IN (SELECT post_id FROM hive_reblogs
                            WHERE account = :account)"""
+
+    # hide posts
+    #hide = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
 
     sql = """
         SELECT post_id
@@ -301,6 +355,9 @@ async def pids_by_posts(db, account: str, start_permlink: str = '', limit: int =
             return []
 
         seek = "AND id <= :start_id"
+
+    # hide posts
+    #hide = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
 
     # `depth` in ORDER BY is a no-op, but forces an ix3 index scan (see #189)
     sql = """
@@ -393,6 +450,9 @@ async def pids_by_payout(db, account: str, start_author: str = '',
         last = "(SELECT payout FROM hive_posts_cache WHERE post_id = :start_id)"
         seek = ("""AND (payout < %s OR (payout = %s AND post_id > :start_id))"""
                 % (last, last))
+
+    # hide posts
+    #hide = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
 
     sql = """
         SELECT post_id
