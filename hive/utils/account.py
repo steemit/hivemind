@@ -6,12 +6,19 @@ from hive.utils.normalize import trunc
 def safe_profile_metadata(account):
     """Given an account, return sanitized profile data."""
     prof = {}
+
     try:
-        prof = json.loads(account['json_metadata'])['profile']
-        if not isinstance(prof, dict):
-            prof = {}
+        # read from posting_json_metadata, if version==2
+        prof = json.loads(account['posting_json_metadata'])['profile']
+        assert isinstance(prof, dict)
+        assert 'version' in prof and prof['version'] == 2
     except Exception:
-        pass
+        try:
+            # fallback to json_metadata
+            prof = json.loads(account['json_metadata'])['profile']
+            assert isinstance(prof, dict)
+        except Exception:
+            prof = {}
 
     name = str(prof['name']) if 'name' in prof else None
     about = str(prof['about']) if 'about' in prof else None

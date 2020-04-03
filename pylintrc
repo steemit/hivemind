@@ -119,7 +119,8 @@ disable=
     coerce-method,
     #custom
     fixme,
-    multiple-statements
+    multiple-statements,
+    import-outside-toplevel
 
 
 [REPORTS]

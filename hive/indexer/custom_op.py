@@ -9,9 +9,11 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.posts import Posts
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
+from hive.indexer.notify import Notify
 
-from hive.indexer.community import process_json_community_op
+from hive.indexer.community import process_json_community_op, START_BLOCK
 from hive.utils.normalize import load_json_key
+from hive.utils.json import valid_op_json, valid_date, valid_command, valid_keys
 
 DB = Db.instance()
 
@@ -39,7 +41,7 @@ class CustomOp:
     def process_ops(cls, ops, block_num, block_date):
         """Given a list of operation in block, filter and process them."""
         for op in ops:
-            if op['id'] not in ['follow', 'com.steemit.community']:
+            if op['id'] not in ['follow', 'community', 'notify']:
                 continue
 
             account = _get_auth(op)
@@ -51,13 +53,41 @@ class CustomOp:
                 if block_num < 6000000 and not isinstance(op_json, list):
                     op_json = ['follow', op_json]  # legacy compat
                 cls._process_legacy(account, op_json, block_date)
-            elif op['id'] == 'com.steemit.community':
-                if block_num > 30e6:
+            elif op['id'] == 'community':
+                if block_num > START_BLOCK:
                     process_json_community_op(account, op_json, block_date)
+            elif op['id'] == 'notify':
+                cls._process_notify(account, op_json, block_date)
+
+    @classmethod
+    def _process_notify(cls, account, op_json, block_date):
+        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog)
+
+        mark_read {date: {type: 'date'}}
+        """
+        try:
+            command, payload = valid_op_json(op_json)
+            valid_command(command, valid=('setLastRead'))
+            if command == 'setLastRead':
+                valid_keys(payload, required=['date'])
+                date = valid_date(payload['date'])
+                assert date <= block_date
+                Notify.set_lastread(account, date)
+        except AssertionError as e:
+            log.warning("notify op fail: %s in %s", e, op_json)
 
     @classmethod
     def _process_legacy(cls, account, op_json, block_date):
-        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog)"""
+        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog)
+
+        follow {follower: {type: 'account'},
+                following: {type: 'account'},
+                what: {type: 'list'}}
+        reblog {account: {type: 'account'},
+                author: {type: 'account'},
+                permlink: {type: 'permlink'},
+                delete: {type: 'str', optional: True}}
+        """
         if not isinstance(op_json, list):
             return
         if len(op_json) != 2:
@@ -98,15 +128,21 @@ class CustomOp:
             log.debug("reblog: post not found: %s/%s", author, permlink)
             return
 
+        author_id = Accounts.get_id(author)
+        blogger_id = Accounts.get_id(blogger)
+
         if 'delete' in op_json and op_json['delete'] == 'delete':
             DB.query("DELETE FROM hive_reblogs WHERE account = :a AND "
                      "post_id = :pid LIMIT 1", a=blogger, pid=post_id)
             if not DbState.is_initial_sync():
-                FeedCache.delete(post_id, Accounts.get_id(blogger))
+                FeedCache.delete(post_id, blogger_id)
 
         else:
             sql = ("INSERT INTO hive_reblogs (account, post_id, created_at) "
                    "VALUES (:a, :pid, :date) ON CONFLICT (account, post_id) DO NOTHING")
             DB.query(sql, a=blogger, pid=post_id, date=block_date)
             if not DbState.is_initial_sync():
-                FeedCache.insert(post_id, Accounts.get_id(blogger), block_date)
+                FeedCache.insert(post_id, blogger_id, block_date)
+                Notify('reblog', src_id=blogger_id, dst_id=author_id,
+                       post_id=post_id, when=block_date,
+                       score=Accounts.default_score(blogger)).write()

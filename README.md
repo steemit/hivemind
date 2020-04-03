@@ -45,7 +45,7 @@ $ hive server
 ```
 
 ```bash
-$ curl --data '{"jsonrpc":"2.0","id":0,"method":"hive.db_head_state"}' http://localhost:8080
+$ curl --data '{"jsonrpc":"2.0","id":0,"method":"hive.db_head_state","params":{}}' http://localhost:8080
 {"jsonrpc": "2.0", "result": {"db_head_block": 19930795, "db_head_time": "2018-02-16 21:35:42", "db_head_age": 10}, "id": 0}
 ```
 

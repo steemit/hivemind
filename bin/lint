@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
+
+# duplicate-code disabled due to https://github.com/PyCQA/pylint/issues/214
+# (bridge_api warnings cannot be selectively disabled)
+
 if [ -z "$1" ]
   then
-    pylint hive/**/*.py -f colorized -r n
+    pylint hive/**/*.py -f colorized -r n -d duplicate-code
     grep -r --color=always 'pylint: disable' hive
 else
-    pylint $1 -f colorized -r n
+    pylint $1 -f colorized -r n -d duplicate-code
     grep -r --color=always 'pylint: disable' $1
 fi

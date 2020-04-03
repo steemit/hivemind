@@ -16,8 +16,19 @@ from hive.server.condenser_api.tags import get_trending_tags as condenser_api_ge
 from hive.server.condenser_api.get_state import get_state as condenser_api_get_state
 from hive.server.condenser_api.call import call as condenser_api_call
 from hive.server.common.mutes import Mutes
+from hive.server.common.payout_stats import PayoutStats
+
+from hive.server.bridge_api import methods as bridge_api
+from hive.server.bridge_api.thread import get_discussion as bridge_api_get_discussion
+from hive.server.bridge_api.support import normalize_post as bridge_api_normalize_post
+from hive.server.bridge_api.support import get_post_header as bridge_api_get_post_header
+from hive.server.hive_api import community as hive_api_community
+from hive.server.hive_api import notify as hive_api_notify
+from hive.server.hive_api import stats as hive_api_stats
 
 from hive.server.db import Db
+
+# pylint: disable=too-many-lines
 
 async def db_head_state(context):
     """Status/health check."""
@@ -101,6 +112,29 @@ def build_methods():
         'call': condenser_api_call
     })
 
+    # bridge_api methods
+    methods.add(**{'bridge.' + method.__name__: method for method in (
+        bridge_api_normalize_post,
+        bridge_api_get_post_header,
+        bridge_api_get_discussion,
+        bridge_api.get_post,
+        bridge_api.get_account_posts,
+        bridge_api.get_ranked_posts,
+        bridge_api.get_profile,
+        bridge_api.get_trending_topics,
+        hive_api_notify.post_notifications,
+        hive_api_notify.account_notifications,
+        hive_api_notify.unread_notifications,
+        hive_api_stats.get_payout_stats,
+        hive_api_community.get_community,
+        hive_api_community.get_community_context,
+        hive_api_community.list_communities,
+        hive_api_community.list_pop_communities,
+        hive_api_community.list_community_roles,
+        hive_api_community.list_subscribers,
+        hive_api_community.list_all_subscriptions,
+    )})
+
     return methods
 
 def truncate_response_log(logger):
@@ -111,7 +145,7 @@ def truncate_response_log(logger):
 
     See also https://github.com/bcb/jsonrpcserver/issues/73.
     """
-    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message).512s')
+    formatter = logging.Formatter('%(levelname)s:%(name)s:%(message).1024s')
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
 
@@ -120,11 +154,13 @@ def truncate_response_log(logger):
 
 def run_server(conf):
     """Configure and launch the API server."""
+    #pylint: disable=too-many-statements
 
     # configure jsonrpcserver logging
     log_level = conf.log_level()
     logging.getLogger('aiohttp.access').setLevel(logging.WARNING)
     logging.getLogger('jsonrpcserver.dispatcher.response').setLevel(log_level)
+    truncate_response_log(logging.getLogger('jsonrpcserver.dispatcher.request'))
     truncate_response_log(logging.getLogger('jsonrpcserver.dispatcher.response'))
 
     # init
@@ -144,6 +180,9 @@ def run_server(conf):
         """Initialize db adapter."""
         args = app['config']['args']
         app['db'] = await Db.create(args['database_url'])
+
+        stats = PayoutStats(app['db'])
+        stats.set_shared_instance(stats)
 
     async def close_db(app):
         """Teardown db adapter."""

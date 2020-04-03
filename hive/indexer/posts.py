@@ -6,12 +6,11 @@ import collections
 from hive.db.adapter import Db
 from hive.db.db_state import DbState
 
-from hive.utils.normalize import load_json_key
 from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
-
-from hive.community.roles import is_community_post_valid
+from hive.indexer.community import Community, START_DATE
+from hive.indexer.notify import Notify
 
 log = logging.getLogger(__name__)
 DB = Db.instance()
@@ -113,10 +112,10 @@ class Posts:
     @classmethod
     def insert(cls, op, date):
         """Inserts new post records."""
-        sql = """INSERT INTO hive_posts (is_valid, parent_id, author, permlink,
-                                        category, community, depth, created_at)
-                      VALUES (:is_valid, :parent_id, :author, :permlink,
-                              :category, :community, :depth, :date)"""
+        sql = """INSERT INTO hive_posts (is_valid, is_muted, parent_id, author,
+                             permlink, category, community_id, depth, created_at)
+                      VALUES (:is_valid, :is_muted, :parent_id, :author,
+                             :permlink, :category, :community_id, :depth, :date)"""
         sql += ";SELECT currval(pg_get_serial_sequence('hive_posts','id'))"
         post = cls._build_post(op, date)
         result = DB.query(sql, **post)
@@ -124,6 +123,10 @@ class Posts:
         cls._set_id(op['author']+'/'+op['permlink'], post['id'])
 
         if not DbState.is_initial_sync():
+            if post['error']:
+                author_id = Accounts.get_id(post['author'])
+                Notify('error', dst_id=author_id, when=date,
+                       post_id=post['id'], payload=post['error']).write()
             CachedPost.insert(op['author'], op['permlink'], post['id'])
             if op['parent_author']: # update parent's child count
                 CachedPost.recount(op['parent_author'],
@@ -133,15 +136,22 @@ class Posts:
     @classmethod
     def undelete(cls, op, date, pid):
         """Re-allocates an existing record flagged as deleted."""
-        sql = """UPDATE hive_posts SET is_valid = :is_valid, is_deleted = '0',
+        sql = """UPDATE hive_posts SET is_valid = :is_valid,
+                   is_muted = :is_muted, is_deleted = '0', is_pinned = '0',
                    parent_id = :parent_id, category = :category,
-                   community = :community, depth = :depth
+                   community_id = :community_id, depth = :depth
                  WHERE id = :id"""
         post = cls._build_post(op, date, pid)
         DB.query(sql, **post)
 
         if not DbState.is_initial_sync():
-            CachedPost.undelete(pid, post['author'], post['permlink'])
+            if post['error']:
+                author_id = Accounts.get_id(post['author'])
+                Notify('error', dst_id=author_id, when=date,
+                       post_id=post['id'], payload=post['error']).write()
+
+            CachedPost.undelete(pid, post['author'], post['permlink'],
+                                post['category'])
             cls._insert_feed_cache(post)
 
     @classmethod
@@ -153,6 +163,7 @@ class Posts:
         if not DbState.is_initial_sync():
             CachedPost.delete(pid, op['author'], op['permlink'])
             if depth == 0:
+                # TODO: delete from hive_reblogs -- otherwise feed cache gets populated with deleted posts somwrimas
                 FeedCache.delete(pid)
             else:
                 # force parent child recount when child is deleted
@@ -190,49 +201,48 @@ class Posts:
 
     @classmethod
     def _build_post(cls, op, date, pid=None):
-        """Validate and normalize a post operation."""
+        """Validate and normalize a post operation.
+
+        Post is muted if:
+         - parent was muted
+         - author unauthorized
+
+        Post is invalid if:
+         - parent is invalid
+         - author unauthorized
+        """
+        # TODO: non-nsfw post in nsfw community is `invalid`
 
         # if this is a top-level post:
         if not op['parent_author']:
             parent_id = None
             depth = 0
             category = op['parent_permlink']
-            community = cls._get_op_community(op, date) or op['author']
+            community_id = None
+            if date > START_DATE:
+                community_id = Community.validated_id(category)
+            is_valid = True
+            is_muted = False
 
         # this is a comment; inherit parent props.
         else:
             parent_id = cls.get_id(op['parent_author'], op['parent_permlink'])
-            sql = "SELECT depth,category,community FROM hive_posts WHERE id=:id"
-            parent_depth, category, community = DB.query_row(sql, id=parent_id)
+            sql = """SELECT depth, category, community_id, is_valid, is_muted
+                       FROM hive_posts WHERE id = :id"""
+            (parent_depth, category, community_id, is_valid,
+             is_muted) = DB.query_row(sql, id=parent_id)
             depth = parent_depth + 1
+            if not is_valid: error = 'replying to invalid post'
+            elif is_muted: error = 'replying to muted post'
 
         # check post validity in specified context
-        is_valid = date < '2020-01-01' or is_community_post_valid(community, op)
-        if not is_valid:
-            url = "@%s/%s" % (op['author'], op['permlink'])
-            log.info("Invalid post %s in @%s", url, community)
+        error = None
+        if community_id and is_valid and not Community.is_post_valid(community_id, op):
+            error = 'not authorized'
+            #is_valid = False # TODO: reserved for future blacklist status?
+            is_muted = True
 
         return dict(author=op['author'], permlink=op['permlink'], id=pid,
-                    is_valid=is_valid, parent_id=parent_id, depth=depth,
-                    category=category, community=community, date=date)
-
-    @classmethod
-    def _get_op_community(cls, comment, date):
-        """Given a comment op, safely read 'community' field from json.
-
-        Ensures value is readable and referenced account exists.
-        """
-
-        # short-circuit pre-launch
-        if date < '2018-07-01':
-            return None
-
-        md = load_json_key(comment, 'json_metadata')
-        if (not md
-                or not isinstance(md, dict)
-                or not 'community' in md
-                or not isinstance(md['community'], str)
-                or not Accounts.exists(md['community'])):
-            return None
-
-        return md['community']
+                    is_valid=is_valid, is_muted=is_muted, parent_id=parent_id,
+                    depth=depth, category=category, community_id=community_id,
+                    date=date, error=error)

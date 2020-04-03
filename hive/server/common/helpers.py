@@ -1,10 +1,15 @@
-"""Helpers for condenser_api calls."""
+"""Helpers for server/API functions."""
 
 import re
 from functools import wraps
+import traceback
+import logging
+
+log = logging.getLogger(__name__)
 
 class ApiError(Exception):
     """API-specific errors: unimplemented/bad params. Pass back to client."""
+    # pylint: disable=unnecessary-pass
     pass
 
 def return_error_info(function):
@@ -14,15 +19,39 @@ def return_error_info(function):
         """Catch ApiError and AssersionError (always due to user error)."""
         try:
             return await function(*args, **kwargs)
-        except (ApiError, AssertionError, TypeError) as e:
-            # one specific TypeError we want to silence; others need a trace.
-            if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
+        except (ApiError, AssertionError, TypeError, Exception) as e:
+            if isinstance(e, KeyError):
+                #TODO: KeyError overloaded for method not found. Any KeyErrors
+                #      captured in this decorater are likely irrelevant to
+                #      json_rpc_server. Verify. (e.g. `KeyError: 'flag_weight'`)
+                log.error("ERR3: %s\n%s", repr(e), traceback.format_exc())
+                raise ApiError('ErrKey: ' + str(e))
+            if isinstance(e, ApiError) and 'get_account_votes' in str(e):
                 raise e
-            return {
-                "error": {
-                    "code": -32000,
-                    "message": str(e) + " (hivemind-alpha)"}}
+            if isinstance(e, AssertionError) and 'account not found' in str(e):
+                raise e
+            if isinstance(e, AssertionError) and 'community not found' in str(e):
+                raise e
+            if isinstance(e, TypeError) and 'unexpected keyword' not in str(e):
+                # one specific TypeError we want to silence; others need a trace
+                log.error("ERR1: %s\n%s", repr(e), traceback.format_exc())
+                raise e
+            if isinstance(e, AssertionError):
+                log.error("ERR2: %s\n%s", repr(e), traceback.format_exc())
+                raise e
+            log.error("ERR0: %s\n%s", repr(e), traceback.format_exc())
+            raise e
+            #return {
+            #    "error": {
+            #        "code": -32000,
+            #        "message": repr(e) + " (hivemind-beta)",
+            #        "trace": traceback.format_exc()}}
     return wrapper
+
+def json_date(date=None):
+    """Given a db datetime, return a steemd/json-friendly version."""
+    if not date: return '1969-12-31T23:59:59'
+    return 'T'.join(str(date).split(' '))
 
 def valid_account(name, allow_empty=False):
     """Returns validated account name or throws Assert."""
@@ -50,8 +79,9 @@ def valid_sort(sort, allow_empty=False):
         assert allow_empty, 'sort must be specified'
         return ""
     assert isinstance(sort, str), 'sort must be a string'
+    # TODO: differentiate valid sorts on comm vs tag
     valid_sorts = ['trending', 'promoted', 'hot', 'created',
-                   'payout', 'payout_comments']
+                   'payout', 'payout_comments', 'muted']
     assert sort in valid_sorts, 'invalid sort `%s`' % sort
     return sort
 
@@ -84,14 +114,3 @@ def valid_follow_type(follow_type: str):
     """Ensure follow type is valid steemd type."""
     assert follow_type in ['blog', 'ignore'], 'invalid follow_type `%s`' % follow_type
     return follow_type
-
-async def get_post_id(db, author, permlink):
-    """Given an author/permlink, retrieve the id from db."""
-    sql = ("SELECT id FROM hive_posts WHERE author = :a "
-           "AND permlink = :p AND is_deleted = '0' LIMIT 1")
-    return await db.query_one(sql, a=author, p=permlink)
-
-async def get_child_ids(db, post_id):
-    """Given a parent post id, retrieve all child ids."""
-    sql = "SELECT id FROM hive_posts WHERE parent_id = :id AND is_deleted = '0'"
-    return await db.query_col(sql, id=post_id)

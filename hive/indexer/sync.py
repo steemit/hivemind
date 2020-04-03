@@ -19,6 +19,10 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
+from hive.indexer.community import Community
+from hive.server.common.mutes import Mutes
+
+#from hive.indexer.jobs import audit_cache_missing, audit_cache_deleted
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +47,13 @@ class Sync:
         Accounts.load_ids()
         Accounts.fetch_ranks()
 
+        # load irredeemables
+        mutes = Mutes(self._conf.get('muted_accounts_url'))
+        Mutes.set_shared_instance(mutes)
+
+        # community stats
+        Community.recalc_pending_payouts()
+
         if DbState.is_initial_sync():
             # resume initial sync
             self.initial()
@@ -54,6 +65,9 @@ class Sync:
 
             # perform cleanup if process did not exit cleanly
             CachedPost.recover_missing_posts(self._steem)
+
+        #audit_cache_missing(self._db, self._steem)
+        #audit_cache_deleted(self._db)
 
         self._update_chain_state()
 
@@ -77,7 +91,7 @@ class Sync:
                 self.listen()
             except MicroForkException as e:
                 # attempt to recover by restarting stream
-                log.error("micro fork: %s", repr(e))
+                log.error("microfork: %s", repr(e))
 
     def initial(self):
         """Initial sync routine."""
@@ -191,9 +205,14 @@ class Sync:
                      cnt['recount'], accts, follows, ms, ' SLOW' if ms > 1000 else '')
 
             if num % 1200 == 0: #1hr
+                log.warning("head block %d @ %s", num, block['timestamp'])
+                log.info("[LIVE] hourly stats")
                 Accounts.fetch_ranks()
+                #Community.recalc_pending_payouts()
+            if num % 200 == 0: #10min
+                Community.recalc_pending_payouts()
             if num % 100 == 0: #5min
-                log.info("[LIVE] flag 500 oldest accounts for update")
+                log.info("[LIVE] 5-min stats")
                 Accounts.dirty_oldest(500)
             if num % 20 == 0: #1min
                 self._update_chain_state()

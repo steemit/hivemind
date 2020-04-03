@@ -85,19 +85,24 @@ class Blocks:
                 # account metadata updates
                 elif op_type == 'account_update_operation':
                     if not is_initial_sync:
-                        Accounts.dirty(set([op['account']]))
+                        Accounts.dirty(op['account']) # full
                 elif op_type == 'account_update2_operation':
                     if not is_initial_sync:
-                        Accounts.dirty(set([op['account']]))
+                        Accounts.dirty(op['account']) # full
 
                 # post ops
                 elif op_type == 'comment_operation':
                     Posts.comment_op(op, date)
+                    if not is_initial_sync:
+                        Accounts.dirty(op['author']) # lite - stats
                 elif op_type == 'delete_comment_operation':
                     Posts.delete_op(op)
                 elif op_type == 'vote_operation':
                     if not is_initial_sync:
-                        CachedPost.vote(op['author'], op['permlink'])
+                        Accounts.dirty(op['author']) # lite - rep
+                        Accounts.dirty(op['voter']) # lite - stats
+                        CachedPost.vote(op['author'], op['permlink'],
+                                        None, op['voter'])
 
                 # misc ops
                 elif op_type == 'transfer_operation':
@@ -201,7 +206,13 @@ class Blocks:
             sql = "SELECT id FROM hive_posts WHERE created_at >= :date"
             post_ids = tuple(DB.query_col(sql, date=date))
 
-            # remove all recent records
+            # remove all recent records -- communities
+            DB.query("DELETE FROM hive_notifs        WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_subscriptions WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_roles         WHERE created_at >= :date", date=date)
+            DB.query("DELETE FROM hive_communities   WHERE created_at >= :date", date=date)
+
+            # remove all recent records -- core
             DB.query("DELETE FROM hive_feed_cache  WHERE created_at >= :date", date=date)
             DB.query("DELETE FROM hive_reblogs     WHERE created_at >= :date", date=date)
             DB.query("DELETE FROM hive_follows     WHERE created_at >= :date", date=date) #*
