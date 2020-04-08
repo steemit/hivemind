@@ -81,7 +81,7 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
         pids = prepend + pids
 
     # first page prepend pinned
-    if not tag and not cids and not start_id:
+    if not tag and not cids and not start_id and sort in ('trending', 'created'):
         first_prepend = await _pids_by_type(db, '2')
         for pid in first_prepend:
             if pid in pids:
