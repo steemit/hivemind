@@ -39,9 +39,16 @@ class Mutes:
 
     def load(self):
         """Reload all accounts from irredeemables endpoint and global lists."""
-        self.accounts = set(_read_url(self.url).decode('utf8').split())
-        #jsn = _read_url('http://blacklist.usesteem.com/blacklists')
-        self.blist = dict() #set(json.loads(jsn))
+        try:
+            self.accounts = set(_read_url(self.url).decode('utf8').split())
+        except Exception as e:
+            self.accounts = dict()
+        try:
+            jsn = _read_url('http://blacklist.usesteem.com/blacklists')
+            self.blist = set(json.loads(jsn))
+        except Exception as e1:
+            self.blist = dict()
+            log.warning("get blacklists failed")
         self.blist_map = dict()
         log.warning("%d muted, %d blacklisted", len(self.accounts), len(self.blist))
         self.fetched = perf()
