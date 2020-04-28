@@ -72,8 +72,11 @@ class Mutes:
             out = []
             if name in inst.blist:
                 url = 'http://blacklist.usesteem.com/user/' + name
-                lists = json.loads(_read_url(url))
-                out.extend(lists['blacklisted'])
+                try:
+                    lists = json.loads(_read_url(url))
+                    out.extend(lists['blacklisted'])
+                except Exception as e:
+                    lists = {}
 
             if name in inst.accounts:
                 if 'irredeemables' not in out:
