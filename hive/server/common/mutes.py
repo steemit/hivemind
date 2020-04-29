@@ -43,12 +43,12 @@ class Mutes:
             self.accounts = set(_read_url(self.url).decode('utf8').split())
         except Exception as e:
             self.accounts = dict()
-        try:
-            jsn = _read_url('http://blacklist.usesteem.com/blacklists')
-            self.blist = set(json.loads(jsn))
-        except Exception as e1:
-            self.blist = dict()
-            log.warning("get blacklists failed")
+        # try:
+        #    jsn = _read_url('http://blacklist.usesteem.com/blacklists')
+        #    self.blist = set(json.loads(jsn))
+        # except Exception as e1:
+        #    log.warning("get blacklists failed")
+        self.blist = dict()
         self.blist_map = dict()
         log.warning("%d muted, %d blacklisted", len(self.accounts), len(self.blist))
         self.fetched = perf()
