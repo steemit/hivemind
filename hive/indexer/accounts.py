@@ -64,7 +64,10 @@ class Accounts:
     @classmethod
     def exists(cls, name):
         """Check if an account name exists."""
-        return name in cls._ids
+        try:
+            return name in cls._ids
+        except Exception as e:
+            return False
 
     @classmethod
     def register(cls, names, block_date):
