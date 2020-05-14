@@ -99,8 +99,7 @@ class CustomOp:
         
         cmd, op_json = op_json  # ['follow', {data...}]
         if cmd == 'follow':
-            updatedOp = frozenset(op_json.items())
-            Follow.follow_op(account, updatedOp, block_date)
+            Follow.follow_op(account, op_json, block_date)
         elif cmd == 'reblog':
             cls.reblog(account, op_json, block_date)
 
