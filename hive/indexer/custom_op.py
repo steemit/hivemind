@@ -96,7 +96,7 @@ class CustomOp:
             return
         if not isinstance(second(op_json), dict):
             return
-
+        
         cmd, op_json = op_json  # ['follow', {data...}]
         if cmd == 'follow':
             Follow.follow_op(account, op_json, block_date)

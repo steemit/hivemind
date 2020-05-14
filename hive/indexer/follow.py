@@ -71,10 +71,13 @@ class Follow:
            or not 'following' in op):
             return None
 
-        what = first(op['what']) or ''
-        defs = {'': 0, 'blog': 1, 'ignore': 2}
-        if what not in defs:
-            return None
+        try:
+            what = first(op['what']) or ''
+            defs = {'': 0, 'blog': 1, 'ignore': 2}
+            if what not in defs:
+                return None
+        except Exception as e:
+            return False
 
         if(op['follower'] == op['following']        # can't follow self
            or op['follower'] != account             # impersonation
