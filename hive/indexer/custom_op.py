@@ -34,10 +34,6 @@ def _get_auth(op):
         return None
     return op['required_posting_auths'][0]
 
-class Hashabledict(dict):
-    def __hash__(self):
-        return hash(frozenset(self))
-
 class CustomOp:
     """Processes custom ops and dispatches updates."""
 
@@ -103,7 +99,7 @@ class CustomOp:
         
         cmd, op_json = op_json  # ['follow', {data...}]
         if cmd == 'follow':
-            updatedopJson = ['follow', Hashabledict(second(op_json))]
+            updatedopJson = ['follow', frozenset(second(op_json).items())]
             Follow.follow_op(account, updatedopJson, block_date)
         elif cmd == 'reblog':
             cls.reblog(account, op_json, block_date)
