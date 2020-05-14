@@ -100,10 +100,11 @@ class CustomOp:
             return
         if not isinstance(second(op_json), dict):
             return
-        hashableOpJson = Hashabledict(op_json)
+        
         cmd, op_json = op_json  # ['follow', {data...}]
         if cmd == 'follow':
-            Follow.follow_op(account, hashableOpJson, block_date)
+            updatedopJson = ['follow', Hashabledict(second(op_json))]
+            Follow.follow_op(account, updatedopJson, block_date)
         elif cmd == 'reblog':
             cls.reblog(account, op_json, block_date)
 
