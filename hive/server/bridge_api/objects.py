@@ -265,7 +265,7 @@ async def load_posts_images(db, ids):
 
     # fetch posts and associated author reps
     sql = """SELECT post_id, author, permlink, json
-               FROM hive_posts_cache WHERE post_id IN :ids"""
+               FROM hive_posts_cache WHERE post_id IN :ids ORDER BY post_id DESC"""
     posts = await db.query_all(sql, ids=tuple(ids))
 
     result = {}
