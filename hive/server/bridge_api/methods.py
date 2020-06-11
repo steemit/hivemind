@@ -1,7 +1,7 @@
 """Bridge API public endpoints for posts"""
 
 import hive.server.bridge_api.cursor as cursor
-from hive.server.bridge_api.objects import load_posts, load_posts_reblogs, load_profiles
+from hive.server.bridge_api.objects import load_posts, load_posts_reblogs, load_profiles, load_posts_images
 from hive.server.common.helpers import (
     return_error_info,
     valid_account,
@@ -156,3 +156,20 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
             if pid in ids:
                 ids.remove(pid)
         return await load_posts(context['db'], ids)
+
+
+async def get_account_images(context, account, start_author='', start_permlink='', limit=20):
+    assert account, 'account is required'
+
+    db = context['db']
+    account = valid_account(account)
+    start_author = valid_account(start_author, allow_empty=True)
+    start_permlink = valid_permlink(start_permlink, allow_empty=True)
+    start = (start_author, start_permlink)
+    limit = valid_limit(limit, 100)
+
+    start = start if start_permlink else (account, None)
+    assert account == start[0], 'comments - account must match start author'
+    ids = await cursor.pids_by_posts(db, *start, limit)
+
+    return await load_posts_images(context['db'], ids)

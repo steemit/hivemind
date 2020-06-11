@@ -119,6 +119,7 @@ def build_methods():
         bridge_api_get_discussion,
         bridge_api.get_post,
         bridge_api.get_account_posts,
+        bridge_api.get_account_images,
         bridge_api.get_ranked_posts,
         bridge_api.get_profile,
         bridge_api.get_trending_topics,

@@ -256,3 +256,28 @@ def _hydrate_active_votes(vote_csv):
         voter, rshares, _, _ = line.split(',')
         votes.append(dict(voter=voter, rshares=rshares))
     return votes
+
+
+async def load_posts_images(db, ids):
+    """Given an array of post ids, returns full posts images."""
+    # pylint: disable=too-many-locals
+    assert ids, 'no ids passed to load_posts_keyed'
+
+    # fetch posts and associated author reps
+    sql = """SELECT post_id, author, permlink, json
+               FROM hive_posts_cache WHERE post_id IN :ids"""
+    posts = await db.query_all(sql, ids=tuple(ids))
+
+    result = {}
+    images = []
+    for row in posts:
+        row = dict(row)
+        json_metadata = json.loads(row['json'])
+
+        result['author'] = row['author']
+        result['permlink'] = row['permlink']
+        images.append(json_metadata['image'])
+
+    result['images'] = images
+
+    return result
