@@ -276,7 +276,8 @@ async def load_posts_images(db, ids):
 
         result['author'] = row['author']
         result['permlink'] = row['permlink']
-        images.append(json_metadata['image'])
+        if 'image' in json_metadata:
+            images.append(json_metadata['image'])
 
     result['images'] = images
 
