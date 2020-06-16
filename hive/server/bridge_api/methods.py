@@ -158,7 +158,7 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
         return await load_posts(context['db'], ids)
 
 
-async def get_account_images(context, account, start_author='', start_permlink='', limit=20):
+async def get_account_images(context, account, post_id=0, start_author='', start_permlink='', limit=20):
     assert account, 'account is required'
 
     db = context['db']
@@ -170,6 +170,9 @@ async def get_account_images(context, account, start_author='', start_permlink='
 
     start = start if start_permlink else (account, None)
     assert account == start[0], 'comments - account must match start author'
-    ids = await cursor.pids_by_posts(db, *start, limit)
+    if post_id == 0:
+        ids = await cursor.pids_by_posts(db, *start, limit)
+    else:
+        ids = [post_id]
 
     return await load_posts_images(context['db'], ids)
