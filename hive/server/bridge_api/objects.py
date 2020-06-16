@@ -262,7 +262,7 @@ async def load_posts_images(db, ids):
     """Given an array of post ids, returns full posts images."""
     # pylint: disable=too-many-locals
     assert ids, 'no ids passed to load_posts_keyed'
-
+    print("3333")
     # fetch posts and associated author reps
     sql = """SELECT post_id, author, permlink, json
                FROM hive_posts_cache WHERE post_id IN :ids ORDER BY post_id DESC"""
