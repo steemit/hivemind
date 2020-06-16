@@ -167,12 +167,12 @@ async def get_account_images(context, account, post_id=0, start_author='', start
     start_permlink = valid_permlink(start_permlink, allow_empty=True)
     start = (start_author, start_permlink)
     limit = valid_limit(limit, 100)
-    print("1111")
+
     start = start if start_permlink else (account, None)
     assert account == start[0], 'comments - account must match start author'
     if post_id == 0:
         ids = await cursor.pids_by_posts(db, *start, limit)
     else:
         ids = [post_id]
-    print("2222")
+
     return await load_posts_images(context['db'], ids)
