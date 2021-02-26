@@ -7,6 +7,7 @@ import ujson as json
 from hive.server.hive_api.common import (get_account_id, get_community_id, valid_limit)
 from hive.server.common.helpers import return_error_info
 
+
 def days_ago(days):
     """Get the date `n` days ago."""
     return datetime.now() + relativedelta(days=-days)
@@ -18,6 +19,7 @@ log = logging.getLogger(__name__)
 
 ROLES = {-2: 'muted', 0: 'guest', 2: 'member', 4: 'mod', 6: 'admin', 8: 'owner'}
 
+
 async def if_tag_community(context, tag, observer=None):
     """Attempt to load community if tag is proper format."""
     if tag[:5] == 'hive-':
@@ -26,6 +28,7 @@ async def if_tag_community(context, tag, observer=None):
         if cid:
             return await get_community(context, tag, observer)
     return None
+
 
 @return_error_info
 async def get_community(context, name, observer=None):
@@ -44,6 +47,7 @@ async def get_community(context, name, observer=None):
         await _append_observer_subs(db, communities, observer_id)
 
     return communities[cid]
+
 
 @return_error_info
 async def get_community_context(context, name, account):
@@ -71,12 +75,11 @@ async def get_community_context(context, name, account):
 async def list_top_communities(context, limit=25):
     """List top communities. Returns lite community list."""
     assert limit < 100
-    #sql = """SELECT name, title FROM hive_communities
-    #          WHERE rank > 0 ORDER BY rank LIMIT :limit"""
     sql = """SELECT name, title FROM hive_communities
-              WHERE id = 1344247 OR rank > 0
-           ORDER BY (CASE WHEN id = 1344247 THEN 0 ELSE rank END)
-              LIMIT :limit"""
+             WHERE id = 1472130 OR ID = 1467200 OR rank > 0
+             ORDER BY
+             (CASE WHEN ID=1472130 THEN -1 WHEN ID=1467200 THEN 0 ELSE RANK END)
+             LIMIT :limit"""
 
     out = await context['db'].query_all(sql, limit=limit)
 
@@ -119,10 +122,11 @@ async def list_all_subscriptions(context, account):
     out = await db.query_all(sql, account_id=account_id)
     return [(r[0], r[1], ROLES[r[2]], r[3]) for r in out]
 
+
 @return_error_info
 async def list_subscribers(context, community):
     """Lists subscribers of `community`."""
-    #limit = valid_limit(limit, 100)
+    # limit = valid_limit(limit, 100)
     db = context['db']
     cid = await get_community_id(db, community)
 
@@ -137,6 +141,7 @@ async def list_subscribers(context, community):
     rows = await db.query_all(sql, cid=cid)
     return [(r['name'], ROLES[r['role_id'] or 0], r['title'],
              str(r['created_at'])) for r in rows]
+
 
 @return_error_info
 async def list_communities(context, last='', limit=100, query=None, sort='rank', observer=None):
@@ -157,9 +162,9 @@ async def list_communities(context, last='', limit=100, query=None, sort='rank',
     if query:
         where.append("to_tsvector('english', title || ' ' || about) @@ plainto_tsquery(:search)")
         search = query
-        #where.append("to_tsvector('english', title || ' ' || about) @@ to_tsquery(:search)")
-        #assert not query, 'query not yet supported'
-        #search = ' | '.join(query.split(' '))
+        # where.append("to_tsvector('english', title || ' ' || about) @@ to_tsquery(:search)")
+        # assert not query, 'query not yet supported'
+        # search = ' | '.join(query.split(' '))
 
     if field == 'rank':
         where.append('rank > 0')
@@ -186,6 +191,7 @@ async def list_communities(context, last='', limit=100, query=None, sort='rank',
 
     return [communities[_id] for _id in ids]
 
+
 @return_error_info
 async def list_community_roles(context, community, last='', limit=50):
     """List community account-roles (anyone with non-guest status)."""
@@ -209,6 +215,7 @@ async def list_community_roles(context, community, last='', limit=50):
     rows = await db.query_all(sql, id=cid, last=last, lrole=lrole, limit=limit)
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
 
+
 @return_error_info
 async def list_community_titles(context, community, last='', limit=50):
     """List community account-titles (anyone with custom title)."""
@@ -222,6 +229,7 @@ async def list_community_titles(context, community, last='', limit=50):
            ORDER BY name LIMIT :limit""" % seek
     rows = await db.query_all(sql, id=community_id, last=last, limit=limit)
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
+
 
 # Communities - internal
 # ----------------------
@@ -269,6 +277,7 @@ async def load_communities(db, ids, lite=True):
 
     return out
 
+
 async def _community_team(db, community_id):
     sql = """SELECT a.name, r.role_id, r.title FROM hive_roles r
                JOIN hive_accounts a ON r.account_id = a.id
@@ -277,6 +286,7 @@ async def _community_team(db, community_id):
            ORDER BY r.role_id DESC"""
     rows = await db.query_all(sql, community_id=community_id)
     return [(r['name'], ROLES[r['role_id']], r['title']) for r in rows]
+
 
 async def _append_observer_roles(db, communities, observer_id):
     ids = communities.keys()
@@ -292,6 +302,7 @@ async def _append_observer_roles(db, communities, observer_id):
         comm['context']['role'] = ROLES[role_id]
         comm['context']['title'] = title
 
+
 async def _append_observer_subs(db, communities, observer_id):
     ids = communities.keys()
 
@@ -302,6 +313,7 @@ async def _append_observer_subs(db, communities, observer_id):
 
     for cid, comm in communities.items():
         comm['context']['subscribed'] = cid in subs
+
 
 async def _append_admins(db, communities):
     ids = communities.keys()
@@ -331,6 +343,7 @@ async def top_community_voters(context, community):
                 total[voter] += abs(int(rshares))
     return sorted(total, key=total.get, reverse=True)[:5]
 
+
 async def top_community_authors(context, community):
     """Get a list of top 5 (pending) community authors."""
     db = context['db']
@@ -342,6 +355,7 @@ async def top_community_authors(context, community):
         total[author] += payout
     return sorted(total, key=total.get, reverse=True)[:5]
 
+
 async def top_community_muted(context, community):
     """Get top authors (by SP) who are muted in a community."""
     db = context['db']
@@ -350,6 +364,7 @@ async def top_community_muted(context, community):
               WHERE r.community_id = :community_id AND r.role_id < 0
            ORDER BY voting_weight DESC LIMIT 5"""
     return await db.query(sql, community_id=await get_community_id(db, community))
+
 
 async def _top_community_posts(db, community, limit=50):
     # TODO: muted equivalent
