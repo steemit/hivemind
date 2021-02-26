@@ -162,9 +162,6 @@ async def list_communities(context, last='', limit=100, query=None, sort='rank',
     if query:
         where.append("to_tsvector('english', title || ' ' || about) @@ plainto_tsquery(:search)")
         search = query
-        # where.append("to_tsvector('english', title || ' ' || about) @@ to_tsquery(:search)")
-        # assert not query, 'query not yet supported'
-        # search = ' | '.join(query.split(' '))
 
     if field == 'rank':
         where.append('rank > 0')
