@@ -52,6 +52,8 @@ def build_methods():
     methods.add(**{'condenser_api.' + method.__name__: method for method in (
         condenser_api.get_followers,
         condenser_api.get_following,
+        condenser_api.get_followers_by_page,
+        condenser_api.get_following_by_page,
         condenser_api.get_follow_count,
         condenser_api.get_content,
         condenser_api.get_content_replies,
@@ -85,6 +87,8 @@ def build_methods():
     methods.add(**{
         'follow_api.get_followers': condenser_api.get_followers,
         'follow_api.get_following': condenser_api.get_following,
+        'follow_api.get_followers_by_page': condenser_api.get_followers_by_page,
+        'follow_api.get_following_by_page': condenser_api.get_following_by_page,
         'follow_api.get_follow_count': condenser_api.get_follow_count,
         'follow_api.get_account_reputations': condenser_api.get_account_reputations,
         'follow_api.get_blog': condenser_api.get_blog,

@@ -140,6 +140,8 @@ The minimum viable API is to remove the requirement for the `follow` and `tags` 
 ```
 condenser_api.get_followers
 condenser_api.get_following
+condenser_api.get_followers_by_page
+condenser_api.get_following_by_page
 condenser_api.get_follow_count
 
 condenser_api.get_content

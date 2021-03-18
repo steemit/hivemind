@@ -61,6 +61,24 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
                               state=state, limit=limit)
 
 
+async def get_followers_by_page(db, account: str, page: int, follow_type: str, page_size: int):
+    """Get a list of accounts following a given account."""
+    account_id = await _get_account_id(db, account)
+    state = 2 if follow_type == 'ignore' else 1
+
+    sql = """
+        SELECT name,reputation FROM hive_follows hf
+     LEFT JOIN hive_accounts ON hf.follower = id
+         WHERE hf.following = :account_id
+           AND state = :state %s
+      ORDER BY hf.created_at DESC
+         LIMIT :limit OFFSET :offset
+    """
+
+    return await db.query_col(sql, account_id=account_id, offset=page,
+                              state=state, limit=page_size)
+
+
 async def get_following(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
     account_id = await _get_account_id(db, account)
@@ -85,6 +103,24 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
 
     return await db.query_col(sql, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
+
+
+async def get_following_by_page(db, account: str, page: int, follow_type: str, page_size: int):
+    """Get a list of accounts followed by a given account."""
+    account_id = await _get_account_id(db, account)
+    state = 2 if follow_type == 'ignore' else 1
+
+    sql = """
+        SELECT name FROM hive_follows hf
+     LEFT JOIN hive_accounts ON hf.following = id
+         WHERE hf.follower = :account_id
+           AND state = :state %s
+      ORDER BY hf.created_at DESC
+         LIMIT :limit OFFSET :offset
+    """
+
+    return await db.query_col(sql, account_id=account_id, offset=page,
+                              state=state, limit=page_size)
 
 
 async def get_follow_counts(db, account: str):

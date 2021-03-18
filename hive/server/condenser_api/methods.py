@@ -31,6 +31,8 @@ async def get_account_votes(context, account):
 
 def _legacy_follower(follower, following, follow_type):
     return dict(follower=follower, following=following, what=[follow_type])
+def _legacy_follower_with_reputation (follower, reputation, following, follow_type):
+    return dict(follower=follower, reputation=reputation, following=following, what=[follow_type])
 
 @return_error_info
 async def get_followers(context, account: str, start: str, follow_type: str = None,
@@ -50,6 +52,23 @@ async def get_followers(context, account: str, start: str, follow_type: str = No
     return [_legacy_follower(name, account, follow_type) for name in followers]
 
 @return_error_info
+async def get_followers_by_page(context, account: str, page: str, follow_type: str = None,
+                        page_size: int = None, **kwargs):
+    """Get all accounts following `account`. (EOL)"""
+    # `type` reserved word workaround
+    if not follow_type and 'type' in kwargs:
+        follow_type = kwargs['type']
+    if not follow_type:
+        follow_type = 'blog'
+    followers = await cursor.get_followers_by_page(
+        context['db'],
+        valid_account(account),
+        valid_offset(page),
+        valid_follow_type(follow_type),
+        valid_limit(page_size, 100))
+    return [_legacy_follower_with_reputation(row.name, row.reputation ,account, follow_type) for row in followers]
+
+@return_error_info
 async def get_following(context, account: str, start: str, follow_type: str = None,
                         limit: int = None, **kwargs):
     """Get all accounts `account` follows. (EOL)"""
@@ -65,6 +84,23 @@ async def get_following(context, account: str, start: str, follow_type: str = No
         valid_follow_type(follow_type),
         valid_limit(limit, 1000))
     return [_legacy_follower(account, name, follow_type) for name in following]
+
+@return_error_info
+async def get_following_by_page(context, account: str, page: str, follow_type: str = None,
+                        page_size: int = None, **kwargs):
+    """Get all accounts following `account`. (EOL)"""
+    # `type` reserved word workaround
+    if not follow_type and 'type' in kwargs:
+        follow_type = kwargs['type']
+    if not follow_type:
+        follow_type = 'blog'
+    followers = await cursor.get_following_by_page(
+        context['db'],
+        valid_account(account),
+        valid_offset(page),
+        valid_follow_type(follow_type),
+        valid_limit(page_size, 100))
+    return [_legacy_follower_with_reputation(row.name, row.reputation ,account, follow_type) for row in followers]
 
 @return_error_info
 async def get_follow_count(context, account: str):
