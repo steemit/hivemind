@@ -59,7 +59,7 @@ async def list_all_muted(context, account):
     db = context['db']
     sql = """SELECT a.name FROM hive_follows f
                JOIN hive_accounts a ON f.following_id = a.id
-              WHERE follower = :follower AND state = 2"""
+              WHERE follower = :follower AND state IN (2,3)"""
     return await db.query_col(sql, follower=get_account_id(db, account))
 
 

@@ -51,8 +51,8 @@ async def _follow_contexts(db, accounts, observer_id, include_mute=False):
     for row in rows:
         following_id = row[0]
         state = row[1]
-        context = {'followed': state == 1}
-        if include_mute and state == 2:
+        context = {'followed': state == 1 or state == 3}
+        if include_mute and (state == 2 or state == 3):
             context['muted'] = True
         accounts[following_id]['context'] = context
 

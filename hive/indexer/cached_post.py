@@ -624,7 +624,7 @@ class CachedPost:
         sql = """SELECT 1 FROM hive_follows
                   WHERE follower = :account
                     AND following = :target
-                    AND state = 2"""
+                    AND state IN (2,3)"""
         return DB.query_col(sql, account=account, target=target)
 
     @classmethod
