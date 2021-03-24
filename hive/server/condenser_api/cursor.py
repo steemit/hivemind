@@ -49,7 +49,7 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
                         AND follower = :start_id)"""
 
     sql = """
-        SELECT name FROM hive_follows hf
+        SELECT name,reputation,state FROM hive_follows hf
      LEFT JOIN hive_accounts ON hf.follower = id
          WHERE hf.following = :account_id
            AND state IN :state %s
@@ -92,7 +92,7 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
                         AND following = :start_id)"""
 
     sql = """
-        SELECT name FROM hive_follows hf
+        SELECT name,reputation,state FROM hive_follows hf
      LEFT JOIN hive_accounts ON hf.following = id
          WHERE hf.follower = :account_id
            AND state IN :state %s
