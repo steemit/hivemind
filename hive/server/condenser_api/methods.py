@@ -30,6 +30,11 @@ async def get_account_votes(context, account):
 # Follows Queries
 
 def _legacy_follower(follower, following, follow_type):
+    what = ['','']
+    if follow_type & 1 != 0:
+        what[0] = 'blog'
+    if follow_type & 2 != 0:
+        what[1] = 'ignore'
     return dict(follower=follower, following=following, what=[follow_type])
 def _legacy_follower_with_reputation (follower, reputation, following, follow_type):
     what = ['','']
