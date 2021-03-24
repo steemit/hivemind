@@ -57,7 +57,7 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
-    return await db.query_col(sql, account_id=account_id, start_id=start_id,
+    return await db.query_all(sql, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
 
 
@@ -100,7 +100,7 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
-    return await db.query_col(sql, account_id=account_id, start_id=start_id,
+    return await db.query_all(sql, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
 
 
