@@ -88,7 +88,7 @@ async def get_following(context, account: str, start: str, follow_type: str = No
         valid_account(start, allow_empty=True),
         valid_follow_type(follow_type),
         valid_limit(limit, 1000))
-    return [_legacy_follower_with_reputation(row['name'], row['reputation'],account,row['state']) for row in following]
+    return [_legacy_follower_with_reputation(account,row['reputation'],row['name'],row['state']) for row in following]
 
 @return_error_info
 async def get_following_by_page(context, account: str, page: int, page_size: int = None,
@@ -105,7 +105,7 @@ async def get_following_by_page(context, account: str, page: int, page_size: int
         valid_offset(page),
         valid_limit(page_size, 100),
         valid_follow_type(follow_type))
-    return [_legacy_follower_with_reputation(row['name'], row['reputation'],account,row['state']) for row in following]
+    return [_legacy_follower_with_reputation(account,row['reputation'],row['name'],row['state']) for row in following]
 
 @return_error_info
 async def get_follow_count(context, account: str):
