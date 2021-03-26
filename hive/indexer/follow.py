@@ -53,7 +53,10 @@ class Follow:
 
         # track count deltas
         if not DbState.is_initial_sync():
-            if new_state & 1 == 1 :
+            if new_state ^ (old_state or 0) == 2:
+                # jump ignore op
+                return
+            if new_state == 1:
                 Follow.follow(op['flr'], op['flg'])
                 if old_state is None:
                     score = Accounts.default_score(op_json['follower'])
