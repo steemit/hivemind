@@ -326,13 +326,14 @@ async def pids_by_feed_with_reblog(db, account: str, start_author: str = '',
           HAVING MIN(hive_feed_cache.created_at) <= (
             SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = :start_id
                AND account_id IN (SELECT following FROM hive_follows
-                                  WHERE follower = :account AND state = 1))
+                                  WHERE follower = :account 
+                                  AND state IN (1,3)))
         """
 
     sql = """
         SELECT post_id, string_agg(name, ',') accounts
           FROM hive_feed_cache
-          JOIN hive_follows ON account_id = hive_follows.following AND state = 1
+          JOIN hive_follows ON account_id = hive_follows.following AND state IN (1,3)
           JOIN hive_accounts ON hive_follows.following = hive_accounts.id
          WHERE hive_follows.follower = :account
            AND hive_feed_cache.created_at > :cutoff

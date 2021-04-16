@@ -3,7 +3,7 @@
 import logging
 from time import perf_counter as perf
 
-from funcy.seqs import first
+from funcy.seqs import first,second
 from hive.db.adapter import Db
 from hive.db.db_state import DbState
 from hive.indexer.accounts import Accounts
@@ -53,13 +53,16 @@ class Follow:
 
         # track count deltas
         if not DbState.is_initial_sync():
+            if new_state ^ (old_state or 0) == 2:
+                # jump ignore op
+                return
             if new_state == 1:
                 Follow.follow(op['flr'], op['flg'])
                 if old_state is None:
                     score = Accounts.default_score(op_json['follower'])
                     Notify('follow', src_id=op['flr'], dst_id=op['flg'],
                            when=op['at'], score=score).write()
-            if old_state == 1:
+            elif old_state & 1 == 1:
                 Follow.unfollow(op['flr'], op['flg'])
 
     @classmethod
@@ -73,9 +76,12 @@ class Follow:
 
         try:
             what = first(op['what']) or ''
-            defs = {'': 0, 'blog': 1, 'ignore': 2}
-            if what not in defs:
-                return None
+            state = 0
+            if what == 'blog':
+                state = state + 1
+            what = second(op['what']) or ''
+            if what == 'ignore':
+                state = state + 2
         except Exception as e:
             return False
 
@@ -87,7 +93,7 @@ class Follow:
 
         return dict(flr=Accounts.get_id(op['follower']),
                     flg=Accounts.get_id(op['following']),
-                    state=defs[what],
+                    state=state,
                     at=date)
 
     @classmethod
@@ -158,8 +164,8 @@ class Follow:
                    *cls._delta[FOLLOWING].keys()])
         sql = """
             UPDATE hive_accounts
-               SET followers = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND following = hive_accounts.id),
-                   following = (SELECT COUNT(*) FROM hive_follows WHERE state = 1 AND follower  = hive_accounts.id)
+               SET followers = (SELECT COUNT(*) FROM hive_follows WHERE state IN (1,3) AND following = hive_accounts.id),
+                   following = (SELECT COUNT(*) FROM hive_follows WHERE state IN (1,3) AND follower = hive_accounts.id)
              WHERE id IN :ids
         """
         DB.query(sql, ids=tuple(ids))
@@ -172,12 +178,12 @@ class Follow:
             CREATE TEMPORARY TABLE following_counts AS (
                   SELECT id account_id, COUNT(state) num
                     FROM hive_accounts
-               LEFT JOIN hive_follows hf ON id = hf.follower AND state = 1
+               LEFT JOIN hive_follows hf ON id = hf.follower AND state IN (1,3)
                 GROUP BY id);
             CREATE TEMPORARY TABLE follower_counts AS (
                   SELECT id account_id, COUNT(state) num
                     FROM hive_accounts
-               LEFT JOIN hive_follows hf ON id = hf.following AND state = 1
+               LEFT JOIN hive_follows hf ON id = hf.following AND state IN (1,3)
                 GROUP BY id);
         """
         DB.query(sql)

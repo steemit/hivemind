@@ -5,6 +5,8 @@ http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_fol
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_followers params:='{"account":"test-safari","start":"","follow_type":"blog","limit":10}'
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_followers params:='{"account":"test-safari","start":"money-dreamer","follow_type":"blog","limit":3}'
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_following params:='{"account":"test-safari","start":"","follow_type":"blog","limit":10}'
+http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_followers_by_page params:='{"account":"test-safari","page":0,"page_size":20,"follow_type":"blog"}'
+http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_following_by_page params:='{"account":"test-safari","page":1,"page_size":10,"follow_type":"blog"}'
 
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_discussions_by_trending params:='{"start_author":"","start_permlink":"","tag":"","limit":10}'
 http -j post http://localhost:8080 jsonrpc=2.0 id=1 method=condenser_api.get_discussions_by_trending params:='{"start_author":"fredrikaa","start_permlink":"why-i-bought-my-brother-steem-for-christmas-and-how-you-can-do-the-same","tag":"","limit":2}'

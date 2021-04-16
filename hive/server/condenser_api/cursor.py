@@ -39,7 +39,7 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
     """Get a list of accounts following a given account."""
     account_id = await _get_account_id(db, account)
     start_id = await _get_account_id(db, start) if start else None
-    state = 2 if follow_type == 'ignore' else 1
+    state = (2,3) if follow_type == 'ignore' else (1,3)
 
     seek = ''
     if start_id:
@@ -49,23 +49,40 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
                         AND follower = :start_id)"""
 
     sql = """
-        SELECT name FROM hive_follows hf
+        SELECT name,reputation,state FROM hive_follows hf
      LEFT JOIN hive_accounts ON hf.follower = id
          WHERE hf.following = :account_id
-           AND state = :state %s
+           AND state IN :state %s
       ORDER BY hf.created_at DESC
          LIMIT :limit
     """ % seek
 
-    return await db.query_col(sql, account_id=account_id, start_id=start_id,
+    return await db.query_all(sql, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
 
+
+async def get_followers_by_page(db, account: str, page: int, page_size: int, follow_type: str):
+    """Get a list of accounts following a given account."""
+    account_id = await _get_account_id(db, account)
+    state = (2,3) if follow_type == 'ignore' else (1,3)
+
+    sql = """
+        SELECT name,reputation,state FROM hive_follows hf
+     LEFT JOIN hive_accounts ON hf.follower = id
+         WHERE hf.following = :account_id
+           AND state IN :state
+      ORDER BY hf.created_at DESC
+         LIMIT :limit OFFSET :offset
+    """
+
+    return await db.query_all(sql, account_id=account_id,
+                              state=state, limit=page_size, offset=page*page_size)
 
 async def get_following(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
     account_id = await _get_account_id(db, account)
     start_id = await _get_account_id(db, start) if start else None
-    state = 2 if follow_type == 'ignore' else 1
+    state = (2, 3) if follow_type == 'ignore' else (1, 3)
 
     seek = ''
     if start_id:
@@ -75,16 +92,34 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
                         AND following = :start_id)"""
 
     sql = """
-        SELECT name FROM hive_follows hf
+        SELECT name,reputation,state FROM hive_follows hf
      LEFT JOIN hive_accounts ON hf.following = id
          WHERE hf.follower = :account_id
-           AND state = :state %s
+           AND state IN :state %s
       ORDER BY hf.created_at DESC
          LIMIT :limit
     """ % seek
 
-    return await db.query_col(sql, account_id=account_id, start_id=start_id,
+    return await db.query_all(sql, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
+
+
+async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
+    """Get a list of accounts followed by a given account."""
+    account_id = await _get_account_id(db, account)
+    state = (2, 3) if follow_type == 'ignore' else (1, 3)
+
+    sql = """
+        SELECT name,reputation,state FROM hive_follows hf
+     LEFT JOIN hive_accounts ON hf.following = id
+         WHERE hf.follower = :account_id
+           AND state IN :state
+      ORDER BY hf.created_at DESC
+         LIMIT :limit OFFSET :offset
+    """
+
+    return await db.query_all(sql, account_id=account_id,
+                              state=state, limit=page_size, offset=page*page_size)
 
 
 async def get_follow_counts(db, account: str):
@@ -287,13 +322,13 @@ async def pids_by_feed_with_reblog(db, account: str, start_author: str = '',
           HAVING MIN(hive_feed_cache.created_at) <= (
             SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = :start_id
                AND account_id IN (SELECT following FROM hive_follows
-                                  WHERE follower = :account AND state = 1))
+                                  WHERE follower = :account AND state IN (1,3)))
         """
 
     sql = """
         SELECT post_id, string_agg(name, ',') accounts
           FROM hive_feed_cache
-          JOIN hive_follows ON account_id = hive_follows.following AND state = 1
+          JOIN hive_follows ON account_id = hive_follows.following AND state IN (1,3)
           JOIN hive_accounts ON hive_follows.following = hive_accounts.id
          WHERE hive_follows.follower = :account
            AND hive_feed_cache.created_at > :cutoff

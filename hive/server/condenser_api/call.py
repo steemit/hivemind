@@ -9,6 +9,8 @@ from hive.server.condenser_api.tags import get_trending_tags
 from hive.server.condenser_api.methods import (
     get_followers,
     get_following,
+    get_followers_by_page,
+    get_following_by_page,
     get_follow_count,
     get_content,
     get_content_replies,
@@ -89,6 +91,10 @@ async def call(context, api, method, params):
         return await get_followers(context, *_strict_list(params, 4))
     elif method == 'get_following':
         return await get_following(context, *_strict_list(params, 4))
+    elif method == 'get_followers_by_page':
+        return await get_followers_by_page(context, *_strict_list(params, 4))
+    elif method == 'get_following_by_page':
+        return await get_following_by_page(context, *_strict_list(params, 4))
     elif method == 'get_follow_count':
         return await get_follow_count(context, *_strict_list(params, 1))
 
