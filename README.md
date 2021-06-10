@@ -88,6 +88,7 @@ docker logs -f hivemind
 | `MAX_BATCH`              | `--max-batch`        | 50      |
 | `MAX_WORKERS`            | `--max-workers`      | 4       |
 | `TRAIL_BLOCKS`           | `--trail-blocks`     | 2       |
+| `RECOMMEND_COMMUNITIES`  | `--recommend-communities` | hive-108451,hive-172186,hive-187187   |
 
 Precedence: CLI over ENV over hive.conf. Check `hive --help` for details.
 
