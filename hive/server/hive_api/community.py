@@ -82,7 +82,7 @@ async def list_top_communities(context, limit=25):
     if (len(hive_names) == 0):
         custom = []
     else:
-        hive_names_str = ["'" + hive_name + "'" for hive_name in hive_names].join(',')
+        hive_names_str = ','.join(["'" + hive_name + "'" for hive_name in hive_names])
         sql = """"SELECT name, title FROM hive_communities
                   WHERE name in (:hive_names)"""
         out = await context['db'].query_all(sql, hive_names=hive_names_str)
