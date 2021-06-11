@@ -46,6 +46,7 @@ class Follow:
         if old_state is None:
             sql = """INSERT INTO hive_follows (follower, following,
                      created_at, state) VALUES (:flr, :flg, :at, :state)"""
+            old_state = 0
         else:
             sql = """UPDATE hive_follows SET state = :state
                       WHERE follower = :flr AND following = :flg"""
@@ -53,12 +54,12 @@ class Follow:
 
         # track count deltas
         if not DbState.is_initial_sync():
-            if new_state ^ (old_state or 0) == 2:
+            if new_state ^ old_state == 2:
                 # jump ignore op
                 return
             if new_state == 1:
                 Follow.follow(op['flr'], op['flg'])
-                if old_state is None:
+                if old_state == 0:
                     score = Accounts.default_score(op_json['follower'])
                     Notify('follow', src_id=op['flr'], dst_id=op['flg'],
                            when=op['at'], score=score).write()
