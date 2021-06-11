@@ -77,7 +77,7 @@ async def list_top_communities(context, limit=25):
     """List top communities. Returns lite community list."""
     assert limit < 100
 
-    hive_names = Conf.get('recommend-communities').split(',')
+    hive_names = context['config']['args']['recommend_communities'].split(',')
 
     if (len(hive_names) == 0):
         custom = []
