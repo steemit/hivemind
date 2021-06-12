@@ -91,7 +91,7 @@ async def list_top_communities(context, limit=25):
     if (len(custom) < limit):
         sql = """SELECT name, title FROM hive_communities
                  WHERE rank > 0
-                 ORDER BY rank DESC
+                 ORDER BY RANK
                  LIMIT :limit"""
 
         out = await context['db'].query_all(sql, limit=(limit-len(custom)))
