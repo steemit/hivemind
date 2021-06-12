@@ -4,6 +4,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import ujson as json
 
+from hive.conf import Conf
 from hive.server.hive_api.common import (get_account_id, get_community_id, valid_limit)
 from hive.server.common.helpers import return_error_info
 
@@ -75,16 +76,29 @@ async def get_community_context(context, name, account):
 async def list_top_communities(context, limit=25):
     """List top communities. Returns lite community list."""
     assert limit < 100
-    sql = """SELECT name, title FROM hive_communities
-             WHERE id = 1472130 OR ID = 1467200 OR rank > 0
-             ORDER BY
-             (CASE WHEN ID=1472130 THEN -1 WHEN ID=1467200 THEN 0 ELSE RANK END)
-             LIMIT :limit"""
 
-    out = await context['db'].query_all(sql, limit=limit)
+    hive_names = context['config']['args']['recommend_communities'].split(',')
 
-    return [(r[0], r[1]) for r in out]
+    if (len(hive_names) == 0):
+        custom = []
+    else:
+        hive_names_str = ','.join(["'" + hive_name + "'" for hive_name in hive_names])
+        sql = """SELECT name, title FROM hive_communities
+                  WHERE name in ({})""".format(hive_names_str)
+        out = await context['db'].query_all(sql)
+        custom = [(r[0], r[1]) for r in out]
 
+    if (len(custom) < limit):
+        sql = """SELECT name, title FROM hive_communities
+                 WHERE rank > 0
+                 ORDER BY RANK
+                 LIMIT :limit"""
+
+        out = await context['db'].query_all(sql, limit=(limit-len(custom)))
+        rank_result = [(r[0], r[1]) for r in out]
+        return custom + rank_result
+    else:
+        return custom
 
 @return_error_info
 async def list_pop_communities(context, limit=25):

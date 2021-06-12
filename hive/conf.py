@@ -44,6 +44,9 @@ class Conf():
         add('--trail-blocks', type=int, env_var='TRAIL_BLOCKS', help='number of blocks to trail head by', default=2)
         add('--sync-to-s3', type=strtobool, env_var='SYNC_TO_S3', help='alternative healthcheck for background sync service', default=False)
 
+        # community
+        add('--recommend-communities', env_var='RECOMMEND_COMMUNITIES', help='add recommend communities into trending communities', default="hive-108451,hive-172186,hive-187187")
+
         # test/debug
         add('--log-level', env_var='LOG_LEVEL', default='INFO')
         add('--test-disable-sync', type=strtobool, env_var='TEST_DISABLE_SYNC', help='(debug) skip sync and sweep; jump to block streaming', default=False)
