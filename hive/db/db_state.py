@@ -7,7 +7,7 @@ import logging
 
 from hive.db.schema import (setup, reset_autovac, build_metadata,
                             build_metadata_community, teardown, DB_VERSION,
-                            build_metadata_blacklist)
+                            build_metadata_blacklist, build_txid_block_num)
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -317,9 +317,13 @@ class DbState:
             cls._set_ver(17)
 
         if cls._ver == 17:
-            if not cls.db().query_col("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_posts_status')"):
+            if not cls.db().query_col("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_posts_status')")[0]:
                 build_metadata_blacklist().create_all(cls.db().engine())
             cls._set_ver(18)
+        if cls._ver == 18:
+            if not cls.db().query_col("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_txid_block_num')")[0]:
+                build_txid_block_num().create_all(cls.db().engine())
+            cls._set_ver(19)
 
         reset_autovac(cls.db())
 

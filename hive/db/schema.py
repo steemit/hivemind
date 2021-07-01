@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 18
+DB_VERSION = 19
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -241,6 +241,8 @@ def build_metadata():
 
     metadata = build_metadata_blacklist(metadata)
 
+    metadata = build_txid_block_num(metadata)
+
     return metadata
 
 def build_metadata_community(metadata=None):
@@ -332,6 +334,20 @@ def build_metadata_blacklist(metadata=None):
         sa.Column('list_type', SMALLINT, nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime, nullable=False, server_default='1990-01-01'),
         sa.UniqueConstraint('list_type', 'post_id', 'author', name='hive_posts_status_ux1'),
+    )
+
+    return metadata
+
+def build_txid_block_num(metadata=None):
+    if not metadata:
+        metadata = sa.MetaData()
+
+    sa.Table(
+        'hive_txid_block_num', metadata,
+        sa.Column('tx_id', VARCHAR(40), nullable=False),
+        sa.Column('block_num', sa.Integer, nullable=False),
+        sa.UniqueConstraint('tx_id', name='hive_txid_ux1'),
+        sa.Index('hive_tx_id_ix1', 'tx_id'),
     )
 
     return metadata
