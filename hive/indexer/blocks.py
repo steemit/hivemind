@@ -65,9 +65,9 @@ class Blocks:
 
         account_names = set()
         json_ops = []
-        txids = set()
+        trxids = set()
         for tx_idx, tx in enumerate(block['transactions']):
-            txids.add("('%s', %s)" % (block['transaction_ids'][tx_idx], num))
+            trxids.add("('%s', %s)" % (block['transaction_ids'][tx_idx], num))
             for operation in tx['operations']:
                 op_type = operation['type']
                 op = operation['value']
@@ -114,7 +114,7 @@ class Blocks:
 
         Accounts.register(account_names, date)     # register any new names
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops
-        cls.save_txids(txids)
+        cls.save_trxids(trxids)
 
         return num
 
@@ -234,8 +234,8 @@ class Blocks:
         # TODO: manually re-process here the blocks which were just popped.
 
     @classmethod
-    def save_txids(cls, txids):
-        assert len(txids) > 0, "txids shouldn't be empty"
-        insert_sql = "INSERT INTO hive_txid_block_num (tx_id, block_num) VALUES "
-        insert_sql = insert_sql + ','.join(txids)
+    def save_trxids(cls, trxids):
+        assert len(trxids) > 0, "trxids shouldn't be empty"
+        insert_sql = "INSERT INTO hive_trxid_block_num (trx_id, block_num) VALUES "
+        insert_sql = insert_sql + ','.join(trxids)
         DB.query(insert_sql)

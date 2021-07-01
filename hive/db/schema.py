@@ -241,7 +241,7 @@ def build_metadata():
 
     metadata = build_metadata_blacklist(metadata)
 
-    metadata = build_txid_block_num(metadata)
+    metadata = build_trxid_block_num(metadata)
 
     return metadata
 
@@ -338,16 +338,16 @@ def build_metadata_blacklist(metadata=None):
 
     return metadata
 
-def build_txid_block_num(metadata=None):
+def build_trxid_block_num(metadata=None):
     if not metadata:
         metadata = sa.MetaData()
 
     sa.Table(
-        'hive_txid_block_num', metadata,
-        sa.Column('tx_id', VARCHAR(40), nullable=False),
+        'hive_trxid_block_num', metadata,
+        sa.Column('trx_id', VARCHAR(40), nullable=False),
         sa.Column('block_num', sa.Integer, nullable=False),
-        sa.UniqueConstraint('tx_id', name='hive_txid_ux1'),
-        sa.Index('hive_tx_id_ix1', 'tx_id'),
+        sa.UniqueConstraint('trx_id', name='hive_trxid_ux1'),
+        sa.Index('hive_trx_id_ix1', 'trx_id'),
     )
 
     return metadata
