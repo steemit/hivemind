@@ -32,7 +32,7 @@ class Blocks:
 
     @classmethod
     def process(cls, block):
-        """Process a single block. Always wrap in a transaction!"""
+        """Process a single block. Has wrap in a transaction out of this func!"""
         #assert is_trx_active(), "Block.process must be in a trx"
         return cls._process(block, is_initial_sync=False)
 
@@ -65,7 +65,9 @@ class Blocks:
 
         account_names = set()
         json_ops = []
+        trxids = set()
         for tx_idx, tx in enumerate(block['transactions']):
+            trxids.add("('%s', %s)" % (block['transaction_ids'][tx_idx], num))
             for operation in tx['operations']:
                 op_type = operation['type']
                 op = operation['value']
@@ -112,6 +114,7 @@ class Blocks:
 
         Accounts.register(account_names, date)     # register any new names
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops
+        cls.save_trxids(trxids)
 
         return num
 
@@ -225,7 +228,17 @@ class Blocks:
 
             DB.query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
             DB.query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
+            DB.query("DELETE FROM hive_trxid_block_num WHERE block_num = :num", num=num)
 
         DB.query("COMMIT")
         log.warning("[FORK] recovery complete")
         # TODO: manually re-process here the blocks which were just popped.
+
+    @classmethod
+    def save_trxids(cls, trxids):
+        data = ','.join(trxids)
+        if data == '':
+            return
+        insert_sql = "INSERT INTO hive_trxid_block_num (trx_id, block_num) VALUES "
+        insert_sql = insert_sql + ','.join(trxids)
+        DB.query(insert_sql)

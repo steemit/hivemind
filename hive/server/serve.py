@@ -75,6 +75,7 @@ def build_methods():
         condenser_api.get_blog_entries,
         condenser_api.get_account_reputations,
         condenser_api.get_reblogged_by,
+        condenser_api.get_transaction,
     )})
 
     # dummy methods -- serve informational error
@@ -178,6 +179,7 @@ def run_server(conf):
     app['config'] = dict()
     app['config']['args'] = conf.args()
     app['config']['hive.MAX_DB_ROW_RESULTS'] = 100000
+    app['steemd'] = conf.steem()
     #app['config']['hive.logger'] = logger
 
     async def init_db(app):

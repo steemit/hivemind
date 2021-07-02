@@ -434,3 +434,21 @@ async def _get_blog(db, account: str, start_index: int, limit: int = None):
         idx -= 1
 
     return out
+
+@return_error_info
+@nested_query_compat
+async def get_transaction(context, trx_id: str):
+    """Get transaction by trx_id.
+    """
+    sql = "SELECT block_num FROM hive_trxid_block_num WHERE trx_id = :trx_id"
+    block_num = await context['db'].query_row(sql, trx_id = trx_id)
+    assert block_num != None, 'trx_id does not exist'
+    block = context['steemd'].get_block(num = block_num[0])
+    assert block != None, 'block does not exist'
+    assert len(block['transactions']) != 0, 'invalid trx_id'
+    trx_index = block['transaction_ids'].index(trx_id)
+    trx = block['transactions'][trx_index]
+    trx['transaction_id'] = trx_id
+    trx['block_num'] = block_num[0]
+    trx['transaction_num'] = trx_index
+    return trx
