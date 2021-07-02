@@ -34,7 +34,15 @@ class Blocks:
     def process(cls, block):
         """Process a single block. Always wrap in a transaction!"""
         #assert is_trx_active(), "Block.process must be in a trx"
-        return cls._process(block, is_initial_sync=False)
+        DB.query("START TRANSACTION")
+        last_num = 0
+        try:
+            last_num = cls._process(block, is_initial_sync=False)
+        except Exception as e:
+            log.error("exception encountered block %d", last_num + 1)
+            raise e
+        DB.query("COMMIT")
+        return last_num
 
     @classmethod
     def process_multi(cls, blocks, is_initial_sync=False):
@@ -228,6 +236,7 @@ class Blocks:
 
             DB.query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
             DB.query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
+            DB.query("DELETE FROM hive_trxid_block_num WHERE block_num = :num", num=num)
 
         DB.query("COMMIT")
         log.warning("[FORK] recovery complete")
@@ -235,7 +244,9 @@ class Blocks:
 
     @classmethod
     def save_trxids(cls, trxids):
-        assert len(trxids) > 0, "trxids shouldn't be empty"
+        data = ','.join(trxids)
+        if data == '':
+            return
         insert_sql = "INSERT INTO hive_trxid_block_num (trx_id, block_num) VALUES "
         insert_sql = insert_sql + ','.join(trxids)
         DB.query(insert_sql)
