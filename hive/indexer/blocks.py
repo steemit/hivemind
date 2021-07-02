@@ -32,17 +32,9 @@ class Blocks:
 
     @classmethod
     def process(cls, block):
-        """Process a single block. Always wrap in a transaction!"""
+        """Process a single block. Has wrap in a transaction out of this func!"""
         #assert is_trx_active(), "Block.process must be in a trx"
-        DB.query("START TRANSACTION")
-        last_num = 0
-        try:
-            last_num = cls._process(block, is_initial_sync=False)
-        except Exception as e:
-            log.error("exception encountered block %d", last_num + 1)
-            raise e
-        DB.query("COMMIT")
-        return last_num
+        return cls._process(block, is_initial_sync=False)
 
     @classmethod
     def process_multi(cls, blocks, is_initial_sync=False):
