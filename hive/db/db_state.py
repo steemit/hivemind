@@ -324,6 +324,13 @@ class DbState:
             if not cls.db().query_col("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_trxid_block_num')")[0]:
                 build_trxid_block_num().create_all(cls.db().engine())
             cls._set_ver(19)
+        if cls._ver == 19:
+            cls.db().query("ALTER TABLE hive_trxid_block_num DROP CONSTRAINT IF EXISTS hive_trxid_ux1")
+            cls.db().query("DROP INDEX hive_trx_id_ix1")
+            cls.db().query("ALTER TABLE hive_trxid_block_num ALTER COLUMN trx_id DROP NOT NULL")
+            cls.db().query("CREATE INDEX hive_block_num_ix1 ON hive_trxid_block_num (block_num)")
+            cls.db().query("CREATE UNIQUE INDEX hive_trxid_ix1 ON hive_trxid_block_num (trx_id) WHERE trx_id IS NOT NULL")
+            cls._set_ver(20)
 
         reset_autovac(cls.db())
 
