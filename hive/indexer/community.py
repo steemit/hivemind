@@ -509,7 +509,7 @@ class CommunityOp:
     def _read_title(self):
         _title = read_key_str(self.op, 'title', 32, allow_blank=True) or ''
         _title = _title.strip()
-        self.title = _title
+        self.title = re.sub(r'\x00',r' ', _title)
 
     def _read_props(self):
         # TODO: assert props changed?
