@@ -53,6 +53,9 @@ class Conf():
         add('--test-max-block', type=int, env_var='TEST_MAX_BLOCK', help='(debug) only sync to given block, for running sync test', default=None)
         add('--test-profile', type=strtobool, env_var='TEST_PROFILE', help='(debug) profile execution', default=False)
 
+        # txid collector
+        add('--txid-collector', type=strtobool, env_var='TXID_COLLECTOR', help='alternative collect txid to block number', default=False)
+
         # needed for e.g. tests - other args may be present
         args = (parser.parse_args() if strict
                 else parser.parse_known_args()[0])

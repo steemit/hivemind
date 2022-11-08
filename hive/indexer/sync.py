@@ -36,6 +36,7 @@ class Sync:
         self._conf = conf
         self._db = conf.db()
         self._steem = conf.steem()
+        Blocks._conf = conf
 
     def run(self):
         """Initialize state; setup/recovery checks; sync and runloop."""

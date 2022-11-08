@@ -114,7 +114,7 @@ class Blocks:
 
         Accounts.register(account_names, date)     # register any new names
         CustomOp.process_ops(json_ops, num, date)  # follow/reblog/community ops
-        cls.save_trxids(trxids)
+        cls._save_trxids(trxids)
 
         return num
 
@@ -235,7 +235,10 @@ class Blocks:
         # TODO: manually re-process here the blocks which were just popped.
 
     @classmethod
-    def save_trxids(cls, trxids):
+    def _save_trxids(cls, trxids):
+        is_collector_open = cls._conf.get('txid_collector')
+        if is_collector_open == False:
+            return
         data = ','.join(trxids)
         if data == '':
             return
