@@ -65,7 +65,8 @@ class Mutes:
         inst = cls.instance()
 
         # update hourly
-        if perf() - inst.fetched > 3600:
+        # add inst.fetched type check to avoid NoneType error
+        if inst.fetched is not None and perf() - inst.fetched > 3600:
             inst.load()
 
         if name not in inst.blist_map:
