@@ -326,6 +326,10 @@ def build_metadata_blacklist(metadata=None):
     if not metadata:
         metadata = sa.MetaData()
 
+    # ListType:
+    # - 1 for Article Block Status
+    # - 2 for Article Pin Status
+    # - 3 for User Block Status
     sa.Table(
         'hive_posts_status', metadata,
         sa.Column('id', sa.Integer, primary_key=True, autoincrement=True),
