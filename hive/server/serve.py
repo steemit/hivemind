@@ -185,7 +185,7 @@ def run_server(conf):
     async def init_db(app):
         """Initialize db adapter."""
         args = app['config']['args']
-        app['db'] = await Db.create(args['database_url'])
+        app['db'] = await Db.create(args['database_url'], args['redis_url'])
 
         stats = PayoutStats(app['db'])
         stats.set_shared_instance(stats)

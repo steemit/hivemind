@@ -13,6 +13,7 @@ ujson = "*"
 prettytable = "*"
 jsonrpcserver = "*"
 aiohttp = "*"
+aioredis = "*"
 aiopg = "*"
 "psycopg2-binary" = "*"
 

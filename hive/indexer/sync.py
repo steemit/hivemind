@@ -45,22 +45,31 @@ class Sync:
         DbState.initialize()
 
         # prefetch id->name and id->rank memory maps
+        log.info("before load ids")
         Accounts.load_ids()
+        log.info("after load ids")
         Accounts.fetch_ranks()
+        log.info("after fetch ranks")
 
         # load irredeemables
+        log.info("before load mute lists")
         mutes = Mutes(self._conf.get('muted_accounts_url'))
+        log.info("after load mute lists")
         Mutes.set_shared_instance(mutes)
 
+        log.info("before load community lists")
         # community stats
         Community.recalc_pending_payouts()
+        log.info("after load community lists")
 
         if DbState.is_initial_sync():
+            log.info("get in logic 1")
             # resume initial sync
             self.initial()
             DbState.finish_initial_sync()
 
         else:
+            log.info("get in logic 2")
             # recover from fork
             Blocks.verify_head(self._steem)
 
@@ -70,6 +79,7 @@ class Sync:
         #audit_cache_missing(self._db, self._steem)
         #audit_cache_deleted(self._db)
 
+        log.info("before update chain state")
         self._update_chain_state()
 
         if self._conf.get('test_max_block'):

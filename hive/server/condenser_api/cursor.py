@@ -57,7 +57,9 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
-    return await db.query_all(sql, account_id=account_id, start_id=start_id,
+    cache_key = "get_followers_" + str(account_id) + "_" + str(start_id) + "_" + str(state)
+
+    return await db.query_all_cache(sql, cache_key, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
 
 
@@ -75,7 +77,9 @@ async def get_followers_by_page(db, account: str, page: int, page_size: int, fol
          LIMIT :limit OFFSET :offset
     """
 
-    return await db.query_all(sql, account_id=account_id,
+    cache_key = "get_followers_by_page_" + str(account_id) + "_" + str(state) + "_" + str(page*page_size)
+
+    return await db.query_all_cache(sql, cache_key, account_id=account_id,
                               state=state, limit=page_size, offset=page*page_size)
 
 async def get_following(db, account: str, start: str, follow_type: str, limit: int):
@@ -100,7 +104,9 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
-    return await db.query_all(sql, account_id=account_id, start_id=start_id,
+    cache_key = "get_following_" + str(account_id) + "_" + str(start_id) + "_" + str(state)
+
+    return await db.query_all_cache(sql, cache_key, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
 
 
@@ -118,7 +124,9 @@ async def get_following_by_page(db, account: str, page: int, page_size: int, fol
          LIMIT :limit OFFSET :offset
     """
 
-    return await db.query_all(sql, account_id=account_id,
+    cache_key = "get_following_by_page_" + str(account_id) + "_" + str(state) + "_" + str(page*page_size)
+
+    return await db.query_all_cache(sql, cache_key, account_id=account_id,
                               state=state, limit=page_size, offset=page*page_size)
 
 
@@ -397,15 +405,31 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
         parent_account = start_author
 
     sql = """
+    SELECT id FROM hive_posts
+    WHERE author = :parent
+    AND is_deleted = '0'
+    ORDER BY id DESC
+    LIMIT 10000
+    """
+    
+    cache_key = "hive_posts-" + parent_account + "-is_deleted_0"
+    print("what_is_the_ids_cache_key:" + cache_key)
+    id_res = await db.query_all_cache(sql, cache_key, parent=parent_account)
+    print(id_res)
+    if id_res == None or len(id_res) == 0:
+        return None
+    tmp_ids = []
+    for el in id_res:
+        tmp_ids.append(str(el[0]))
+    ids = ",".join(tmp_ids)
+    print("what_is_the_ids:" + ids)
+
+    sql = """
        SELECT id FROM hive_posts
-        WHERE parent_id IN (SELECT id FROM hive_posts
-                             WHERE author = :parent
-                               AND is_deleted = '0'
-                          ORDER BY id DESC
-                             LIMIT 10000) %s
+        WHERE parent_id IN (%s) %s
           AND is_deleted = '0'
      ORDER BY id DESC
         LIMIT :limit
-    """ % seek
+    """ % (ids, seek)
 
     return await db.query_col(sql, parent=parent_account, start_id=start_id, limit=limit)

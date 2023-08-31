@@ -428,16 +428,32 @@ async def pids_by_replies(db, start_author: str, start_permlink: str = '',
         parent_account = start_author
 
     sql = """
+    SELECT id FROM hive_posts
+    WHERE author = :parent
+    AND is_deleted = '0'
+    ORDER BY id DESC
+    LIMIT 10000
+    """
+    
+    cache_key = "hive_posts-" + parent_account + "-is_deleted_0"
+    print("what_is_the_ids_cache_key:" + cache_key)
+    id_res = await db.query_all_cache(sql, cache_key, parent=parent_account)
+    print(id_res)
+    if id_res == None or len(id_res) == 0:
+        return None
+    tmp_ids = []
+    for el in id_res:
+        tmp_ids.append(str(el[0]))
+    ids = ",".join(tmp_ids)
+    print("what_is_the_ids:" + ids)
+
+    sql = """
        SELECT id FROM hive_posts
-        WHERE parent_id IN (SELECT id FROM hive_posts
-                             WHERE author = :parent
-                               AND is_deleted = '0'
-                          ORDER BY id DESC
-                             LIMIT 10000) %s
+        WHERE parent_id IN (%s) %s
           AND is_deleted = '0'
      ORDER BY id DESC
         LIMIT :limit
-    """ % seek
+    """ % (ids, seek)
 
     return await db.query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
 
