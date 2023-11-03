@@ -42,6 +42,7 @@ setup(
         'aiocache',
         'configargparse',
         'pdoc',
+        'aioredis',
     ],
     extras_require={'test': tests_require},
     entry_points={

@@ -29,8 +29,8 @@ async def redis_get(cls, k):
         try:
             v = await cls.get(k)
         except Exception as e:
-            log.warning("[REDIS-GET_ERR] k:%s, err: %s",k, e.__class__.__name__)
-            raise e
+            log.warning("[REDIS-GET_ERR] k:%s, err: %s",k, str(e))
+            return None
         if isinstance(v, bytes):  
             return pickle.loads(v)
         return None
