@@ -5,7 +5,13 @@ from dateutil.relativedelta import relativedelta
 
 from hive.utils.normalize import rep_to_raw
 
+import re
+
 # pylint: disable=too-many-lines
+
+def to_string_without_special_char(v):
+    cleaned_string = re.sub('[^A-Za-z0-9]+', '', str(v))
+    return cleaned_string
 
 def last_month():
     """Get the date 1 month ago."""
@@ -57,7 +63,7 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
-    cache_key = "get_followers_" + str(account_id) + "_" + str(start_id) + "_" + str(state)
+    cache_key = "get_followers_" + to_string_without_special_char(account_id) + "_" + to_string_without_special_char(start_id) + "_" + to_string_without_special_char(state)
 
     return await db.query_all_cache(sql, cache_key, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
@@ -77,7 +83,7 @@ async def get_followers_by_page(db, account: str, page: int, page_size: int, fol
          LIMIT :limit OFFSET :offset
     """
 
-    cache_key = "get_followers_by_page_" + str(account_id) + "_" + str(state) + "_" + str(page*page_size)
+    cache_key = "get_followers_by_page_" + to_string_without_special_char(account_id) + "_" + to_string_without_special_char(state) + "_" + to_string_without_special_char(page*page_size)
 
     return await db.query_all_cache(sql, cache_key, account_id=account_id,
                               state=state, limit=page_size, offset=page*page_size)
@@ -104,7 +110,7 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
-    cache_key = "get_following_" + str(account_id) + "_" + str(start_id) + "_" + str(state)
+    cache_key = "get_following_" + to_string_without_special_char(account_id) + "_" + to_string_without_special_char(start_id) + "_" + to_string_without_special_char(state)
 
     return await db.query_all_cache(sql, cache_key, account_id=account_id, start_id=start_id,
                               state=state, limit=limit)
@@ -124,7 +130,7 @@ async def get_following_by_page(db, account: str, page: int, page_size: int, fol
          LIMIT :limit OFFSET :offset
     """
 
-    cache_key = "get_following_by_page_" + str(account_id) + "_" + str(state) + "_" + str(page*page_size)
+    cache_key = "get_following_by_page_" + to_string_without_special_char(account_id) + "_" + to_string_without_special_char(state) + "_" + to_string_without_special_char(page*page_size)
 
     return await db.query_all_cache(sql, cache_key, account_id=account_id,
                               state=state, limit=page_size, offset=page*page_size)
