@@ -17,7 +17,7 @@ async def redis_set(cls, k, v, timeout):
     if cls:
         async with cls.pipeline(transaction=True) as pipe:
             try:
-                ok1, ok2 = await (pipe.set(k, pickle.dumps(v).encode('utf-8')).expire(k, timeout).execute())
+                ok1, ok2 = await (pipe.set(k, pickle.dumps(v)).expire(k, timeout).execute())
             except Exception as e:
                 log.warning("[REDIS-SET_ERR] k:%s, v:%s, err: %s",k, v, e.__class__.__name__)
                 raise e
@@ -28,10 +28,12 @@ async def redis_get(cls, k):
     if cls:
         try:
             v = await cls.get(k)
+            if v is not None:
+                return pickle.loads(v)
+            return None
         except Exception as e:
             log.warning("[REDIS-GET_ERR] k:%s, err: %s",k, str(e))
             return None
-        return pickle.loads(v)
 
 def sqltimer(function):
     """Decorator for DB query methods which tracks timing."""
@@ -70,7 +72,7 @@ class Db:
         if redis_url:
             self.redis = await aioredis.from_url(redis_url,
                                 db=1,
-                                decode_responses=True)
+                                decode_responses=False)
 
     def close(self):
         """Close pool."""
