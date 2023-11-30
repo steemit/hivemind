@@ -31,8 +31,9 @@ class Conf():
         add('mode', nargs='*', default=['sync'])
 
         # common
-        add('--database-url', env_var='DATABASE_URL', required=False, help='database connection url', default='')
-        add('--steemd-url', env_var='STEEMD_URL', required=False, help='steemd/jussi endpoint', default='https://api.steemit.com')
+        add('--database-url', env_var='DATABASE_URL', required=True, help='database connection url', default='')
+        add('--steemd-url', env_var='STEEMD_URL', required=True, help='steemd/jussi endpoint', default='https://api.steemit.com')
+        add('--redis-url', env_var='REDIS_URL', required=True, help='redis connection url', default='')
         add('--muted-accounts-url', env_var='MUTED_ACCOUNTS_URL', required=False, help='url to flat list of muted accounts', default='')
 
         # server
