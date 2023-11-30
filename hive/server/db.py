@@ -14,6 +14,8 @@ from hive.utils.stats import Stats
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
+CACHE_NAMESPACE = "hivemind_"
+
 def sqltimer(function):
     """Decorator for DB query methods which tracks timing."""
     async def _wrapper(*args, **kwargs):
@@ -40,8 +42,9 @@ def cacher(func):
                     ttl = 5*60
                 if isinstance(v, list):
                     v = [{column: value for column, value in rowproxy.items()} for rowproxy in v]
-                await args[0].redis_cache.set(kwargs["cache_key"], v)
-                await args[0].redis_cache.expire(kwargs["cache_key"], ttl)
+                cache_key = CACHE_NAMESPACE + kwargs['cache_key']
+                await args[0].redis_cache.set(cache_key, v)
+                await args[0].redis_cache.expire(cache_key, ttl)
             return v
         else:
             return await func(*args, **kwargs)
