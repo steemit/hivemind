@@ -441,7 +441,7 @@ async def pids_by_replies(db, start_author: str, start_permlink: str = '',
         return None
     tmp_ids = []
     for el in id_res:
-        tmp_ids.append(str(el[0]))
+        tmp_ids.append(str(el['id']))
     ids = ",".join(tmp_ids)
 
     sql = """
