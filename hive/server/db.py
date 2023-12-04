@@ -36,12 +36,33 @@ def cacher(func):
             v = await args[0].redis_cache.get(kwargs["cache_key"])
             if v is None:
                 v = await func(*args, **kwargs)
+                if v is None:
+                    """
+                    TODO:
+                        * hit no cache => None
+                        * get no record => None
+                        These two conditions are conflict.
+                        Need to wrap the redis_cache.get()
+                    """
+                    log.warning("[CACHE-LAYER-TODO] [%s] (%s)", args, kwargs)
+                    return None
                 if "cache_ttl" in kwargs:
                     ttl = kwargs['cache_ttl']
                 else:
                     ttl = 5*60
                 if isinstance(v, list):
-                    v = [{column: value for column, value in rowproxy.items()} for rowproxy in v]
+                    d, a = {}, []
+                    for row in v:
+                        try:
+                            for col, val in row.items():
+                                # build up the dictionary
+                                d = {**d, **{col: val}}
+                            a.append(d)
+                        except:
+                            # if row is not RowProxy
+                            log.warning("[CACHE-LAYER] The row is not RowProxy. row: {%s}, args: {%s}, kwargs: {%s}", row, args, kwargs)
+                            a.append(row)
+                    v = a
                 cache_key = CACHE_NAMESPACE + kwargs['cache_key']
                 await args[0].redis_cache.set(cache_key, v)
                 await args[0].redis_cache.expire(cache_key, ttl)

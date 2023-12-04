@@ -287,11 +287,14 @@ async def _get_feed_price(db):
 
 async def _get_props_lite(db):
     """Return a minimal version of get_dynamic_global_properties data."""
-    raw = json.loads(
-        await db.query_one(
-            "SELECT dgpo FROM hive_state",
-            cache_key="_hive_state_dgpo",
-            cache_ttl=300))
+    tmp = await db.query_one(
+        "SELECT dgpo FROM hive_state",
+        cache_key="_hive_state_dgpo",
+        cache_ttl=300)
+    if tmp is None or tmp == '':
+        return dict()
+ 
+    raw = json.loads(tmp)
 
     # convert NAI amounts to legacy
     nais = ['virtual_supply', 'current_supply', 'current_sbd_supply',
