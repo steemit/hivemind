@@ -20,6 +20,7 @@ def return_error_info(function):
         try:
             return await function(*args, **kwargs)
         except (ApiError, AssertionError, TypeError, Exception) as e:
+            log.error("ERR-DEBUG: args: {%s}, kwargs: {%s}", args, kwargs)
             if isinstance(e, KeyError):
                 #TODO: KeyError overloaded for method not found. Any KeyErrors
                 #      captured in this decorater are likely irrelevant to
@@ -39,7 +40,6 @@ def return_error_info(function):
             if isinstance(e, AssertionError):
                 log.error("ERR2: %s\n%s", repr(e), traceback.format_exc())
                 raise e
-            log.error("ERR0: %s\n%s", repr(e), traceback.format_exc())
             raise e
             #return {
             #    "error": {

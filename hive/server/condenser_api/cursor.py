@@ -4,8 +4,13 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 from hive.utils.normalize import rep_to_raw
+import re
 
 # pylint: disable=too-many-lines
+
+def to_string_without_special_char(v):
+    cleaned_string = re.sub('[^A-Za-z0-9]+', '', str(v))
+    return cleaned_string
 
 def last_month():
     """Get the date 1 month ago."""
@@ -15,7 +20,8 @@ async def get_post_id(db, author, permlink):
     """Given an author/permlink, retrieve the id from db."""
     sql = ("SELECT id FROM hive_posts WHERE author = :a "
            "AND permlink = :p AND is_deleted = '0' LIMIT 1")
-    return await db.query_one(sql, a=author, p=permlink)
+    cache_key = "get_post_id_" + author + "_" + permlink
+    return await db.query_one(sql, a=author, p=permlink, cache_key=cache_key)
 
 async def get_child_ids(db, post_id):
     """Given a parent post id, retrieve all child ids."""
@@ -25,12 +31,14 @@ async def get_child_ids(db, post_id):
 async def _get_post_id(db, author, permlink):
     """Get post_id from hive db."""
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    return await db.query_one(sql, a=author, p=permlink)
+    cache_key = "_get_post_id_" + author + "_" + permlink
+    return await db.query_one(sql, a=author, p=permlink, cache_key=cache_key)
 
 async def _get_account_id(db, name):
     """Get account id from hive db."""
     assert name, 'no account name specified'
-    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
+    cache_key = "_get_account_id_" + name
+    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name, cache_key=cache_key)
     assert _id, "account not found: `%s`" % name
     return _id
 
@@ -57,8 +65,13 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
+    cache_key = "get_followers_"
+    cache_key = cache_key + to_string_without_special_char(account_id) + "_"
+    cache_key = cache_key + to_string_without_special_char(start_id) + "_"
+    cache_key = cache_key + to_string_without_special_char(state)
+
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit)
+                              state=state, limit=limit, cache_key=cache_key)
 
 
 async def get_followers_by_page(db, account: str, page: int, page_size: int, follow_type: str):
@@ -75,8 +88,14 @@ async def get_followers_by_page(db, account: str, page: int, page_size: int, fol
          LIMIT :limit OFFSET :offset
     """
 
+    cache_key = "get_followers_by_page_"
+    cache_key = cache_key + to_string_without_special_char(account_id) + "_"
+    cache_key = cache_key + to_string_without_special_char(state) + "_"
+    cache_key = cache_key + to_string_without_special_char(page*page_size)
+
     return await db.query_all(sql, account_id=account_id,
-                              state=state, limit=page_size, offset=page*page_size)
+                              state=state, limit=page_size, offset=page*page_size,
+                              cache_key=cache_key)
 
 async def get_following(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
@@ -100,8 +119,13 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
+    cache_key = "get_following_"
+    cache_key = cache_key + to_string_without_special_char(account_id) + "_"
+    cache_key = cache_key + to_string_without_special_char(start_id) + "_"
+    cache_key = cache_key + to_string_without_special_char(state)
+
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit)
+                              state=state, limit=limit, cache_key=cache_key)
 
 
 async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
@@ -118,8 +142,14 @@ async def get_following_by_page(db, account: str, page: int, page_size: int, fol
          LIMIT :limit OFFSET :offset
     """
 
+    cache_key = "get_following_by_page_"
+    cache_key = cache_key + to_string_without_special_char(account_id) + "_"
+    cache_key = cache_key + to_string_without_special_char(state) + "_"
+    cache_key = cache_key + to_string_without_special_char(page*page_size)
+
     return await db.query_all(sql, account_id=account_id,
-                              state=state, limit=page_size, offset=page*page_size)
+                              state=state, limit=page_size, offset=page*page_size,
+                              cache_key=cache_key)
 
 
 async def get_follow_counts(db, account: str):
@@ -395,17 +425,30 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
         seek = "AND id <= :start_id"
     else:
         parent_account = start_author
+    
+    sql = """
+    SELECT id FROM hive_posts
+    WHERE author = :parent
+    AND is_deleted = '0'
+    ORDER BY id DESC
+    LIMIT 10000
+    """
+
+    cache_key = "hive_posts-" + parent_account + "-is_deleted_0"
+    id_res = await db.query_all(sql, parent=parent_account, cache_key=cache_key)
+    if id_res == None or len(id_res) == 0:
+        return None
+    tmp_ids = []
+    for el in id_res:
+        tmp_ids.append(str(el[0]))
+    ids = ",".join(tmp_ids)
 
     sql = """
-       SELECT id FROM hive_posts
-        WHERE parent_id IN (SELECT id FROM hive_posts
-                             WHERE author = :parent
-                               AND is_deleted = '0'
-                          ORDER BY id DESC
-                             LIMIT 10000) %s
-          AND is_deleted = '0'
-     ORDER BY id DESC
-        LIMIT :limit
-    """ % seek
+    SELECT id FROM hive_posts
+    WHERE parent_id IN (%s) %s
+    AND is_deleted = '0'
+    ORDER BY id DESC
+    LIMIT :limit
+    """ % (ids, seek)
 
-    return await db.query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
+    return await db.query_col(sql, limit=limit)

@@ -4,7 +4,6 @@
 import logging
 from collections import OrderedDict
 import ujson as json
-from aiocache import cached
 
 from hive.utils.normalize import legacy_amount
 from hive.server.common.mutes import Mutes
@@ -278,16 +277,24 @@ async def _load_discussion(db, author, permlink):
     # return all nodes keyed by ref
     return {refs[pid]: post for pid, post in posts.items()}
 
-@cached(ttl=1800, timeout=1200)
 async def _get_feed_price(db):
     """Get a steemd-style ratio object representing feed price."""
-    price = await db.query_one("SELECT usd_per_steem FROM hive_state")
+    price = await db.query_one(
+        "SELECT usd_per_steem FROM hive_state",
+        cache_key="_get_feed_price",
+        cache_ttl=1800)
     return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
 
-@cached(ttl=1800, timeout=1200)
 async def _get_props_lite(db):
     """Return a minimal version of get_dynamic_global_properties data."""
-    raw = json.loads(await db.query_one("SELECT dgpo FROM hive_state"))
+    tmp = await db.query_one(
+        "SELECT dgpo FROM hive_state",
+        cache_key="_hive_state_dgpo",
+        cache_ttl=300)
+    if tmp is None or tmp == '':
+        return dict()
+ 
+    raw = json.loads(tmp)
 
     # convert NAI amounts to legacy
     nais = ['virtual_supply', 'current_supply', 'current_sbd_supply',
