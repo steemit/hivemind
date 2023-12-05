@@ -85,6 +85,7 @@ docker logs -f hivemind
 | `HTTP_SERVER_PORT`       | `--http-server-port` | 8080    |
 | `DATABASE_URL`           | `--database-url`     | postgresql://user:pass@localhost:5432/hive |
 | `STEEMD_URL`             | `--steemd-url`       | https://api.steemit.com |
+| `REDIS_URL`              | `--redis-url`        | redis://localhost:6379/ |
 | `MAX_BATCH`              | `--max-batch`        | 50      |
 | `MAX_WORKERS`            | `--max-workers`      | 4       |
 | `TRAIL_BLOCKS`           | `--trail-blocks`     | 2       |

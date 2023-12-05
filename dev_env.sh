@@ -1,5 +1,7 @@
 #/bin/bash
 
+set -xe
+
 container_name=dev-hivemind-env
 
 run() {
@@ -10,16 +12,16 @@ run() {
         tag=dev-env
     fi
 
-    if [ -n ${network} ]; then
-        network_str="--network ${network}"
+    if [ "${network}" = "" ]; then
+        network=bridge
     fi
 
-    docker run -it --rm \
+    docker run -itd --rm \
         --name ${container_name} \
         -v $(pwd):/project \
         --env-file $(pwd)/.env \
         --workdir /project \
-        ${network_str} \
+        --network ${network} \
         steemit/hivemind:${tag} \
         /bin/bash
 }
@@ -40,6 +42,7 @@ main_func() {
     case ${op} in
         run)
             run $tag $network
+            cli
             ;;
         cli)
             cli
