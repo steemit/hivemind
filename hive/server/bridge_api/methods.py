@@ -156,3 +156,35 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
             if pid in ids:
                 ids.remove(pid)
         return await load_posts(context['db'], ids)
+
+@return_error_info
+async def get_bookmarked_posts(context, account, sort='bookmark', category='', start_author='', start_permlink='',
+                               limit=20, observer=None):
+    """Get bookmarked posts for an account"""
+
+    # valid sorts are by age of posts, age of bookmarks or authors
+    valid_sorts = ['post', 'bookmark', 'author']
+    assert sort in valid_sorts, 'invalid bookmark sort'
+    assert account, 'account is required'
+
+    db = context['db']
+    account = valid_account(account)
+    start_author = valid_account(start_author, allow_empty=True)
+    start_permlink = valid_permlink(start_permlink, allow_empty=True)
+    start = (start_author, start_permlink)
+    limit = valid_limit(limit, 100)
+
+    # check blacklist accounts
+    _id = await db.query_one("SELECT id FROM hive_posts_status WHERE author = :n AND list_type = '3'", n=account)
+    if _id:
+        return []
+    
+    ids = await cursor.pids_by_bookmarks(
+        context['db'],
+        account,
+        sort,
+        category,
+        *start,
+        limit)
+
+    return await load_posts(context['db'], ids)    
