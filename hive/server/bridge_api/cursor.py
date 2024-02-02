@@ -472,25 +472,36 @@ async def pids_by_bookmarks(db, account: str, sort: str = 'bookmarks', category:
     account_id = await _get_account_id(db, account)
     seek = ''
     join = ''
-    start_id = None
+    start_id = await _get_post_id(db, start_author, start_permlink) if start_permlink else None
 
     if sort == 'bookmarks':
         # order by age of bookmarks
         order_by = "bookmarks.bookmarked_at DESC"
-        # if start_permlink:
-        #     start_id = # TODO start_id ermitteln aus bookmarks-table - ggf. get_bookmark_id() verwenden und neuen Index in Tabelle anlegen...
+        if start_permlink:
+            join = "JOIN hive_posts AS posts ON bookmarks.post_id = posts.id"
+            seek = """
+                AND bookmarks.bookmarked_at < (
+                    SELECT bookmarked_at FROM hive_bookmarks WHERE post_id = :start_id
+                )
+            """
+    
     elif sort == 'posts':
         # order by age of posts
         order_by = "bookmarks.post_id DESC"
-        # if start_permlink:
-            # start_id = await _get_post_id(db, start_author, start_permlink)
-            # seek = "AND post_id <= :start_id"
+        if start_permlink:
+            seek = "AND bookmarks.post_id < :start_id"
+    
     elif sort == 'authors':
         # order by name of authors
+        # sort by author, then by post_id 
+        # for paging we need a sort if more than one post by the same author is bookmarked
         join = "JOIN hive_posts AS posts ON bookmarks.post_id = posts.id"
-        order_by = "posts.author ASC"
-        # if start_permlink:
-        #     seek = "AND authors.name >= :start_author AND posts.permlink >= :start_permlink" # TODO testen
+        order_by = "posts.author ASC, bookmarks.post_id DESC"
+        if start_permlink:
+            seek = """
+                AND (posts.author > :start_author
+                OR (posts.author = :start_author AND bookmarks.post_id < :start_id))
+            """
 
     sql = """
         SELECT bookmarks.post_id
@@ -501,4 +512,8 @@ async def pids_by_bookmarks(db, account: str, sort: str = 'bookmarks', category:
          LIMIT :limit
     """ % (join, seek, order_by)
 
-    return await db.query_col(sql, account_id=account_id, start_id=start_id, limit=limit)
+    return await db.query_col(sql, 
+                              account_id=account_id, 
+                              start_id=start_id, 
+                              start_author=start_author, 
+                              limit=limit)
