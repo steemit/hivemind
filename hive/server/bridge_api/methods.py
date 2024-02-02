@@ -158,12 +158,12 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
         return await load_posts(context['db'], ids)
 
 @return_error_info
-async def get_bookmarked_posts(context, account, sort='bookmark', category='', start_author='', start_permlink='',
+async def get_bookmarked_posts(context, account, sort='bookmarks', category='', start_author='', start_permlink='',
                                limit=20, observer=None):
     """Get bookmarked posts for an account"""
 
     # valid sorts are by age of posts, age of bookmarks or authors
-    valid_sorts = ['post', 'bookmark', 'author']
+    valid_sorts = ['posts', 'bookmarks', 'authors']
     assert sort in valid_sorts, 'invalid bookmark sort'
     assert account, 'account is required'
 

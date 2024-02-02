@@ -466,7 +466,7 @@ async def pids_by_payout(db, account: str, start_author: str = '',
 
     return await db.query_col(sql, account=account, start_id=start_id, limit=limit)
 
-async def pids_by_bookmarks(db, account: str, sort: str = 'bookmark', category: str = '', start_author: str = '',
+async def pids_by_bookmarks(db, account: str, sort: str = 'bookmarks', category: str = '', start_author: str = '',
                             start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids for an author's bookmarks."""
     account_id = await _get_account_id(db, account)
@@ -474,18 +474,18 @@ async def pids_by_bookmarks(db, account: str, sort: str = 'bookmark', category: 
     join = ''
     start_id = None
 
-    if sort == 'bookmark':
+    if sort == 'bookmarks':
         # order by age of bookmarks
         order_by = "bookmarks.bookmarked_at DESC"
         # if start_permlink:
         #     start_id = # TODO start_id ermitteln aus bookmarks-table - ggf. get_bookmark_id() verwenden und neuen Index in Tabelle anlegen...
-    elif sort == 'post':
+    elif sort == 'posts':
         # order by age of posts
         order_by = "bookmarks.post_id DESC"
         # if start_permlink:
             # start_id = await _get_post_id(db, start_author, start_permlink)
             # seek = "AND post_id <= :start_id"
-    elif sort == 'author':
+    elif sort == 'authors':
         # order by name of authors
         join = "JOIN hive_posts AS posts ON bookmarks.post_id = posts.id"
         order_by = "posts.author ASC"
