@@ -23,8 +23,8 @@ class Bookmark:
         
         # perform add bookmark
         if op['action'] == 'add':
-            sql = """INSERT INTO hive_bookmarks (account_id, post_id, bookmarked_at)
-                     VALUES (:account_id, :post_id, :at)"""
+            sql = """INSERT INTO hive_bookmarks (account, post_id, bookmarked_at)
+                     VALUES (:account, :post_id, :at)"""
             DB.query(sql, **op)
             # TODO notify author of bookmark added
             # TODO update bookmarks count on post
@@ -32,7 +32,7 @@ class Bookmark:
         # perform remove bookmark
         elif op['action'] == 'remove':
             sql = """DELETE FROM hive_bookmarks
-                     WHERE account_id = :account_id AND post_id = :post_id"""
+                     WHERE account = :account AND post_id = :post_id"""
             DB.query(sql, **op)
             # TODO update bookmarks count on post
 
@@ -63,20 +63,20 @@ class Bookmark:
             # invalid post
             return None
 
-        exist_bookmark = cls._get_bookmark(account_id, post_id)
-        if ((exist_bookmark and op['action'] == 'add')              # already bookmarked
-           or (not exist_bookmark and op['action'] == 'remove')):   # not bookmarked
+        is_bookmarked = cls._is_bookmarked(account, post_id)
+        if ((is_bookmarked and op['action'] == 'add')              # already bookmarked
+           or (not is_bookmarked and op['action'] == 'remove')):   # not bookmarked
             # invalid action
             return None
         
-        return dict(account_id=account_id,
+        return dict(account=account,
                     post_id=post_id,
                     action=op['action'],
                     at=date)
 
     @classmethod
-    def _get_bookmark(cls, account_id, post_id):
+    def _is_bookmarked(cls, account, post_id):
         """Return bookmark if it exists."""
         sql = """SELECT 1 FROM hive_bookmarks
-                 WHERE account_id = :account_id AND post_id = :post_id"""
-        return DB.query_one(sql, account_id=account_id, post_id=post_id)
+                 WHERE account = :account AND post_id = :post_id"""
+        return DB.query_one(sql, account=account, post_id=post_id)

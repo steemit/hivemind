@@ -335,7 +335,7 @@ class DbState:
         if cls._ver == 20:
             if not cls.db().query_col("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_bookmarks')")[0]:
                 build_metadata_bookmarks().create_all(cls.db().engine())
-                cls.db().query("ALTER TABLE hive_bookmarks ADD CONSTRAINT hive_bookmarks_fk1 FOREIGN KEY (account_id) REFERENCES hive_accounts(id);")
+                cls.db().query("ALTER TABLE hive_bookmarks ADD CONSTRAINT hive_bookmarks_fk1 FOREIGN KEY (account) REFERENCES hive_accounts(name);")
                 cls.db().query("ALTER TABLE hive_bookmarks ADD CONSTRAINT hive_bookmarks_fk2 FOREIGN KEY (post_id) REFERENCES hive_posts(id);")
             cls._set_ver(21)
 

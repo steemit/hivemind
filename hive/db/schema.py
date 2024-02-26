@@ -365,12 +365,12 @@ def build_metadata_bookmarks(metadata=None):
     sa.Table(
         'hive_bookmarks', metadata,
         sa.Column('id', sa.Integer, primary_key=True, autoincrement=True), # TODO notwendig?
-        sa.Column('account_id', sa.Integer, nullable=False),
+        sa.Column('account', VARCHAR(16), nullable=False),
         sa.Column('post_id', sa.Integer, nullable=False),
         sa.Column('bookmarked_at', sa.DateTime, nullable=False),
         
-        sa.UniqueConstraint('account_id', 'post_id', name='hive_bookmarks_ux1'),
-        sa.Index('hive_bookmarks_ix1', 'account_id'), # bookmarks from account
+        sa.UniqueConstraint('account', 'post_id', name='hive_bookmarks_ux1'),
+        sa.Index('hive_bookmarks_ix1', 'account'), # bookmarks from account
         sa.Index('hive_bookmarks_ix2', 'post_id'), # bookmarks for a post
     )
 
