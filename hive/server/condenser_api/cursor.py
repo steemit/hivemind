@@ -20,8 +20,7 @@ async def get_post_id(db, author, permlink):
     """Given an author/permlink, retrieve the id from db."""
     sql = ("SELECT id FROM hive_posts WHERE author = :a "
            "AND permlink = :p AND is_deleted = '0' LIMIT 1")
-    cache_key = "get_post_id_" + author + "_" + permlink
-    return await db.query_one(sql, a=author, p=permlink, cache_key=cache_key)
+    return await db.query_one(sql, a=author, p=permlink)
 
 async def get_child_ids(db, post_id):
     """Given a parent post id, retrieve all child ids."""
@@ -31,14 +30,12 @@ async def get_child_ids(db, post_id):
 async def _get_post_id(db, author, permlink):
     """Get post_id from hive db."""
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    cache_key = "_get_post_id_" + author + "_" + permlink
-    return await db.query_one(sql, a=author, p=permlink, cache_key=cache_key)
+    return await db.query_one(sql, a=author, p=permlink)
 
 async def _get_account_id(db, name):
     """Get account id from hive db."""
     assert name, 'no account name specified'
-    cache_key = "_get_account_id_" + name
-    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name, cache_key=cache_key)
+    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
     assert _id, "account not found: `%s`" % name
     return _id
 
@@ -65,13 +62,8 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
-    cache_key = "get_followers_"
-    cache_key = cache_key + to_string_without_special_char(account_id) + "_"
-    cache_key = cache_key + to_string_without_special_char(start_id) + "_"
-    cache_key = cache_key + to_string_without_special_char(state)
-
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit, cache_key=cache_key)
+                              state=state, limit=limit)
 
 
 async def get_followers_by_page(db, account: str, page: int, page_size: int, follow_type: str):
@@ -88,14 +80,8 @@ async def get_followers_by_page(db, account: str, page: int, page_size: int, fol
          LIMIT :limit OFFSET :offset
     """
 
-    cache_key = "get_followers_by_page_"
-    cache_key = cache_key + to_string_without_special_char(account_id) + "_"
-    cache_key = cache_key + to_string_without_special_char(state) + "_"
-    cache_key = cache_key + to_string_without_special_char(page*page_size)
-
     return await db.query_all(sql, account_id=account_id,
-                              state=state, limit=page_size, offset=page*page_size,
-                              cache_key=cache_key)
+                              state=state, limit=page_size, offset=page*page_size)
 
 async def get_following(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
@@ -119,13 +105,8 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
          LIMIT :limit
     """ % seek
 
-    cache_key = "get_following_"
-    cache_key = cache_key + to_string_without_special_char(account_id) + "_"
-    cache_key = cache_key + to_string_without_special_char(start_id) + "_"
-    cache_key = cache_key + to_string_without_special_char(state)
-
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit, cache_key=cache_key)
+                              state=state, limit=limit)
 
 
 async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
@@ -142,14 +123,8 @@ async def get_following_by_page(db, account: str, page: int, page_size: int, fol
          LIMIT :limit OFFSET :offset
     """
 
-    cache_key = "get_following_by_page_"
-    cache_key = cache_key + to_string_without_special_char(account_id) + "_"
-    cache_key = cache_key + to_string_without_special_char(state) + "_"
-    cache_key = cache_key + to_string_without_special_char(page*page_size)
-
     return await db.query_all(sql, account_id=account_id,
-                              state=state, limit=page_size, offset=page*page_size,
-                              cache_key=cache_key)
+                              state=state, limit=page_size, offset=page*page_size)
 
 
 async def get_follow_counts(db, account: str):

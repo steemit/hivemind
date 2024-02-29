@@ -282,7 +282,7 @@ async def _get_feed_price(db):
     price = await db.query_one(
         "SELECT usd_per_steem FROM hive_state",
         cache_key="_get_feed_price",
-        cache_ttl=1800)
+        cache_ttl=3)
     return {"base": "%.3f SBD" % price, "quote": "1.000 STEEM"}
 
 async def _get_props_lite(db):
@@ -290,7 +290,7 @@ async def _get_props_lite(db):
     tmp = await db.query_one(
         "SELECT dgpo FROM hive_state",
         cache_key="_hive_state_dgpo",
-        cache_ttl=300)
+        cache_ttl=3)
     if tmp is None or tmp == '':
         return dict()
  

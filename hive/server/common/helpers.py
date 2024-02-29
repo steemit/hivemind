@@ -40,6 +40,7 @@ def return_error_info(function):
             if isinstance(e, AssertionError):
                 log.error("ERR2: %s\n%s", repr(e), traceback.format_exc())
                 raise e
+            log.error("ERR0: %s\n%s", repr(e), traceback.format_exc())
             raise e
             #return {
             #    "error": {

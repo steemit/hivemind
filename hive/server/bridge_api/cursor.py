@@ -428,30 +428,18 @@ async def pids_by_replies(db, start_author: str, start_permlink: str = '',
         parent_account = start_author
 
     sql = """
-    SELECT id FROM hive_posts
-    WHERE author = :parent
-    AND is_deleted = '0'
-    ORDER BY id DESC
-    LIMIT 10000
-    """
+       SELECT id FROM hive_posts
+        WHERE parent_id IN (SELECT id FROM hive_posts
+                             WHERE author = :parent
+                               AND is_deleted = '0'
+                          ORDER BY id DESC
+                             LIMIT 10000) %s
+          AND is_deleted = '0'
+     ORDER BY id DESC
+        LIMIT :limit
+    """ % seek
 
-    cache_key = "hive_posts-" + parent_account + "-is_deleted_0"
-    id_res = await db.query_all(sql, cache_key=cache_key, parent=parent_account)
-    if id_res == None or len(id_res) == 0:
-        return None
-    tmp_ids = []
-    for el in id_res:
-        tmp_ids.append(str(el['id']))
-    ids = ",".join(tmp_ids)
-
-    sql = """
-    SELECT id FROM hive_posts
-    WHERE parent_id IN (%s) %s
-    AND is_deleted = '0'
-    ORDER BY id DESC
-    LIMIT :limit
-    """ % (ids, seek)
-    return await db.query_col(sql, limit=limit)
+    return await db.query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
 
 async def pids_by_payout(db, account: str, start_author: str = '',
                          start_permlink: str = '', limit: int = 20):
