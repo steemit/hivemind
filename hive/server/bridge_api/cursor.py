@@ -478,10 +478,11 @@ async def pids_by_bookmarks(db, account: str, sort: str = 'bookmarks', category:
         # order by age of bookmarks
         order_by = "bookmarks.bookmarked_at DESC"
         if start_permlink:
-            join = "JOIN hive_posts AS posts ON bookmarks.post_id = posts.id"
             seek = """
                 AND bookmarks.bookmarked_at < (
-                    SELECT bookmarked_at FROM hive_bookmarks WHERE post_id = :start_id
+                    SELECT bookmarked_at FROM hive_bookmarks
+                     WHERE post_id = :start_id
+                       AND account = :account
                 )
             """
     
