@@ -172,7 +172,8 @@ async def get_bookmarked_posts(context, account, sort='bookmarks', category='', 
     start_author = valid_account(start_author, allow_empty=True)
     start_permlink = valid_permlink(start_permlink, allow_empty=True)
     start = (start_author, start_permlink)
-    limit = valid_limit(limit, 100)
+    limit = valid_limit(limit, 50)
+    category = '' # currently unused
 
     # check blacklist accounts
     _id = await db.query_one("SELECT id FROM hive_posts_status WHERE author = :n AND list_type = '3'", n=account)

@@ -92,7 +92,7 @@ class CustomOp:
                   author: {type: 'account'}, 
                   permlink: {type: 'permlink'}, 
                   action: {type: 'str'}, 
-                  category: {type: 'str'}}
+                  category: {type: 'str'}} // category currently unused
         """
         if not isinstance(op_json, list):
             return

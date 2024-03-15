@@ -469,7 +469,6 @@ async def pids_by_payout(db, account: str, start_author: str = '',
 async def pids_by_bookmarks(db, account: str, sort: str = 'bookmarks', category: str = '', start_author: str = '',
                             start_permlink: str = '', limit: int = 20):
     """Get a list of post_ids for an author's bookmarks."""
-    account_id = await _get_account_id(db, account)
     seek = ''
     join = ''
     start_id = await _get_post_id(db, start_author, start_permlink) if start_permlink else None
@@ -508,7 +507,7 @@ async def pids_by_bookmarks(db, account: str, sort: str = 'bookmarks', category:
         SELECT bookmarks.post_id
           FROM hive_bookmarks AS bookmarks
           %s
-         WHERE account = :account %s
+         WHERE bookmarks.account = :account %s
       ORDER BY %s
          LIMIT :limit
     """ % (join, seek, order_by)

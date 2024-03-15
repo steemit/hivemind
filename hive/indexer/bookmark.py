@@ -26,15 +26,12 @@ class Bookmark:
             sql = """INSERT INTO hive_bookmarks (account, post_id, bookmarked_at)
                      VALUES (:account, :post_id, :at)"""
             DB.query(sql, **op)
-            # TODO notify author of bookmark added
-            # TODO update bookmarks count on post
 
         # perform remove bookmark
         elif op['action'] == 'remove':
             sql = """DELETE FROM hive_bookmarks
                      WHERE account = :account AND post_id = :post_id"""
             DB.query(sql, **op)
-            # TODO update bookmarks count on post
 
     @classmethod
     def _validated_op(cls, account, op, date):
