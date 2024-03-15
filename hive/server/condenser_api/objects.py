@@ -146,7 +146,7 @@ def _condenser_post_object(row, truncate_body=0):
     post['promoted'] = "%.3f SBD" % row['promoted']
 
     post['replies'] = []
-    post['body_length'] = len(row['body'])
+    post['body_length'] = len(row['body']) if row['body'] is not None else ''
     post['active_votes'] = _hydrate_active_votes(row['votes'])
     post['author_reputation'] = rep_to_raw(row['author_rep'])
 
