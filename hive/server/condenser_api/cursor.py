@@ -20,7 +20,8 @@ async def get_post_id(db, author, permlink):
     """Given an author/permlink, retrieve the id from db."""
     sql = ("SELECT id FROM hive_posts WHERE author = :a "
            "AND permlink = :p AND is_deleted = '0' LIMIT 1")
-    return await db.query_one(sql, a=author, p=permlink)
+    cache_key = f"get_post_id_{author}_{permlink}"
+    return await db.query_one(sql, a=author, p=permlink, cache_key=cache_key)
 
 async def get_child_ids(db, post_id):
     """Given a parent post id, retrieve all child ids."""
@@ -30,12 +31,14 @@ async def get_child_ids(db, post_id):
 async def _get_post_id(db, author, permlink):
     """Get post_id from hive db."""
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    return await db.query_one(sql, a=author, p=permlink)
+    cache_key = f"_get_post_id_{author}_{permlink}"
+    return await db.query_one(sql, a=author, p=permlink, cache_key=cache_key)
 
 async def _get_account_id(db, name):
     """Get account id from hive db."""
     assert name, 'no account name specified'
-    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name)
+    cache_key = f"_get_account_id_{name}"
+    _id = await db.query_one("SELECT id FROM hive_accounts WHERE name = :n", n=name, cache_key=cache_key)
     assert _id, "account not found: `%s`" % name
     return _id
 
@@ -409,7 +412,7 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
     LIMIT 10000
     """
 
-    cache_key = "hive_posts-" + parent_account + "-is_deleted_0"
+    cache_key = f"hive_posts-{parent_account}-is_deleted_0"
     id_res = await db.query_all(sql, parent=parent_account, cache_key=cache_key)
     if id_res == None or len(id_res) == 0:
         return None
