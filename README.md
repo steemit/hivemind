@@ -117,8 +117,8 @@ Build flags
 
 Plugins
 
- - Required: `reputation reputation_api database_api condenser_api block_api`
- - Not required: `follow*`, `tags*`, `market_history`, `account_history`, `witness`
+ - Required: `reputation reputation_api database_api condenser_api block_api market_history_api`
+ - Not required: `follow*`, `tags*`, `account_history`, `witness`
 
 
 ### Postgres Performance
