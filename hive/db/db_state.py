@@ -7,7 +7,8 @@ import logging
 
 from hive.db.schema import (setup, reset_autovac, build_metadata,
                             build_metadata_community, teardown, DB_VERSION,
-                            build_metadata_blacklist, build_trxid_block_num)
+                            build_metadata_blacklist, build_trxid_block_num,
+                            build_metadata_bookmarks)
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -331,6 +332,12 @@ class DbState:
             cls.db().query("CREATE INDEX hive_block_num_ix1 ON hive_trxid_block_num (block_num)")
             cls.db().query("CREATE UNIQUE INDEX hive_trxid_ix1 ON hive_trxid_block_num (trx_id) WHERE trx_id IS NOT NULL")
             cls._set_ver(20)
+        if cls._ver == 20:
+            if not cls.db().query_col("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_bookmarks')")[0]:
+                build_metadata_bookmarks().create_all(cls.db().engine())
+                cls.db().query("ALTER TABLE hive_bookmarks ADD CONSTRAINT hive_bookmarks_fk1 FOREIGN KEY (account) REFERENCES hive_accounts(name);")
+                cls.db().query("ALTER TABLE hive_bookmarks ADD CONSTRAINT hive_bookmarks_fk2 FOREIGN KEY (post_id) REFERENCES hive_posts(id);")
+            cls._set_ver(21)
 
         reset_autovac(cls.db())
 
