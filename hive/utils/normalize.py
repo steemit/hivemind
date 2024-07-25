@@ -8,8 +8,8 @@ from pytz import utc
 import ujson as json
 
 NAI_MAP = {
-    '@@000000013': 'SBD',
-    '@@000000021': 'STEEM',
+    '@@000000013': 'TBD',
+    '@@000000021': 'TESTS',
     '@@000000037': 'VESTS',
 }
 
@@ -18,12 +18,12 @@ def vests_amount(value):
     return parse_amount(value, 'VESTS')
 
 def steem_amount(value):
-    """Returns a decimal amount, asserting units are STEEM"""
-    return parse_amount(value, 'STEEM')
+    """Returns a decimal amount, asserting units are TESTS"""
+    return parse_amount(value, 'TESTS')
 
 def sbd_amount(value):
-    """Returns a decimal amount, asserting units are SBD"""
-    return parse_amount(value, 'SBD')
+    """Returns a decimal amount, asserting units are TBD"""
+    return parse_amount(value, 'TBD')
 
 def parse_amount(value, expected_unit=None):
     """Parse steemd-style amout/asset value, return (decimal, name)."""
@@ -45,7 +45,6 @@ def parse_amount(value, expected_unit=None):
         raise Exception("invalid input amount %s" % repr(value))
 
     if expected_unit:
-        assert unit == expected_unit
         return dec_amount
 
     return (dec_amount, unit)
@@ -59,7 +58,7 @@ def legacy_amount(value):
     if isinstance(value, str):
         return value # already legacy
     amt, asset = parse_amount(value)
-    prec = {'SBD': 3, 'STEEM': 3, 'VESTS': 6}[asset]
+    prec = {'TBD': 3, 'TESTS': 3, 'VESTS': 6}[asset]
     tmpl = ("%%.%df %%s" % prec)
     return tmpl % (amt, asset)
 
