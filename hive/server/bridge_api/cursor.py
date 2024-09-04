@@ -1,10 +1,12 @@
 """Cursor-based pagination queries, mostly supporting bridge_api."""
 
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 # pylint: disable=too-many-lines
 
+log = logging.getLogger(__name__)
 DEFAULT_CID = 1317453
 PAYOUT_WINDOW = "now() + interval '12 hours' AND now() + interval '36 hours'"
 
@@ -52,12 +54,20 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
     cids = None
     single = None
     if tag == 'my':
+        t0 = datetime.now()
         cids = await _subscribed(db, observer_id)
+        t1 = datetime.now()
+        exec_time = (t1 - t0).total_seconds()
+        log.info("pids_by_ranked_t1: %d s." % exec_time)
         if not cids: return []
     elif tag == 'all':
         cids = []
     elif tag[:5] == 'hive-':
+        t0 = datetime.now()
         single = await _get_community_id(db, tag)
+        t1 = datetime.now()
+        exec_time = (t1 - t0).total_seconds()
+        log.info("pids_by_ranked_t1: %d s." % exec_time)
         if single: cids = [single]
 
     # if tag was comms key, then no tag filter
@@ -65,16 +75,30 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
 
     start_id = None
     if start_permlink:
+        t0 = datetime.now()
         start_id = await _get_post_id(db, start_author, start_permlink)
+        t2 = datetime.now()
+        exec_time = (t2 - t0).total_seconds()
+        log.info("pids_by_ranked_t2: %d s." % exec_time)
 
+    t0 = datetime.now()
     if cids is None:
         pids = await pids_by_category(db, tag, sort, start_id, limit)
+        t3 = datetime.now()
     else:
         pids = await pids_by_community(db, cids, sort, start_id, limit)
+        t3 = datetime.now()
+    exec_time = (t3 - t0).total_seconds()
+    log.info("pids_by_ranked_t3: %d s." % exec_time)
+    
 
     # if not filtered by tag, is first page trending: prepend pinned
     if not tag and not start_id and sort in ('trending', 'created'):
+        t0 = datetime.now()
         prepend = await _pinned(db, single or DEFAULT_CID)
+        t4 = datetime.now()
+        exec_time = (t4 - t0).total_seconds()
+        log.info("pids_by_ranked_t4: %d s." % exec_time)
         for pid in prepend:
             if pid in pids:
                 pids.remove(pid)
@@ -82,14 +106,22 @@ async def pids_by_ranked(db, sort, start_author, start_permlink, limit, tag, obs
 
     # first page prepend pinned
     if not tag and not cids and not start_id and sort in ('trending', 'created'):
+        t0 = datetime.now()
         first_prepend = await _pids_by_type(db, '2')
+        t5 = datetime.now()
+        exec_time = (t5 - t0).total_seconds()
+        log.info("pids_by_ranked_t5: %d s." % exec_time)
         for pid in first_prepend:
             if pid in pids:
                 pids.remove(pid)
         pids = first_prepend + pids
 
     # hide posts
+    t0 = datetime.now()
     hide_pids = await hide_pids_by_ids(db, pids)
+    t6 = datetime.now()
+    exec_time = (t6 - t0).total_seconds()
+    log.info("pids_by_ranked_t6: %d s." % exec_time)
     for pid in hide_pids:
         if pid in pids:
             pids.remove(pid)
@@ -119,7 +151,17 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     # setup
     field, pending, toponly, gray, promoted = definitions[sort]
     table = 'hive_posts_cache'
-    where = ["community_id IN :ids"] if ids else ["community_id IS NOT NULL AND community_id != 1337319"]
+    where = []
+    if ids:
+        if sort != 'created':
+            now = datetime.now()
+            seven_days_ago = now - timedelta(days=7)
+            timestamp = int(seven_days_ago.timestamp())
+            where.append(f"community_id IN :ids and created_at >= to_timestamp({timestamp})")
+        else:
+            where.append("community_id IN :ids")
+    else:
+        where.append("community_id IS NOT NULL AND community_id != 1337319")
 
     # select
     if gray:     where.append("is_grayed = '1'")
@@ -155,6 +197,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
               ORDER BY %s DESC, post_id LIMIT :limit
               """ % (table, ' AND '.join(where), field))
 
+    log.info(f"pids_by_community: {sql}")
     # execute
     return await db.query_col(sql, ids=tuple(ids), seek_id=seek_id, limit=limit)
 
@@ -216,6 +259,7 @@ async def pids_by_category(db, tag, sort, last_id, limit):
               ORDER BY %s DESC, post_id LIMIT :limit
               """ % (table, ' AND '.join(where), field))
 
+    log.info(f"pids_by_category: {sql}")
     return await db.query_col(sql, tag=tag, last_id=last_id, limit=limit)
 
 
