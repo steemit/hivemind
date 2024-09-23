@@ -63,7 +63,7 @@ def cacher(func):
                             log.warning("[CACHE-LAYER] The row is not RowProxy. row: {%s}, args: {%s}, kwargs: {%s}", row, args, kwargs)
                             a.append(row)
                     v = a
-                await args[0].redis_cache.set(kwargs['cache_key'], v, ttl, namespace=CACHE_NAMESPACE)
+                await args[0].redis_cache.set(kwargs['cache_key'], v, ttl=ttl, namespace=CACHE_NAMESPACE)
             return v
         else:
             return await func(*args, **kwargs)
