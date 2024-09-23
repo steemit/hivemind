@@ -33,7 +33,7 @@ def cacher(func):
     """Decorator for DB query result cache."""
     async def _wrapper(*args, **kwargs):
         if 'cache_key' in kwargs and args[0].redis_cache is not None:
-            v = await args[0].redis_cache.get(kwargs["cache_key"])
+            v = await args[0].redis_cache.get(kwargs["cache_key"], namespace=CACHE_NAMESPACE)
             if v is None:
                 v = await func(*args, **kwargs)
                 if v is None:
@@ -63,9 +63,7 @@ def cacher(func):
                             log.warning("[CACHE-LAYER] The row is not RowProxy. row: {%s}, args: {%s}, kwargs: {%s}", row, args, kwargs)
                             a.append(row)
                     v = a
-                cache_key = CACHE_NAMESPACE + kwargs['cache_key']
-                await args[0].redis_cache.set(cache_key, v)
-                await args[0].redis_cache.expire(cache_key, ttl)
+                await args[0].redis_cache.set(kwargs['cache_key'], v, ttl, namespace=CACHE_NAMESPACE)
             return v
         else:
             return await func(*args, **kwargs)
