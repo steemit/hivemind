@@ -35,7 +35,7 @@ class BlockQueue:
         next_hash = block['block_id']
         next_prev = block['previous']
         if self._prev != next_prev:
-            fork = "%s--> %s->%s" % (self._prev, next_prev, next_hash)
+            fork = f"{self._prev}--> {next_prev}->{next_hash}"
             if self._queue: # if using max_size>0, fork might be in buffer only
                 buff = self.size()
                 alert = "NOTIFYALERT " if buff < self._max_size else ""
