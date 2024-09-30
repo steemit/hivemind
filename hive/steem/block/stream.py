@@ -39,7 +39,7 @@ class BlockQueue:
             if self._queue: # if using max_size>0, fork might be in buffer only
                 buff = self.size()
                 alert = "NOTIFYALERT " if buff < self._max_size else ""
-                raise MicroForkException("%squeue:%d %s" % (alert, fork, buff))
+                raise MicroForkException(f"{alert}queue:{buff} {fork}")
             raise ForkException("NOTIFYALERT fork " + fork)
 
         self._prev = next_hash
