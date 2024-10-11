@@ -48,7 +48,7 @@ async def get_trending_tags(context, start_tag: str = '', limit: int = 250):
     """ % seek
 
     out = []
-    for row in await context['db'].query_all(sql, limit=limit, start_tag=start_tag, cache_key="get_trending_tags_"+start_tag+"_"+limit, cache_ttl=5*60):
+    for row in await context['db'].query_all(sql, limit=limit, start_tag=start_tag, cache_key=f"get_trending_tags_{start_tag}_{limit}", cache_ttl=5*60):
         out.append({
             'name': row['category'],
             'comments': row['total_posts'] - row['top_posts'],
