@@ -18,7 +18,8 @@ async def load_profiles(db, names):
                     cover_image, rank, following, followers, active_at
                FROM hive_accounts WHERE name IN :names"""
     rows = await db.query_all(sql, names=tuple(names))
-    return [_condenser_profile_object(row) for row in rows]
+    steem_per_vest = await _get_steem_per_vest(db)
+    return [_condenser_profile_object(row, steem_per_vest) for row in rows]
 
 async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
     """Given a list of (id, reblogged_by) tuples, return posts w/ reblog key."""
@@ -156,7 +157,7 @@ async def _query_author_map(db, posts):
     sql = "SELECT id, name, reputation FROM hive_accounts WHERE name IN :names"
     return {r['name']: r for r in await db.query_all(sql, names=names)}
 
-def _condenser_profile_object(row):
+def _condenser_profile_object(row, steem_per_vest):
     """Convert an internal account record into legacy-steemd style."""
 
     blacklists = Mutes.lists(row['name'], row['reputation'])
@@ -170,7 +171,7 @@ def _condenser_profile_object(row):
         'reputation': row['reputation'],
         'blacklists': blacklists,
         'stats': {
-            'sp': int(row['vote_weight'] * 0.0005037),
+            'sp': int(row['vote_weight'] * steem_per_vest),
             'rank': row['rank'],
             'following': row['following'],
             'followers': row['followers'],
@@ -266,3 +267,11 @@ def _hydrate_active_votes(vote_csv):
         voter, rshares, _, _ = line.split(',')
         votes.append(dict(voter=voter, rshares=rshares))
     return votes
+
+async def _get_steem_per_vest(db):
+    """Get the current steem per vest ratio."""
+    steem_per_mvest = await db.query_one(
+        "SELECT steem_per_mvest FROM hive_state",
+        cache_key="_get_steem_per_vest",
+        cache_ttl=3600)
+    return float(steem_per_mvest) / 1e6

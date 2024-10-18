@@ -1,6 +1,6 @@
 """Cursor-based pagination queries, mostly supporting bridge_api."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 # pylint: disable=too-many-lines
@@ -119,7 +119,17 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     # setup
     field, pending, toponly, gray, promoted = definitions[sort]
     table = 'hive_posts_cache'
-    where = ["community_id IN :ids"] if ids else ["community_id IS NOT NULL AND community_id != 1337319"]
+    where = []
+    if ids:
+        if sort != 'created':
+            now = datetime.now()
+            seven_days_ago = now - timedelta(days=7)
+            timestamp = int(seven_days_ago.timestamp())
+            where.append(f"community_id IN :ids and created_at >= to_timestamp({timestamp})")
+        else:
+            where.append("community_id IN :ids")
+    else:
+        where.append("community_id IS NOT NULL AND community_id != 1337319")
 
     # select
     if gray:     where.append("is_grayed = '1'")

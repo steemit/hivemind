@@ -38,7 +38,7 @@ async def db_head_state(context):
     row = await db.query_row(sql)
     return dict(db_head_block=row['num'],
                 db_head_time=str(row['created_at']),
-                db_head_age=int(time.time() - row['ts']))
+                db_head_age=int(time.time() - float(row['ts'])))
 
 def build_methods():
     """Register all supported hive_api/condenser_api.calls."""
@@ -186,7 +186,10 @@ def run_server(conf):
     async def init_db(app):
         """Initialize db adapter."""
         args = app['config']['args']
-        app['db'] = await Db.create(args['database_url'])
+        if 'redis_url' in args:
+            app['db'] = await Db.create(args['database_url'], args['redis_url'])
+        else:
+            app['db'] = await Db.create(args['database_url'])
 
         stats = PayoutStats(app['db'])
         stats.set_shared_instance(stats)

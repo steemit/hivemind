@@ -4,8 +4,13 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 from hive.utils.normalize import rep_to_raw
+import re
 
 # pylint: disable=too-many-lines
+
+def to_string_without_special_char(v):
+    cleaned_string = re.sub('[^A-Za-z0-9]+', '', str(v))
+    return cleaned_string
 
 def last_month():
     """Get the date 1 month ago."""
@@ -395,17 +400,30 @@ async def pids_by_replies_to_account(db, start_author: str, start_permlink: str 
         seek = "AND id <= :start_id"
     else:
         parent_account = start_author
+    
+    sql = """
+    SELECT id FROM hive_posts
+    WHERE author = :parent
+    AND is_deleted = '0'
+    ORDER BY id DESC
+    LIMIT 10000
+    """
+
+    cache_key = "hive_posts-" + parent_account + "-is_deleted_0"
+    id_res = await db.query_all(sql, parent=parent_account, cache_key=cache_key)
+    if id_res == None or len(id_res) == 0:
+        return None
+    tmp_ids = []
+    for el in id_res:
+        tmp_ids.append(str(el[0]))
+    ids = ",".join(tmp_ids)
 
     sql = """
-       SELECT id FROM hive_posts
-        WHERE parent_id IN (SELECT id FROM hive_posts
-                             WHERE author = :parent
-                               AND is_deleted = '0'
-                          ORDER BY id DESC
-                             LIMIT 10000) %s
-          AND is_deleted = '0'
-     ORDER BY id DESC
-        LIMIT :limit
-    """ % seek
+    SELECT id FROM hive_posts
+    WHERE parent_id IN (%s) %s
+    AND is_deleted = '0'
+    ORDER BY id DESC
+    LIMIT :limit
+    """ % (ids, seek)
 
-    return await db.query_col(sql, parent=parent_account, start_id=start_id, limit=limit)
+    return await db.query_col(sql, limit=limit)

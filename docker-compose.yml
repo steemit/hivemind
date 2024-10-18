@@ -6,21 +6,27 @@ services:
       POSTGRES_USER: testuser
       POSTGRES_PASSWORD: testuserpass
       POSTGRES_DB: testdb
-    ports:
-     - 3306:3306
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    restart: always
+  redis:
+    image: redis
+    volumes:
+      - ./redis_data:/data
+    restart: always
   hive:
     depends_on:
       - db
-    image: steemit/hive
-    build: .
+      - redis
+    image: steemit/hivemind:latest
     environment:
-      DATABASE_URL: postgresql://testuser:testuserpass@db:5432/testdb
       LOG_LEVEL: INFO
+      DATABASE_URL: postgresql://testuser:testuserpass@db:5432/testdb
       STEEMD_URL: https://api.steemit.com
+      REDIS_URL: redis://redis:6379
     links:
       - db:db
+      - redis:redis
     ports:
       - 8080:8080
-    volumes:
-      - .:/app
     restart: always

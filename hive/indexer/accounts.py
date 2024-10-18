@@ -211,7 +211,7 @@ class Accounts:
             'display_name':  profile['name'],
             'about':         profile['about'],
             'location':      profile['location'],
-            'website':       profile['website'],
+            'website':       profile['website'][0:100] if len(profile['website']) > 100 else profile['website'],
             'profile_image': profile['profile_image'],
             'cover_image':   profile['cover_image'],
 

@@ -125,3 +125,9 @@ tests/failed_blocks/
 /deploy/
 /scripts/hive.sqlite
 .vscode
+
+# docker
+redis_data/*
+postgres_data/*
+!redis_data/.gitkeep
+!postgres_data/.gitkeep
