@@ -538,6 +538,7 @@ class CommunityOp:
             out['settings'] = json.dumps(settings)
             if 'avatar_url' in settings:
                 avatar_url = settings['avatar_url']
+                assert  avatar_url is not None
                 assert not avatar_url or _valid_url_proto(avatar_url)
                 out['avatar_url'] = avatar_url
         assert out, 'props were blank'
