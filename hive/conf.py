@@ -57,6 +57,9 @@ class Conf():
         # txid collector
         add('--txid-collector', type=strtobool, env_var='TXID_COLLECTOR', help='alternative collect txid to block number', default=False)
 
+        # force follow recount
+        add('--force-follow-recount', type=strtobool, env_var='FORCE_FOLLOW_RECOUNT', help='force recount of follow relationships at startup', default=False)
+
         # needed for e.g. tests - other args may be present
         args = (parser.parse_args() if strict
                 else parser.parse_known_args()[0])
