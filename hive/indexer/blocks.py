@@ -229,6 +229,7 @@ class Blocks:
             DB.query("DELETE FROM hive_payments    WHERE block_num = :num", num=num)
             DB.query("DELETE FROM hive_blocks      WHERE num = :num", num=num)
             DB.query("DELETE FROM hive_trxid_block_num WHERE block_num = :num", num=num)
+            DB.query("DELETE FROM hive_bookmarks   WHERE bookmarked_at >= :date", date=date)
 
         DB.query("COMMIT")
         log.warning("[FORK] recovery complete")

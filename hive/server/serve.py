@@ -127,6 +127,7 @@ def build_methods():
         bridge_api.get_ranked_posts,
         bridge_api.get_profile,
         bridge_api.get_trending_topics,
+        bridge_api.get_bookmarked_posts,
         hive_api_notify.post_notifications,
         hive_api_notify.account_notifications,
         hive_api_notify.unread_notifications,

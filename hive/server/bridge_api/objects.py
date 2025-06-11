@@ -76,6 +76,14 @@ async def load_posts_keyed(db, ids, truncate_body=0):
                 ctx[cid] = []
             ctx[cid].append(author['id'])
 
+    # fetch bookmarks
+    sql = """SELECT post_id, string_agg(account, ',') AS bookmarked_by
+               FROM hive_bookmarks
+              WHERE post_id IN :ids
+           GROUP BY post_id"""
+    bookmarks = await db.query_all(sql, ids=tuple(ids))
+    bookmarks = {row[0]:row[1].split(',') for row in bookmarks}
+
     # TODO: optimize
     titles = {}
     roles = {}
@@ -106,6 +114,8 @@ async def load_posts_keyed(db, ids, truncate_body=0):
                                      or len(post['blacklists']) >= 2)
         post['stats']['hide'] = 'irredeemables' in post['blacklists']
 
+        # add bookmarked account names
+        post["bookmarked_by"] = bookmarks.get(pid, [])
 
     sql = """SELECT id FROM hive_posts
               WHERE id IN :ids AND is_pinned = '1' AND is_deleted = '0'"""

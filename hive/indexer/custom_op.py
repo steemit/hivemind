@@ -10,6 +10,7 @@ from hive.indexer.posts import Posts
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
 from hive.indexer.notify import Notify
+from hive.indexer.bookmark import Bookmark
 
 from hive.indexer.community import process_json_community_op, START_BLOCK
 from hive.utils.normalize import load_json_key
@@ -78,7 +79,7 @@ class CustomOp:
 
     @classmethod
     def _process_legacy(cls, account, op_json, block_date):
-        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog)
+        """Handle legacy 'follow' plugin ops (follow/mute/clear, reblog, bookmark)
 
         follow {follower: {type: 'account'},
                 following: {type: 'account'},
@@ -87,12 +88,17 @@ class CustomOp:
                 author: {type: 'account'},
                 permlink: {type: 'permlink'},
                 delete: {type: 'str', optional: True}}
+        bookmark {account: {type: 'account'},
+                  author: {type: 'account'}, 
+                  permlink: {type: 'permlink'}, 
+                  action: {type: 'str'}, 
+                  category: {type: 'str'}} // category currently unused
         """
         if not isinstance(op_json, list):
             return
         if len(op_json) != 2:
             return
-        if first(op_json) not in ['follow', 'reblog']:
+        if first(op_json) not in ['follow', 'reblog', 'bookmark']:
             return
         if not isinstance(second(op_json), dict):
             return
@@ -102,6 +108,8 @@ class CustomOp:
             Follow.follow_op(account, op_json, block_date)
         elif cmd == 'reblog':
             cls.reblog(account, op_json, block_date)
+        elif cmd == 'bookmark':
+            Bookmark.bookmark_op(account, op_json, block_date)
 
     @classmethod
     def reblog(cls, account, op_json, block_date):

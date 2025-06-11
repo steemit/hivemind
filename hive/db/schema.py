@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 20
+DB_VERSION = 21
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -243,6 +243,8 @@ def build_metadata():
 
     metadata = build_trxid_block_num(metadata)
 
+    metadata = build_metadata_bookmarks(metadata)
+
     return metadata
 
 def build_metadata_community(metadata=None):
@@ -356,6 +358,23 @@ def build_trxid_block_num(metadata=None):
 
     return metadata
 
+def build_metadata_bookmarks(metadata=None):
+    if not metadata:
+        metadata = sa.MetaData()
+
+    sa.Table(
+        'hive_bookmarks', metadata,
+        sa.Column('account', VARCHAR(16), nullable=False),
+        sa.Column('post_id', sa.Integer, nullable=False),
+        sa.Column('bookmarked_at', sa.DateTime, nullable=False),
+        
+        sa.UniqueConstraint('account', 'post_id', name='hive_bookmarks_ux1'),
+        sa.Index('hive_bookmarks_ix1', 'post_id'), 
+        sa.Index('hive_bookmarks_ix2', 'account', 'post_id'), 
+        sa.Index('hive_bookmarks_ix3', 'account', 'bookmarked_at'),
+    )
+
+    return metadata
 
 def teardown(db):
     """Drop all tables"""
