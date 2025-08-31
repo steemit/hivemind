@@ -157,8 +157,9 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     #where.append("post_id NOT IN (%s)" % sql)
 
     # hide author
-    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
-    where.append("author NOT IN (%s)" % sql)
+    authors_to_hide = await db.query_all("SELECT author FROM hive_posts_status WHERE list_type = '3'", cache_key="_hide_authors_list_type_3", cache_ttl=600)
+    if authors_to_hide:
+        where.append("author NOT IN %s" % str(tuple(authors_to_hide)))
 
     # build
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -219,8 +220,9 @@ async def pids_by_category(db, tag, sort, last_id, limit):
     #where.append("post_id NOT IN (%s)" % sql)
 
     # hide author
-    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
-    where.append("author NOT IN (%s)" % sql)
+    authors_to_hide = await db.query_all("SELECT author FROM hive_posts_status WHERE list_type = '3'", cache_key="_hide_authors_list_type_3", cache_ttl=600)
+    if authors_to_hide:
+        where.append("author NOT IN %s" % str(tuple(authors_to_hide)))
 
     sql = ("""SELECT post_id FROM %s WHERE %s
               ORDER BY %s DESC, post_id LIMIT :limit
@@ -250,7 +252,7 @@ async def _pids_by_type(db, list_type):
     sql = """SELECT post_id FROM hive_posts_status
               WHERE list_type = :list_type
             ORDER BY created_at DESC"""
-    return await db.query_col(sql, list_type=list_type)
+    return await db.query_col(sql, list_type=list_type, cache_key="_pids_by_type_{list_type}", cache_ttl=600)
 
 
 async def hide_pids_by_ids(db, ids):

@@ -106,7 +106,7 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
     start = (start_author, start_permlink)
     limit = valid_limit(limit, 100)
 
-    _id = await db.query_one("SELECT id FROM hive_posts_status WHERE author = :n", n=account)
+    _id = await db.query_one("SELECT id FROM hive_posts_status WHERE author = :n", n=account, cache_key=f"get_hive_posts_status_by_{account}", cache_ttl=600)
     if _id:
         return []
 

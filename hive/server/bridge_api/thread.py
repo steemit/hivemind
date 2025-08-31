@@ -40,14 +40,14 @@ async def _get_author_hide_id(db, author):
     """Given an author, retrieve the id from db."""
     sql = ("SELECT id FROM hive_posts_status WHERE author = :a "
            "AND list_type = '3' LIMIT 1")
-    return await db.query_one(sql, a=author)
+    return await db.query_one(sql, a=author, cache_key=f"_get_author_hide_id_{author}", cache_ttl=600)
 
 
 async def _check_posts_hide_id(db, post_id):
     """Given an post_id, retrieve the id from db."""
     sql = ("SELECT id FROM hive_posts_status WHERE post_id = :post_id "
            "AND list_type = '1' LIMIT 1")
-    return await db.query_one(sql, post_id=post_id)
+    return await db.query_one(sql, post_id=post_id, cache_key=f"_check_posts_hide_id_{post_id}", cache_ttl=600)
 
 def _ref(post):
     return post['author'] + '/' + post['permlink']
