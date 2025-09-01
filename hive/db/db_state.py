@@ -331,6 +331,12 @@ class DbState:
             cls.db().query("CREATE INDEX hive_block_num_ix1 ON hive_trxid_block_num (block_num)")
             cls.db().query("CREATE UNIQUE INDEX hive_trxid_ix1 ON hive_trxid_block_num (trx_id) WHERE trx_id IS NOT NULL")
             cls._set_ver(20)
+        if cls._ver == 20:
+            cls.db().query("CREATE INDEX idx_hive_posts_status_author ON hive_posts_status(author)")
+            cls.db().query("CREATE INDEX idx_hive_posts_status_list_type_post_id ON hive_posts_status(list_type, post_id)")
+            cls.db().query("CREATE INDEX idx_hive_posts_status_list_type_author ON hive_posts_status(list_type, author)")
+            cls.db().query("ALTER TABLE hive_posts_status DROP CONSTRAINT IF EXISTS hive_posts_status_ux1")
+            cls._set_ver(21)
 
         reset_autovac(cls.db())
 
