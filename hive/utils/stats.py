@@ -110,6 +110,7 @@ class SteemStats(StatsAbstract):
 class DbStats(StatsAbstract):
     """Tracks database query timings."""
     SLOW_QUERY_MS = 250
+    DEBUG_SQL = False
 
     def __init__(self):
         super().__init__('db')
@@ -134,7 +135,11 @@ class Stats:
     @classmethod
     def log_db(cls, sql, secs):
         """Log a database query. Incoming SQL is normalized."""
-        cls._db.add(_normalize_sql(sql), secs * 1000)
+        if cls._db.DEBUG_SQL:
+            sql = ' '.join(sql.split())
+            cls._db.add(sql, secs * 1000)
+        else:
+            cls._db.add(_normalize_sql(sql), secs * 1000)
         cls.add_secs(secs)
 
     @classmethod
