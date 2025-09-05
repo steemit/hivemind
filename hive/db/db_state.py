@@ -337,6 +337,10 @@ class DbState:
             cls.db().query("CREATE INDEX idx_hive_posts_status_list_type_author ON hive_posts_status(list_type, author)")
             cls.db().query("ALTER TABLE hive_posts_status DROP CONSTRAINT IF EXISTS hive_posts_status_ux1")
             cls._set_ver(21)
+        if cls._ver == 21:
+            cls.db().query("CREATE INDEX CONCURRENTLY hive_posts_ix4_optimized ON hive_posts (parent_id, id) INCLUDE (author) WHERE is_deleted = '0'")
+            cls.db().query("DROP INDEX IF EXISTS hive_posts_ix4")
+            cls._set_ver(22)
 
         reset_autovac(cls.db())
 
