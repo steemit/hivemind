@@ -77,7 +77,7 @@ class Conf():
         if conf.mode() == 'server':
             #DbStats.SLOW_QUERY_MS = 750
             DbStats.SLOW_QUERY_MS = 200 # TODO
-            DbStats.DEBUG_SQL = conf.debug_sql()
+            DbStats.DEBUG_SQL = conf.get("debug_sql")
 
         return conf
 
