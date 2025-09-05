@@ -54,15 +54,19 @@ def _ref(post):
 
 async def _child_ids(db, parent_ids):
     """Load child ids for multuple parent ids."""
-    hide = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
     sql = """
-             SELECT parent_id, array_agg(id)
-               FROM hive_posts
-              WHERE parent_id IN :ids
-                AND is_deleted = '0'
-                AND author NOT IN (%s)
-           GROUP BY parent_id
-    """ % hide
+        SELECT p.parent_id, array_agg(p.id)
+        FROM hive_posts p
+        WHERE p.parent_id IN :ids
+        AND p.is_deleted = '0'
+        AND NOT EXISTS (
+            SELECT 1
+            FROM hive_posts_status s
+            WHERE s.list_type = '3'
+            AND s.author = p.author
+        )
+        GROUP BY p.parent_id
+    """
     rows = await db.query_all(sql, ids=tuple(parent_ids))
     return [[row[0], row[1]] for row in rows]
 
