@@ -55,7 +55,7 @@ def _ref(post):
 async def _child_ids(db, parent_ids):
     """Load child ids for multuple parent ids."""
     sql = """
-        SELECT p.parent_id, array_agg(p.id)
+        SELECT p.parent_id as parent_id, array_agg(p.id) as child_ids
         FROM hive_posts p
         WHERE p.parent_id IN :ids
         AND p.is_deleted = '0'
@@ -67,8 +67,9 @@ async def _child_ids(db, parent_ids):
         )
         GROUP BY p.parent_id
     """
-    rows = await db.query_all(sql, ids=tuple(parent_ids))
-    return [[row[0], row[1]] for row in rows]
+    rows = await db.query_all(sql, ids=tuple(parent_ids),
+        cache_key="_child_ids_" + "_".join(map(str, parent_ids)), cache_ttl=30)
+    return [[row['parent_id'], row['child_ids']] for row in rows]
 
 async def _load_discussion(db, root_id):
     """Load a full discussion thread."""

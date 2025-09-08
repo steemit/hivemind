@@ -118,7 +118,10 @@ class DbStats(StatsAbstract):
     def check_timing(self, call, ms, batch_size):
         """Warn if any query is slower than defined threshold."""
         if ms > self.SLOW_QUERY_MS:
-            out = "[SQL][%dms] %s" % (ms, call)
+            if self.DEBUG_SQL:
+                out = "[SQL][%dms] %s" % (ms, call)
+            else:
+                out = "[SQL][%dms] %s" % (ms, call[:250])
             log.warning(colorize(out))
 
 
