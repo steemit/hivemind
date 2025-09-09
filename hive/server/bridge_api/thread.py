@@ -38,15 +38,15 @@ async def _get_post_id(db, author, permlink):
 
 async def _get_author_hide_id(db, author):
     """Given an author, retrieve the id from db."""
-    sql = ("SELECT id FROM hive_posts_status WHERE author = :a "
-           "AND list_type = '3' LIMIT 1")
+    sql = ("SELECT id FROM hive_posts_status WHERE list_type = '3'"
+           "AND author = :a LIMIT 1")
     return await db.query_one(sql, a=author)
 
 
 async def _check_posts_hide_id(db, post_id):
     """Given an post_id, retrieve the id from db."""
-    sql = ("SELECT id FROM hive_posts_status WHERE post_id = :post_id "
-           "AND list_type = '1' LIMIT 1")
+    sql = ("SELECT id FROM hive_posts_status WHERE list_type = '1'"
+           "AND post_id = :post_id LIMIT 1")
     return await db.query_one(sql, post_id=post_id)
 
 def _ref(post):
@@ -54,17 +54,22 @@ def _ref(post):
 
 async def _child_ids(db, parent_ids):
     """Load child ids for multuple parent ids."""
-    hide = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
     sql = """
-             SELECT parent_id, array_agg(id)
-               FROM hive_posts
-              WHERE parent_id IN :ids
-                AND is_deleted = '0'
-                AND author NOT IN (%s)
-           GROUP BY parent_id
-    """ % hide
-    rows = await db.query_all(sql, ids=tuple(parent_ids))
-    return [[row[0], row[1]] for row in rows]
+        SELECT p.parent_id as parent_id, array_agg(p.id) as child_ids
+        FROM hive_posts p
+        WHERE p.parent_id IN :ids
+        AND p.is_deleted = '0'
+        AND NOT EXISTS (
+            SELECT 1
+            FROM hive_posts_status s
+            WHERE s.list_type = '3'
+            AND s.author = p.author
+        )
+        GROUP BY p.parent_id
+    """
+    rows = await db.query_all(sql, ids=tuple(parent_ids),
+        cache_key="_child_ids_" + "_".join(map(str, parent_ids)), cache_ttl=30)
+    return [[row['parent_id'], row['child_ids']] for row in rows]
 
 async def _load_discussion(db, root_id):
     """Load a full discussion thread."""

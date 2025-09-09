@@ -7,14 +7,14 @@ import sqlalchemy
 from sqlalchemy.engine.url import make_url
 from aiopg.sa import create_engine
 from aiocache import Cache
-from aiocache.serializers import JsonSerializer
+from hive.utils.safe_serializer import SafeUniversalSerializer
 
 from hive.utils.stats import Stats
 
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
-CACHE_NAMESPACE = "hivemind_"
+CACHE_NAMESPACE = "hivemind"
 
 def sqltimer(function):
     """Decorator for DB query methods which tracks timing."""
@@ -34,15 +34,21 @@ def cacher(func):
     async def _wrapper(*args, **kwargs):
         if 'cache_key' in kwargs and args[0].redis_cache is not None:
             v = await args[0].redis_cache.get(kwargs["cache_key"], namespace=CACHE_NAMESPACE)
+            if Stats._db.DEBUG_SQL:
+                log.debug("[CACHE-DEBUG] cache_key: %s, value: %s", kwargs["cache_key"], v)
             if v is None:
+                # Get from DB and set to cache, when miss cache
                 v = await func(*args, **kwargs)
+                if Stats._db.DEBUG_SQL:
+                    log.debug("[CACHE-DEBUG] Not fit cache, cache_key: %s, Get from DB, value: %s", kwargs["cache_key"], v)
                 if v is None:
                     """
                     TODO:
-                        * hit no cache => None
-                        * get no record => None
+                        * Hit no cache from Redis, we will get None
+                        * Get no record from DB, we will get None
                         These two conditions are conflict.
-                        Need to wrap the redis_cache.get()
+                        If we don't cache the DB result None, every request will get in DB.
+                        If we cache the DB result None, we cannot charge whether cache exist or not.
                     """
                     log.warning("[CACHE-LAYER-TODO] [%s] (%s)", args, kwargs)
                     return None
@@ -50,19 +56,6 @@ def cacher(func):
                     ttl = kwargs['cache_ttl']
                 else:
                     ttl = 5*60
-                if isinstance(v, list):
-                    d, a = {}, []
-                    for row in v:
-                        try:
-                            for col, val in row.items():
-                                # build up the dictionary
-                                d = {**d, **{col: val}}
-                            a.append(d)
-                        except:
-                            # if row is not RowProxy
-                            log.warning("[CACHE-LAYER] The row is not RowProxy. row: {%s}, args: {%s}, kwargs: {%s}", row, args, kwargs)
-                            a.append(row)
-                    v = a
                 await args[0].redis_cache.set(kwargs['cache_key'], v, ttl=ttl, namespace=CACHE_NAMESPACE)
             return v
         else:
@@ -96,7 +89,7 @@ class Db:
                                       **conf.query)
         if redis_url is not None:
             self.redis_cache = Cache.from_url(redis_url)
-            self.redis_cache.serializer = JsonSerializer()
+            self.redis_cache.serializer = SafeUniversalSerializer()
 
     def close(self):
         """Close pool."""

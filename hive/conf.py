@@ -60,6 +60,9 @@ class Conf():
         # force follow recount
         add('--force-follow-recount', type=strtobool, env_var='FORCE_FOLLOW_RECOUNT', help='force recount of follow relationships at startup', default=False)
 
+        # debug
+        add('--debug-sql', type=strtobool, env_var='DEBUG_SQL', required=False, help='Display full sql when set True', default=False)
+
         # needed for e.g. tests - other args may be present
         args = (parser.parse_args() if strict
                 else parser.parse_known_args()[0])
@@ -74,6 +77,7 @@ class Conf():
         if conf.mode() == 'server':
             #DbStats.SLOW_QUERY_MS = 750
             DbStats.SLOW_QUERY_MS = 200 # TODO
+            DbStats.DEBUG_SQL = conf.get("debug_sql")
 
         return conf
 
