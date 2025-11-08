@@ -1,5 +1,6 @@
 """Bridge API public endpoints for posts"""
 
+import hashlib
 import hive.server.bridge_api.cursor as cursor
 from hive.server.bridge_api.objects import load_posts, load_posts_reblogs, load_profiles
 from hive.server.common.helpers import (
@@ -11,6 +12,7 @@ from hive.server.common.helpers import (
 from hive.server.hive_api.common import get_account_id
 from hive.server.hive_api.objects import _follow_contexts
 from hive.server.hive_api.community import list_top_communities
+from hive.server.db import CACHE_NAMESPACE
 
 #pylint: disable=too-many-arguments, no-else-return
 
@@ -80,16 +82,62 @@ async def get_ranked_posts(context, sort, start_author='', start_permlink='',
 
     assert sort in ['trending', 'hot', 'created', 'promoted',
                     'payout', 'payout_comments', 'muted'], 'invalid sort'
+    
+    # Validate and normalize parameters
+    start_author = valid_account(start_author, allow_empty=True)
+    start_permlink = valid_permlink(start_permlink, allow_empty=True)
+    limit = valid_limit(limit, 100)
+    tag = valid_tag(tag, allow_empty=True)
+    
+    # Generate cache key (based on all query parameters, excluding observer
+    # as it only affects personalized content)
+    cache_key_parts = [
+        'get_ranked_posts',
+        sort,
+        start_author or '',
+        start_permlink or '',
+        str(limit),
+        tag or '',
+    ]
+    cache_key_str = '_'.join(cache_key_parts)
+    # Use hash to shorten overly long cache keys
+    cache_key = 'bridge_get_ranked_posts_' + hashlib.md5(cache_key_str.encode()).hexdigest()
+    
+    # Set different cache TTL based on sort type (in seconds)
+    cache_ttl_map = {
+        'created': 3,           # 3 seconds cache
+        'trending': 300,        # 300 seconds cache
+        'hot': 300,             # 300 seconds cache
+        'promoted': 300,        # 300 seconds cache
+        'payout': 30,           # 30 seconds cache
+        'payout_comments': 30,  # 30 seconds cache
+        'muted': 600,           # 600 seconds cache
+    }
+    cache_ttl = cache_ttl_map.get(sort, 60)  # Default 60 seconds
+    
+    # Try to get result from cache
+    if db.redis_cache is not None:
+        cached_result = await db.redis_cache.get(cache_key, namespace=CACHE_NAMESPACE)
+        if cached_result is not None:
+            return cached_result
+    
+    # Cache miss, execute query
     ids = await cursor.pids_by_ranked(
         context['db'],
         sort,
-        valid_account(start_author, allow_empty=True),
-        valid_permlink(start_permlink, allow_empty=True),
-        valid_limit(limit, 100),
-        valid_tag(tag, allow_empty=True),
+        start_author,
+        start_permlink,
+        limit,
+        tag,
         observer_id)
 
-    return await load_posts(context['db'], ids)
+    result = await load_posts(context['db'], ids)
+    
+    # Store result in cache
+    if db.redis_cache is not None:
+        await db.redis_cache.set(cache_key, result, ttl=cache_ttl, namespace=CACHE_NAMESPACE)
+    
+    return result
 
 @return_error_info
 async def get_account_posts(context, sort, account, start_author='', start_permlink='',
