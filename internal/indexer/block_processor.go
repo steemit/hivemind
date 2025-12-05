@@ -15,14 +15,15 @@ import (
 
 // BlockProcessor processes blockchain blocks
 type BlockProcessor struct {
-	db          *db.DB
-	repo        *db.Repository
-	accounts    *AccountIndexer
-	posts       *PostIndexer
-	follows     *FollowIndexer
-	payments    *PaymentIndexer
-	customOps   *CustomOpProcessor
-	logger      *zap.Logger
+	db              *db.DB
+	repo            *db.Repository
+	accounts        *AccountIndexer
+	posts           *PostIndexer
+	follows         *FollowIndexer
+	payments        *PaymentIndexer
+	customOps       *CustomOpProcessor
+	communityIndexer *CommunityIndexer
+	logger          *zap.Logger
 }
 
 // NewBlockProcessor creates a new block processor
@@ -30,14 +31,15 @@ func NewBlockProcessor(database *db.DB, repo *db.Repository) *BlockProcessor {
 	logger := logging.GetLogger().With(zap.String("component", "block-processor"))
 	
 	return &BlockProcessor{
-		db:        database,
-		repo:      repo,
-		accounts:  NewAccountIndexer(repo, logger),
-		posts:     NewPostIndexer(repo, logger),
-		follows:   NewFollowIndexer(repo, logger),
-		payments:  NewPaymentIndexer(repo, logger),
-		customOps: NewCustomOpProcessor(repo, logger),
-		logger:    logger,
+		db:              database,
+		repo:            repo,
+		accounts:        NewAccountIndexer(repo, logger),
+		posts:           NewPostIndexer(repo, logger),
+		follows:         NewFollowIndexer(repo, logger),
+		payments:        NewPaymentIndexer(repo, logger),
+		customOps:       NewCustomOpProcessor(repo, logger),
+		communityIndexer: NewCommunityIndexer(repo, logger),
+		logger:          logger,
 	}
 }
 
@@ -172,6 +174,12 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 	if len(accountNamesList) > 0 {
 		if err := bp.accounts.Register(ctx, tx, accountNamesList, blockDate); err != nil {
 			return fmt.Errorf("failed to register accounts: %w", err)
+		}
+		
+		// Check if any new accounts are communities and register them
+		if err := bp.communityIndexer.Register(ctx, tx, accountNamesList, blockDate); err != nil {
+			bp.logger.Warn("Failed to register communities", zap.Error(err))
+			// Don't fail block processing for community registration errors
 		}
 	}
 

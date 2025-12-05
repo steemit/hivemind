@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -13,15 +14,17 @@ import (
 
 // CustomOpProcessor processes custom JSON operations
 type CustomOpProcessor struct {
-	repo   *db.Repository
-	logger *zap.Logger
+	repo            *db.Repository
+	communityIndexer *CommunityIndexer
+	logger          *zap.Logger
 }
 
 // NewCustomOpProcessor creates a new custom op processor
 func NewCustomOpProcessor(repo *db.Repository, logger *zap.Logger) *CustomOpProcessor {
 	return &CustomOpProcessor{
-		repo:   repo,
-		logger: logger,
+		repo:            repo,
+		communityIndexer: NewCommunityIndexer(repo, logger),
+		logger:          logger,
 	}
 }
 
@@ -56,13 +59,65 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 		// Process based on operation ID
 		switch opID {
 		case "follow":
-			// TODO: Parse and process follow operation
-			// This will be handled by FollowIndexer
+			// Follow operations are handled by FollowIndexer
+			// This is just a placeholder
 		case "community":
-			// TODO: Process community operations
+			// Process community operations only after START_BLOCK
+			if blockNum > START_BLOCK {
+				if err := cop.communityIndexer.ProcessCommunityOp(ctx, tx, account, jsonStr, blockDate); err != nil {
+					cop.logger.Warn("Failed to process community op",
+						zap.String("account", account),
+						zap.String("json", jsonStr),
+						zap.Error(err))
+				}
+			}
 		case "notify":
-			// TODO: Process notify operations (setLastRead, etc.)
+			// Process notify operations
+			if err := cop.processNotify(ctx, tx, account, jsonStr, blockDate); err != nil {
+				cop.logger.Warn("Failed to process notify op",
+					zap.String("account", account),
+					zap.Error(err))
+			}
 		}
+	}
+
+	return nil
+}
+
+// processNotify processes notify operations (e.g., setLastRead)
+func (cop *CustomOpProcessor) processNotify(ctx context.Context, tx *gorm.DB, account, jsonStr string, blockDate time.Time) error {
+	var opJSON map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &opJSON); err != nil {
+		return fmt.Errorf("failed to parse notify op JSON: %w", err)
+	}
+
+	command, ok := opJSON["type"].(string)
+	if !ok {
+		return nil // Not a valid notify op
+	}
+
+	if command == "setLastRead" {
+		payload, ok := opJSON["date"].(string)
+		if !ok {
+			return fmt.Errorf("missing date in setLastRead")
+		}
+
+		// Parse date
+		readDate, err := time.Parse(time.RFC3339, payload)
+		if err != nil {
+			return fmt.Errorf("invalid date format: %w", err)
+		}
+
+		// Ensure read date is not in the future
+		if readDate.After(blockDate) {
+			readDate = blockDate
+		}
+
+		// Update notification last read time
+		// TODO: Implement notification last read update
+		cop.logger.Debug("Set last read",
+			zap.String("account", account),
+			zap.Time("date", readDate))
 	}
 
 	return nil
