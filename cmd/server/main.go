@@ -12,6 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/steemit/hivemind/internal/api"
+	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/pkg/config"
 	"github.com/steemit/hivemind/pkg/logging"
 	"github.com/steemit/hivemind/pkg/telemetry"
@@ -42,6 +44,13 @@ func main() {
 	}
 	defer telemetryShutdown()
 
+	// Initialize database
+	database, err := db.New(&cfg.Database, cfg.Logging.Level)
+	if err != nil {
+		logger.Fatal("Failed to initialize database", zap.Error(err))
+	}
+	defer database.Close()
+
 	// Create Gin router
 	if cfg.Logging.Level == "DEBUG" {
 		gin.SetMode(gin.DebugMode)
@@ -52,12 +61,9 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	// Health check endpoint
-	router.GET("/health", healthHandler)
-	router.GET("/.well-known/healthcheck.json", healthHandler)
-
-	// JSON-RPC endpoint (to be implemented)
-	router.POST("/", jsonRPCHandler)
+	// Setup API routes
+	apiRouter := api.NewRouter(database)
+	apiRouter.SetupRoutes(router)
 
 	// Create HTTP server
 	srv := &http.Server{
@@ -91,17 +97,4 @@ func main() {
 	logger.Info("Server exited")
 }
 
-func healthHandler(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status": "OK",
-		"service": "hivemind-api",
-	})
-}
-
-func jsonRPCHandler(c *gin.Context) {
-	// TODO: Implement JSON-RPC handler
-	c.JSON(http.StatusNotImplemented, gin.H{
-		"error": "JSON-RPC handler not yet implemented",
-	})
-}
 
