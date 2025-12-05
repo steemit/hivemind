@@ -16,6 +16,7 @@ import (
 type CustomOpProcessor struct {
 	repo            *db.Repository
 	communityIndexer *CommunityIndexer
+	notifyIndexer   *NotifyIndexer
 	logger          *zap.Logger
 }
 
@@ -24,6 +25,7 @@ func NewCustomOpProcessor(repo *db.Repository, logger *zap.Logger) *CustomOpProc
 	return &CustomOpProcessor{
 		repo:            repo,
 		communityIndexer: NewCommunityIndexer(repo, logger),
+		notifyIndexer:   NewNotifyIndexer(repo),
 		logger:          logger,
 	}
 }
@@ -114,7 +116,10 @@ func (cop *CustomOpProcessor) processNotify(ctx context.Context, tx *gorm.DB, ac
 		}
 
 		// Update notification last read time
-		// TODO: Implement notification last read update
+		if err := cop.notifyIndexer.SetLastRead(ctx, account, readDate); err != nil {
+			return fmt.Errorf("failed to set last read: %w", err)
+		}
+
 		cop.logger.Debug("Set last read",
 			zap.String("account", account),
 			zap.Time("date", readDate))

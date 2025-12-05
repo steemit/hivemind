@@ -8,15 +8,18 @@ import (
 // Notification represents a notification
 type Notification struct {
 	ID          int64          `gorm:"primaryKey;autoIncrement;column:id"`
-	AccountID   int64          `gorm:"not null;column:account_id"`
-	CommunityID sql.NullInt64  `gorm:"column:community_id"`
-	PostID      sql.NullInt64  `gorm:"column:post_id"`
-	Type        int16          `gorm:"type:smallint;not null;column:type"`
+	Type        int16          `gorm:"type:smallint;not null;column:type_id"`
 	Score       int16          `gorm:"type:smallint;not null;default:0;column:score"`
 	CreatedAt   time.Time      `gorm:"not null;column:created_at"`
+	SrcID       sql.NullInt64  `gorm:"column:src_id"`
+	DstID       sql.NullInt64  `gorm:"column:dst_id"`
+	CommunityID sql.NullInt64  `gorm:"column:community_id"`
+	PostID      sql.NullInt64  `gorm:"column:post_id"`
+	Payload     sql.NullString `gorm:"type:text;column:payload"`
 
 	// Relationships
-	Account   *Account   `gorm:"foreignKey:AccountID;references:ID"`
+	Src       *Account   `gorm:"foreignKey:SrcID;references:ID"`
+	Dst       *Account   `gorm:"foreignKey:DstID;references:ID"`
 	Community *Community `gorm:"foreignKey:CommunityID;references:ID"`
 	Post      *Post      `gorm:"foreignKey:PostID;references:ID"`
 }

@@ -15,15 +15,17 @@ import (
 
 // PostIndexer handles post indexing
 type PostIndexer struct {
-	repo   *db.Repository
-	logger *zap.Logger
+	repo         *db.Repository
+	logger       *zap.Logger
+	notifyIndexer *NotifyIndexer
 }
 
 // NewPostIndexer creates a new post indexer
 func NewPostIndexer(repo *db.Repository, logger *zap.Logger) *PostIndexer {
 	return &PostIndexer{
-		repo:   repo,
-		logger: logger,
+		repo:         repo,
+		logger:       logger,
+		notifyIndexer: NewNotifyIndexer(repo),
 	}
 }
 
@@ -89,6 +91,18 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 	if err := tx.WithContext(ctx).Create(post).Error; err != nil {
 		return fmt.Errorf("failed to create post: %w", err)
 	}
+
+	// Check for post errors and send notification
+	// TODO: Implement error detection logic (e.g., invalid JSON metadata, etc.)
+	// For now, we skip error notifications during initial sync
+	// if postError != "" {
+	//     accountRepo := db.NewAccountRepository(pi.repo)
+	//     account, err := accountRepo.GetByName(ctx, author)
+	//     if err == nil && account != nil {
+	//         postID := post.ID
+	//         pi.notifyIndexer.Write(ctx, models.NotifyTypeError, blockDate, nil, &account.ID, nil, &postID, &postError, nil)
+	//     }
+	// }
 
 	// Insert into feed cache if root post (depth=0)
 	if post.Depth == 0 {

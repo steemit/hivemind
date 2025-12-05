@@ -21,15 +21,17 @@ const (
 
 // CommunityIndexer handles community-related indexing
 type CommunityIndexer struct {
-	repo   *db.Repository
-	logger *zap.Logger
+	repo          *db.Repository
+	logger        *zap.Logger
+	notifyIndexer *NotifyIndexer
 }
 
 // NewCommunityIndexer creates a new community indexer
 func NewCommunityIndexer(repo *db.Repository, logger *zap.Logger) *CommunityIndexer {
 	return &CommunityIndexer{
-		repo:   repo,
-		logger: logger,
+		repo:          repo,
+		logger:        logger,
+		notifyIndexer: NewNotifyIndexer(repo),
 	}
 }
 
@@ -90,6 +92,10 @@ func (ci *CommunityIndexer) Register(ctx context.Context, tx *gorm.DB, accountNa
 				zap.Error(err))
 		}
 
+		// Send new_community notification
+		communityID := account.ID
+		ci.notifyIndexer.Write(ctx, models.NotifyTypeNewCommunity, blockDate, nil, &communityID, &communityID, nil, nil, nil)
+
 		ci.logger.Info("Registered new community",
 			zap.String("name", name),
 			zap.Int64("id", account.ID))
@@ -145,7 +151,7 @@ func (ci *CommunityIndexer) ProcessCommunityOp(ctx context.Context, tx *gorm.DB,
 	case "setUserTitle":
 		return ci.processSetUserTitle(ctx, tx, op, actorAccount.ID, communityID, blockDate)
 	case "updateProps":
-		return ci.processUpdateProps(ctx, tx, op, communityID)
+		return ci.processUpdateProps(ctx, tx, op, actorAccount.ID, communityID, blockDate)
 	case "mutePost", "unmutePost", "pinPost", "unpinPost", "flagPost":
 		return ci.processPostAction(ctx, tx, action, op, actorAccount.ID, communityID, blockDate)
 	default:
@@ -191,6 +197,9 @@ func (ci *CommunityIndexer) processSubscribe(ctx context.Context, tx *gorm.DB, a
 		Update("subscribers", gorm.Expr("subscribers + 1")).Error; err != nil {
 		ci.logger.Warn("Failed to update subscriber count", zap.Error(err))
 	}
+
+	// Send subscribe notification (to community)
+	ci.notifyIndexer.Write(ctx, models.NotifyTypeSubscribe, blockDate, &accountID, nil, &communityID, nil, nil, nil)
 
 	return nil
 }
@@ -249,6 +258,10 @@ func (ci *CommunityIndexer) processSetRole(ctx context.Context, tx *gorm.DB, op 
 		return fmt.Errorf("failed to set role: %w", err)
 	}
 
+	// Send set_role notification
+	payload := roleName
+	ci.notifyIndexer.Write(ctx, models.NotifyTypeSetRole, blockDate, &actorID, &account.ID, &communityID, nil, &payload, nil)
+
 	return nil
 }
 
@@ -276,11 +289,15 @@ func (ci *CommunityIndexer) processSetUserTitle(ctx context.Context, tx *gorm.DB
 		return fmt.Errorf("failed to set user title: %w", err)
 	}
 
+	// Send set_label notification
+	payload := title
+	ci.notifyIndexer.Write(ctx, models.NotifyTypeSetLabel, blockDate, &actorID, &account.ID, &communityID, nil, &payload, nil)
+
 	return nil
 }
 
 // processUpdateProps handles updateProps action
-func (ci *CommunityIndexer) processUpdateProps(ctx context.Context, tx *gorm.DB, op map[string]interface{}, communityID int64) error {
+func (ci *CommunityIndexer) processUpdateProps(ctx context.Context, tx *gorm.DB, op map[string]interface{}, actorID, communityID int64, blockDate time.Time) error {
 	props, ok := op["props"].(map[string]interface{})
 	if !ok {
 		return fmt.Errorf("missing props in updateProps op")
@@ -301,6 +318,11 @@ func (ci *CommunityIndexer) processUpdateProps(ctx context.Context, tx *gorm.DB,
 		}
 	}
 
+	// Send set_props notification
+	propsJSON, _ := json.Marshal(props)
+	payload := string(propsJSON)
+	ci.notifyIndexer.Write(ctx, models.NotifyTypeSetProps, blockDate, &actorID, nil, &communityID, nil, &payload, nil)
+
 	return nil
 }
 
@@ -320,7 +342,14 @@ func (ci *CommunityIndexer) processPostAction(ctx context.Context, tx *gorm.DB, 
 		return fmt.Errorf("post not found: %s/%s", author, permlink)
 	}
 
-	// Update post status based on action
+	// Get notes from op (if any)
+	notes, _ := op["notes"].(string)
+	var payload *string
+	if notes != "" {
+		payload = &notes
+	}
+
+	// Update post status based on action and send notification
 	switch action {
 	case "mutePost":
 		if err := tx.WithContext(ctx).
@@ -329,6 +358,8 @@ func (ci *CommunityIndexer) processPostAction(ctx context.Context, tx *gorm.DB, 
 			Update("is_muted", true).Error; err != nil {
 			return fmt.Errorf("failed to mute post: %w", err)
 		}
+		postID := post.ID
+		ci.notifyIndexer.Write(ctx, models.NotifyTypeMutePost, blockDate, &actorID, nil, &communityID, &postID, payload, nil)
 	case "unmutePost":
 		if err := tx.WithContext(ctx).
 			Model(&models.Post{}).
@@ -336,6 +367,8 @@ func (ci *CommunityIndexer) processPostAction(ctx context.Context, tx *gorm.DB, 
 			Update("is_muted", false).Error; err != nil {
 			return fmt.Errorf("failed to unmute post: %w", err)
 		}
+		postID := post.ID
+		ci.notifyIndexer.Write(ctx, models.NotifyTypeUnmutePost, blockDate, &actorID, nil, &communityID, &postID, payload, nil)
 	case "pinPost":
 		if err := tx.WithContext(ctx).
 			Model(&models.Post{}).
@@ -343,6 +376,8 @@ func (ci *CommunityIndexer) processPostAction(ctx context.Context, tx *gorm.DB, 
 			Update("is_pinned", true).Error; err != nil {
 			return fmt.Errorf("failed to pin post: %w", err)
 		}
+		postID := post.ID
+		ci.notifyIndexer.Write(ctx, models.NotifyTypePinPost, blockDate, &actorID, nil, &communityID, &postID, payload, nil)
 	case "unpinPost":
 		if err := tx.WithContext(ctx).
 			Model(&models.Post{}).
@@ -350,9 +385,13 @@ func (ci *CommunityIndexer) processPostAction(ctx context.Context, tx *gorm.DB, 
 			Update("is_pinned", false).Error; err != nil {
 			return fmt.Errorf("failed to unpin post: %w", err)
 		}
+		postID := post.ID
+		ci.notifyIndexer.Write(ctx, models.NotifyTypeUnpinPost, blockDate, &actorID, nil, &communityID, &postID, payload, nil)
 	case "flagPost":
 		// Flagging might require additional logic
 		ci.logger.Debug("Flag post action", zap.Int64("post_id", post.ID))
+		postID := post.ID
+		ci.notifyIndexer.Write(ctx, models.NotifyTypeFlagPost, blockDate, &actorID, nil, &communityID, &postID, payload, nil)
 	}
 
 	return nil

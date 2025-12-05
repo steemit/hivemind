@@ -14,15 +14,17 @@ import (
 
 // FollowIndexer handles follow relationship indexing
 type FollowIndexer struct {
-	repo   *db.Repository
-	logger *zap.Logger
+	repo          *db.Repository
+	logger        *zap.Logger
+	notifyIndexer *NotifyIndexer
 }
 
 // NewFollowIndexer creates a new follow indexer
 func NewFollowIndexer(repo *db.Repository, logger *zap.Logger) *FollowIndexer {
 	return &FollowIndexer{
-		repo:   repo,
-		logger: logger,
+		repo:          repo,
+		logger:        logger,
+		notifyIndexer: NewNotifyIndexer(repo),
 	}
 }
 
@@ -91,6 +93,22 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 		existing.State = state
 		if err := tx.WithContext(ctx).Save(&existing).Error; err != nil {
 			return fmt.Errorf("failed to update follow: %w", err)
+		}
+
+		// Send notification if new follow (state changed from non-blog to blog)
+		// Only notify if state is blog (1) and old state was not blog
+		if state&models.FollowStateBlog != 0 && oldState&models.FollowStateBlog == 0 {
+			// Skip if this is an ignore-only change (jump from 0 to 2)
+			if oldState == 0 && state == models.FollowStateIgnore {
+				// This is just ignore, not a follow
+			} else {
+				// This is a new follow, send notification
+				// TODO: Calculate score based on follower account reputation
+				score := int16(35) // Default score
+				followerID := followerAcc.ID
+				followingID := followingAcc.ID
+				fi.notifyIndexer.Write(ctx, models.NotifyTypeFollow, blockDate, &followerID, &followingID, nil, nil, nil, &score)
+			}
 		}
 
 		// Track count deltas
