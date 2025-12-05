@@ -14,19 +14,24 @@ import (
 
 // Sync manages the blockchain synchronization process
 type Sync struct {
-	config *config.Config
-	db     *db.DB
-	steem  *steem.Client
-	logger *zap.Logger
+	config         *config.Config
+	db             *db.DB
+	steem          *steem.Client
+	blockProcessor *BlockProcessor
+	logger         *zap.Logger
 }
 
 // NewSync creates a new sync manager
 func NewSync(cfg *config.Config, database *db.DB, steemClient *steem.Client) (*Sync, error) {
+	repo := db.NewRepository(database.DB)
+	blockProcessor := NewBlockProcessor(database, repo)
+
 	return &Sync{
-		config: cfg,
-		db:     database,
-		steem:  steemClient,
-		logger: logging.GetLogger().With(zap.String("component", "indexer")),
+		config:         cfg,
+		db:             database,
+		steem:          steemClient,
+		blockProcessor: blockProcessor,
+		logger:         logging.GetLogger().With(zap.String("component", "indexer")),
 	}, nil
 }
 
@@ -94,12 +99,33 @@ func (s *Sync) syncBlocks(ctx context.Context, from, to int64) error {
 		zap.Int64("to", to),
 		zap.Int64("count", to-from+1))
 
-	// TODO: Implement block syncing
-	// 1. Fetch blocks in batches
-	// 2. Process each block
-	// 3. Update database
+	// Fetch blocks in batches
+	batchSize := int64(s.config.Indexer.MaxBatch)
+	for start := from; start <= to; start += batchSize {
+		end := start + batchSize - 1
+		if end > to {
+			end = to
+		}
 
-	return fmt.Errorf("block syncing not yet implemented")
+		// Fetch blocks from steemd
+		blocks, err := s.steem.GetBlocksRange(ctx, start, end)
+		if err != nil {
+			return fmt.Errorf("failed to fetch blocks %d-%d: %w", start, end, err)
+		}
+
+		// Process each block
+		for _, block := range blocks {
+			if err := s.blockProcessor.ProcessBlock(ctx, block, false); err != nil {
+				return fmt.Errorf("failed to process block: %w", err)
+			}
+		}
+
+		s.logger.Debug("Synced block batch",
+			zap.Int64("from", start),
+			zap.Int64("to", end))
+	}
+
+	return nil
 }
 
 // syncLatest implements Strategy A: follow latest blocks with fork handling
