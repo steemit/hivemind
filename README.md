@@ -82,6 +82,79 @@ go build -o bin/hivemind-indexer ./cmd/indexer
 ./bin/hivemind-server
 ```
 
+## Docker
+
+### Quick Start
+
+The easiest way to run Hivemind is using Docker Compose:
+
+```bash
+# Start all services (PostgreSQL, Redis, Server, Indexer)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop all services
+docker-compose down
+```
+
+This will start:
+- **PostgreSQL** on port 5432
+- **Redis** on port 6379
+- **API Server** on port 8080
+- **Indexer** (background service)
+- **Jaeger** (tracing UI) on port 16686
+
+### Building Docker Images
+
+```bash
+# Build server image
+docker build -f Dockerfile.server -t hivemind-server:latest .
+
+# Build indexer image
+docker build -f Dockerfile.indexer -t hivemind-indexer:latest .
+
+# Build both (using main Dockerfile)
+docker build -t hivemind:latest .
+```
+
+### Running Individual Services
+
+```bash
+# Run server only
+docker run -p 8080:8080 \
+  -e HIVE_DATABASE_URL=postgresql://user:pass@host:5432/db \
+  -e HIVE_STEEM_URL=https://api.steemit.com \
+  hivemind-server:latest
+
+# Run indexer only
+docker run \
+  -e HIVE_DATABASE_URL=postgresql://user:pass@host:5432/db \
+  -e HIVE_STEEM_URL=https://api.steemit.com \
+  hivemind-indexer:latest
+```
+
+### Environment Variables
+
+Key environment variables for Docker:
+
+- `HIVE_DATABASE_URL`: PostgreSQL connection string
+- `HIVE_STEEM_URL`: Steemd node URL
+- `HIVE_REDIS_URL`: Redis connection (optional)
+- `HIVE_HTTP_SERVER_PORT`: API server port (default: 8080)
+- `HIVE_LOG_LEVEL`: Logging level (default: INFO)
+- `HIVE_TELEMETRY_ENABLED`: Enable telemetry (default: true)
+
+See `docker-compose.yml` for all available configuration options.
+
+### Accessing Services
+
+- **API Server**: http://localhost:8080
+- **Prometheus Metrics (Server)**: http://localhost:9090/metrics
+- **Prometheus Metrics (Indexer)**: http://localhost:9091/metrics
+- **Jaeger UI**: http://localhost:16686
+
 ## License
 
 MIT

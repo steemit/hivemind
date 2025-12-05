@@ -1,0 +1,73 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+hivemind-server
+hivemind-indexer
+server
+indexer
+
+# Test files
+*_test.go
+*.test
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Legacy Python code
+legacy/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Coverage
+*.out
+coverage/
+
+# Cursor
+.cursor/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Data directories
+postgres_data/
+redis_data/
+
