@@ -116,8 +116,10 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 		}
 
 		// Get transaction ID
-		if txIDs, ok := block["transaction_ids"].([]interface{}); ok && txIdx < len(txIDs) {
-			trxIDs = append(trxIDs, txIDs[txIdx].(string))
+		if txIDList, ok := block["transaction_ids"].([]interface{}); ok && txIdx < len(txIDList) {
+			if txID, ok := txIDList[txIdx].(string); ok {
+				trxIDs = append(trxIDs, txID)
+			}
 		}
 
 		// Process operations
@@ -174,7 +176,55 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 	}
 
 	// Save transaction IDs
-	// TODO: Implement transaction ID storage
+	if len(trxIDs) > 0 {
+		if err := bp.saveTransactionIDs(ctx, tx, trxIDs, blockNum); err != nil {
+			bp.logger.Warn("Failed to save transaction IDs", zap.Error(err))
+			// Don't fail the block processing for this
+		}
+	}
+
+	return nil
+}
+
+// saveTransactionIDs saves transaction IDs to hive_trxid_block_num table
+func (bp *BlockProcessor) saveTransactionIDs(ctx context.Context, tx *gorm.DB, trxIDs []string, blockNum int64) error {
+	if len(trxIDs) == 0 {
+		return nil
+	}
+
+	// Batch insert transaction IDs
+	records := make([]models.TransactionBlock, 0, len(trxIDs))
+	for _, trxID := range trxIDs {
+		if trxID == "" {
+			continue
+		}
+		records = append(records, models.TransactionBlock{
+			TrxID:    trxID,
+			BlockNum: blockNum,
+		})
+	}
+
+	if len(records) == 0 {
+		return nil
+	}
+
+	// Use ON CONFLICT DO NOTHING to handle duplicates
+	if err := tx.WithContext(ctx).
+		Exec("INSERT INTO hive_trxid_block_num (trx_id, block_num) VALUES "+
+			"(?, ?) ON CONFLICT (trx_id) DO NOTHING",
+			records[0].TrxID, records[0].BlockNum).Error; err != nil {
+		// Fallback to individual inserts if batch fails
+		for _, record := range records {
+			if err := tx.WithContext(ctx).
+				Where("trx_id = ?", record.TrxID).
+				FirstOrCreate(&record).Error; err != nil {
+				bp.logger.Warn("Failed to save transaction ID",
+					zap.String("trx_id", record.TrxID),
+					zap.Int64("block", blockNum),
+					zap.Error(err))
+			}
+		}
+	}
 
 	return nil
 }
@@ -241,14 +291,27 @@ func (bp *BlockProcessor) processOperation(
 	// Vote operations
 	case "vote_operation":
 		if !isInitialSync {
-			if author, ok := opValue["author"].(string); ok {
+			author, _ := opValue["author"].(string)
+			voter, _ := opValue["voter"].(string)
+			permlink, _ := opValue["permlink"].(string)
+			
+			if author != "" {
 				bp.accounts.MarkDirty(author)
 			}
-			if voter, ok := opValue["voter"].(string); ok {
+			if voter != "" {
 				bp.accounts.MarkDirty(voter)
 			}
+			
+			// Mark post for cache update
+			if author != "" && permlink != "" {
+				if err := bp.posts.MarkPostDirty(ctx, tx, author, permlink); err != nil {
+					bp.logger.Warn("Failed to mark post dirty for vote",
+						zap.String("author", author),
+						zap.String("permlink", permlink),
+						zap.Error(err))
+				}
+			}
 		}
-		// TODO: Process vote for post cache
 
 	// Transfer operations
 	case "transfer_operation":

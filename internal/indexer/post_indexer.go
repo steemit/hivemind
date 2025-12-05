@@ -64,7 +64,7 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 		Permlink:  permlink,
 		Category:  extractCategory(jsonMeta),
 		CreatedAt: blockDate,
-		Depth:      0,
+		Depth:     0,
 		IsDeleted: false,
 		IsValid:   true,
 	}
@@ -112,6 +112,17 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 	return nil
 }
 
+// MarkPostDirty marks a post as needing cache update (e.g., after vote)
+func (pi *PostIndexer) MarkPostDirty(ctx context.Context, tx *gorm.DB, author, permlink string) error {
+	// This is a placeholder for future cache update logic
+	// For now, we just log that the post needs updating
+	// TODO: Implement proper cache dirty tracking
+	pi.logger.Debug("Post marked dirty for cache update",
+		zap.String("author", author),
+		zap.String("permlink", permlink))
+	return nil
+}
+
 // ProcessDelete processes a delete comment operation
 func (pi *PostIndexer) ProcessDelete(ctx context.Context, tx *gorm.DB, op map[string]interface{}) error {
 	author, _ := op["author"].(string)
@@ -155,4 +166,3 @@ func extractCategory(jsonMeta string) string {
 	// For now, return empty string
 	return ""
 }
-
