@@ -37,10 +37,11 @@ See `project.mdc` for detailed package management rules and guidelines.
 
 - **Never automatically commit changes without explicit user confirmation**
 - Before creating any commit:
-  1. Show the user what files will be committed (`git status`)
+  1. Show the user what files will be committed (`git status` or `git diff --stat`)
   2. Present the proposed commit message
-  3. Wait for explicit user approval before executing `git commit`
-- Only use `git add` and prepare commits, but always ask for confirmation before committing
+  3. **Wait for explicit user approval before executing `git commit`**
+- Only use `git add` to stage files, but **always ask for confirmation before committing**
+- When user requests to "创建commit" or similar, show the commit details and wait for confirmation
 - This ensures the user maintains full control over the git history and commit timing
 
 ## Documentation Update Policy
