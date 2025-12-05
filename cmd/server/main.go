@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/steemit/hivemind/internal/api"
+	"github.com/steemit/hivemind/internal/cache"
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/pkg/config"
 	"github.com/steemit/hivemind/pkg/logging"
@@ -51,6 +52,15 @@ func main() {
 	}
 	defer database.Close()
 
+	// Initialize Redis cache
+	redisCache, err := cache.New(&cfg.Redis)
+	if err != nil {
+		logger.Fatal("Failed to initialize Redis cache", zap.Error(err))
+	}
+	if redisCache != nil {
+		defer redisCache.Close()
+	}
+
 	// Create Gin router
 	if cfg.Logging.Level == "DEBUG" {
 		gin.SetMode(gin.DebugMode)
@@ -62,7 +72,7 @@ func main() {
 	router.Use(gin.Recovery())
 
 	// Setup API routes
-	apiRouter := api.NewRouter(database)
+	apiRouter := api.NewRouter(database, redisCache)
 	apiRouter.SetupRoutes(router)
 
 	// Create HTTP server

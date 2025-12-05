@@ -9,6 +9,7 @@ import (
 	"github.com/steemit/hivemind/internal/api/bridge"
 	"github.com/steemit/hivemind/internal/api/condenser"
 	"github.com/steemit/hivemind/internal/api/hive"
+	"github.com/steemit/hivemind/internal/cache"
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/pkg/logging"
 )
@@ -17,15 +18,17 @@ import (
 type Router struct {
 	handler *JSONRPCHandler
 	db      *db.DB
+	cache   *cache.Cache
 	logger  *zap.Logger
 }
 
 // NewRouter creates a new API router
-func NewRouter(database *db.DB) *Router {
+func NewRouter(database *db.DB, redisCache *cache.Cache) *Router {
 	handler := NewJSONRPCHandler()
 	router := &Router{
 		handler: handler,
 		db:      database,
+		cache:   redisCache,
 		logger:  logging.GetLogger().With(zap.String("component", "api-router")),
 	}
 
@@ -113,7 +116,7 @@ func (r *Router) registerMethods() {
 	// Bridge API
 	bridgePost := bridge.NewPostAPI(repo)
 	bridgeProfile := bridge.NewProfileAPI(repo)
-	bridgeRanked := bridge.NewRankedAPI(repo, r.db, nil) // TODO: Initialize cache
+	bridgeRanked := bridge.NewRankedAPI(repo, r.db, r.cache)
 
 	r.handler.RegisterMethod("bridge.get_post", bridgePost.GetPost)
 	r.handler.RegisterMethod("bridge.get_profile", bridgeProfile.GetProfile)

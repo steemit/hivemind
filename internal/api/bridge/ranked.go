@@ -62,11 +62,22 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 	observer, _ := pMap["observer"].(string)
 	_ = observer // TODO: Use for personalized content
 
+	// Generate cache key using hash to shorten long keys
+	cacheKeyParts := []string{
+		"bridge_get_ranked_posts",
+		sort,
+		startAuthor,
+		startPermlink,
+		fmt.Sprintf("%d", limit),
+		tag,
+	}
+	cacheKey := cache.HashKey(cacheKeyParts...)
+	
 	// Check cache
 	if r.cache != nil {
-		cacheKey := fmt.Sprintf("ranked_posts:%s:%s:%s:%d:%s", sort, startAuthor, startPermlink, limit, tag)
-		if cached, err := r.cache.Get(cacheKey); err == nil && cached != "" {
-			// TODO: Parse and return cached result
+		var cachedResult []interface{}
+		if err := r.cache.GetJSON(cacheKey, &cachedResult); err == nil {
+			return cachedResult, nil
 		}
 	}
 
@@ -102,11 +113,12 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 
 	// Cache result
 	if r.cache != nil {
-		cacheKey := fmt.Sprintf("ranked_posts:%s:%s:%s:%d:%s", sort, startAuthor, startPermlink, limit, tag)
 		ttl := r.getCacheTTL(sort)
-		// TODO: Serialize and cache result
-		_ = cacheKey
-		_ = ttl
+		if err := r.cache.SetJSON(cacheKey, result, ttl); err != nil {
+			// Log error but don't fail the request
+			// TODO: Add logging
+			_ = err
+		}
 	}
 
 	return result, nil
