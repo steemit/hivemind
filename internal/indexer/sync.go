@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -54,40 +55,66 @@ func (s *Sync) Run(ctx context.Context) error {
 func (s *Sync) syncIrreversible(ctx context.Context) error {
 	s.logger.Info("Using fork strategy: irreversible blocks only")
 
+	blockRepo := db.NewBlockRepository(s.blockProcessor.repo)
+	syncInterval := s.config.Indexer.SyncInterval
+	if syncInterval == 0 {
+		syncInterval = 3 // Default 3 seconds
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 			// Get current head from database
-			// TODO: Get head block from database
+			headBlock, err := blockRepo.GetHead(ctx)
+			if err != nil {
+				s.logger.Error("Failed to get head block from database", zap.Error(err))
+				// Retry after a short delay
+				s.wait(ctx, syncInterval)
+				continue
+			}
+
+			currentHead := int64(0)
+			if headBlock != nil {
+				currentHead = headBlock.Num
+			}
 
 			// Get last irreversible block from steemd
 			irreversible, err := s.steem.LastIrreversible(ctx)
 			if err != nil {
 				s.logger.Error("Failed to get last irreversible block", zap.Error(err))
-				// TODO: Add retry logic
+				// Retry after a short delay
+				s.wait(ctx, syncInterval)
 				continue
 			}
 
-			// TODO: Get current database head
-			// For now, use irreversible as placeholder
-			currentHead := int64(0) // Placeholder until DB head is implemented
-
 			// Sync blocks from currentHead+1 to irreversible
 			if currentHead < irreversible {
+				s.logger.Info("Syncing blocks",
+					zap.Int64("current_head", currentHead),
+					zap.Int64("irreversible", irreversible),
+					zap.Int64("blocks_to_sync", irreversible-currentHead))
+
 				if err := s.syncBlocks(ctx, currentHead+1, irreversible); err != nil {
 					s.logger.Error("Failed to sync blocks", zap.Error(err))
-					// TODO: Add retry logic
+					// Retry after a short delay
+					s.wait(ctx, syncInterval)
 					continue
 				}
+
+				s.logger.Info("Successfully synced blocks",
+					zap.Int64("from", currentHead+1),
+					zap.Int64("to", irreversible))
 			} else {
-				// Log irreversible block for monitoring when no sync needed
-				s.logger.Debug("Already synced to irreversible block", zap.Int64("block", irreversible))
+				// Already synced, wait before next check
+				s.logger.Debug("Already synced to irreversible block",
+					zap.Int64("current_head", currentHead),
+					zap.Int64("irreversible", irreversible))
 			}
 
 			// Wait before next check
-			// TODO: Implement proper waiting logic
+			s.wait(ctx, syncInterval)
 		}
 	}
 }
@@ -126,6 +153,19 @@ func (s *Sync) syncBlocks(ctx context.Context, from, to int64) error {
 	}
 
 	return nil
+}
+
+// wait waits for the specified duration or until context is cancelled
+func (s *Sync) wait(ctx context.Context, seconds int) {
+	timer := time.NewTimer(time.Duration(seconds) * time.Second)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-timer.C:
+		return
+	}
 }
 
 // syncLatest implements Strategy A: follow latest blocks with fork handling

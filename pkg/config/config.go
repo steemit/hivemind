@@ -49,6 +49,7 @@ type IndexerConfig struct {
 	TrailBlocks          int
 	MaxBatch            int
 	MaxWorkers          int
+	SyncInterval        int // Seconds between sync checks
 	SyncToS3            bool
 	ForceFollowRecount  bool
 	TestMaxBlock        int
@@ -116,6 +117,7 @@ func Load() (*Config, error) {
 			TrailBlocks:          getInt("trail_blocks", 2),
 			MaxBatch:            getInt("max_batch", 50),
 			MaxWorkers:          getInt("max_workers", 4),
+			SyncInterval:        getInt("sync_interval", 3),
 			SyncToS3:            getBool("sync_to_s3", false),
 			ForceFollowRecount:  getBool("force_follow_recount", false),
 			TestMaxBlock:        getInt("test_max_block", 0),
