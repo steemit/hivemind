@@ -3,7 +3,9 @@ package indexer
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,16 +17,16 @@ import (
 
 // PostIndexer handles post indexing
 type PostIndexer struct {
-	repo         *db.Repository
-	logger       *zap.Logger
+	repo          *db.Repository
+	logger        *zap.Logger
 	notifyIndexer *NotifyIndexer
 }
 
 // NewPostIndexer creates a new post indexer
 func NewPostIndexer(repo *db.Repository, logger *zap.Logger) *PostIndexer {
 	return &PostIndexer{
-		repo:         repo,
-		logger:       logger,
+		repo:          repo,
+		logger:        logger,
 		notifyIndexer: NewNotifyIndexer(repo),
 	}
 }
@@ -175,8 +177,46 @@ func (pi *PostIndexer) ProcessDelete(ctx context.Context, tx *gorm.DB, op map[st
 }
 
 // extractCategory extracts category from JSON metadata
+// In Steem, category is typically the first tag in the tags array
 func extractCategory(jsonMeta string) string {
-	// TODO: Parse JSON and extract category/tags
-	// For now, return empty string
+	if jsonMeta == "" {
+		return ""
+	}
+
+	// Parse JSON metadata
+	var meta map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonMeta), &meta); err != nil {
+		// Invalid JSON, return empty
+		return ""
+	}
+
+	// Try to get tags array
+	tags, ok := meta["tags"].([]interface{})
+	if !ok {
+		// Tags might be a single string (legacy format)
+		if tagStr, ok := meta["tags"].(string); ok {
+			// Split by space and take first
+			parts := strings.Fields(tagStr)
+			if len(parts) > 0 {
+				return strings.ToLower(strings.Trim(parts[0], "# "))
+			}
+		}
+		return ""
+	}
+
+	// Get first tag as category
+	if len(tags) > 0 {
+		if tag, ok := tags[0].(string); ok {
+			// Clean up tag: remove # prefix, trim, lowercase, max 32 chars
+			tag = strings.TrimPrefix(tag, "#")
+			tag = strings.TrimSpace(tag)
+			tag = strings.ToLower(tag)
+			if len(tag) > 32 {
+				tag = tag[:32]
+			}
+			return tag
+		}
+	}
+
 	return ""
 }
