@@ -6,10 +6,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/steemit/hivemind/pkg/config"
-	"github.com/steemit/hivemind/pkg/logging"
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/steem"
+	"github.com/steemit/hivemind/pkg/config"
+	"github.com/steemit/hivemind/pkg/logging"
 )
 
 // Sync manages the blockchain synchronization process
@@ -66,12 +66,20 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 			}
 
 			// TODO: Get current database head
-			// currentHead := s.getDBHead()
+			// For now, use irreversible as placeholder
+			currentHead := int64(0) // Placeholder until DB head is implemented
 
-			// TODO: Sync blocks from currentHead+1 to irreversible
-			// if currentHead < irreversible {
-			//     s.syncBlocks(ctx, currentHead+1, irreversible)
-			// }
+			// Sync blocks from currentHead+1 to irreversible
+			if currentHead < irreversible {
+				if err := s.syncBlocks(ctx, currentHead+1, irreversible); err != nil {
+					s.logger.Error("Failed to sync blocks", zap.Error(err))
+					// TODO: Add retry logic
+					continue
+				}
+			} else {
+				// Log irreversible block for monitoring when no sync needed
+				s.logger.Debug("Already synced to irreversible block", zap.Int64("block", irreversible))
+			}
 
 			// Wait before next check
 			// TODO: Implement proper waiting logic
@@ -107,4 +115,3 @@ func (s *Sync) syncLatest(ctx context.Context) error {
 
 	return fmt.Errorf("latest block sync strategy not yet implemented")
 }
-
