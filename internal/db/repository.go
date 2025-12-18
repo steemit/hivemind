@@ -293,3 +293,223 @@ func (r *CommunityRepository) GetByID(ctx context.Context, id int64) (*models.Co
 	return &community, nil
 }
 
+// GetByName retrieves a community by name
+func (r *CommunityRepository) GetByName(ctx context.Context, name string) (*models.Community, error) {
+	var community models.Community
+	if err := r.db.WithContext(ctx).Where("name = ?", name).First(&community).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &community, nil
+}
+
+// FeedCacheRepository provides feed cache operations
+type FeedCacheRepository struct {
+	*Repository
+}
+
+// NewFeedCacheRepository creates a new feed cache repository
+func NewFeedCacheRepository(repo *Repository) *FeedCacheRepository {
+	return &FeedCacheRepository{Repository: repo}
+}
+
+// Insert inserts a post into feed cache
+func (r *FeedCacheRepository) Insert(ctx context.Context, postID, accountID int64, createdAt time.Time) error {
+	feedCache := &models.FeedCache{
+		PostID:    postID,
+		AccountID: accountID,
+		CreatedAt: createdAt,
+	}
+	// Use ON CONFLICT DO NOTHING equivalent in GORM
+	return r.db.WithContext(ctx).
+		Where("post_id = ? AND account_id = ?", postID, accountID).
+		FirstOrCreate(feedCache).Error
+}
+
+// Delete removes a post from feed cache
+func (r *FeedCacheRepository) Delete(ctx context.Context, postID int64, accountID *int64) error {
+	query := r.db.WithContext(ctx).Where("post_id = ?", postID)
+	if accountID != nil {
+		query = query.Where("account_id = ?", *accountID)
+	}
+	return query.Delete(&models.FeedCache{}).Error
+}
+
+// Rebuild rebuilds the entire feed cache
+func (r *FeedCacheRepository) Rebuild(ctx context.Context, truncate bool) error {
+	tx := r.db.WithContext(ctx).Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	if truncate {
+		if err := tx.Exec("TRUNCATE TABLE hive_feed_cache").Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	// Insert all root posts (depth=0, not deleted) by their authors
+	if err := tx.Exec(`
+		INSERT INTO hive_feed_cache (account_id, post_id, created_at)
+		SELECT hive_accounts.id, hive_posts.id, hive_posts.created_at
+		FROM hive_posts
+		JOIN hive_accounts ON hive_posts.author = hive_accounts.name
+		WHERE depth = 0 AND is_deleted = false
+		ON CONFLICT (post_id, account_id) DO NOTHING
+	`).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Insert all reblogs
+	if err := tx.Exec(`
+		INSERT INTO hive_feed_cache (account_id, post_id, created_at)
+		SELECT hive_accounts.id, post_id, hive_reblogs.created_at
+		FROM hive_reblogs
+		JOIN hive_accounts ON hive_reblogs.account = hive_accounts.name
+		ON CONFLICT (post_id, account_id) DO NOTHING
+	`).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	return tx.Commit().Error
+}
+
+// ReblogRepository provides reblog-related database operations
+type ReblogRepository struct {
+	*Repository
+}
+
+// NewReblogRepository creates a new reblog repository
+func NewReblogRepository(repo *Repository) *ReblogRepository {
+	return &ReblogRepository{Repository: repo}
+}
+
+// Create creates a new reblog
+func (r *ReblogRepository) Create(ctx context.Context, reblog *models.Reblog) error {
+	return r.db.WithContext(ctx).Create(reblog).Error
+}
+
+// Delete deletes a reblog
+func (r *ReblogRepository) Delete(ctx context.Context, account string, postID int64) error {
+	return r.db.WithContext(ctx).
+		Where("account = ? AND post_id = ?", account, postID).
+		Delete(&models.Reblog{}).Error
+}
+
+// GetByPostID retrieves all reblogs for a post
+func (r *ReblogRepository) GetByPostID(ctx context.Context, postID int64) ([]*models.Reblog, error) {
+	var reblogs []*models.Reblog
+	if err := r.db.WithContext(ctx).
+		Where("post_id = ?", postID).
+		Order("created_at DESC").
+		Find(&reblogs).Error; err != nil {
+		return nil, err
+	}
+	return reblogs, nil
+}
+
+// GetAccountNamesByPostID retrieves account names that reblogged a post
+func (r *ReblogRepository) GetAccountNamesByPostID(ctx context.Context, postID int64) ([]string, error) {
+	var accounts []string
+	if err := r.db.WithContext(ctx).
+		Model(&models.Reblog{}).
+		Where("post_id = ?", postID).
+		Pluck("account", &accounts).Error; err != nil {
+		return nil, err
+	}
+	return accounts, nil
+}
+
+// FollowRepository provides follow-related database operations
+type FollowRepository struct {
+	*Repository
+}
+
+// NewFollowRepository creates a new follow repository
+func NewFollowRepository(repo *Repository) *FollowRepository {
+	return &FollowRepository{Repository: repo}
+}
+
+// GetFollowers retrieves followers for an account
+func (r *FollowRepository) GetFollowers(ctx context.Context, followingID int64, startFollowerID *int64, followType string, limit int) ([]*models.Follow, error) {
+	var follows []*models.Follow
+	query := r.db.WithContext(ctx).
+		Where("following = ?", followingID)
+
+	// Filter by follow type (state: 1=blog, 2=ignore, 3=both)
+	if followType == "blog" {
+		query = query.Where("state IN (1, 3)")
+	} else if followType == "ignore" {
+		query = query.Where("state IN (2, 3)")
+	}
+
+	if startFollowerID != nil {
+		query = query.Where("follower < ?", *startFollowerID)
+	}
+
+	if err := query.
+		Order("follower DESC").
+		Limit(limit).
+		Find(&follows).Error; err != nil {
+		return nil, err
+	}
+
+	return follows, nil
+}
+
+// GetFollowing retrieves accounts followed by an account
+func (r *FollowRepository) GetFollowing(ctx context.Context, followerID int64, startFollowingID *int64, followType string, limit int) ([]*models.Follow, error) {
+	var follows []*models.Follow
+	query := r.db.WithContext(ctx).
+		Where("follower = ?", followerID)
+
+	// Filter by follow type
+	if followType == "blog" {
+		query = query.Where("state IN (1, 3)")
+	} else if followType == "ignore" {
+		query = query.Where("state IN (2, 3)")
+	}
+
+	if startFollowingID != nil {
+		query = query.Where("following < ?", *startFollowingID)
+	}
+
+	if err := query.
+		Order("following DESC").
+		Limit(limit).
+		Find(&follows).Error; err != nil {
+		return nil, err
+	}
+
+	return follows, nil
+}
+
+// GetByFollowerFollowing retrieves a follow relationship
+func (r *FollowRepository) GetByFollowerFollowing(ctx context.Context, followerID, followingID int64) (*models.Follow, error) {
+	var follow models.Follow
+	if err := r.db.WithContext(ctx).
+		Where("follower = ? AND following = ?", followerID, followingID).
+		First(&follow).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &follow, nil
+}
+
+// CreateOrUpdate creates or updates a follow relationship
+func (r *FollowRepository) CreateOrUpdate(ctx context.Context, follow *models.Follow) error {
+	return r.db.WithContext(ctx).
+		Where("follower = ? AND following = ?", follow.Follower, follow.Following).
+		Assign(*follow).
+		FirstOrCreate(follow).Error
+}
+

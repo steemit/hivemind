@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/steemit/hivemind/internal/db"
+	"github.com/steemit/hivemind/internal/models"
 	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/config"
 	"github.com/steemit/hivemind/pkg/logging"
@@ -41,7 +42,21 @@ func (s *Sync) Run(ctx context.Context) error {
 	s.logger.Info("Starting indexer sync")
 
 	// Check if initial sync is needed
-	// TODO: Check database state
+	feedCacheRepo := db.NewFeedCacheRepository(s.blockProcessor.repo)
+	isInitialSync, err := s.checkInitialSync(ctx, feedCacheRepo)
+	if err != nil {
+		return fmt.Errorf("failed to check initial sync status: %w", err)
+	}
+
+	if isInitialSync {
+		s.logger.Info("Initial sync detected, starting initial sync process")
+		if err := s.initialSync(ctx, feedCacheRepo); err != nil {
+			return fmt.Errorf("initial sync failed: %w", err)
+		}
+		s.logger.Info("Initial sync completed")
+	} else {
+		s.logger.Info("Resuming normal sync")
+	}
 
 	// Determine sync strategy based on configuration
 	// For now, we'll use Strategy B (irreversible blocks only)
@@ -49,6 +64,68 @@ func (s *Sync) Run(ctx context.Context) error {
 
 	// Start sync loop
 	return s.syncIrreversible(ctx)
+}
+
+// checkInitialSync checks if initial sync is needed by checking if feed cache is empty
+func (s *Sync) checkInitialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepository) (bool, error) {
+	var count int64
+	if err := s.db.DB.WithContext(ctx).
+		Model(&models.FeedCache{}).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count == 0, nil
+}
+
+// initialSync performs the initial sync routine
+func (s *Sync) initialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepository) error {
+	s.logger.Info("Starting initial fast sync")
+
+	// Fast sync from steemd up to last irreversible block
+	blockRepo := db.NewBlockRepository(s.blockProcessor.repo)
+	headBlock, err := blockRepo.GetHead(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get head block: %w", err)
+	}
+
+	currentHead := int64(0)
+	if headBlock != nil {
+		currentHead = headBlock.Num
+	}
+
+	irreversible, err := s.steem.LastIrreversible(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get last irreversible block: %w", err)
+	}
+
+	if currentHead < irreversible {
+		s.logger.Info("Syncing blocks for initial sync",
+			zap.Int64("from", currentHead+1),
+			zap.Int64("to", irreversible))
+		
+		if err := s.syncBlocks(ctx, currentHead+1, irreversible); err != nil {
+			return fmt.Errorf("failed to sync blocks: %w", err)
+		}
+	}
+
+	// Recover missing posts (post cache recovery)
+	s.logger.Info("Recovering missing posts")
+	// TODO: Implement post cache recovery
+	// This should check for posts without cache entries and fetch them from steemd
+
+	// Rebuild feed cache
+	s.logger.Info("Rebuilding feed cache")
+	if err := feedCacheRepo.Rebuild(ctx, true); err != nil {
+		return fmt.Errorf("failed to rebuild feed cache: %w", err)
+	}
+
+	// Force follow recount
+	s.logger.Info("Recounting follows")
+	// TODO: Implement follow recount
+	// This should recalculate follow counts for all accounts
+
+	s.logger.Info("Initial sync completed successfully")
+	return nil
 }
 
 // syncIrreversible implements Strategy B: sync only to irreversible blocks

@@ -96,7 +96,7 @@ func (l *PostLoader) LoadPosts(ctx context.Context, ids []int64, truncateBody in
 			continue // Skip posts without author
 		}
 
-		postObj := l.buildPostObject(post, cache, account, truncateBody)
+		postObj := l.buildPostObject(ctx, post, cache, account, truncateBody)
 		result = append(result, postObj)
 	}
 
@@ -104,7 +104,7 @@ func (l *PostLoader) LoadPosts(ctx context.Context, ids []int64, truncateBody in
 }
 
 // buildPostObject builds a complete post object from post, cache, and account data
-func (l *PostLoader) buildPostObject(post *models.Post, cache *models.PostCache, account *models.Account, truncateBody int) map[string]interface{} {
+func (l *PostLoader) buildPostObject(ctx context.Context, post *models.Post, cache *models.PostCache, account *models.Account, truncateBody int) map[string]interface{} {
 	body := cache.Body
 	if truncateBody > 0 && len(body) > truncateBody {
 		body = body[:truncateBody]
@@ -129,9 +129,9 @@ func (l *PostLoader) buildPostObject(post *models.Post, cache *models.PostCache,
 		"children":          cache.Children,
 		"net_rshares":       cache.RShares,
 		"url":               fmt.Sprintf("/%s/@%s/%s", post.Category, account.Name, post.Permlink),
-		"active_votes":      []interface{}{}, // TODO: Load active votes from cache.Votes
-		"replies":           []interface{}{},  // TODO: Load replies
-		"reblogged_by":      []interface{}{},  // TODO: Load reblogs
+		"active_votes":      []interface{}{}, // TODO: Load active votes from cache.Votes (format needs to be parsed)
+		"replies":           []interface{}{},  // TODO: Load replies (requires querying child posts)
+		"reblogged_by":      l.getRebloggedBy(ctx, post.ID), // Load reblogs
 		"body_length":       len(cache.Body),
 		"author_reputation": account.Reputation,
 		"promoted":          post.Promoted,
@@ -181,5 +181,26 @@ func (l *PostLoader) LoadPostsReblogs(ctx context.Context, idsWithReblogs [][]in
 	}
 
 	return posts, nil
+}
+
+// getRebloggedBy gets account names that reblogged a post
+func (l *PostLoader) getRebloggedBy(ctx context.Context, postID int64) []interface{} {
+	// Create a temporary repository to query reblogs
+	// Note: This is a workaround since we don't have direct access to repository
+	// In a real implementation, PostLoader should have access to repository
+	var reblogs []models.Reblog
+	if err := l.db.WithContext(ctx).
+		Where("post_id = ?", postID).
+		Order("created_at DESC").
+		Find(&reblogs).Error; err != nil {
+		return []interface{}{}
+	}
+
+	result := make([]interface{}, 0, len(reblogs))
+	for _, reblog := range reblogs {
+		result = append(result, reblog.Account)
+	}
+
+	return result
 }
 

@@ -32,7 +32,7 @@ func NewPostIndexer(repo *db.Repository, logger *zap.Logger) *PostIndexer {
 }
 
 // ProcessComment processes a comment operation (create or update post)
-func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[string]interface{}, blockDate time.Time) error {
+func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[string]interface{}, blockDate time.Time, isInitialSync bool) error {
 	author, _ := op["author"].(string)
 	permlink, _ := op["permlink"].(string)
 	parentAuthor, _ := op["parent_author"].(string)
@@ -106,17 +106,19 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 	//     }
 	// }
 
-	// Insert into feed cache if root post (depth=0)
-	if post.Depth == 0 {
+	// Insert into feed cache if root post (depth=0) and not in initial sync
+	// Feed cache is rebuilt after initial sync completes
+	if post.Depth == 0 && !isInitialSync {
 		accountRepo := db.NewAccountRepository(pi.repo)
 		account, err := accountRepo.GetByName(ctx, author)
 		if err == nil && account != nil {
-			feedCache := &models.FeedCache{
-				PostID:    post.ID,
-				AccountID: account.ID,
-				CreatedAt: blockDate,
+			feedCacheRepo := db.NewFeedCacheRepository(pi.repo)
+			if err := feedCacheRepo.Insert(ctx, post.ID, account.ID, blockDate); err != nil {
+				pi.logger.Warn("Failed to insert into feed cache",
+					zap.Int64("post_id", post.ID),
+					zap.Int64("account_id", account.ID),
+					zap.Error(err))
 			}
-			tx.WithContext(ctx).Create(feedCache)
 		}
 	}
 

@@ -58,6 +58,7 @@ func (r *Router) registerMethods() {
 	// Condenser API
 	condenserFollow := condenser.NewFollowAPI(repo)
 	condenserContent := condenser.NewContentAPI(repo)
+	condenserContent.SetDatabase(r.db.DB)
 	condenserDiscussions := condenser.NewDiscussionsAPI(repo, r.db)
 
 	r.handler.RegisterMethod("condenser_api.get_followers", condenserFollow.GetFollowers)

@@ -161,7 +161,7 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 
 	// Process custom JSON operations
 	if len(jsonOps) > 0 {
-		if err := bp.customOps.ProcessOps(ctx, tx, jsonOps, blockNum, blockDate); err != nil {
+		if err := bp.customOps.ProcessOps(ctx, tx, jsonOps, blockNum, blockDate, isInitialSync); err != nil {
 			bp.logger.Error("Failed to process custom ops", zap.Error(err))
 		}
 	}
@@ -292,7 +292,7 @@ func (bp *BlockProcessor) processOperation(
 
 	// Post operations
 	case "comment_operation":
-		return bp.posts.ProcessComment(ctx, tx, opValue, blockDate)
+		return bp.posts.ProcessComment(ctx, tx, opValue, blockDate, isInitialSync)
 	case "delete_comment_operation":
 		return bp.posts.ProcessDelete(ctx, tx, opValue)
 
