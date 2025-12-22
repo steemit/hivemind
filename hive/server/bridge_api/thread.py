@@ -54,17 +54,15 @@ def _ref(post):
 
 async def _child_ids(db, parent_ids):
     """Load child ids for multuple parent ids."""
+    # Optimized: Use LEFT JOIN instead of NOT EXISTS to improve performance
+    # This avoids executing a subquery for each row and better utilizes indexes
     sql = """
         SELECT p.parent_id as parent_id, array_agg(p.id) as child_ids
         FROM hive_posts p
+        LEFT JOIN hive_posts_status s ON s.list_type = '3' AND s.author = p.author
         WHERE p.parent_id IN :ids
         AND p.is_deleted = '0'
-        AND NOT EXISTS (
-            SELECT 1
-            FROM hive_posts_status s
-            WHERE s.list_type = '3'
-            AND s.author = p.author
-        )
+        AND s.id IS NULL
         GROUP BY p.parent_id
     """
     rows = await db.query_all(sql, ids=tuple(parent_ids),
