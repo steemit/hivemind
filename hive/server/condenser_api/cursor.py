@@ -108,8 +108,19 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
         LIMIT :limit
     """ % seek
 
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'get_following',
+        str(account_id),
+        follow_type or 'blog',
+        str(start_id) if start_id else '',
+        str(limit)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit)
+                              state=state, limit=limit,
+                              cache_key=cache_key, cache_ttl=30)
 
 
 async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
