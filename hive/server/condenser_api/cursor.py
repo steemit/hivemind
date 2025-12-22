@@ -248,7 +248,17 @@ async def pids_by_blog(db, account: str, start_author: str = '',
          LIMIT :limit
     """ % seek
 
-    return await db.query_col(sql, account_id=account_id, start_id=start_id, limit=limit)
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'pids_by_blog',
+        str(account_id),
+        str(start_id) if start_id else '',
+        str(limit)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+
+    return await db.query_col(sql, account_id=account_id, start_id=start_id, limit=limit,
+                              cache_key=cache_key, cache_ttl=30)
 
 
 async def pids_by_blog_by_index(db, account: str, start_index: int, limit: int = 20):
