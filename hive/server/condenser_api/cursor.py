@@ -96,17 +96,31 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
                       WHERE follower = :account_id
                         AND following = :start_id)"""
 
+    # Optimized: Use INNER JOIN instead of LEFT JOIN for better performance
+    # This assumes data integrity (all following IDs exist in hive_accounts)
     sql = """
-        SELECT name,reputation,state FROM hive_follows hf
-     LEFT JOIN hive_accounts ON hf.following = id
-         WHERE hf.follower = :account_id
-           AND state IN :state %s
-      ORDER BY hf.created_at DESC
-         LIMIT :limit
+        SELECT ha.name, ha.reputation, hf.state
+        FROM hive_follows hf
+        INNER JOIN hive_accounts ha ON hf.following = ha.id
+        WHERE hf.follower = :account_id
+          AND hf.state IN :state %s
+        ORDER BY hf.created_at DESC
+        LIMIT :limit
     """ % seek
 
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'get_following',
+        str(account_id),
+        follow_type or 'blog',
+        str(start_id) if start_id else '',
+        str(limit)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit)
+                              state=state, limit=limit,
+                              cache_key=cache_key, cache_ttl=30)
 
 
 async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
