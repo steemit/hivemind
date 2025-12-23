@@ -35,16 +35,26 @@ async def load_posts_reblogs(db, ids_with_reblogs, truncate_body=0):
 
     return posts
 
+# Maximum batch size for IN clause to avoid performance degradation
+# PostgreSQL can handle large IN lists, but very large lists (>1000) can be slow
+MAX_BATCH_SIZE = 1000
+
 async def load_posts_keyed(db, ids, truncate_body=0):
     """Given an array of post ids, returns full posts objects keyed by id."""
     assert ids, 'no ids passed to load_posts_keyed'
 
-    # fetch posts and associated author reps
-    sql = """SELECT post_id, author, permlink, title, body, category, depth,
-                    promoted, payout, payout_at, is_paidout, children, votes,
-                    created_at, updated_at, rshares, raw_json, json
-               FROM hive_posts_cache WHERE post_id IN :ids"""
-    result = await db.query_all(sql, ids=tuple(ids))
+    # Optimized: Split large id lists into batches to avoid performance issues
+    # with very large IN clauses (>1000 items)
+    if len(ids) <= MAX_BATCH_SIZE:
+        # Small list: query directly
+        result = await _fetch_posts_batch(db, ids)
+    else:
+        # Large list: query in batches and merge results
+        result = []
+        for i in range(0, len(ids), MAX_BATCH_SIZE):
+            batch_ids = ids[i:i + MAX_BATCH_SIZE]
+            batch_result = await _fetch_posts_batch(db, batch_ids)
+            result.extend(batch_result)
     author_reps = await _query_author_rep_map(db, result)
 
     muted_accounts = Mutes.all()
@@ -87,6 +97,14 @@ async def load_posts(db, ids, truncate_body=0):
                 log.info("requested deleted post: %s", dict(post))
 
     return [posts_by_id[_id] for _id in ids]
+
+async def _fetch_posts_batch(db, ids):
+    """Fetch posts from hive_posts_cache for a batch of ids."""
+    sql = """SELECT post_id, author, permlink, title, body, category, depth,
+                    promoted, payout, payout_at, is_paidout, children, votes,
+                    created_at, updated_at, rshares, raw_json, json
+               FROM hive_posts_cache WHERE post_id IN :ids"""
+    return await db.query_all(sql, ids=tuple(ids))
 
 async def _query_author_rep_map(db, posts):
     """Given a list of posts, returns an author->reputation map."""
