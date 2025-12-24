@@ -127,7 +127,12 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
             timestamp = int(seven_days_ago.timestamp())
             where.append(f"community_id IN :ids and created_at >= to_timestamp({timestamp})")
         else:
-            where.append("community_id IN :ids")
+            # For 'created' sort, limit to last 30 days to avoid query timeout
+            # when querying communities with large historical data
+            now = datetime.now()
+            thirty_days_ago = now - timedelta(days=30)
+            timestamp = int(thirty_days_ago.timestamp())
+            where.append(f"community_id IN :ids and created_at >= to_timestamp({timestamp})")
     else:
         where.append("community_id IS NOT NULL AND community_id != 1337319")
 
