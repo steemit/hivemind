@@ -89,8 +89,9 @@ async def get_ranked_posts(context, sort, start_author='', start_permlink='',
     limit = valid_limit(limit, 100)
     tag = valid_tag(tag, allow_empty=True)
     
-    # Generate cache key (based on all query parameters, excluding observer
-    # as it only affects personalized content)
+    # Generate cache key (based on all query parameters)
+    # Note: when tag='my', observer_id affects the result (subscribed communities),
+    # so we must include it in the cache key
     cache_key_parts = [
         'get_ranked_posts',
         sort,
@@ -99,6 +100,9 @@ async def get_ranked_posts(context, sort, start_author='', start_permlink='',
         str(limit),
         tag or '',
     ]
+    # Include observer_id in cache key when tag='my' (personalized content)
+    if tag == 'my' and observer_id:
+        cache_key_parts.append(str(observer_id))
     cache_key_str = '_'.join(cache_key_parts)
     # Use hash to shorten overly long cache keys
     cache_key = 'bridge_get_ranked_posts_' + hashlib.md5(cache_key_str.encode()).hexdigest()
