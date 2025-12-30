@@ -289,6 +289,8 @@ async def pids_by_blog(db, account: str, start_author: str = '',
     # ignore community posts which were not reblogged
     # Optimized: Use NOT EXISTS instead of NOT IN for better performance
     # This avoids the performance penalty of NOT IN with NULL values
+    # Note: p.author and r.account are VARCHAR(16) storing account names (not IDs)
+    # The :account parameter (account name string) is passed in the query execution below
     skip_condition = """
         AND NOT EXISTS (
             SELECT 1 FROM hive_posts p
@@ -351,12 +353,15 @@ async def pids_by_feed_with_reblog(db, account: str, start_author: str = '',
             )
             WHERE fc.post_id = :start_id
         """
-        start_created_at = await db.query_one(
+        start_created_at_row = await db.query_one(
             start_created_at_sql, 
             account_id=account_id,
             start_id=start_id
         )
-        if start_created_at:
+        # db.query_one returns row[0] (scalar value) or None
+        # Ensure we have a valid datetime value
+        if start_created_at_row is not None:
+            start_created_at = start_created_at_row
             seek = "HAVING MIN(hive_feed_cache.created_at) <= :start_created_at"
 
     # Optimized: Use INNER JOIN explicitly for better query planning
