@@ -14,8 +14,13 @@ def last_month():
 
 async def _get_post_id(db, author, permlink):
     """Get post_id from hive db. (does NOT filter on is_deleted)"""
+    # Generate cache key for post_id lookup (without is_deleted filter)
+    # Post IDs don't change once created, so we can cache for a long time
+    cache_key = f'post_id_all_{author}_{permlink}'
+    
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    post_id = await db.query_one(sql, a=author, p=permlink)
+    post_id = await db.query_one(sql, a=author, p=permlink, 
+                                 cache_key=cache_key, cache_ttl=3600)
     assert post_id, 'invalid author/permlink'
     return post_id
 
@@ -287,14 +292,23 @@ async def pids_by_blog(db, account: str, start_author: str = '',
         """
 
     # ignore community posts which were not reblogged
-    skip = """
-        SELECT id FROM hive_posts
-         WHERE author = :account
-           AND is_deleted = '0'
-           AND depth = 0
-           AND community_id IS NOT NULL
-           AND id NOT IN (SELECT post_id FROM hive_reblogs
-                           WHERE account = :account)"""
+    # Optimized: Use NOT EXISTS instead of NOT IN for better performance
+    # This avoids the performance penalty of NOT IN with NULL values
+    # Note: p.author and r.account are VARCHAR(16) storing account names (not IDs)
+    # The :account parameter (account name string) is passed in the query execution below
+    skip_condition = """
+        AND NOT EXISTS (
+            SELECT 1 FROM hive_posts p
+            WHERE p.id = hive_feed_cache.post_id
+              AND p.author = :account
+              AND p.is_deleted = '0'
+              AND p.depth = 0
+              AND p.community_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM hive_reblogs r
+                  WHERE r.post_id = p.id AND r.account = :account
+              )
+        )"""
 
     # hide posts
     #hide = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
@@ -302,11 +316,10 @@ async def pids_by_blog(db, account: str, start_author: str = '',
     sql = """
         SELECT post_id
           FROM hive_feed_cache
-         WHERE account_id = :account_id %s
-           AND post_id NOT IN (%s)
+         WHERE account_id = :account_id %s %s
       ORDER BY created_at DESC
          LIMIT :limit
-    """ % (seek, skip)
+    """ % (seek, skip_condition)
 
     # Generate cache key with all parameters that affect the result
     cache_key_parts = [
@@ -327,33 +340,59 @@ async def pids_by_feed_with_reblog(db, account: str, start_author: str = '',
     account_id = await _get_account_id(db, account)
 
     seek = ''
-    start_id = None
+    start_created_at = None
     if start_permlink:
         start_id = await _get_post_id(db, start_author, start_permlink)
         if not start_id:
             return []
 
-        seek = """
-          HAVING MIN(hive_feed_cache.created_at) <= (
-            SELECT MIN(created_at) FROM hive_feed_cache WHERE post_id = :start_id
-               AND account_id IN (SELECT following FROM hive_follows
-                                  WHERE follower = :account 
-                                  AND state IN (1,3)))
+        # Optimized: Pre-fetch the created_at to avoid nested subquery in HAVING
+        # This reduces query complexity and improves performance
+        start_created_at_sql = """
+            SELECT MIN(fc.created_at) 
+            FROM hive_feed_cache fc
+            INNER JOIN hive_follows hf ON (
+                fc.account_id = hf.following 
+                AND hf.follower = :account_id
+                AND hf.state IN (1,3)
+            )
+            WHERE fc.post_id = :start_id
         """
+        start_created_at_row = await db.query_one(
+            start_created_at_sql, 
+            account_id=account_id,
+            start_id=start_id
+        )
+        # db.query_one returns row[0] (scalar value) or None
+        # Ensure we have a valid datetime value
+        if start_created_at_row is not None:
+            start_created_at = start_created_at_row
+            seek = "HAVING MIN(hive_feed_cache.created_at) <= :start_created_at"
 
+    # Optimized: Use INNER JOIN explicitly for better query planning
     sql = """
         SELECT post_id, string_agg(name, ',') accounts
           FROM hive_feed_cache
-          JOIN hive_follows ON account_id = hive_follows.following AND state IN (1,3)
-          JOIN hive_accounts ON hive_follows.following = hive_accounts.id
-         WHERE hive_follows.follower = :account
-           AND hive_feed_cache.created_at > :cutoff
+          INNER JOIN hive_follows ON (
+              account_id = hive_follows.following 
+              AND hive_follows.follower = :account_id
+              AND hive_follows.state IN (1,3)
+          )
+          INNER JOIN hive_accounts ON hive_follows.following = hive_accounts.id
+         WHERE hive_feed_cache.created_at > :cutoff
       GROUP BY post_id %s
       ORDER BY MIN(hive_feed_cache.created_at) DESC LIMIT :limit
     """ % seek
 
-    result = await db.query_all(sql, account=account_id, start_id=start_id,
-                                limit=limit, cutoff=last_month())
+    params = {
+        'account_id': account_id,
+        'cutoff': last_month(),
+        'limit': limit
+    }
+    if start_created_at:
+        params['start_created_at'] = start_created_at
+
+    result = await db.query_all(sql, **params)
     return [(row[0], row[1]) for row in result]
 
 

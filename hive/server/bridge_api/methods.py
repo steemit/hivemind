@@ -18,11 +18,16 @@ from hive.server.db import CACHE_NAMESPACE
 
 async def _get_post_id(db, author, permlink):
     """Get post_id from hive db."""
+    # Generate cache key for post_id lookup
+    # Post IDs don't change once created, so we can cache for a long time
+    cache_key = f'post_id_{author}_{permlink}'
+    
     sql = """SELECT id FROM hive_posts
               WHERE author = :a
                 AND permlink = :p
                 AND is_deleted = '0'"""
-    post_id = await db.query_one(sql, a=author, p=permlink)
+    post_id = await db.query_one(sql, a=author, p=permlink, 
+                                 cache_key=cache_key, cache_ttl=3600)
     assert post_id, 'invalid author/permlink'
     return post_id
 

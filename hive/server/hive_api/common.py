@@ -23,8 +23,13 @@ async def url_to_id(db, url):
 
 async def get_post_id(db, author, permlink):
     """Get post_id based on author/permlink."""
+    # Generate cache key for post_id lookup
+    # Post IDs don't change once created, so we can cache for a long time
+    cache_key = f'post_id_{author}_{permlink}'
+    
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    _id = await db.query_one(sql, a=author, p=permlink)
+    _id = await db.query_one(sql, a=author, p=permlink, 
+                             cache_key=cache_key, cache_ttl=3600)
     assert _id, 'post id not found'
     return _id
 

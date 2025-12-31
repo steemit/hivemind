@@ -7,6 +7,7 @@ import ujson as json
 from hive.conf import Conf
 from hive.server.hive_api.common import (get_account_id, get_community_id, valid_limit)
 from hive.server.common.helpers import return_error_info
+from hive.server.db import CACHE_NAMESPACE
 
 
 def days_ago(days):
@@ -126,6 +127,16 @@ async def list_all_subscriptions(context, account):
     db = context['db']
     account_id = await get_account_id(db, account)
 
+    # Generate cache key
+    cache_key = f'bridge_list_all_subscriptions_{account_id}'
+    
+    # Try to get result from cache
+    if db.redis_cache is not None:
+        cached_result = await db.redis_cache.get(cache_key, namespace=CACHE_NAMESPACE)
+        if cached_result is not None:
+            return cached_result
+    
+    # Cache miss, execute query
     sql = """SELECT c.name, c.title, COALESCE(r.role_id, 0), COALESCE(r.title, '')
                FROM hive_communities c
                JOIN hive_subscriptions s ON c.id = s.community_id
@@ -134,7 +145,14 @@ async def list_all_subscriptions(context, account):
               WHERE s.account_id = :account_id
            ORDER BY COALESCE(role_id, 0) DESC, c.rank"""
     out = await db.query_all(sql, account_id=account_id)
-    return [(r[0], r[1], ROLES[r[2]], r[3]) for r in out]
+    result = [(r[0], r[1], ROLES[r[2]], r[3]) for r in out]
+    
+    # Store result in cache (TTL: 300 seconds = 5 minutes)
+    # Subscriptions don't change frequently, but we want reasonable freshness
+    if db.redis_cache is not None:
+        await db.redis_cache.set(cache_key, result, ttl=300, namespace=CACHE_NAMESPACE)
+    
+    return result
 
 
 @return_error_info

@@ -18,9 +18,14 @@ def last_month():
 
 async def get_post_id(db, author, permlink):
     """Given an author/permlink, retrieve the id from db."""
+    # Generate cache key for post_id lookup
+    # Post IDs don't change once created, so we can cache for a long time
+    cache_key = f'post_id_{author}_{permlink}'
+    
     sql = ("SELECT id FROM hive_posts WHERE author = :a "
            "AND permlink = :p AND is_deleted = '0' LIMIT 1")
-    return await db.query_one(sql, a=author, p=permlink)
+    return await db.query_one(sql, a=author, p=permlink, 
+                             cache_key=cache_key, cache_ttl=3600)
 
 async def get_child_ids(db, post_id):
     """Given a parent post id, retrieve all child ids."""
@@ -29,8 +34,13 @@ async def get_child_ids(db, post_id):
 
 async def _get_post_id(db, author, permlink):
     """Get post_id from hive db."""
+    # Generate cache key for post_id lookup (without is_deleted filter)
+    # Post IDs don't change once created, so we can cache for a long time
+    cache_key = f'post_id_all_{author}_{permlink}'
+    
     sql = "SELECT id FROM hive_posts WHERE author = :a AND permlink = :p"
-    return await db.query_one(sql, a=author, p=permlink)
+    return await db.query_one(sql, a=author, p=permlink, 
+                              cache_key=cache_key, cache_ttl=3600)
 
 async def _get_account_id(db, name):
     """Get account id from hive db."""
