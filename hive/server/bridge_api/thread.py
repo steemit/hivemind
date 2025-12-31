@@ -31,9 +31,14 @@ async def get_discussion(context, author, permlink):
 
 async def _get_post_id(db, author, permlink):
     """Given an author/permlink, retrieve the id from db."""
+    # Generate cache key for post_id lookup
+    # Post IDs don't change once created, so we can cache for a long time
+    cache_key = f'post_id_{author}_{permlink}'
+    
     sql = ("SELECT id FROM hive_posts WHERE author = :a "
            "AND permlink = :p AND is_deleted = '0' LIMIT 1")
-    return await db.query_one(sql, a=author, p=permlink)
+    return await db.query_one(sql, a=author, p=permlink, 
+                             cache_key=cache_key, cache_ttl=3600)
 
 
 async def _get_author_hide_id(db, author):
