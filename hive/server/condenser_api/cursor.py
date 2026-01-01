@@ -63,13 +63,16 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
                       WHERE following = :account_id
                         AND follower = :start_id)"""
 
+    # Optimized: Use INNER JOIN instead of LEFT JOIN for better performance
+    # This assumes data integrity (all follower IDs exist in hive_accounts)
     sql = """
-        SELECT name,reputation,state FROM hive_follows hf
-     LEFT JOIN hive_accounts ON hf.follower = id
-         WHERE hf.following = :account_id
-           AND state IN :state %s
-      ORDER BY hf.created_at DESC
-         LIMIT :limit
+        SELECT ha.name, ha.reputation, hf.state
+        FROM hive_follows hf
+        INNER JOIN hive_accounts ha ON hf.follower = ha.id
+        WHERE hf.following = :account_id
+          AND hf.state IN :state %s
+        ORDER BY hf.created_at DESC
+        LIMIT :limit
     """ % seek
 
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
@@ -81,13 +84,16 @@ async def get_followers_by_page(db, account: str, page: int, page_size: int, fol
     account_id = await _get_account_id(db, account)
     state = (2,3) if follow_type == 'ignore' else (1,3)
 
+    # Optimized: Use INNER JOIN instead of LEFT JOIN for better performance
+    # This assumes data integrity (all follower IDs exist in hive_accounts)
     sql = """
-        SELECT name,reputation,state FROM hive_follows hf
-     LEFT JOIN hive_accounts ON hf.follower = id
-         WHERE hf.following = :account_id
-           AND state IN :state
-      ORDER BY hf.created_at DESC
-         LIMIT :limit OFFSET :offset
+        SELECT ha.name, ha.reputation, hf.state
+        FROM hive_follows hf
+        INNER JOIN hive_accounts ha ON hf.follower = ha.id
+        WHERE hf.following = :account_id
+          AND hf.state IN :state
+        ORDER BY hf.created_at DESC
+        LIMIT :limit OFFSET :offset
     """
 
     return await db.query_all(sql, account_id=account_id,
