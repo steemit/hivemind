@@ -3,12 +3,18 @@
 Redis cache validity check script
 
 Usage:
+    # Using environment variable (recommended)
+    export REDIS_URL=redis://localhost:6379
+    python check_cache.py
+    
+    # Using command line argument
     python check_cache.py --redis-url redis://localhost:6379
     python check_cache.py --redis-url redis://localhost:6379 --test-key "post_id_testuser_testpost"
 """
 
 import asyncio
 import argparse
+import os
 import sys
 from aiocache import Cache
 from hive.server.db import CACHE_NAMESPACE
@@ -151,11 +157,21 @@ def print_debug_instructions():
 
 async def main():
     parser = argparse.ArgumentParser(description='Check Redis cache validity')
-    parser.add_argument('--redis-url', required=True, help='Redis connection URL (e.g., redis://localhost:6379)')
+    # Get Redis URL from environment variable or command line argument
+    default_redis_url = os.environ.get('REDIS_URL')
+    parser.add_argument('--redis-url', 
+                       default=default_redis_url,
+                       help='Redis connection URL (default: from REDIS_URL environment variable)')
     parser.add_argument('--test-key', help='Cache key to check (e.g., post_id_testuser_testpost)')
     parser.add_argument('--pattern', default='post_id_*', help='Key pattern to scan (default: post_id_*)')
     
     args = parser.parse_args()
+    
+    # Validate Redis URL
+    if not args.redis_url:
+        print("Error: Redis URL is required")
+        print("Please provide --redis-url argument or set REDIS_URL environment variable")
+        sys.exit(1)
     
     # Check Redis connection
     cache = await check_redis_connection(args.redis_url)

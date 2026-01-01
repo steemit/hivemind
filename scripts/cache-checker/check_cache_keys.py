@@ -3,12 +3,18 @@
 Detailed Redis cache key inspection script
 
 Usage:
+    # Using environment variable (recommended)
+    export REDIS_URL=redis://localhost:6379
+    python3 check_cache_keys.py
+    
+    # Using command line argument
     python3 check_cache_keys.py --redis-url redis://localhost:6379
     python3 check_cache_keys.py --redis-url redis://localhost:6379 --pattern "post_id_*" --limit 100
     python3 check_cache_keys.py --redis-url redis://localhost:6379 --stats
 """
 
 import argparse
+import os
 import sys
 import time
 from collections import defaultdict
@@ -243,7 +249,11 @@ def check_specific_key(r, key):
 
 def main():
     parser = argparse.ArgumentParser(description='Detailed Redis cache key inspection tool')
-    parser.add_argument('--redis-url', required=True, help='Redis connection URL')
+    # Get Redis URL from environment variable or command line argument
+    default_redis_url = os.environ.get('REDIS_URL')
+    parser.add_argument('--redis-url', 
+                       default=default_redis_url,
+                       help='Redis connection URL (default: from REDIS_URL environment variable)')
     parser.add_argument('--pattern', default=f'{CACHE_NAMESPACE}:post_id_*', 
                        help=f'Key pattern to scan (default: {CACHE_NAMESPACE}:post_id_*)')
     parser.add_argument('--key', help='Check a specific cache key (without namespace prefix)')
@@ -253,6 +263,12 @@ def main():
     parser.add_argument('--max-details', type=int, default=10, help='Maximum number of detailed keys to show (default: 10)')
     
     args = parser.parse_args()
+    
+    # Validate Redis URL
+    if not args.redis_url:
+        print("Error: Redis URL is required")
+        print("Please provide --redis-url argument or set REDIS_URL environment variable")
+        sys.exit(1)
     
     # Check Redis connection
     r = check_redis_connection(args.redis_url)
