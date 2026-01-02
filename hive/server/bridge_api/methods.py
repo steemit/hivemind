@@ -16,6 +16,17 @@ from hive.server.db import CACHE_NAMESPACE
 
 #pylint: disable=too-many-arguments, no-else-return
 
+async def _filter_hidden_posts(db, ids):
+    """Filter out hidden posts from a list of post IDs. Returns filtered list."""
+    if not ids:
+        return ids
+    hide_pids = await cursor.hide_pids_by_ids(db, ids)
+    if hide_pids:
+        # Use set for O(1) lookup instead of O(n) list operations
+        hide_set = set(hide_pids)
+        return [pid for pid in ids if pid not in hide_set]
+    return ids
+
 async def _get_post_id(db, author, permlink):
     """Get post_id from hive db."""
     # Generate cache key for post_id lookup
@@ -27,7 +38,7 @@ async def _get_post_id(db, author, permlink):
                 AND permlink = :p
                 AND is_deleted = '0'"""
     post_id = await db.query_one(sql, a=author, p=permlink, 
-                                 cache_key=cache_key, cache_ttl=3600)
+                                 cache_key=cache_key, cache_ttl=86400)
     assert post_id, 'invalid author/permlink'
     return post_id
 
@@ -69,12 +80,33 @@ async def get_post(context, author, permlink, observer=None):
     #TODO: `observer` logic for user-post state
     db = context['db']
     observer_id = await get_account_id(db, observer) if observer else None
-    pid = await _get_post_id(db,
-                             valid_account(author),
-                             valid_permlink(permlink))
+    
+    # Generate cache key for the full post result
+    # Include observer_id in cache key when observer logic is implemented
+    author_valid = valid_account(author)
+    permlink_valid = valid_permlink(permlink)
+    cache_key_parts = ['get_post', author_valid, permlink_valid]
+    if observer_id:
+        cache_key_parts.append(str(observer_id))
+    cache_key_str = '_'.join(cache_key_parts)
+    cache_key = 'bridge_get_post_' + hashlib.md5(cache_key_str.encode()).hexdigest()
+    
+    # Try to get result from cache (cache for 180 seconds)
+    if db.redis_cache is not None:
+        cached_result = await db.redis_cache.get(cache_key, namespace=CACHE_NAMESPACE)
+        if cached_result is not None:
+            return cached_result
+    
+    pid = await _get_post_id(db, author_valid, permlink_valid)
     posts = await load_posts(db, [pid])
     assert len(posts) == 1, 'cache post not found'
-    return posts[0]
+    result = posts[0]
+    
+    # Store result in cache
+    if db.redis_cache is not None:
+        await db.redis_cache.set(cache_key, result, ttl=180, namespace=CACHE_NAMESPACE)
+    
+    return result
 
 
 @return_error_info
@@ -170,46 +202,62 @@ async def get_account_posts(context, sort, account, start_author='', start_perml
     # pylint: disable=unused-variable
     observer_id = await get_account_id(db, observer) if observer else None # TODO
 
+    # Generate cache key for account posts
+    # Note: observer_id is not used yet, but included for future compatibility
+    cache_key_parts = [
+        'get_account_posts',
+        sort,
+        account,
+        start_author or '',
+        start_permlink or '',
+        str(limit),
+    ]
+    if observer_id:
+        cache_key_parts.append(str(observer_id))
+    cache_key_str = '_'.join(cache_key_parts)
+    cache_key = 'bridge_get_account_posts_' + hashlib.md5(cache_key_str.encode()).hexdigest()
+    
+    # Try to get result from cache (cache for 30 seconds)
+    if db.redis_cache is not None:
+        cached_result = await db.redis_cache.get(cache_key, namespace=CACHE_NAMESPACE)
+        if cached_result is not None:
+            return cached_result
+
+    # Normalize start parameter for sorts that require it
+    needs_start_normalization = sort in ['posts', 'comments', 'replies', 'payout']
+    if needs_start_normalization:
+        start = start if start_permlink else (account, None)
+        if sort in ['posts', 'comments']:
+            assert account == start[0], 'comments - account must match start author'
+
     if sort == 'blog':
         ids = await cursor.pids_by_blog(db, account, *start, limit)
-        # hide posts
-        hide_pids = await cursor.hide_pids_by_ids(db, ids)
-        for pid in hide_pids:
-            if pid in ids:
-                ids.remove(pid)
+        ids = await _filter_hidden_posts(db, ids)
         posts = await load_posts(context['db'], ids)
         for post in posts:
             if post['author'] != account:
                 post['reblogged_by'] = [account]
-        return posts
+        result = posts
     elif sort == 'feed':
         res = await cursor.pids_by_feed_with_reblog(db, account, *start, limit)
-        return await load_posts_reblogs(context['db'], res)
+        result = await load_posts_reblogs(context['db'], res)
     elif sort == 'posts':
-        start = start if start_permlink else (account, None)
-        assert account == start[0], 'comments - account must match start author'
         ids = await cursor.pids_by_posts(db, *start, limit)
-        # hide posts
-        hide_pids = await cursor.hide_pids_by_ids(db, ids)
-        for pid in hide_pids:
-            if pid in ids:
-                ids.remove(pid)
-        return await load_posts(context['db'], ids)
+        ids = await _filter_hidden_posts(db, ids)
+        result = await load_posts(context['db'], ids)
     elif sort == 'comments':
-        start = start if start_permlink else (account, None)
-        assert account == start[0], 'comments - account must match start author'
         ids = await cursor.pids_by_comments(db, *start, limit)
-        return await load_posts(context['db'], ids)
+        result = await load_posts(context['db'], ids)
     elif sort == 'replies':
-        start = start if start_permlink else (account, None)
         ids = await cursor.pids_by_replies(db, *start, limit)
-        return await load_posts(context['db'], ids)
+        result = await load_posts(context['db'], ids)
     elif sort == 'payout':
-        start = start if start_permlink else (account, None)
         ids = await cursor.pids_by_payout(db, account, *start, limit)
-        # hide posts
-        hide_pids = await cursor.hide_pids_by_ids(db, ids)
-        for pid in hide_pids:
-            if pid in ids:
-                ids.remove(pid)
-        return await load_posts(context['db'], ids)
+        ids = await _filter_hidden_posts(db, ids)
+        result = await load_posts(context['db'], ids)
+    
+    # Store result in cache
+    if db.redis_cache is not None:
+        await db.redis_cache.set(cache_key, result, ttl=30, namespace=CACHE_NAMESPACE)
+    
+    return result
