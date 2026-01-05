@@ -341,6 +341,31 @@ class DbState:
             cls.db().query("CREATE INDEX CONCURRENTLY hive_posts_ix4_optimized ON hive_posts (parent_id, id) INCLUDE (author) WHERE is_deleted = '0'")
             cls.db().query("DROP INDEX IF EXISTS hive_posts_ix4")
             cls._set_ver(22)
+        if cls._ver == 22:
+            # Performance optimization: Add indexes for ORDER BY DESC queries
+            # These indexes optimize frequently used queries that sort by created_at DESC
+            log.info("[HIVE] Creating performance optimization indexes...")
+            
+            # 1. Optimize hive_feed_cache ORDER BY created_at DESC (for pids_by_blog queries)
+            cls.db().query("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_feed_cache_account_created_desc ON hive_feed_cache(account_id, created_at DESC, post_id)")
+            
+            # 2. Optimize pids_by_feed_with_reblog query JOIN and WHERE conditions
+            # Note: Cannot use NOW() in WHERE clause (must be IMMUTABLE), so we create index without WHERE
+            # The query itself will filter by created_at, and this index will still be effective
+            cls.db().query("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_feed_cache_created_account_post ON hive_feed_cache(created_at DESC, account_id, post_id)")
+            
+            # 3. Optimize hive_follows JOIN in pids_by_feed_with_reblog
+            cls.db().query("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_follows_follower_following_state ON hive_follows(follower, following, state) WHERE state IN (1,3)")
+            
+            # 4. Optimize get_following query ORDER BY created_at DESC
+            cls.db().query("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_follows_follower_state_created_desc ON hive_follows(follower, state, created_at DESC, following) WHERE state IN (1,3)")
+            
+            # Update statistics after creating indexes
+            cls.db().query("ANALYZE hive_feed_cache")
+            cls.db().query("ANALYZE hive_follows")
+            
+            log.info("[HIVE] Performance optimization indexes created")
+            cls._set_ver(23)
 
         reset_autovac(cls.db())
 
