@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 22
+DB_VERSION = 23
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -111,6 +111,8 @@ def build_metadata():
         sa.UniqueConstraint('following', 'follower', name='hive_follows_ux3'), # core
         sa.Index('hive_follows_ix5a', 'following', 'state', 'created_at', 'follower'),
         sa.Index('hive_follows_ix5b', 'follower', 'state', 'created_at', 'following'),
+        # Note: idx_follows_follower_following_state and idx_follows_follower_state_created_desc
+        # are created via migration (v23) because they use DESC and WHERE clauses
     )
 
     sa.Table(
@@ -148,6 +150,8 @@ def build_metadata():
         sa.Column('created_at', sa.DateTime, nullable=False),
         sa.UniqueConstraint('post_id', 'account_id', name='hive_feed_cache_ux1'), # core
         sa.Index('hive_feed_cache_ix1', 'account_id', 'post_id', 'created_at'), # API (and rebuild?)
+        # Note: idx_feed_cache_account_created_desc is created via migration (v23)
+        # because SQLAlchemy doesn't support DESC in Index definition
     )
 
     sa.Table(
