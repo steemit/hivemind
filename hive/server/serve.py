@@ -185,10 +185,11 @@ def run_server(conf):
     async def init_db(app):
         """Initialize db adapter."""
         args = app['config']['args']
+        pool_size = args.get('db_pool_size', 20)
         if 'redis_url' in args:
-            app['db'] = await Db.create(args['database_url'], args['redis_url'])
+            app['db'] = await Db.create(args['database_url'], args['redis_url'], pool_size=pool_size)
         else:
-            app['db'] = await Db.create(args['database_url'])
+            app['db'] = await Db.create(args['database_url'], None, pool_size=pool_size)
 
         stats = PayoutStats(app['db'])
         stats.set_shared_instance(stats)

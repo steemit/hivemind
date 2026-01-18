@@ -66,10 +66,10 @@ class Db:
     """Wrapper for aiopg.sa db driver."""
 
     @classmethod
-    async def create(cls, url, redis_url):
+    async def create(cls, url, redis_url=None, pool_size=20):
         """Factory method."""
         instance = Db()
-        await instance.init(url, redis_url)
+        await instance.init(url, redis_url, pool_size)
         return instance
 
     def __init__(self):
@@ -77,7 +77,7 @@ class Db:
         self.redis_cache = None
         self._prep_sql = {}
 
-    async def init(self, url, redis_url):
+    async def init(self, url, redis_url, pool_size=20):
         """Initialize the aiopg.sa engine."""
         conf = make_url(url)
         self.db = await create_engine(user=conf.username,
@@ -85,7 +85,7 @@ class Db:
                                       password=conf.password,
                                       host=conf.host,
                                       port=conf.port,
-                                      maxsize=20,
+                                      maxsize=pool_size,
                                       **conf.query)
         if redis_url is not None:
             self.redis_cache = Cache.from_url(redis_url)
