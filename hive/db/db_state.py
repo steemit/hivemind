@@ -366,6 +366,23 @@ class DbState:
             
             log.info("[HIVE] Performance optimization indexes created")
             cls._set_ver(23)
+        if cls._ver == 23:
+            # Performance optimization: Add index for pids_by_blog NOT EXISTS subquery
+            # This index optimizes the hive_posts NOT EXISTS check in pids_by_blog queries
+            # Reference: Report-2026-01-19.md
+            log.info("[HIVE] Creating idx_posts_id_author_deleted_depth_community index...")
+            
+            # Optimize hive_posts NOT EXISTS subquery in pids_by_blog
+            # The existing hive_posts_ix3 index is not precise enough because it doesn't
+            # include community_id condition. This new index covers all conditions used
+            # in the NOT EXISTS subquery: id, author, is_deleted, depth, community_id
+            cls.db().query("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_posts_id_author_deleted_depth_community ON hive_posts(id, author, is_deleted, depth, community_id) WHERE is_deleted = '0' AND depth = 0 AND community_id IS NOT NULL")
+            
+            # Update statistics after creating index
+            cls.db().query("ANALYZE hive_posts")
+            
+            log.info("[HIVE] idx_posts_id_author_deleted_depth_community index created")
+            cls._set_ver(24)
 
         reset_autovac(cls.db())
 

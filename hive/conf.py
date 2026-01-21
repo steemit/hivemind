@@ -38,6 +38,7 @@ class Conf():
 
         # server
         add('--http-server-port', type=int, env_var='HTTP_SERVER_PORT', default=8080)
+        add('--db-pool-size', type=int, env_var='DB_POOL_SIZE', help='database connection pool size', default=20)
 
         # sync
         add('--max-workers', type=int, env_var='MAX_WORKERS', help='max workers for batch requests', default=4)
