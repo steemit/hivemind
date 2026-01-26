@@ -16,6 +16,14 @@ log = logging.getLogger(__name__)
 
 CACHE_NAMESPACE = "hivemind"
 
+# Sentinel value to represent 'record not found' in cache.
+# Using a string marker that can be easily serialized/deserialized.
+# This allows us to distinguish between:
+# - Cache miss (None from cache.get) → query DB
+# - Record doesn't exist (sentinel in cache) → return None (cached)
+# - Record exists (value in cache) → return value (cached)
+_CACHE_NOT_FOUND = "__CACHE_NOT_FOUND__"
+
 def sqltimer(function):
     """Decorator for DB query methods which tracks timing."""
     async def _wrapper(*args, **kwargs):
@@ -37,27 +45,25 @@ def cacher(func):
             if Stats._db.DEBUG_SQL:
                 log.debug("[CACHE-DEBUG] cache_key: %s, value: %s", kwargs["cache_key"], v)
             if v is None:
-                # Get from DB and set to cache, when miss cache
+                # Cache miss: Get from DB and set to cache
                 v = await func(*args, **kwargs)
                 if Stats._db.DEBUG_SQL:
                     log.debug("[CACHE-DEBUG] Not fit cache, cache_key: %s, Get from DB, value: %s", kwargs["cache_key"], v)
-                if v is None:
-                    """
-                    TODO:
-                        * Hit no cache from Redis, we will get None
-                        * Get no record from DB, we will get None
-                        These two conditions are conflict.
-                        If we don't cache the DB result None, every request will get in DB.
-                        If we cache the DB result None, we cannot charge whether cache exist or not.
-                    """
-                    log.warning("[CACHE-LAYER-TODO] [%s] (%s)", args, kwargs)
-                    return None
                 if "cache_ttl" in kwargs:
                     ttl = kwargs['cache_ttl']
                 else:
                     ttl = 5*60
-                await args[0].redis_cache.set(kwargs['cache_key'], v, ttl=ttl, namespace=CACHE_NAMESPACE)
-            return v
+                # Use sentinel value to cache "not found" results
+                # This allows us to distinguish cache misses from "record doesn't exist"
+                cache_value = _CACHE_NOT_FOUND if v is None else v
+                await args[0].redis_cache.set(kwargs['cache_key'], cache_value, ttl=ttl, namespace=CACHE_NAMESPACE)
+                return v
+            elif v == _CACHE_NOT_FOUND:
+                # Cache hit with sentinel: record doesn't exist (cached)
+                return None
+            else:
+                # Cache hit with value: record exists (cached)
+                return v
         else:
             return await func(*args, **kwargs)
     return _wrapper
