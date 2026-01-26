@@ -53,16 +53,23 @@ def cacher(func):
                     ttl = kwargs['cache_ttl']
                 else:
                     ttl = 5*60
-                # Use sentinel value to cache "not found" results
-                # This allows us to distinguish cache misses from "record doesn't exist"
-                cache_value = _CACHE_NOT_FOUND if v is None else v
+                # Use sentinel value to cache "not found" results only for query_one
+                # For query_col and query_all, empty list [] is a valid result and should be cached as-is
+                # For query_one, None means "record doesn't exist" and needs sentinel to distinguish from cache miss
+                func_name = func.__name__
+                if func_name == 'query_one' and v is None:
+                    # Only use sentinel for query_one when result is None
+                    cache_value = _CACHE_NOT_FOUND
+                else:
+                    # For query_col, query_all, query_row: cache the actual result (including empty lists)
+                    cache_value = v
                 await args[0].redis_cache.set(kwargs['cache_key'], cache_value, ttl=ttl, namespace=CACHE_NAMESPACE)
                 return v
             elif v == _CACHE_NOT_FOUND:
-                # Cache hit with sentinel: record doesn't exist (cached)
+                # Cache hit with sentinel: record doesn't exist (cached) - only for query_one
                 return None
             else:
-                # Cache hit with value: record exists (cached)
+                # Cache hit with value: record exists (cached) or empty list for query_col/query_all
                 return v
         else:
             return await func(*args, **kwargs)
