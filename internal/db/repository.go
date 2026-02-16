@@ -513,3 +513,51 @@ func (r *FollowRepository) CreateOrUpdate(ctx context.Context, follow *models.Fo
 		FirstOrCreate(follow).Error
 }
 
+// GetFollowersPaginated retrieves followers with page-based pagination
+func (r *FollowRepository) GetFollowersPaginated(ctx context.Context, followingID int64, followType string, offset, limit int) ([]*models.Follow, error) {
+	var follows []*models.Follow
+	query := r.db.WithContext(ctx).
+		Where("following = ?", followingID)
+
+	// Filter by follow type
+	if followType == "blog" {
+		query = query.Where("state IN (1, 3)")
+	} else if followType == "ignore" {
+		query = query.Where("state IN (2, 3)")
+	}
+
+	if err := query.
+		Order("follower DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&follows).Error; err != nil {
+		return nil, err
+	}
+
+	return follows, nil
+}
+
+// GetFollowingPaginated retrieves following with page-based pagination
+func (r *FollowRepository) GetFollowingPaginated(ctx context.Context, followerID int64, followType string, offset, limit int) ([]*models.Follow, error) {
+	var follows []*models.Follow
+	query := r.db.WithContext(ctx).
+		Where("follower = ?", followerID)
+
+	// Filter by follow type
+	if followType == "blog" {
+		query = query.Where("state IN (1, 3)")
+	} else if followType == "ignore" {
+		query = query.Where("state IN (2, 3)")
+	}
+
+	if err := query.
+		Order("following DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&follows).Error; err != nil {
+		return nil, err
+	}
+
+	return follows, nil
+}
+

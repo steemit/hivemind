@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -12,6 +13,7 @@ import (
 	"github.com/steemit/hivemind/internal/cache"
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/pkg/logging"
+	"github.com/steemit/hivemind/pkg/telemetry"
 )
 
 // Router sets up API routes
@@ -65,6 +67,8 @@ func (r *Router) registerMethods() {
 	r.handler.RegisterMethod("condenser_api.get_following", condenserFollow.GetFollowing)
 	r.handler.RegisterMethod("condenser_api.get_follow_count", condenserFollow.GetFollowCount)
 	r.handler.RegisterMethod("condenser_api.get_reblogged_by", condenserFollow.GetRebloggedBy)
+	r.handler.RegisterMethod("condenser_api.get_followers_by_page", condenserFollow.GetFollowersByPage)
+	r.handler.RegisterMethod("condenser_api.get_following_by_page", condenserFollow.GetFollowingByPage)
 	r.handler.RegisterMethod("condenser_api.get_content", condenserContent.GetContent)
 	r.handler.RegisterMethod("condenser_api.get_content_replies", condenserContent.GetContentReplies)
 	
@@ -118,12 +122,17 @@ func (r *Router) registerMethods() {
 	bridgePost := bridge.NewPostAPI(repo)
 	bridgeProfile := bridge.NewProfileAPI(repo)
 	bridgeRanked := bridge.NewRankedAPI(repo, r.db, r.cache)
+	bridgeStats := bridge.NewStatsAPI(repo, r.db)
 
 	r.handler.RegisterMethod("bridge.get_post", bridgePost.GetPost)
+	r.handler.RegisterMethod("bridge.normalize_post", bridgePost.NormalizePost)
+	r.handler.RegisterMethod("bridge.get_post_header", bridgePost.GetPostHeader)
+	r.handler.RegisterMethod("bridge.get_discussion", bridgePost.GetDiscussion)
 	r.handler.RegisterMethod("bridge.get_profile", bridgeProfile.GetProfile)
 	r.handler.RegisterMethod("bridge.get_ranked_posts", bridgeRanked.GetRankedPosts)
 	r.handler.RegisterMethod("bridge.get_account_posts", bridgeRanked.GetAccountPosts)
 	r.handler.RegisterMethod("bridge.get_trending_topics", bridgeRanked.GetTrendingTopics)
+	r.handler.RegisterMethod("bridge.get_payout_stats", bridgeStats.GetPayoutStats)
 
 	// Hive API
 	hivePublic := hive.NewPublicAPI(repo)
@@ -165,11 +174,35 @@ func (r *Router) healthHandler(c *gin.Context) {
 
 // dbHeadState returns database head state
 func (r *Router) dbHeadState(c *gin.Context, params json.RawMessage) (interface{}, error) {
-	// TODO: Implement database head state query
+	_, span := telemetry.StartSpanWithName(c.Request.Context(), "hive.db_head_state")
+	defer span.End()
+
+	repo := db.NewRepository(r.db.DB)
+	blockRepo := db.NewBlockRepository(repo)
+
+	headBlock, err := blockRepo.GetHead(c.Request.Context())
+	if err != nil {
+		telemetry.RecordSpanError(span, err)
+		return nil, err
+	}
+
+	if headBlock == nil {
+		return gin.H{
+			"db_head_block": 0,
+			"db_head_time":  "",
+			"db_head_age":   0,
+		}, nil
+	}
+
+	// Calculate age in seconds
+	age := int64(time.Since(headBlock.CreatedAt).Seconds())
+
+	telemetry.SetSpanSuccess(span)
+
 	return gin.H{
-		"db_head_block": 0,
-		"db_head_time":  "",
-		"db_head_age":   0,
+		"db_head_block": headBlock.Num,
+		"db_head_time":  headBlock.CreatedAt.Format("2006-01-02 15:04:05"),
+		"db_head_age":   age,
 	}, nil
 }
 

@@ -18,21 +18,24 @@ Hivemind consists of two main components:
 ```
 hivemind/
 ├── cmd/
-│   ├── server/          # API 服务器
-│   └── indexer/         # 索引器服务
+│   ├── server/          # API server
+│   └── indexer/         # Indexer service
 ├── internal/
-│   ├── api/            # API 层
-│   ├── indexer/         # 索引器逻辑
-│   ├── db/             # 数据库访问层
-│   ├── steem/          # Steem SDK 封装
-│   ├── cache/          # 缓存层（Redis）
-│   ├── models/         # 数据模型
-│   └── utils/          # 工具函数
+│   ├── api/             # API layer
+│   │   ├── bridge/      # Bridge API
+│   │   ├── condenser/   # Condenser API
+│   │   └── hive/        # Hive API
+│   ├── db/              # Database access layer
+│   ├── middleware/      # HTTP middleware
+│   ├── steem/           # Steem SDK wrapper
+│   ├── cache/           # Cache layer (Redis)
+│   └── models/          # Data models
 ├── pkg/
-│   ├── telemetry/      # OpenTelemetry 集成
-│   └── config/         # 配置管理
-├── migrations/         # 数据库迁移
-└── docs/              # 文档
+│   ├── telemetry/       # OpenTelemetry integration
+│   ├── config/          # Configuration management
+│   └── logging/         # Logging system
+├── migrations/          # Database migrations
+└── docs/                # Documentation
 ```
 
 ## Documentation
@@ -46,11 +49,32 @@ See the [docs/](docs/) directory for detailed documentation:
 - [Indexer Flow](docs/indexer-flow.md) - Indexer workflow
 - [Golang Rewrite Plan](.cursor/plans/hivemind-golang-rewrite-plan.md) - Implementation plan
 
+## Development Status
+
+### Completed
+
+- [x] Infrastructure (Go modules, config, logging, telemetry)
+- [x] Database layer (models, repository pattern)
+- [x] API layer - Condenser API (follow, content, discussions, blog, tags)
+- [x] API layer - Bridge API (post, profile, ranked posts, stats)
+- [x] API layer - Hive API (public, community, notifications)
+- [x] OpenTelemetry integration (OTLP exporter, tracing, metrics)
+- [x] Prometheus metrics
+
+### In Progress
+
+- [ ] Indexer core (using legacy Python indexer temporarily)
+
+### Pending
+
+- [ ] Database migrations
+- [ ] Tests and documentation
+
 ## Development
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.23 or later
 - PostgreSQL 10+
 - Redis (optional, for caching)
 - Steemd node access
@@ -59,11 +83,16 @@ See the [docs/](docs/) directory for detailed documentation:
 
 Configuration is managed via environment variables or config file:
 
-- `DATABASE_URL`: PostgreSQL connection string
-- `STEEMD_URL`: Steemd node URL
-- `REDIS_URL`: Redis connection (optional)
-- `HTTP_SERVER_PORT`: API server port (default: 8080)
-- `LOG_LEVEL`: Logging level (default: INFO)
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HIVE_DATABASE_URL` | PostgreSQL connection string | Required |
+| `HIVE_STEEMD_URL` | Steemd node URL | Required |
+| `HIVE_REDIS_URL` | Redis connection | Optional |
+| `HIVE_HTTP_SERVER_PORT` | API server port | 8080 |
+| `HIVE_LOG_LEVEL` | Logging level | INFO |
+| `HIVE_TRACES_ENDPOINT` | OTLP traces endpoint | localhost:4318 |
+| `HIVE_PROMETHEUS_ENABLED` | Enable Prometheus metrics | true |
+| `HIVE_PROMETHEUS_PORT` | Prometheus metrics port | 9090 |
 
 ### Building
 
@@ -75,12 +104,26 @@ go build -o bin/hivemind-indexer ./cmd/indexer
 ### Running
 
 ```bash
-# Start indexer
-./bin/hivemind-indexer
-
 # Start API server
 ./bin/hivemind-server
+
+# Start indexer (requires implementation)
+./bin/hivemind-indexer
 ```
+
+## OpenTelemetry Integration
+
+Hivemind integrates with OpenTelemetry for distributed tracing and metrics:
+
+- **Tracing**: Uses OTLP exporter for Jaeger/Grafana Tempo compatibility
+- **Metrics**: Prometheus-compatible metrics endpoint
+- **Propagation**: W3C TraceContext for distributed tracing
+
+All JSON-RPC methods are automatically traced with:
+- Method name and namespace
+- Request parameters (as span events)
+- Response status and duration
+- Error details (if any)
 
 ## Docker
 
@@ -135,19 +178,6 @@ docker run \
   hivemind-indexer:latest
 ```
 
-### Environment Variables
-
-Key environment variables for Docker:
-
-- `HIVE_DATABASE_URL`: PostgreSQL connection string
-- `HIVE_STEEM_URL`: Steemd node URL
-- `HIVE_REDIS_URL`: Redis connection (optional)
-- `HIVE_HTTP_SERVER_PORT`: API server port (default: 8080)
-- `HIVE_LOG_LEVEL`: Logging level (default: INFO)
-- `HIVE_TELEMETRY_ENABLED`: Enable telemetry (default: true)
-
-See `docker-compose.yml` for all available configuration options.
-
 ### Accessing Services
 
 - **API Server**: http://localhost:8080
@@ -158,4 +188,3 @@ See `docker-compose.yml` for all available configuration options.
 ## License
 
 MIT
-

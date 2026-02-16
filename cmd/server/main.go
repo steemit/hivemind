@@ -15,6 +15,7 @@ import (
 	"github.com/steemit/hivemind/internal/api"
 	"github.com/steemit/hivemind/internal/cache"
 	"github.com/steemit/hivemind/internal/db"
+	"github.com/steemit/hivemind/internal/middleware"
 	"github.com/steemit/hivemind/pkg/config"
 	"github.com/steemit/hivemind/pkg/logging"
 	"github.com/steemit/hivemind/pkg/telemetry"
@@ -69,7 +70,11 @@ func main() {
 	}
 
 	router := gin.New()
+
+	// Add middlewares
 	router.Use(gin.Recovery())
+	router.Use(middleware.TracingMiddleware())
+	router.Use(middleware.MetricsMiddleware())
 
 	// Setup API routes
 	apiRouter := api.NewRouter(database, redisCache)
@@ -106,5 +111,3 @@ func main() {
 
 	logger.Info("Server exited")
 }
-
-

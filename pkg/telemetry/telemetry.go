@@ -3,10 +3,13 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -24,7 +27,7 @@ var (
 	tracer trace.Tracer
 )
 
-// Init initializes OpenTelemetry with Jaeger and Prometheus exporters
+// Init initializes OpenTelemetry with OTLP and Prometheus exporters
 func Init(cfg *config.TelemetryConfig) (func(), error) {
 	if !cfg.Enabled {
 		logging.GetLogger().Info("Telemetry disabled")
@@ -46,23 +49,46 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 
 	var shutdownFuncs []func(context.Context) error
 
-	// Initialize tracer provider with Jaeger exporter
-	if cfg.JaegerURL != "" {
-		jaegerExporter, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(cfg.JaegerURL)))
+	// Parse endpoint URL to extract host:port
+	// WithEndpoint expects host:port format, not full URL
+	endpoint := cfg.TracesEndpoint
+	if strings.HasPrefix(cfg.TracesEndpoint, "http://") || strings.HasPrefix(cfg.TracesEndpoint, "https://") {
+		parsedURL, err := url.Parse(cfg.TracesEndpoint)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create Jaeger exporter: %w", err)
+			return nil, fmt.Errorf("failed to parse endpoint URL: %w", err)
 		}
-
-		tp := sdktrace.NewTracerProvider(
-			sdktrace.WithBatcher(jaegerExporter),
-			sdktrace.WithResource(res),
-		)
-
-		otel.SetTracerProvider(tp)
-		shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
-
-		logging.GetLogger().Info("Jaeger exporter initialized", zap.String("url", cfg.JaegerURL))
+		endpoint = parsedURL.Host
+		if parsedURL.Port() == "" {
+			// Default port based on scheme
+			if parsedURL.Scheme == "https" {
+				endpoint += ":4318"
+			} else {
+				endpoint += ":4318"
+			}
+		}
 	}
+
+	// Setup trace exporter using OTLP
+	traceExporter, err := otlptrace.New(ctx,
+		otlptracehttp.NewClient(
+			otlptracehttp.WithEndpoint(endpoint),
+			otlptracehttp.WithInsecure(), // Use TLS in production
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OTLP trace exporter: %w", err)
+	}
+
+	// Setup trace provider
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(traceExporter),
+		sdktrace.WithResource(res),
+	)
+
+	otel.SetTracerProvider(tp)
+	shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
+
+	logging.GetLogger().Info("OTLP trace exporter initialized", zap.String("endpoint", endpoint))
 
 	// Initialize metric provider with Prometheus exporter
 	if cfg.PrometheusEnabled {
@@ -124,4 +150,3 @@ func Tracer() trace.Tracer {
 func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
 	return Tracer().Start(ctx, name, opts...)
 }
-

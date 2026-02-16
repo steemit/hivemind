@@ -4,8 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/steemit/hivemind/pkg/logging"
@@ -22,9 +27,9 @@ type JSONRPCRequest struct {
 
 // JSONRPCResponse represents a JSON-RPC 2.0 response
 type JSONRPCResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      interface{} `json:"id"`
-	Result  interface{} `json:"result,omitempty"`
+	JSONRPC string       `json:"jsonrpc"`
+	ID      interface{}  `json:"id"`
+	Result  interface{}  `json:"result,omitempty"`
 	Error   *JSONRPCError `json:"error,omitempty"`
 }
 
@@ -59,39 +64,87 @@ func (h *JSONRPCHandler) RegisterMethod(method string, handler MethodHandler) {
 
 // Handle handles a JSON-RPC request
 func (h *JSONRPCHandler) Handle(c *gin.Context) {
-	_, span := telemetry.StartSpan(c.Request.Context(), "jsonrpc.handle")
+	startTime := time.Now()
+
+	// Create span for JSON-RPC handling
+	ctx, span := telemetry.StartSpanWithName(c.Request.Context(), "jsonrpc.handle")
 	defer span.End()
+
+	// Update context with span
+	c.Request = c.Request.WithContext(ctx)
 
 	var req JSONRPCRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		telemetry.RecordError("jsonrpc", "parse", "parse_error")
 		h.sendError(c, nil, -32700, "Parse error", err)
 		return
 	}
 
+	// Add method to span attributes
+	span.SetAttributes(
+		attribute.String("rpc.method", req.Method),
+		attribute.String("rpc.jsonrpc", req.JSONRPC),
+	)
+
+	// Record params as span event
+	telemetry.RecordSpanParams(span, req.Params)
+
 	// Validate JSON-RPC version
 	if req.JSONRPC != "2.0" {
+		telemetry.RecordError("jsonrpc", req.Method, "invalid_request")
 		h.sendError(c, req.ID, -32600, "Invalid Request", fmt.Errorf("invalid jsonrpc version"))
 		return
 	}
 
+	// Parse namespace and method
+	namespace, method := parseMethod(req.Method)
+	span.SetAttributes(
+		attribute.String("rpc.namespace", namespace),
+		attribute.String("rpc.method_name", method),
+	)
+
 	// Find method handler
 	handler, ok := h.methods[req.Method]
 	if !ok {
+		telemetry.RecordError(namespace, method, "method_not_found")
 		h.sendError(c, req.ID, -32601, "Method not found", fmt.Errorf("method %s not found", req.Method))
 		return
 	}
 
-	// Call handler
+	// Create child span for method execution
+	methodCtx, methodSpan := telemetry.StartSpanWithName(ctx, req.Method)
+	defer methodSpan.End()
+
+	// Call handler with context containing span
+	c.Request = c.Request.WithContext(methodCtx)
 	result, err := handler(c, req.Params)
+
+	// Calculate duration
+	duration := time.Since(startTime).Seconds()
+
 	if err != nil {
-		// For now, treat all errors as internal server errors
-		// TODO: Add error type checking for better error codes
+		telemetry.RecordError(namespace, method, "server_error")
+		telemetry.RecordRequest(namespace, method, "error", duration)
+		telemetry.RecordSpanError(methodSpan, err)
 		h.sendError(c, req.ID, -32000, "Server error", err)
 		return
 	}
 
+	// Record success metrics
+	telemetry.RecordRequest(namespace, method, "success", duration)
+	telemetry.SetSpanSuccess(methodSpan)
+
 	// Send response
 	h.sendResponse(c, req.ID, result)
+}
+
+// parseMethod parses a method string into namespace and method name
+func parseMethod(fullMethod string) (namespace, method string) {
+	parts := strings.SplitN(fullMethod, ".", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "unknown", fullMethod
 }
 
 // sendResponse sends a successful JSON-RPC response
@@ -106,8 +159,20 @@ func (h *JSONRPCHandler) sendResponse(c *gin.Context, id interface{}, result int
 
 // sendError sends an error JSON-RPC response
 func (h *JSONRPCHandler) sendError(c *gin.Context, id interface{}, code int, message string, err error) {
+	// Record error in current span if available
+	span := trace.SpanFromContext(c.Request.Context())
+	if span.IsRecording() {
+		span.SetStatus(codes.Error, message)
+		if err != nil {
+			span.RecordError(err)
+		}
+	}
+
 	if err != nil {
-		h.logger.Error("JSON-RPC error", zap.String("message", message), zap.Error(err))
+		h.logger.Error("JSON-RPC error",
+			zap.String("message", message),
+			zap.Int("code", code),
+			zap.Error(err))
 	}
 
 	resp := JSONRPCResponse{
@@ -130,4 +195,3 @@ const (
 	ErrInvalidParams  = -32602
 	ErrInternalError  = -32603
 )
-

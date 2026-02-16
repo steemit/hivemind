@@ -66,11 +66,12 @@ type LoggingConfig struct {
 
 // TelemetryConfig holds observability configuration
 type TelemetryConfig struct {
-	Enabled     bool
-	JaegerURL   string
+	Enabled           bool
+	TracesEndpoint    string // OTLP endpoint (e.g., "localhost:4318")
+	JaegerURL         string // Deprecated: use TracesEndpoint instead
 	PrometheusEnabled bool
 	PrometheusPort    int
-	ServiceName string
+	ServiceName       string
 }
 
 // Load loads configuration from environment variables and config file
@@ -130,11 +131,12 @@ func Load() (*Config, error) {
 			ScalyrFormat: getBool("log_scalyr_format", true),
 		},
 		Telemetry: TelemetryConfig{
-			Enabled:            getBool("telemetry_enabled", true),
-			JaegerURL:          getString("jaeger_url", "http://localhost:14268/api/traces"),
-			PrometheusEnabled:  getBool("prometheus_enabled", true),
-			PrometheusPort:     getInt("prometheus_port", 9090),
-			ServiceName:        getString("service_name", "hivemind"),
+			Enabled:           getBool("telemetry_enabled", true),
+			TracesEndpoint:    getString("traces_endpoint", "localhost:4318"),
+			JaegerURL:         getString("jaeger_url", "http://localhost:14268/api/traces"),
+			PrometheusEnabled: getBool("prometheus_enabled", true),
+			PrometheusPort:    getInt("prometheus_port", 9090),
+			ServiceName:       getString("service_name", "hivemind"),
 		},
 	}
 
@@ -158,6 +160,7 @@ func setDefaults() {
 	viper.SetDefault("max_batch", 50)
 	viper.SetDefault("max_workers", 4)
 	viper.SetDefault("telemetry_enabled", true)
+	viper.SetDefault("traces_endpoint", "localhost:4318")
 	viper.SetDefault("prometheus_enabled", true)
 	viper.SetDefault("prometheus_port", 9090)
 	viper.SetDefault("service_name", "hivemind")

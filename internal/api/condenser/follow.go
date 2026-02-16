@@ -265,3 +265,173 @@ func (f *FollowAPI) GetRebloggedBy(c *gin.Context, params json.RawMessage) (inte
 	return accounts, nil
 }
 
+// GetFollowersByPage handles condenser_api.get_followers_by_page
+func (f *FollowAPI) GetFollowersByPage(c *gin.Context, params json.RawMessage) (interface{}, error) {
+	var p []interface{}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, err
+	}
+
+	if len(p) < 2 {
+		return nil, fmt.Errorf("missing required parameters: account, page")
+	}
+
+	account, _ := p[0].(string)
+	page := 0
+	if pg, ok := p[1].(float64); ok {
+		page = int(pg)
+	}
+	pageSize := 100
+	if len(p) > 2 {
+		if ps, ok := p[2].(float64); ok {
+			pageSize = int(ps)
+		}
+	}
+	followType := "blog"
+	if len(p) > 3 {
+		followType, _ = p[3].(string)
+	}
+
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+	if pageSize < 1 {
+		pageSize = 100
+	}
+	if page < 0 {
+		page = 0
+	}
+
+	// Get account ID
+	accountRepo := db.NewAccountRepository(f.repo)
+	acc, err := accountRepo.GetByName(c.Request.Context(), account)
+	if err != nil {
+		return nil, err
+	}
+	if acc == nil {
+		return nil, fmt.Errorf("account not found: %s", account)
+	}
+
+	// Calculate offset
+	offset := page * pageSize
+
+	// Query followers with pagination
+	followRepo := db.NewFollowRepository(f.repo)
+	follows, err := followRepo.GetFollowersPaginated(c.Request.Context(), acc.ID, followType, offset, pageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build result
+	result := make([]interface{}, 0, len(follows))
+	for _, follow := range follows {
+		// Get follower account name
+		followerAcc, err := accountRepo.GetByID(c.Request.Context(), follow.FollowerID)
+		if err != nil || followerAcc == nil {
+			continue
+		}
+
+		// Determine what array based on state
+		what := []string{}
+		if follow.State&models.FollowStateBlog != 0 {
+			what = append(what, "blog")
+		}
+		if follow.State&models.FollowStateIgnore != 0 {
+			what = append(what, "ignore")
+		}
+
+		result = append(result, map[string]interface{}{
+			"follower":  followerAcc.Name,
+			"following": account,
+			"what":      what,
+		})
+	}
+
+	return result, nil
+}
+
+// GetFollowingByPage handles condenser_api.get_following_by_page
+func (f *FollowAPI) GetFollowingByPage(c *gin.Context, params json.RawMessage) (interface{}, error) {
+	var p []interface{}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, err
+	}
+
+	if len(p) < 2 {
+		return nil, fmt.Errorf("missing required parameters: account, page")
+	}
+
+	account, _ := p[0].(string)
+	page := 0
+	if pg, ok := p[1].(float64); ok {
+		page = int(pg)
+	}
+	pageSize := 100
+	if len(p) > 2 {
+		if ps, ok := p[2].(float64); ok {
+			pageSize = int(ps)
+		}
+	}
+	followType := "blog"
+	if len(p) > 3 {
+		followType, _ = p[3].(string)
+	}
+
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+	if pageSize < 1 {
+		pageSize = 100
+	}
+	if page < 0 {
+		page = 0
+	}
+
+	// Get account ID
+	accountRepo := db.NewAccountRepository(f.repo)
+	acc, err := accountRepo.GetByName(c.Request.Context(), account)
+	if err != nil {
+		return nil, err
+	}
+	if acc == nil {
+		return nil, fmt.Errorf("account not found: %s", account)
+	}
+
+	// Calculate offset
+	offset := page * pageSize
+
+	// Query following with pagination
+	followRepo := db.NewFollowRepository(f.repo)
+	follows, err := followRepo.GetFollowingPaginated(c.Request.Context(), acc.ID, followType, offset, pageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build result
+	result := make([]interface{}, 0, len(follows))
+	for _, follow := range follows {
+		// Get following account name
+		followingAcc, err := accountRepo.GetByID(c.Request.Context(), follow.FollowingID)
+		if err != nil || followingAcc == nil {
+			continue
+		}
+
+		// Determine what array based on state
+		what := []string{}
+		if follow.State&models.FollowStateBlog != 0 {
+			what = append(what, "blog")
+		}
+		if follow.State&models.FollowStateIgnore != 0 {
+			what = append(what, "ignore")
+		}
+
+		result = append(result, map[string]interface{}{
+			"follower":  account,
+			"following": followingAcc.Name,
+			"what":      what,
+		})
+	}
+
+	return result, nil
+}
+
