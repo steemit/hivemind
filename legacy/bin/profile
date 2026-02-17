@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-python3 -m cProfile -s cumtime hive/cli.py > profile.out
-less profile.out

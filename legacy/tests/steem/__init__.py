@@ -1,1 +1,0 @@
-"""Hive steem-client tests."""
