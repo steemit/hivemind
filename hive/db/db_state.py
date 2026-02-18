@@ -7,7 +7,8 @@ import logging
 
 from hive.db.schema import (setup, reset_autovac, build_metadata,
                             build_metadata_community, teardown, DB_VERSION,
-                            build_metadata_blacklist, build_trxid_block_num)
+                            build_metadata_blacklist, build_trxid_block_num,
+                            build_temp_cache_metadata)
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -383,6 +384,15 @@ class DbState:
             
             log.info("[HIVE] idx_posts_id_author_deleted_depth_community index created")
             cls._set_ver(24)
+        if cls._ver == 24:
+            # Hot-data temp table for hive_posts_cache (90-day window, synced every 30s)
+            if not cls.db().query_col(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_posts_cache_temp')"
+            )[0]:
+                log.info("[HIVE] Creating hive_posts_cache_temp table...")
+                build_temp_cache_metadata().create_all(cls.db().engine())
+                log.info("[HIVE] hive_posts_cache_temp created")
+            cls._set_ver(25)
 
         reset_autovac(cls.db())
 

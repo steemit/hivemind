@@ -19,6 +19,7 @@ from hive.indexer.accounts import Accounts
 from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.follow import Follow
+from hive.indexer.cache_sync import CacheSync
 from hive.indexer.community import Community
 from hive.server.common.mutes import Mutes
 
@@ -222,6 +223,8 @@ class Sync:
                 Accounts.dirty_oldest(500)
             if num % 20 == 0: #1min
                 self._update_chain_state()
+            if num % 10 == 0: #30s - sync hive_posts_cache_temp (non-blocking)
+                CacheSync.sync()
 
     # refetch dynamic_global_properties, feed price, etc
     def _update_chain_state(self):

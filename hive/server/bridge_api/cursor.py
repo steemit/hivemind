@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
+from hive.db.cache_router import CacheRouter
+
 # pylint: disable=too-many-lines
 
 DEFAULT_CID = 1317453
@@ -123,7 +125,7 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
 
     # setup
     field, pending, toponly, gray, promoted = definitions[sort]
-    table = 'hive_posts_cache'
+    table = CacheRouter.get_table(sort)
     where = []
     if ids:
         if sort != 'created':
@@ -199,7 +201,7 @@ async def pids_by_category(db, tag, sort, last_id, limit):
         'muted':           ('payout',   True,   False,  False,  False),
     }[sort]
 
-    table = 'hive_posts_cache'
+    table = CacheRouter.get_table(sort)
     field = params[0]
     where = []
 
@@ -493,25 +495,23 @@ async def pids_by_replies(db, start_author: str, start_permlink: str = '',
 
 async def pids_by_payout(db, account: str, start_author: str = '',
                          start_permlink: str = '', limit: int = 20):
-    """Get a list of post_ids for an author's blog."""
+    """Get a list of post_ids for an author's payout-sorted posts."""
+    table = CacheRouter.TEMP_TABLE
     seek = ''
     start_id = None
     if start_permlink:
         start_id = await _get_post_id(db, start_author, start_permlink)
-        last = "(SELECT payout FROM hive_posts_cache WHERE post_id = :start_id)"
+        last = "(SELECT payout FROM %s WHERE post_id = :start_id)" % table
         seek = ("""AND (payout < %s OR (payout = %s AND post_id > :start_id))"""
                 % (last, last))
 
-    # hide posts
-    #hide = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
-
     sql = """
         SELECT post_id
-          FROM hive_posts_cache
+          FROM %s
          WHERE author = :account
            AND is_paidout = '0' %s
       ORDER BY payout DESC, post_id
          LIMIT :limit
-    """ % seek
+    """ % (table, seek)
 
     return await db.query_col(sql, account=account, start_id=start_id, limit=limit)

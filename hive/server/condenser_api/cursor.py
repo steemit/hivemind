@@ -3,6 +3,7 @@
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
+from hive.db.cache_router import CacheRouter
 from hive.utils.normalize import rep_to_raw
 import re
 
@@ -210,7 +211,7 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
         'payout_comments': ('payout',   True,   False,  True,   False),
     }[sort]
 
-    table = 'hive_posts_cache'
+    table = CacheRouter.get_table(sort)
     field = params[0]
     where = []
 
