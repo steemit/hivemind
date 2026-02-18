@@ -173,9 +173,10 @@ class Stats:
             return # nothing to report
         total = perf() - cls._start
         non_idle = total - cls._idle
+        pct_busy = (100 * cls._secs / non_idle) if non_idle else 0.0
+        pct_idle = (100 * cls._idle / total) if total else 0.0
         log.info("cumtime %ds (%.1f%% of %ds). %.1f%% idle. peak %dmb.",
-                 cls._secs, 100 * cls._secs / non_idle, non_idle,
-                 100 * cls._idle / total, peak_usage_mb())
+                 cls._secs, pct_busy, non_idle, pct_idle, peak_usage_mb())
         if cls._secs > 1:
             cls._db.report(cls._secs)
             cls._steemd.report(cls._secs)
