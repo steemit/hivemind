@@ -1,0 +1,370 @@
+# API 一致性测试用例配置
+# 用于测试 Go 版本和 Python 版本 API 的响应一致性
+
+# 测试配置
+config:
+  # 全局忽略的字段 (会在所有测试中应用)
+  ignore_fields:
+    - "request_id"
+    - "id"  # 内部 ID 可能不同
+
+  # 全局容差配置
+  tolerance:
+    float_epsilon: 0.001      # 浮点数误差
+    timestamp_seconds: 2      # 时间戳误差(秒)
+
+# 测试用例列表
+test_cases:
+  # ==================== Hive Core API ====================
+  - name: "获取数据库头部状态"
+    api: "hive.db_head_state"
+    priority: "P0"
+    params: null
+
+  # ==================== Condenser API - Follow ====================
+  - name: "获取关注数"
+    api: "condenser_api.get_follow_count"
+    priority: "P0"
+    params:
+      account: "steemit"
+
+  - name: "获取关注者列表"
+    api: "condenser_api.get_followers"
+    priority: "P0"
+    params:
+      follower: "steemit"
+      following: "steemit"
+      limit: 10
+
+  - name: "获取关注列表"
+    api: "condenser_api.get_following"
+    priority: "P0"
+    params:
+      follower: "steemit"
+      following: "steemit"
+      limit: 10
+
+  - name: "获取转发信息"
+    api: "condenser_api.get_reblogged_by"
+    priority: "P1"
+    params:
+      author: "steemit"
+      permlink: "firstpost"
+
+  # ==================== Condenser API - Content ====================
+  - name: "获取文章内容"
+    api: "condenser_api.get_content"
+    priority: "P0"
+    params:
+      author: "steemit"
+      permlink: "firstpost"
+    ignore_fields:
+      - "request_id"
+      - "last_update"
+
+  - name: "获取文章回复"
+    api: "condenser_api.get_content_replies"
+    priority: "P0"
+    params:
+      author: "steemit"
+      permlink: "firstpost"
+    ignore_fields:
+      - "request_id"
+
+  # ==================== Condenser API - Discussions ====================
+  - name: "获取热门讨论"
+    api: "condenser_api.get_discussions_by_trending"
+    priority: "P0"
+    params:
+      tag: ""
+      limit: 5
+      truncate_body: 1024
+
+  - name: "获取热点讨论"
+    api: "condenser_api.get_discussions_by_hot"
+    priority: "P0"
+    params:
+      tag: ""
+      limit: 5
+      truncate_body: 1024
+
+  - name: "获取最新讨论"
+    api: "condenser_api.get_discussions_by_created"
+    priority: "P0"
+    params:
+      tag: ""
+      limit: 5
+      truncate_body: 1024
+
+  - name: "获取推广讨论"
+    api: "condenser_api.get_discussions_by_promoted"
+    priority: "P1"
+    params:
+      tag: ""
+      limit: 5
+      truncate_body: 1024
+
+  - name: "获取博客讨论"
+    api: "condenser_api.get_discussions_by_blog"
+    priority: "P0"
+    params:
+      tag: "steemit"
+      limit: 5
+      truncate_body: 1024
+
+  - name: "获取动态讨论"
+    api: "condenser_api.get_discussions_by_feed"
+    priority: "P0"
+    params:
+      tag: "steemit"
+      limit: 5
+      truncate_body: 1024
+
+  # ==================== Condenser API - Blog ====================
+  - name: "获取博客"
+    api: "condenser_api.get_blog"
+    priority: "P0"
+    params:
+      account: "steemit"
+      limit: 5
+    ignore_fields:
+      - "request_id"
+
+  - name: "获取博客条目"
+    api: "condenser_api.get_blog_entries"
+    priority: "P1"
+    params:
+      account: "steemit"
+      limit: 5
+
+  # ==================== Condenser API - Tags ====================
+  - name: "获取热门标签"
+    api: "condenser_api.get_trending_tags"
+    priority: "P1"
+    params:
+      startTag: ""
+      limit: 10
+
+  - name: "获取账户声望"
+    api: "condenser_api.get_account_reputations"
+    priority: "P1"
+    params:
+      accountLowerBound: ""
+      limit: 10
+
+  # ==================== Condenser API - Misc ====================
+  - name: "获取评论讨论"
+    api: "condenser_api.get_discussions_by_comments"
+    priority: "P1"
+    params:
+      tag: ""
+      limit: 5
+      truncate_body: 1024
+
+  - name: "获取最新回复"
+    api: "condenser_api.get_replies_by_last_update"
+    priority: "P1"
+    params:
+      startAuthor: ""
+      startPermlink: ""
+      limit: 5
+
+  - name: "获取交易"
+    api: "condenser_api.get_transaction"
+    priority: "P1"
+    params:
+      trx_id: "0000000000000000000000000000000000000000"
+
+  - name: "获取账户投票"
+    api: "condenser_api.get_account_votes"
+    priority: "P1"
+    params:
+      account: "steemit"
+
+  # ==================== Bridge API - Post ====================
+  - name: "获取文章"
+    api: "bridge.get_post"
+    priority: "P0"
+    params:
+      author: "steemit"
+      permlink: "firstpost"
+    ignore_fields:
+      - "request_id"
+
+  - name: "标准化文章"
+    api: "bridge.normalize_post"
+    priority: "P1"
+    params:
+      author: "steemit"
+      permlink: "firstpost"
+
+  - name: "获取讨论"
+    api: "bridge.get_discussion"
+    priority: "P0"
+    params:
+      author: "steemit"
+      permlink: "firstpost"
+    ignore_fields:
+      - "request_id"
+
+  # ==================== Bridge API - Profile ====================
+  - name: "获取用户资料"
+    api: "bridge.get_profile"
+    priority: "P0"
+    params:
+      account: "steemit"
+    ignore_fields:
+      - "last_update"
+
+  # ==================== Bridge API - Ranked ====================
+  - name: "获取排名文章"
+    api: "bridge.get_ranked_posts"
+    priority: "P0"
+    params:
+      sort: "trending"
+      tag: ""
+      observer: ""
+      limit: 5
+
+  - name: "获取账户文章"
+    api: "bridge.get_account_posts"
+    priority: "P0"
+    params:
+      account: "steemit"
+      sort: "posts"
+      observer: ""
+      limit: 5
+
+  - name: "获取热门话题"
+    api: "bridge.get_trending_topics"
+    priority: "P1"
+    params:
+      limit: 10
+
+  # ==================== Bridge API - Stats ====================
+  - name: "获取收益统计"
+    api: "bridge.get_payout_stats"
+    priority: "P1"
+    params:
+      start_date: "2024-01-01"
+      end_date: "2024-01-31"
+
+  # ==================== Bridge API - Community ====================
+  - name: "获取社区信息"
+    api: "bridge.get_community"
+    priority: "P1"
+    params:
+      name: "hive-139531"
+      observer: ""
+
+  - name: "列出社区"
+    api: "bridge.list_communities"
+    priority: "P1"
+    params:
+      last: ""
+      limit: 10
+
+  - name: "列出顶级社区"
+    api: "bridge.list_top_communities"
+    priority: "P1"
+    params:
+      observer: ""
+      limit: 10
+
+  - name: "列出热门社区"
+    api: "bridge.list_pop_communities"
+    priority: "P1"
+    params:
+      observer: ""
+      limit: 10
+
+  # ==================== Bridge API - Notification ====================
+  - name: "获取未读通知"
+    api: "bridge.unread_notifications"
+    priority: "P1"
+    params:
+      account: "steemit"
+
+  - name: "获取账户通知"
+    api: "bridge.account_notifications"
+    priority: "P1"
+    params:
+      account: "steemit"
+      limit: 10
+      offset: 0
+
+  # ==================== Hive API - Public ====================
+  - name: "获取账户信息"
+    api: "hive_api.get_account"
+    priority: "P0"
+    params:
+      account: "steemit"
+    ignore_fields:
+      - "last_owner_update"
+      - "last_account_update"
+
+  - name: "批量获取账户"
+    api: "hive_api.get_accounts"
+    priority: "P0"
+    params:
+      names:
+        - "steemit"
+        - "alice"
+    ignore_fields:
+      - "last_owner_update"
+      - "last_account_update"
+
+  - name: "列出关注者"
+    api: "hive_api.list_followers"
+    priority: "P0"
+    params:
+      account: "steemit"
+      start: ""
+      limit: 10
+      type: "blog"
+
+  - name: "列出关注"
+    api: "hive_api.list_following"
+    priority: "P0"
+    params:
+      account: "steemit"
+      start: ""
+      limit: 10
+      type: "blog"
+
+  - name: "列出所有屏蔽"
+    api: "hive_api.list_all_muted"
+    priority: "P2"
+    params:
+      account: "steemit"
+
+  - name: "列出账户博客"
+    api: "hive_api.list_account_blog"
+    priority: "P1"
+    params:
+      account: "steemit"
+      start: ""
+      limit: 10
+      observer: ""
+
+  - name: "列出账户文章"
+    api: "hive_api.list_account_posts"
+    priority: "P1"
+    params:
+      account: "steemit"
+      start: ""
+      limit: 10
+      observer: ""
+
+  - name: "列出账户动态"
+    api: "hive_api.list_account_feed"
+    priority: "P1"
+    params:
+      account: "steemit"
+      start: ""
+      limit: 10
+      observer: ""
+
+# ==================== 优先级过滤器 ====================
+# 使用命令行参数控制运行哪些优先级的测试
+# 例如: python api_comparator.py --priority P0

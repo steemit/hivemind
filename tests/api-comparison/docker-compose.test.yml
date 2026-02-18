@@ -1,0 +1,126 @@
+# Docker Compose 配置 - API 一致性测试环境
+# 用于同时运行 Python 和 Go 版本的 Hivemind API 并进行对比测试
+
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: hivemind-test-postgres
+    environment:
+      POSTGRES_USER: hivemind
+      POSTGRES_PASSWORD: hivemind
+      POSTGRES_DB: hivemind
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hivemind"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: hivemind-test-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Python 版本 Hivemind API
+  python-api:
+    build:
+      context: /home/ety001/workspace/hivemind_legacy
+      dockerfile: Dockerfile
+    container_name: hivemind-python-api
+    ports:
+      - "8081:8080"
+    environment:
+      DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
+      REDIS_URL: redis://redis:6379
+      STEEM_URL: https://api.steemit.com
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Go 版本 Hivemind API
+  go-api:
+    build:
+      context: /home/ety001/workspace/hivemind
+      dockerfile: Dockerfile
+    container_name: hivemind-go-api
+    ports:
+      - "8082:8080"
+    environment:
+      HIVE_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
+      HIVE_REDIS_URL: redis://redis:6379
+      HIVE_STEEM_URL: https://api.steemit.com
+      HIVE_HTTP_SERVER_PORT: 8080
+      HIVE_HTTP_SERVER_HOST: 0.0.0.0
+      HIVE_LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 测试运行器
+  test-runner:
+    build:
+      context: ./tests/api-comparison
+      dockerfile: Dockerfile
+    container_name: hivemind-test-runner
+    environment:
+      PYTHON_API_URL: http://python-api:8080
+      GO_API_URL: http://go-api:8080
+      TIMEOUT: 30
+    depends_on:
+      python-api:
+        condition: service_healthy
+      go-api:
+        condition: service_healthy
+    volumes:
+      - ./tests/api-comparison/results:/app/results
+    command: >
+      --config test_cases.yaml
+      --python-url http://python-api:8080
+      --go-url http://go-api:8080
+      --timeout 30
+      --output results
+
+volumes:
+  postgres_data:
+
+# 使用说明:
+# 1. 启动测试环境:
+#    docker-compose -f docker-compose.test.yml up -d
+#
+# 2. 查看测试运行日志:
+#    docker-compose -f docker-compose.test.yml logs -f test-runner
+#
+# 3. 重新运行测试:
+#    docker-compose -f docker-compose.test.yml restart test-runner
+#
+# 4. 停止并清理:
+#    docker-compose -f docker-compose.test.yml down -v
