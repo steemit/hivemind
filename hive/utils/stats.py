@@ -58,15 +58,18 @@ class StatsAbstract:
             return
 
         total_ms = parent_secs * 1000
+        pct_total = (100 * (self._ms / total_ms)) if total_ms else 0.0
         log.info("Service: %s -- %ds total (%.1f%%)",
                  self._service,
                  round(self._ms / 1000),
-                 100 * (self._ms / total_ms))
+                 pct_total)
 
         log.info('%7s %9s %9s %9s', '-pct-', '-ttl-', '-avg-', '-cnt-')
         for call, ms, reqs in self.table(40):
+            pct = (100 * ms / self._ms) if self._ms else 0.0
+            avg_ms = (ms / reqs) if reqs else 0.0
             log.info("% 6.1f%% % 7dms % 9.2f % 8dx -- %s",
-                     100 * ms/self._ms, ms, ms/reqs, reqs, call)
+                     pct, ms, avg_ms, reqs, call)
         self.clear()
 
 
