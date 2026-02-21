@@ -1,4 +1,4 @@
-"""Sync hive_posts_cache to hive_posts_cache_temp (non-blocking, 30s interval)."""
+"""Sync hive_posts_cache to hive_posts_cache_temp (non-blocking, 60s interval)."""
 
 import logging
 import threading
@@ -10,10 +10,16 @@ log = logging.getLogger(__name__)
 
 
 class CacheSync:
-    """Sync hive_posts_cache to temp table (non-blocking)."""
+    """Sync hive_posts_cache to temp table (non-blocking).
 
-    SYNC_WINDOW = 30
+    Runs every 60s (20 blocks). Uses chunked INSERT with bounded batch size
+    and max batches per run; DELETE steps are not chunked.
+    """
+
+    SYNC_WINDOW = 60
     HOT_DAYS = 90
+    INSERT_BATCH_SIZE = 5000
+    INSERT_MAX_BATCHES = 12
 
     _syncing = False
     _lock = threading.Lock()
@@ -45,7 +51,11 @@ class CacheSync:
 
     @classmethod
     def _sync(cls):
-        """Core sync logic (one run)."""
+        """Core sync logic (one run).
+
+        Chunked INSERT: up to INSERT_MAX_BATCHES batches of INSERT_BATCH_SIZE
+        rows each (ORDER BY updated_at). DELETE steps run once and are not chunked.
+        """
         try:
             db = Db.instance()
         except AssertionError:
@@ -60,17 +70,28 @@ class CacheSync:
         stats = {'inserted': 0, 'updated': 0, 'deleted': 0}
 
         try:
-            sql = """
+            # Chunked INSERT: subquery with ORDER BY updated_at LIMIT for bounded runtime
+            insert_sql = """
                 INSERT INTO hive_posts_cache_temp
-                SELECT post_id, author, permlink, category, community_id, depth, children,
-                       author_rep, flag_weight, total_votes, up_votes, title, preview, img_url,
-                       payout, promoted, created_at, payout_at, updated_at, is_paidout,
-                       is_nsfw, is_declined, is_full_power, is_hidden, is_grayed,
-                       rshares, sc_trend, sc_hot, body, votes, json, raw_json,
+                SELECT _src.post_id, _src.author, _src.permlink, _src.category, _src.community_id,
+                       _src.depth, _src.children, _src.author_rep, _src.flag_weight, _src.total_votes,
+                       _src.up_votes, _src.title, _src.preview, _src.img_url, _src.payout, _src.promoted,
+                       _src.created_at, _src.payout_at, _src.updated_at, _src.is_paidout,
+                       _src.is_nsfw, _src.is_declined, _src.is_full_power, _src.is_hidden, _src.is_grayed,
+                       _src.rshares, _src.sc_trend, _src.sc_hot, _src.body, _src.votes, _src.json, _src.raw_json,
                        :now as _synced_at
-                FROM hive_posts_cache
-                WHERE created_at >= :cutoff
-                  AND updated_at >= :sync_from
+                FROM (
+                    SELECT post_id, author, permlink, category, community_id, depth, children,
+                           author_rep, flag_weight, total_votes, up_votes, title, preview, img_url,
+                           payout, promoted, created_at, payout_at, updated_at, is_paidout,
+                           is_nsfw, is_declined, is_full_power, is_hidden, is_grayed,
+                           rshares, sc_trend, sc_hot, body, votes, json, raw_json
+                    FROM hive_posts_cache
+                    WHERE created_at >= :cutoff
+                      AND updated_at >= :sync_from
+                    ORDER BY updated_at
+                    LIMIT :batch_size
+                ) _src
                 ON CONFLICT (post_id) DO UPDATE SET
                     author = EXCLUDED.author,
                     permlink = EXCLUDED.permlink,
@@ -86,8 +107,20 @@ class CacheSync:
                     is_grayed = EXCLUDED.is_grayed,
                     _synced_at = EXCLUDED._synced_at
             """
-            result = db.query(sql, now=now, cutoff=cutoff, sync_from=sync_from)
-            stats['updated'] = result.rowcount if hasattr(result, 'rowcount') else 0
+            batches = 0
+            for _ in range(cls.INSERT_MAX_BATCHES):
+                result = db.query(
+                    insert_sql,
+                    now=now,
+                    cutoff=cutoff,
+                    sync_from=sync_from,
+                    batch_size=cls.INSERT_BATCH_SIZE,
+                )
+                n = result.rowcount if hasattr(result, 'rowcount') else 0
+                stats['updated'] += n
+                batches += 1
+                if n < cls.INSERT_BATCH_SIZE:
+                    break
 
             sql = """
                 DELETE FROM hive_posts_cache_temp
@@ -106,8 +139,8 @@ class CacheSync:
             result = db.query(sql, cutoff=cutoff)
             stats['deleted'] += result.rowcount if hasattr(result, 'rowcount') else 0
 
-            log.info("CacheSync: inserted/updated=%d, deleted=%d",
-                     stats['updated'], stats['deleted'])
+            log.info("CacheSync: inserted/updated=%d, batches=%d, deleted=%d",
+                     stats['updated'], batches, stats['deleted'])
         except Exception as e:
             log.error("CacheSync failed: %s", str(e))
 

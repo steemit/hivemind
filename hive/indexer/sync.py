@@ -223,7 +223,7 @@ class Sync:
                 Accounts.dirty_oldest(500)
             if num % 20 == 0: #1min
                 self._update_chain_state()
-            if num % 10 == 0: #30s - sync hive_posts_cache_temp (non-blocking)
+            if num % 20 == 0: #60s - sync hive_posts_cache_temp (non-blocking)
                 CacheSync.sync()
 
     # refetch dynamic_global_properties, feed price, etc

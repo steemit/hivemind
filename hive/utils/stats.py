@@ -66,6 +66,8 @@ class StatsAbstract:
 
         log.info('%7s %9s %9s %9s', '-pct-', '-ttl-', '-avg-', '-cnt-')
         for call, ms, reqs in self.table(40):
+            # Guard against zero to avoid ZeroDivisionError (e.g. when report
+            # runs right after a long CacheSync and _ms or reqs is 0)
             pct = (100 * ms / self._ms) if self._ms else 0.0
             avg_ms = (ms / reqs) if reqs else 0.0
             log.info("% 6.1f%% % 7dms % 9.2f % 8dx -- %s",
