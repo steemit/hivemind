@@ -117,6 +117,7 @@ class CachedPost:
          - you can always get_content on any author/permlink you see in an op
         """
         DB.query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
+        DB.query("DELETE FROM hive_posts_cache_temp WHERE post_id = :id", id=post_id)
         DB.query("DELETE FROM hive_post_tags   WHERE post_id = :id", id=post_id)
 
         # if it was queued for a write, remove it

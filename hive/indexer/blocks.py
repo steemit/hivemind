@@ -223,6 +223,7 @@ class Blocks:
             # remove posts: core, tags, cache entries
             if post_ids:
                 DB.query("DELETE FROM hive_posts_cache WHERE post_id IN :ids", ids=post_ids)
+                DB.query("DELETE FROM hive_posts_cache_temp WHERE post_id IN :ids", ids=post_ids)
                 DB.query("DELETE FROM hive_post_tags   WHERE post_id IN :ids", ids=post_ids)
                 DB.query("DELETE FROM hive_posts       WHERE id      IN :ids", ids=post_ids)
 
