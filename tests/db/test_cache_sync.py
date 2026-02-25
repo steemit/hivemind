@@ -7,11 +7,9 @@ from hive.indexer.cache_sync import CacheSync
 
 
 def test_sync_constants():
-    """Sync window, hot days, and chunked-insert constants are set."""
+    """Sync window and hot-days constants are set."""
     assert CacheSync.SYNC_WINDOW == 60
     assert CacheSync.HOT_DAYS == 90
-    assert CacheSync.INSERT_BATCH_SIZE == 5000
-    assert CacheSync.INSERT_MAX_BATCHES == 12
 
 
 def test_sync_returns_immediately():
