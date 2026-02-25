@@ -74,6 +74,32 @@ So comments older than 90 days are still returned by reading from the main table
 
 ---
 
+## 6. Temp Table: Write and Delete Locations
+
+Where `hive_posts_cache_temp` is written to and deleted from (for verification and operations).
+
+### Writes (INSERT / UPDATE)
+
+| Location | Description |
+|----------|-------------|
+| **`hive/db/db_state.py`** | **Create table + cold-start backfill.** On migration, if the temp table does not exist: create it, then run a one-time `INSERT INTO hive_posts_cache_temp (...) SELECT ... FROM hive_posts_cache WHERE created_at >= :cutoff` (90-day window) to backfill. |
+| **`hive/indexer/cached_post.py`** | **Dual-write with main table.** Every write to `hive_posts_cache` also writes to the temp table in the same batch: `_insert()` produces both main and temp INSERTs; `_update()` produces both main and temp UPDATEs. Used in listen (per-block), `from_steemd` (batch sync), and undelete placeholder writes. |
+
+### Deletes
+
+| Location | Description |
+|----------|-------------|
+| **`hive/indexer/cache_sync.py`** | **Every 60s:** `CacheSync._sync()` runs in a background thread and executes `DELETE FROM hive_posts_cache_temp WHERE created_at < :cutoff` (cutoff = now − 90 days). Triggered from `hive/indexer/sync.py` when `num % 20 == 0` (every ~60s in listen). |
+| **`hive/indexer/cached_post.py`** | **On post delete:** `CachedPost.delete()` runs `DELETE FROM hive_posts_cache_temp WHERE post_id = :id` when a post is removed (e.g. delete_comment op), in sync with the main table delete. |
+| **`hive/indexer/blocks.py`** | **Fork rollback:** `_pop_blocks()` deletes from the main cache for affected blocks and also runs `DELETE FROM hive_posts_cache_temp WHERE post_id IN :ids` so temp stays in sync. |
+
+### Summary
+
+- **Writes to temp:** (1) One-time cold-start backfill in `db_state.py`; (2) Dual-write in `cached_post.py` (same transaction as `hive_posts_cache`).
+- **Deletes from temp:** (1) 90-day prune every 60s in `cache_sync.py`; (2) Single-post delete in `cached_post.delete()`; (3) Bulk delete on fork rollback in `blocks._pop_blocks()`.
+
+---
+
 ## Related Code
 
 - `hive/db/cache_router.py` – table selection by `sort`
