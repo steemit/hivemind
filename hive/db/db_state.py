@@ -4,10 +4,12 @@
 
 import time
 import logging
+from datetime import datetime, timedelta
 
 from hive.db.schema import (setup, reset_autovac, build_metadata,
                             build_metadata_community, teardown, DB_VERSION,
-                            build_metadata_blacklist, build_trxid_block_num)
+                            build_metadata_blacklist, build_trxid_block_num,
+                            build_temp_cache_metadata)
 from hive.db.adapter import Db
 
 log = logging.getLogger(__name__)
@@ -383,6 +385,38 @@ class DbState:
             
             log.info("[HIVE] idx_posts_id_author_deleted_depth_community index created")
             cls._set_ver(24)
+        if cls._ver == 24:
+            # Hot-data temp table for hive_posts_cache (90-day window, synced every 30s)
+            if not cls.db().query_col(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='hive_posts_cache_temp')"
+            )[0]:
+                log.info("[HIVE] Creating hive_posts_cache_temp table...")
+                build_temp_cache_metadata().create_all(cls.db().engine())
+                log.info("[HIVE] hive_posts_cache_temp created")
+                # One-time cold-start backfill (90-day window); disable statement_timeout for long run
+                cls.db().query("SET LOCAL statement_timeout = '0'")
+                cutoff = datetime.now() - timedelta(days=90)
+                backfill_sql = """
+                    INSERT INTO hive_posts_cache_temp (
+                        post_id, author, permlink, category, community_id, depth, children,
+                        author_rep, flag_weight, total_votes, up_votes, title, preview, img_url,
+                        payout, promoted, created_at, payout_at, updated_at, is_paidout,
+                        is_nsfw, is_declined, is_full_power, is_hidden, is_grayed,
+                        rshares, sc_trend, sc_hot, body, votes, json, raw_json, _synced_at
+                    )
+                    SELECT post_id, author, permlink, category, community_id, depth, children,
+                           author_rep, flag_weight, total_votes, up_votes, title, preview, img_url,
+                           payout, promoted, created_at, payout_at, updated_at, is_paidout,
+                           is_nsfw, is_declined, is_full_power, is_hidden, is_grayed,
+                           rshares, sc_trend, sc_hot, body, votes, json, raw_json,
+                           NOW() as _synced_at
+                    FROM hive_posts_cache
+                    WHERE created_at >= :cutoff
+                """
+                result = cls.db().query(backfill_sql, cutoff=cutoff)
+                n = result.rowcount if hasattr(result, 'rowcount') else 0
+                log.info("[HIVE] hive_posts_cache_temp cold-start backfill done, rows=%s", n)
+            cls._set_ver(25)
 
         reset_autovac(cls.db())
 

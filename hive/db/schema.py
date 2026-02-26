@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 24
+DB_VERSION = 25
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -247,7 +247,63 @@ def build_metadata():
 
     metadata = build_trxid_block_num(metadata)
 
+    metadata = build_temp_cache_metadata(metadata)
+
     return metadata
+
+
+def build_temp_cache_metadata(metadata=None):
+    """Build hive_posts_cache_temp table for hot-data queries (90-day window)."""
+    if not metadata:
+        metadata = sa.MetaData()
+
+    sa.Table(
+        'hive_posts_cache_temp', metadata,
+        sa.Column('post_id', sa.Integer, primary_key=True, autoincrement=False),
+        sa.Column('author', VARCHAR(16), nullable=False),
+        sa.Column('permlink', VARCHAR(255), nullable=False),
+        sa.Column('category', VARCHAR(255), nullable=False, server_default=''),
+        sa.Column('community_id', sa.Integer, nullable=True),
+        sa.Column('depth', SMALLINT, nullable=False, server_default='0'),
+        sa.Column('children', SMALLINT, nullable=False, server_default='0'),
+        sa.Column('author_rep', sa.Float(precision=6), nullable=False, server_default='0'),
+        sa.Column('flag_weight', sa.Float(precision=6), nullable=False, server_default='0'),
+        sa.Column('total_votes', sa.Integer, nullable=False, server_default='0'),
+        sa.Column('up_votes', sa.Integer, nullable=False, server_default='0'),
+        sa.Column('title', sa.String(255), nullable=False, server_default=''),
+        sa.Column('preview', sa.String(1024), nullable=False, server_default=''),
+        sa.Column('img_url', sa.String(1024), nullable=False, server_default=''),
+        sa.Column('payout', sa.types.DECIMAL(10, 3), nullable=False, server_default='0'),
+        sa.Column('promoted', sa.types.DECIMAL(10, 3), nullable=False, server_default='0'),
+        sa.Column('created_at', sa.DateTime, nullable=False, server_default='1990-01-01'),
+        sa.Column('payout_at', sa.DateTime, nullable=False, server_default='1990-01-01'),
+        sa.Column('updated_at', sa.DateTime, nullable=False, server_default='1990-01-01'),
+        sa.Column('is_paidout', BOOLEAN, nullable=False, server_default='0'),
+        sa.Column('is_nsfw', BOOLEAN, nullable=False, server_default='0'),
+        sa.Column('is_declined', BOOLEAN, nullable=False, server_default='0'),
+        sa.Column('is_full_power', BOOLEAN, nullable=False, server_default='0'),
+        sa.Column('is_hidden', BOOLEAN, nullable=False, server_default='0'),
+        sa.Column('is_grayed', BOOLEAN, nullable=False, server_default='0'),
+        sa.Column('rshares', sa.BigInteger, nullable=False, server_default='0'),
+        sa.Column('sc_trend', sa.Float(precision=6), nullable=False, server_default='0'),
+        sa.Column('sc_hot', sa.Float(precision=6), nullable=False, server_default='0'),
+        sa.Column('body', TEXT),
+        sa.Column('votes', TEXT),
+        sa.Column('json', sa.Text),
+        sa.Column('raw_json', sa.Text),
+        sa.Column('_synced_at', sa.DateTime, nullable=True),
+        sa.Index('hive_posts_cache_temp_ix6a', 'sc_trend', 'post_id',
+                 postgresql_where=sql_text("is_paidout = '0'")),
+        sa.Index('hive_posts_cache_temp_ix7a', 'sc_hot', 'post_id',
+                 postgresql_where=sql_text("is_paidout = '0'")),
+        sa.Index('hive_posts_cache_temp_ix9a', 'depth', 'payout', 'post_id',
+                 postgresql_where=sql_text("is_paidout = '0'")),
+        sa.Index('hive_posts_cache_temp_ix30', 'community_id', 'sc_trend', 'post_id',
+                 postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),
+        sa.Index('hive_posts_cache_temp_created', 'created_at'),
+    )
+    return metadata
+
 
 def build_metadata_community(metadata=None):
     """Build community schema defs"""

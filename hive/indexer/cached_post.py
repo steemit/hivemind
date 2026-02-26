@@ -117,6 +117,7 @@ class CachedPost:
          - you can always get_content on any author/permlink you see in an op
         """
         DB.query("DELETE FROM hive_posts_cache WHERE post_id = :id", id=post_id)
+        DB.query("DELETE FROM hive_posts_cache_temp WHERE post_id = :id", id=post_id)
         DB.query("DELETE FROM hive_post_tags   WHERE post_id = :id", id=post_id)
 
         # if it was queued for a write, remove it
@@ -158,11 +159,12 @@ class CachedPost:
         # force-create dummy row to ensure cache is aware. only needed when
         # cache already spans this id, in case in-mem buffer is lost. default
         # value for payout_at ensures that it will get picked up for update.
-        DB.query(cls._insert({
-            'post_id': post_id,
-            'author': author,
-            'permlink': permlink,
-            'category': category}))
+        for (sql, params) in cls._insert({
+                'post_id': post_id,
+                'author': author,
+                'permlink': permlink,
+                'category': category}):
+            DB.query(sql, **params)
         cls.update(author, permlink, post_id)
         log.warning("undeleted %s/%s", author, permlink) #173
 
@@ -183,7 +185,7 @@ class CachedPost:
             changed = filter(lambda t: t[1], counts.items())
             summary = list(map(lambda group: "%d %ss" % group[::-1], changed))
             summary = ', '.join(summary) if summary else 'none'
-            log.info("[PREP] posts cache process: %s", summary)
+            log.info("[PREP] posts cache process (main+temp): %s", summary)
 
         for url, _, _ in tuples:
             del cls._queue[url]
@@ -386,6 +388,7 @@ class CachedPost:
             DB.batch_queries(buffer, trx)
 
             timer.batch_finish(len(posts))
+            log.info("[DUAL-WRITE] batch: %d posts written to main+temp", len(posts))
             if len(tuples) >= 1000:
                 log.info(timer.batch_status())
 
@@ -550,12 +553,12 @@ class CachedPost:
         # trigger any notifications
         cls._notifs(post, pid, level, payout['payout'])
 
-        # build the post insert/update SQL, add tag SQLs
+        # build the post insert/update SQL for main + temp (dual-write), add tag SQLs
         if level == 'insert':
-            sql = cls._insert(values)
+            queries = cls._insert(values)
         else:
-            sql = cls._update(values)
-        return [sql] + tag_sqls
+            queries = cls._update(values)
+        return list(queries) + tag_sqls
 
     @classmethod
     def _notifs(cls, post, pid, level, payout):
@@ -671,8 +674,14 @@ class CachedPost:
 
     @classmethod
     def _insert(cls, values):
-        return DB.build_insert('hive_posts_cache', values, pk='post_id')
+        """Build INSERT for both hive_posts_cache and hive_posts_cache_temp (dual-write)."""
+        main = DB.build_insert('hive_posts_cache', values, pk='post_id')
+        temp = DB.build_insert('hive_posts_cache_temp', values, pk='post_id')
+        return [main, temp]
 
     @classmethod
     def _update(cls, values):
-        return DB.build_update('hive_posts_cache', values, pk='post_id')
+        """Build UPDATE for both hive_posts_cache and hive_posts_cache_temp (dual-write)."""
+        main = DB.build_update('hive_posts_cache', values, pk='post_id')
+        temp = DB.build_update('hive_posts_cache_temp', values, pk='post_id')
+        return [main, temp]

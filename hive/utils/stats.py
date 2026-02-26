@@ -58,15 +58,20 @@ class StatsAbstract:
             return
 
         total_ms = parent_secs * 1000
+        pct_total = (100 * (self._ms / total_ms)) if total_ms else 0.0
         log.info("Service: %s -- %ds total (%.1f%%)",
                  self._service,
                  round(self._ms / 1000),
-                 100 * (self._ms / total_ms))
+                 pct_total)
 
         log.info('%7s %9s %9s %9s', '-pct-', '-ttl-', '-avg-', '-cnt-')
         for call, ms, reqs in self.table(40):
+            # Guard against zero to avoid ZeroDivisionError (e.g. when report
+            # runs right after a long CacheSync and _ms or reqs is 0)
+            pct = (100 * ms / self._ms) if self._ms else 0.0
+            avg_ms = (ms / reqs) if reqs else 0.0
             log.info("% 6.1f%% % 7dms % 9.2f % 8dx -- %s",
-                     100 * ms/self._ms, ms, ms/reqs, reqs, call)
+                     pct, ms, avg_ms, reqs, call)
         self.clear()
 
 
@@ -173,9 +178,10 @@ class Stats:
             return # nothing to report
         total = perf() - cls._start
         non_idle = total - cls._idle
+        pct_busy = (100 * cls._secs / non_idle) if non_idle else 0.0
+        pct_idle = (100 * cls._idle / total) if total else 0.0
         log.info("cumtime %ds (%.1f%% of %ds). %.1f%% idle. peak %dmb.",
-                 cls._secs, 100 * cls._secs / non_idle, non_idle,
-                 100 * cls._idle / total, peak_usage_mb())
+                 cls._secs, pct_busy, non_idle, pct_idle, peak_usage_mb())
         if cls._secs > 1:
             cls._db.report(cls._secs)
             cls._steemd.report(cls._secs)

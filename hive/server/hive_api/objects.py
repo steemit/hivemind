@@ -1,6 +1,9 @@
 """Hive API: account, post, and comment object retrieval"""
 import logging
+
+from hive.db.cache_router import CacheRouter
 from hive.server.hive_api.common import get_account_id, estimated_sp
+
 log = logging.getLogger(__name__)
 
 # Account objects
@@ -68,11 +71,17 @@ async def comments_by_id(db, ids, observer=None):
     """Given an array of post ids, returns comment objects keyed by id."""
     assert ids, 'no ids passed to comments_by_id'
 
-    sql = """SELECT post_id, author, permlink, body, depth,
+    sql_tpl = """SELECT post_id, author, permlink, body, depth,
                     payout, payout_at, is_paidout, created_at, updated_at,
                     rshares, is_hidden, is_grayed, votes
-               FROM hive_posts_cache WHERE post_id IN :ids""" #votes
-    result = await db.query_all(sql, ids=tuple(ids))
+               FROM %s WHERE post_id IN :ids"""
+    sql = sql_tpl % CacheRouter.TEMP_TABLE
+    result = list(await db.query_all(sql, ids=tuple(ids)))
+    found_ids = {row['post_id'] for row in result}
+    missing = [i for i in ids if i not in found_ids]
+    if missing:
+        sql_main = sql_tpl % CacheRouter.MAIN_TABLE
+        result.extend(await db.query_all(sql_main, ids=tuple(missing)))
 
     authors = set()
     by_id = {}

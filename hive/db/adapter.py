@@ -189,6 +189,6 @@ class Db:
             return False
         if action in ['DELETE', 'UPDATE', 'INSERT', 'COMMIT', 'START',
                       'ALTER', 'TRUNCA', 'CREATE', 'DROP I', 'DROP T',
-                      'ANALYZ']:  # ANALYZE command
+                      'ANALYZ', 'SET LO']:  # ANALYZE command; SET LOCAL for migration
             return True
         raise Exception("unknown action: {}".format(sql))

@@ -1,8 +1,10 @@
 """Hive API: Threaded discussion handling"""
 import logging
 
+from hive.db.cache_router import CacheRouter
 from hive.server.hive_api.common import url_to_id, valid_comment_sort, valid_limit
 from hive.server.hive_api.objects import comments_by_id
+
 log = logging.getLogger(__name__)
 
 # pylint: disable=too-many-arguments
@@ -34,6 +36,8 @@ async def _fetch_children(db, root_id, start_id, sort, limit, observer=None):
     """Fetch truncated children from tree."""
     mutes = set()
     field = _SORTS[sort]
+    query_type = {'top': 'payout', 'new': 'created'}.get(sort, sort)
+    table = CacheRouter.get_table(query_type)
 
     # load id skeleton
     tree, parent = await _load_tree(db, root_id, mutes, max_depth=3)
@@ -41,11 +45,11 @@ async def _fetch_children(db, root_id, start_id, sort, limit, observer=None):
     # find most relevant ids in subset
     seek = ''
     if start_id:
-        seek = """AND %s < (SELECT %s FROM hive_posts_cache
-                             WHERE post_id = :start_id)""" % (field, field)
-    sql = """SELECT post_id FROM hive_posts_cache
+        seek = """AND %s < (SELECT %s FROM %s
+                             WHERE post_id = :start_id)""" % (field, field, table)
+    sql = """SELECT post_id FROM %s
               WHERE post_id IN :ids %s ORDER BY %s DESC
-              LIMIT :limit""" % (seek, field)
+              LIMIT :limit""" % (table, seek, field)
     relevant_ids = await db.query_col(sql, ids=tuple(parent.keys()),
                                       start_id=start_id, limit=limit)
 
