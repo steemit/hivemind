@@ -11,6 +11,7 @@ from hive.indexer.cached_post import CachedPost
 from hive.indexer.feed_cache import FeedCache
 from hive.indexer.community import Community, START_DATE
 from hive.indexer.notify import Notify
+from hive.utils.redis_cache import RedisCacheManager
 
 log = logging.getLogger(__name__)
 DB = Db.instance()
@@ -122,6 +123,9 @@ class Posts:
         post['id'] = int(list(result)[0][0])
         cls._set_id(op['author']+'/'+op['permlink'], post['id'])
 
+        # Invalidate Redis cache for this post (in case of stale "not found" cache)
+        RedisCacheManager.sync_delete_all_post_caches(op['author'], op['permlink'])
+
         if not DbState.is_initial_sync():
             if post['error']:
                 author_id = Accounts.get_id(post['author'])
@@ -144,6 +148,9 @@ class Posts:
         post = cls._build_post(op, date, pid)
         DB.query(sql, **post)
 
+        # Invalidate Redis cache for this post
+        RedisCacheManager.sync_delete_all_post_caches(op['author'], op['permlink'])
+
         if not DbState.is_initial_sync():
             if post['error']:
                 author_id = Accounts.get_id(post['author'])
@@ -159,6 +166,9 @@ class Posts:
         """Marks a post record as being deleted."""
         pid, depth = cls.get_id_and_depth(op['author'], op['permlink'])
         DB.query("UPDATE hive_posts SET is_deleted = '1' WHERE id = :id", id=pid)
+
+        # Invalidate Redis cache for this post
+        RedisCacheManager.sync_delete_all_post_caches(op['author'], op['permlink'])
 
         if not DbState.is_initial_sync():
             CachedPost.delete(pid, op['author'], op['permlink'])
