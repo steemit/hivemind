@@ -22,6 +22,7 @@ from hive.indexer.follow import Follow
 from hive.indexer.cache_sync import CacheSync
 from hive.indexer.community import Community
 from hive.server.common.mutes import Mutes
+from hive.utils.redis_cache import RedisCacheManager
 
 #from hive.indexer.jobs import audit_cache_missing, audit_cache_deleted
 
@@ -38,6 +39,10 @@ class Sync:
         self._db = conf.db()
         self._steem = conf.steem()
         Blocks._conf = conf
+
+        # Initialize Redis cache for invalidation hooks
+        redis_url = conf.get('redis_url')
+        RedisCacheManager.init(redis_url)
 
     def run(self):
         """Initialize state; setup/recovery checks; sync and runloop."""
