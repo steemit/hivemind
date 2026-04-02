@@ -447,24 +447,37 @@ def reset_autovac(db):
     """Initializes/resets per-table autovacuum/autoanalyze params.
 
     We use a scale factor of 0 and specify exact threshold tuple counts,
-    per-table, in the format (autovacuum_threshold, autoanalyze_threshold)."""
+    per-table, in the format:
+        (vacuum_threshold, analyze_threshold, vacuum_cost_delay, vacuum_cost_limit)
 
-    autovac_config = { #    vacuum  analyze
-        'hive_accounts':    (50000, 100000),
-        'hive_posts_cache': (25000, 25000),
-        'hive_posts_cache_temp': (25000, 25000),
-        'hive_posts':       (2500, 10000),
-        'hive_post_tags':   (5000, 10000),
-        'hive_follows':     (5000, 5000),
-        'hive_feed_cache':  (5000, 5000),
-        'hive_blocks':      (5000, 25000),
-        'hive_reblogs':     (5000, 5000),
-        'hive_payments':    (5000, 5000),
+    cost_delay and cost_limit control autovacuum I/O throttling:
+    - cost_delay: sleep duration (ms) between rounds (higher = gentler)
+    - cost_limit: work budget per round (lower = gentler)
+    Omit cost params (None) to use global defaults."""
+
+    autovac_config = { #                      vacuum  analyze cost_delay cost_limit
+        'hive_accounts':        (50000, 100000, None,  None),
+        'hive_posts_cache':     (25000, 25000,  20,    200),
+        'hive_posts_cache_temp':(25000, 25000,  20,    200),
+        'hive_posts':           (2500,  10000,  None,  None),
+        'hive_post_tags':       (5000,  10000,  None,  None),
+        'hive_follows':         (5000,  5000,   None,  None),
+        'hive_feed_cache':      (5000,  5000,   None,  None),
+        'hive_blocks':          (5000,  25000,  None,  None),
+        'hive_reblogs':         (5000,  5000,   None,  None),
+        'hive_payments':        (5000,  5000,   None,  None),
     }
 
-    for table, (n_vacuum, n_analyze) in autovac_config.items():
-        sql = """ALTER TABLE %s SET (autovacuum_vacuum_scale_factor = 0,
-                                     autovacuum_vacuum_threshold = %s,
-                                     autovacuum_analyze_scale_factor = 0,
-                                     autovacuum_analyze_threshold = %s)"""
-        db.query(sql % (table, n_vacuum, n_analyze))
+    for table, (n_vacuum, n_analyze, cost_delay, cost_limit) in autovac_config.items():
+        sets = [
+            "autovacuum_vacuum_scale_factor = 0",
+            "autovacuum_vacuum_threshold = %s" % n_vacuum,
+            "autovacuum_analyze_scale_factor = 0",
+            "autovacuum_analyze_threshold = %s" % n_analyze,
+        ]
+        if cost_delay is not None:
+            sets.append("autovacuum_vacuum_cost_delay = %s" % cost_delay)
+        if cost_limit is not None:
+            sets.append("autovacuum_vacuum_cost_limit = %s" % cost_limit)
+        sql = "ALTER TABLE %s SET (%s)" % (table, ',\n                                     '.join(sets))
+        db.query(sql)

@@ -419,15 +419,26 @@ class DbState:
             cls._set_ver(25)
 
         if cls._ver == 25:
-            # Add autovacuum config for hive_posts_cache_temp (dead ratio was 9.16%)
-            log.info("[HIVE] Configuring autovacuum for hive_posts_cache_temp...")
+            # Tune autovacuum for hive_posts_cache_temp and hive_posts_cache
+            log.info("[HIVE] Tuning autovacuum for hive_posts_cache_temp...")
             cls.db().query("""ALTER TABLE hive_posts_cache_temp SET (
                 autovacuum_vacuum_scale_factor = 0,
                 autovacuum_vacuum_threshold = 25000,
                 autovacuum_analyze_scale_factor = 0,
-                autovacuum_analyze_threshold = 25000
+                autovacuum_analyze_threshold = 25000,
+                autovacuum_vacuum_cost_delay = 20,
+                autovacuum_vacuum_cost_limit = 200
             )""")
             log.info("[HIVE] hive_posts_cache_temp autovacuum configured")
+
+            # Throttle hive_posts_cache autovacuum to reduce I/O impact during peak hours
+            # Default cost_limit=600 was too aggressive for a 240GB / 18-index table
+            log.info("[HIVE] Tuning autovacuum cost for hive_posts_cache...")
+            cls.db().query("""ALTER TABLE hive_posts_cache SET (
+                autovacuum_vacuum_cost_delay = 20,
+                autovacuum_vacuum_cost_limit = 200
+            )""")
+            log.info("[HIVE] hive_posts_cache autovacuum cost tuned")
             cls._set_ver(26)
 
         reset_autovac(cls.db())
