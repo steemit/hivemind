@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 25
+DB_VERSION = 26
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -452,6 +452,7 @@ def reset_autovac(db):
     autovac_config = { #    vacuum  analyze
         'hive_accounts':    (50000, 100000),
         'hive_posts_cache': (25000, 25000),
+        'hive_posts_cache_temp': (25000, 25000),
         'hive_posts':       (2500, 10000),
         'hive_post_tags':   (5000, 10000),
         'hive_follows':     (5000, 5000),

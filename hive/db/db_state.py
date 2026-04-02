@@ -418,6 +418,18 @@ class DbState:
                 log.info("[HIVE] hive_posts_cache_temp cold-start backfill done, rows=%s", n)
             cls._set_ver(25)
 
+        if cls._ver == 25:
+            # Add autovacuum config for hive_posts_cache_temp (dead ratio was 9.16%)
+            log.info("[HIVE] Configuring autovacuum for hive_posts_cache_temp...")
+            cls.db().query("""ALTER TABLE hive_posts_cache_temp SET (
+                autovacuum_vacuum_scale_factor = 0,
+                autovacuum_vacuum_threshold = 25000,
+                autovacuum_analyze_scale_factor = 0,
+                autovacuum_analyze_threshold = 25000
+            )""")
+            log.info("[HIVE] hive_posts_cache_temp autovacuum configured")
+            cls._set_ver(26)
+
         reset_autovac(cls.db())
 
         log.info("[HIVE] db version: %d", cls._ver)
