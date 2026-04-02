@@ -439,6 +439,11 @@ class DbState:
                 autovacuum_vacuum_cost_limit = 200
             )""")
             log.info("[HIVE] hive_posts_cache autovacuum cost tuned")
+
+            # Drop unused ix31 (community hot) - 2GB, only 15k scans vs 50M for ix32
+            log.info("[HIVE] Dropping unused index hive_posts_cache_ix31...")
+            cls.db().query("DROP INDEX CONCURRENTLY IF EXISTS hive_posts_cache_ix31")
+            log.info("[HIVE] hive_posts_cache_ix31 dropped (recovered ~2GB)")
             cls._set_ver(26)
 
         reset_autovac(cls.db())
