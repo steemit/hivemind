@@ -418,6 +418,34 @@ class DbState:
                 log.info("[HIVE] hive_posts_cache_temp cold-start backfill done, rows=%s", n)
             cls._set_ver(25)
 
+        if cls._ver == 25:
+            # Tune autovacuum for hive_posts_cache_temp and hive_posts_cache
+            log.info("[HIVE] Tuning autovacuum for hive_posts_cache_temp...")
+            cls.db().query("""ALTER TABLE hive_posts_cache_temp SET (
+                autovacuum_vacuum_scale_factor = 0,
+                autovacuum_vacuum_threshold = 25000,
+                autovacuum_analyze_scale_factor = 0,
+                autovacuum_analyze_threshold = 25000,
+                autovacuum_vacuum_cost_delay = 20,
+                autovacuum_vacuum_cost_limit = 200
+            )""")
+            log.info("[HIVE] hive_posts_cache_temp autovacuum configured")
+
+            # Throttle hive_posts_cache autovacuum to reduce I/O impact during peak hours
+            # Default cost_limit=600 was too aggressive for a 240GB / 18-index table
+            log.info("[HIVE] Tuning autovacuum cost for hive_posts_cache...")
+            cls.db().query("""ALTER TABLE hive_posts_cache SET (
+                autovacuum_vacuum_cost_delay = 20,
+                autovacuum_vacuum_cost_limit = 200
+            )""")
+            log.info("[HIVE] hive_posts_cache autovacuum cost tuned")
+
+            # Drop unused ix31 (community hot) - 2GB, only 15k scans vs 50M for ix32
+            log.info("[HIVE] Dropping unused index hive_posts_cache_ix31...")
+            cls.db().query("DROP INDEX CONCURRENTLY IF EXISTS hive_posts_cache_ix31")
+            log.info("[HIVE] hive_posts_cache_ix31 dropped (recovered ~2GB)")
+            cls._set_ver(26)
+
         reset_autovac(cls.db())
 
         log.info("[HIVE] db version: %d", cls._ver)
