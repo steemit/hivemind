@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 26
+DB_VERSION = 27
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -300,6 +300,13 @@ def build_temp_cache_metadata(metadata=None):
         sa.Index('hive_posts_cache_temp_ix30', 'community_id', 'sc_trend', 'post_id',
                  postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),
         sa.Index('hive_posts_cache_temp_created', 'created_at'),
+        # Slow query optimization indexes (added in v27)
+        # Optimizes trending queries with depth=0 filter
+        sa.Index('hive_posts_cache_temp_ix6b', 'depth', 'sc_trend', 'post_id',
+                 postgresql_where=sql_text("is_paidout = '0' AND depth = 0")),
+        # Optimizes community trending queries
+        sa.Index('hive_posts_cache_temp_ix30b', 'community_id', 'depth', 'sc_trend', 'post_id',
+                 postgresql_where=sql_text("community_id IS NOT NULL AND is_grayed = '0' AND depth = 0")),
     )
     return metadata
 

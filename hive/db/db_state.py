@@ -446,6 +446,49 @@ class DbState:
             log.info("[HIVE] hive_posts_cache_ix31 dropped (recovered ~2GB)")
             cls._set_ver(26)
 
+        if cls._ver == 26:
+            # Performance optimization: Add indexes for slow queries
+            # Reference: beta-hivemind-slow-query-analysis.md
+            log.info("[HIVE] Creating slow query optimization indexes...")
+
+            # 1. hive_posts_cache_temp depth+trending index
+            # Optimizes trending/new queries with depth=0 filter
+            cls.db().query("""
+                CREATE INDEX CONCURRENTLY IF NOT EXISTS hive_posts_cache_temp_ix6b
+                ON hive_posts_cache_temp (depth, sc_trend DESC, post_id)
+                WHERE is_paidout = '0' AND depth = 0
+            """)
+
+            # 2. hive_posts_cache_temp community+depth+trending index
+            # Optimizes community trending queries
+            cls.db().query("""
+                CREATE INDEX CONCURRENTLY IF NOT EXISTS hive_posts_cache_temp_ix30b
+                ON hive_posts_cache_temp (community_id, depth, sc_trend DESC, post_id)
+                WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0
+            """)
+
+            # 3. hive_feed_cache account+created index (if not exists from v23)
+            # Optimizes feed/blog ORDER BY created_at DESC queries
+            cls.db().query("""
+                CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_feed_cache_account_created_desc
+                ON hive_feed_cache (account_id, created_at DESC, post_id)
+            """)
+
+            # 4. hive_reblogs post+account index
+            # Optimizes NOT EXISTS subquery in pids_by_blog
+            cls.db().query("""
+                CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reblogs_post_account
+                ON hive_reblogs (post_id, account)
+            """)
+
+            # Update statistics after creating indexes
+            cls.db().query("ANALYZE hive_posts_cache_temp")
+            cls.db().query("ANALYZE hive_feed_cache")
+            cls.db().query("ANALYZE hive_reblogs")
+
+            log.info("[HIVE] Slow query optimization indexes created")
+            cls._set_ver(27)
+
         reset_autovac(cls.db())
 
         log.info("[HIVE] db version: %d", cls._ver)

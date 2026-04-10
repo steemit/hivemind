@@ -168,9 +168,11 @@ async def pids_by_community(db, ids, sort, seek_id, limit):
     #sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
     #where.append("post_id NOT IN (%s)" % sql)
 
-    # hide author
-    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
-    where.append("author NOT IN (%s)" % sql)
+    # hide author (using NOT EXISTS for better performance than NOT IN)
+    where.append("""NOT EXISTS (
+        SELECT 1 FROM hive_posts_status s
+        WHERE s.list_type = '3' AND s.author = %s.author
+    )""" % table)
 
     # build
     sql = ("""SELECT post_id FROM %s WHERE %s
@@ -230,9 +232,12 @@ async def pids_by_category(db, tag, sort, last_id, limit):
     #sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
     #where.append("post_id NOT IN (%s)" % sql)
 
-    # hide author
-    sql = "SELECT author FROM hive_posts_status WHERE list_type = '3'"
-    where.append("author NOT IN (%s)" % sql)
+    # hide author (using NOT EXISTS for better performance than NOT IN)
+    table = CacheRouter.get_table(sort)
+    where.append("""NOT EXISTS (
+        SELECT 1 FROM hive_posts_status s
+        WHERE s.list_type = '3' AND s.author = %s.author
+    )""" % table)
 
     sql = ("""SELECT post_id FROM %s WHERE %s
               ORDER BY %s DESC, post_id LIMIT :limit
