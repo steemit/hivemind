@@ -489,6 +489,21 @@ class DbState:
             log.info("[HIVE] Slow query optimization indexes created")
             cls._set_ver(27)
 
+        if cls._ver == 27:
+            # Performance: index for hive_notifs sync hot-path
+            # The indexer's notify-account-votes query (SELECT 1 FROM hive_notifs
+            # WHERE dst_id = :dst_id AND post_id = :post_id AND type_id = 16)
+            # was doing a full table scan (~2s per query on 97M rows), causing
+            # sync to stall. This index reduces it to <1ms.
+            log.info("[HIVE] Creating hive_notifs_dst_post_type_idx index...")
+            cls.db().query("""
+                CREATE INDEX CONCURRENTLY IF NOT EXISTS hive_notifs_dst_post_type_idx
+                ON hive_notifs (dst_id, post_id, type_id)
+            """)
+            cls.db().query("ANALYZE hive_notifs")
+            log.info("[HIVE] hive_notifs_dst_post_type_idx index created")
+            cls._set_ver(28)
+
         reset_autovac(cls.db())
 
         log.info("[HIVE] db version: %d", cls._ver)

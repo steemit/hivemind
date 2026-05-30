@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 27
+DB_VERSION = 28
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
