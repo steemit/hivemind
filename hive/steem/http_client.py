@@ -88,7 +88,7 @@ class HttpClient(object):
         get_accounts='condenser_api',
         get_order_book='condenser_api',
         get_feed_history='condenser_api',
-        get_dynamic_global_properties='database_api',
+        get_dynamic_global_properties='condenser_api',
     )
 
     def __init__(self, nodes, **kwargs):
