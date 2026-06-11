@@ -270,15 +270,46 @@ async def _pids_by_type(db, list_type):
     return await db.query_col(sql, list_type=list_type)
 
 
+# Module-level cache for hidden post IDs (list_type=1).
+# Since the table is small (13K rows) and changes infrequently, we cache the
+# full set in Redis and filter in Python. This eliminates per-request DB queries
+# and prevents connection pool exhaustion under burst traffic.
+_HIDDEN_PIDS_CACHE_KEY = 'hide_pids_full_set_v1'
+_HIDDEN_PIDS_CACHE_TTL = 60  # seconds
+
+
+async def _get_hidden_pids_set(db):
+    """Get the full set of hidden post IDs (list_type=1) from cache or DB."""
+    if db.redis_cache is not None:
+        cached = await db.redis_cache.get(
+            _HIDDEN_PIDS_CACHE_KEY, namespace='bridge')
+        if cached is not None:
+            return set(cached) if cached else set()
+
+    # Cache miss: query DB for full hidden set
+    sql = "SELECT post_id FROM hive_posts_status WHERE list_type = '1'"
+    rows = await db.query_col(sql)
+
+    if db.redis_cache is not None:
+        await db.redis_cache.set(
+            _HIDDEN_PIDS_CACHE_KEY, rows, ttl=_HIDDEN_PIDS_CACHE_TTL,
+            namespace='bridge')
+
+    return set(rows)
+
+
 async def hide_pids_by_ids(db, ids):
-    """Get a list of hided post `id`s."""
+    """Get a list of hidden post `id`s from the input list.
+
+    Caches the full hidden set in Redis (60s TTL) and filters in Python.
+    This avoids per-request DB queries which caused connection pool
+    exhaustion under burst traffic (up to 427s observed 2026-04-20).
+    """
     if not ids:
         return []
 
-    sql = """SELECT post_id FROM hive_posts_status
-              WHERE list_type = '1' 
-              AND post_id IN :ids"""
-    return await db.query_col(sql, ids=tuple(ids))
+    hidden_set = await _get_hidden_pids_set(db)
+    return [pid for pid in ids if pid in hidden_set]
 
 
 async def pids_by_blog(db, account: str, start_author: str = '',
