@@ -1,3 +1,31 @@
 ---
 alwaysApply: true
 ---
+
+## Legacy Codebase Reference
+
+The original Python implementation of Hivemind is located at:
+
+```
+/home/ety001/workspace/hivemind_legacy
+```
+
+This legacy codebase serves as a reference for:
+
+- API implementation patterns and business logic
+- Database schema and queries
+- Indexer workflow and block processing
+- Steem blockchain interaction patterns
+
+When implementing or debugging features in the Go version, refer to the corresponding Python code in the `hivemind_legacy` directory for guidance on expected behavior and implementation details.
+
+### Key Legacy Files
+
+| Go Module | Legacy Reference |
+|-----------|------------------|
+| `internal/api/condenser/` | `hivemind_legacy/hive/server/condenser_api/` |
+| `internal/api/bridge/` | `hivemind_legacy/hive/server/bridge_api/` |
+| `internal/api/hive/` | `hivemind_legacy/hive/server/hive_api/` |
+| `internal/indexer/` | `hivemind_legacy/hive/indexer/` |
+| `internal/db/` | `hivemind_legacy/hive/db/` |
+| `internal/steem/` | `hivemind_legacy/hive/steem/` |
