@@ -304,7 +304,19 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
     sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
            % (table, ' AND '.join(where), field))
 
-    return await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'pids_by_query',
+        str(sort),
+        str(tag),
+        str(start_author),
+        str(start_permlink),
+        str(limit)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+
+    return await db.query_col(sql, tag=tag, start_id=start_id, limit=limit,
+                              cache_key=cache_key, cache_ttl=60)
 
 
 async def pids_by_blog(db, account: str, start_author: str = '',

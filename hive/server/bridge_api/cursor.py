@@ -243,7 +243,18 @@ async def pids_by_category(db, tag, sort, last_id, limit):
               ORDER BY %s DESC, post_id LIMIT :limit
               """ % (table, ' AND '.join(where), field))
 
-    return await db.query_col(sql, tag=tag, last_id=last_id, limit=limit)
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'pids_by_category',
+        str(sort),
+        str(tag),
+        str(last_id),
+        str(limit)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+
+    return await db.query_col(sql, tag=tag, last_id=last_id, limit=limit,
+                              cache_key=cache_key, cache_ttl=60)
 
 
 async def _subscribed(db, account_id):
