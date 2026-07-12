@@ -10,7 +10,7 @@ from sqlalchemy.types import BOOLEAN
 
 #pylint: disable=line-too-long, too-many-lines, bad-whitespace
 
-DB_VERSION = 28
+DB_VERSION = 29
 
 def build_metadata():
     """Build schema def with SqlAlchemy"""
@@ -112,7 +112,10 @@ def build_metadata():
         sa.Index('hive_follows_ix5a', 'following', 'state', 'created_at', 'follower'),
         sa.Index('hive_follows_ix5b', 'follower', 'state', 'created_at', 'following'),
         # Note: idx_follows_follower_following_state and idx_follows_follower_state_created_desc
-        # are created via migration (v23) because they use DESC and WHERE clauses
+        # are created via migration (v23) because they use DESC and WHERE clauses.
+        # v29: idx_follows_following_state_created_desc added via migration (symmetric
+        #      to idx_follows_follower_state_created_desc, serving get_followers).
+        # v29: hive_follows_5a/5b (v9 migration duplicates of ix5a/ix5b) dropped.
     )
 
     sa.Table(
