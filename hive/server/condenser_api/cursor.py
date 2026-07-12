@@ -55,7 +55,13 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
     """Get a list of accounts following a given account."""
     account_id = await _get_account_id(db, account)
     start_id = await _get_account_id(db, start) if start else None
-    state = (2,3) if follow_type == 'ignore' else (1,3)
+    # Hardcode state IN (...) so the planner can match the partial index
+    # idx_follows_following_state_created_desc (WHERE state IN (1,3)).
+    # A parameterized `state IN :state` tuple cannot be proven to satisfy the
+    # partial-index predicate at plan time.
+    state_clause = ("AND hf.state IN (2, 3)"
+                    if follow_type == 'ignore'
+                    else "AND hf.state IN (1, 3)")
 
     seek = ''
     if start_id:
@@ -71,19 +77,34 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
         FROM hive_follows hf
         INNER JOIN hive_accounts ha ON hf.follower = ha.id
         WHERE hf.following = :account_id
-          AND hf.state IN :state %s
+          %s %s
         ORDER BY hf.created_at DESC
         LIMIT :limit
-    """ % seek
+    """ % (state_clause, seek)
+
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'get_followers',
+        str(account_id),
+        follow_type or 'blog',
+        str(start_id) if start_id else '',
+        str(limit)
+    ]
+    cache_key = '_'.join(cache_key_parts)
 
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit)
+                              limit=limit,
+                              cache_key=cache_key, cache_ttl=30)
 
 
 async def get_followers_by_page(db, account: str, page: int, page_size: int, follow_type: str):
     """Get a list of accounts following a given account."""
     account_id = await _get_account_id(db, account)
-    state = (2,3) if follow_type == 'ignore' else (1,3)
+    # Hardcode state IN (...) so the planner can match the partial index
+    # idx_follows_following_state_created_desc (WHERE state IN (1,3)).
+    state_clause = ("AND hf.state IN (2, 3)"
+                    if follow_type == 'ignore'
+                    else "AND hf.state IN (1, 3)")
 
     # Optimized: Use INNER JOIN instead of LEFT JOIN for better performance
     # This assumes data integrity (all follower IDs exist in hive_accounts)
@@ -92,19 +113,34 @@ async def get_followers_by_page(db, account: str, page: int, page_size: int, fol
         FROM hive_follows hf
         INNER JOIN hive_accounts ha ON hf.follower = ha.id
         WHERE hf.following = :account_id
-          AND hf.state IN :state
+          %s
         ORDER BY hf.created_at DESC
         LIMIT :limit OFFSET :offset
-    """
+    """ % state_clause
+
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'get_followers_by_page',
+        str(account_id),
+        follow_type or 'blog',
+        str(page),
+        str(page_size)
+    ]
+    cache_key = '_'.join(cache_key_parts)
 
     return await db.query_all(sql, account_id=account_id,
-                              state=state, limit=page_size, offset=page*page_size)
+                              limit=page_size, offset=page*page_size,
+                              cache_key=cache_key, cache_ttl=30)
 
 async def get_following(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
     account_id = await _get_account_id(db, account)
     start_id = await _get_account_id(db, start) if start else None
-    state = (2, 3) if follow_type == 'ignore' else (1, 3)
+    # Hardcode state IN (...) so the planner can match the partial index
+    # idx_follows_follower_state_created_desc (WHERE state IN (1,3)).
+    state_clause = ("AND hf.state IN (2, 3)"
+                    if follow_type == 'ignore'
+                    else "AND hf.state IN (1, 3)")
 
     seek = ''
     if start_id:
@@ -120,10 +156,10 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
         FROM hive_follows hf
         INNER JOIN hive_accounts ha ON hf.following = ha.id
         WHERE hf.follower = :account_id
-          AND hf.state IN :state %s
+          %s %s
         ORDER BY hf.created_at DESC
         LIMIT :limit
-    """ % seek
+    """ % (state_clause, seek)
 
     # Generate cache key with all parameters that affect the result
     cache_key_parts = [
@@ -136,26 +172,46 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
     cache_key = '_'.join(cache_key_parts)
 
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit,
+                              limit=limit,
                               cache_key=cache_key, cache_ttl=30)
 
 
 async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
     """Get a list of accounts followed by a given account."""
     account_id = await _get_account_id(db, account)
-    state = (2, 3) if follow_type == 'ignore' else (1, 3)
+    # Hardcode state IN (...) so the planner can match the partial index
+    # idx_follows_follower_state_created_desc (WHERE state IN (1,3)).
+    state_clause = ("AND hf.state IN (2, 3)"
+                    if follow_type == 'ignore'
+                    else "AND hf.state IN (1, 3)")
 
+    # Optimized: Use INNER JOIN instead of LEFT JOIN for better performance.
+    # This aligns with the other three follow* functions, which were migrated
+    # to INNER JOIN (3274329, 67c6d5e); this function was missed at the time.
+    # Assumes data integrity (all following IDs exist in hive_accounts).
     sql = """
-        SELECT name,reputation,state FROM hive_follows hf
-     LEFT JOIN hive_accounts ON hf.following = id
-         WHERE hf.follower = :account_id
-           AND state IN :state
-      ORDER BY hf.created_at DESC
-         LIMIT :limit OFFSET :offset
-    """
+        SELECT ha.name, ha.reputation, hf.state
+        FROM hive_follows hf
+        INNER JOIN hive_accounts ha ON hf.following = ha.id
+        WHERE hf.follower = :account_id
+          %s
+        ORDER BY hf.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """ % state_clause
+
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'get_following_by_page',
+        str(account_id),
+        follow_type or 'blog',
+        str(page),
+        str(page_size)
+    ]
+    cache_key = '_'.join(cache_key_parts)
 
     return await db.query_all(sql, account_id=account_id,
-                              state=state, limit=page_size, offset=page*page_size)
+                              limit=page_size, offset=page*page_size,
+                              cache_key=cache_key, cache_ttl=30)
 
 
 async def get_follow_counts(db, account: str):
