@@ -93,10 +93,14 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
         str(limit)
     ]
     cache_key = '_'.join(cache_key_parts)
+    # ignore (muted) relationships change rarely; use a longer TTL to avoid
+    # cache churn on the slow ix5a fallback path (no partial index for state
+    # IN (2,3)). Normal blog follows stay at 30s.
+    cache_ttl = 300 if follow_type == 'ignore' else 30
 
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
                               limit=limit,
-                              cache_key=cache_key, cache_ttl=30)
+                              cache_key=cache_key, cache_ttl=cache_ttl)
 
 
 async def get_followers_by_page(db, account: str, page: int, page_size: int, follow_type: str):
@@ -132,10 +136,11 @@ async def get_followers_by_page(db, account: str, page: int, page_size: int, fol
         str(page_size)
     ]
     cache_key = '_'.join(cache_key_parts)
+    cache_ttl = 300 if follow_type == 'ignore' else 30
 
     return await db.query_all(sql, account_id=account_id,
                               limit=page_size, offset=page*page_size,
-                              cache_key=cache_key, cache_ttl=30)
+                              cache_key=cache_key, cache_ttl=cache_ttl)
 
 async def get_following(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
@@ -178,10 +183,11 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
         str(limit)
     ]
     cache_key = '_'.join(cache_key_parts)
+    cache_ttl = 300 if follow_type == 'ignore' else 30
 
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
                               limit=limit,
-                              cache_key=cache_key, cache_ttl=30)
+                              cache_key=cache_key, cache_ttl=cache_ttl)
 
 
 async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
@@ -219,10 +225,11 @@ async def get_following_by_page(db, account: str, page: int, page_size: int, fol
         str(page_size)
     ]
     cache_key = '_'.join(cache_key_parts)
+    cache_ttl = 300 if follow_type == 'ignore' else 30
 
     return await db.query_all(sql, account_id=account_id,
                               limit=page_size, offset=page*page_size,
-                              cache_key=cache_key, cache_ttl=30)
+                              cache_key=cache_key, cache_ttl=cache_ttl)
 
 
 async def get_follow_counts(db, account: str):
