@@ -504,6 +504,27 @@ class DbState:
             log.info("[HIVE] hive_notifs_dst_post_type_idx index created")
             cls._set_ver(28)
 
+        if cls._ver == 28:
+            # Performance: symmetric partial index for get_followers + drop dup indexes
+            # get_followers queries `WHERE following = :id ... ORDER BY created_at DESC`
+            # but only had idx_follows_follower_state_created_desc (follower-led, serves
+            # get_following). Add a following-led counterpart so the planner can satisfy
+            # get_followers without falling back to the full-ASC ix5a + cross-value sort.
+            # Also drop hive_follows_5a/5b: legacy v9 duplicates of ix5a/ix5b (identical
+            # columns), pure write-amplification burden, never managed by _disableable_indexes.
+            log.info("[HIVE] Creating idx_follows_following_state_created_desc index...")
+            cls.db().query("""
+                CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_follows_following_state_created_desc
+                ON hive_follows (following, state, created_at DESC, follower)
+                WHERE state IN (1,3)
+            """)
+            log.info("[HIVE] Dropping duplicate hive_follows_5a/5b indexes...")
+            cls.db().query("DROP INDEX CONCURRENTLY IF EXISTS hive_follows_5a")
+            cls.db().query("DROP INDEX CONCURRENTLY IF EXISTS hive_follows_5b")
+            cls.db().query("ANALYZE hive_follows")
+            log.info("[HIVE] hive_follows index optimization complete")
+            cls._set_ver(29)
+
         reset_autovac(cls.db())
 
         log.info("[HIVE] db version: %d", cls._ver)

@@ -55,7 +55,15 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
     """Get a list of accounts following a given account."""
     account_id = await _get_account_id(db, account)
     start_id = await _get_account_id(db, start) if start else None
-    state = (2,3) if follow_type == 'ignore' else (1,3)
+    # Hardcode the state filter (instead of a parameterized `state IN :state`
+    # tuple) so the normal branch (state IN (1,3)) can match the partial index
+    # idx_follows_following_state_created_desc. The ignore branch (state IN
+    # (2,3)) cannot match that partial index (predicate is state IN (1,3)) and
+    # falls back to ix5a; hardcoding still beats a tuple bind via better
+    # cardinality estimates.
+    state_clause = ("AND hf.state IN (2, 3)"
+                    if follow_type == 'ignore'
+                    else "AND hf.state IN (1, 3)")
 
     seek = ''
     if start_id:
@@ -71,19 +79,41 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
         FROM hive_follows hf
         INNER JOIN hive_accounts ha ON hf.follower = ha.id
         WHERE hf.following = :account_id
-          AND hf.state IN :state %s
+          %s %s
         ORDER BY hf.created_at DESC
         LIMIT :limit
-    """ % seek
+    """ % (state_clause, seek)
+
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'get_followers',
+        str(account_id),
+        follow_type or 'blog',
+        'none' if start_id is None else str(start_id),
+        str(limit)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+    # ignore (muted) relationships change rarely; use a longer TTL to avoid
+    # cache churn on the slow ix5a fallback path (no partial index for state
+    # IN (2,3)). Normal blog follows stay at 30s.
+    cache_ttl = 300 if follow_type == 'ignore' else 30
 
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit)
+                              limit=limit,
+                              cache_key=cache_key, cache_ttl=cache_ttl)
 
 
 async def get_followers_by_page(db, account: str, page: int, page_size: int, follow_type: str):
     """Get a list of accounts following a given account."""
     account_id = await _get_account_id(db, account)
-    state = (2,3) if follow_type == 'ignore' else (1,3)
+    # Hardcode the state filter so the normal branch (state IN (1,3)) can match
+    # the partial index idx_follows_following_state_created_desc. The ignore
+    # branch (state IN (2,3)) cannot match that partial index (predicate is
+    # state IN (1,3)) and falls back to ix5a; hardcoding still beats a tuple
+    # bind via better cardinality estimates.
+    state_clause = ("AND hf.state IN (2, 3)"
+                    if follow_type == 'ignore'
+                    else "AND hf.state IN (1, 3)")
 
     # Optimized: Use INNER JOIN instead of LEFT JOIN for better performance
     # This assumes data integrity (all follower IDs exist in hive_accounts)
@@ -92,19 +122,38 @@ async def get_followers_by_page(db, account: str, page: int, page_size: int, fol
         FROM hive_follows hf
         INNER JOIN hive_accounts ha ON hf.follower = ha.id
         WHERE hf.following = :account_id
-          AND hf.state IN :state
+          %s
         ORDER BY hf.created_at DESC
         LIMIT :limit OFFSET :offset
-    """
+    """ % state_clause
+
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'get_followers_by_page',
+        str(account_id),
+        follow_type or 'blog',
+        str(page),
+        str(page_size)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+    cache_ttl = 300 if follow_type == 'ignore' else 30
 
     return await db.query_all(sql, account_id=account_id,
-                              state=state, limit=page_size, offset=page*page_size)
+                              limit=page_size, offset=page*page_size,
+                              cache_key=cache_key, cache_ttl=cache_ttl)
 
 async def get_following(db, account: str, start: str, follow_type: str, limit: int):
     """Get a list of accounts followed by a given account."""
     account_id = await _get_account_id(db, account)
     start_id = await _get_account_id(db, start) if start else None
-    state = (2, 3) if follow_type == 'ignore' else (1, 3)
+    # Hardcode the state filter so the normal branch (state IN (1,3)) can match
+    # the partial index idx_follows_follower_state_created_desc. The ignore
+    # branch (state IN (2,3)) cannot match that partial index (predicate is
+    # state IN (1,3)) and falls back to ix5b; hardcoding still beats a tuple
+    # bind via better cardinality estimates.
+    state_clause = ("AND hf.state IN (2, 3)"
+                    if follow_type == 'ignore'
+                    else "AND hf.state IN (1, 3)")
 
     seek = ''
     if start_id:
@@ -120,42 +169,67 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
         FROM hive_follows hf
         INNER JOIN hive_accounts ha ON hf.following = ha.id
         WHERE hf.follower = :account_id
-          AND hf.state IN :state %s
+          %s %s
         ORDER BY hf.created_at DESC
         LIMIT :limit
-    """ % seek
+    """ % (state_clause, seek)
 
     # Generate cache key with all parameters that affect the result
     cache_key_parts = [
         'get_following',
         str(account_id),
         follow_type or 'blog',
-        str(start_id) if start_id else '',
+        'none' if start_id is None else str(start_id),
         str(limit)
     ]
     cache_key = '_'.join(cache_key_parts)
+    cache_ttl = 300 if follow_type == 'ignore' else 30
 
     return await db.query_all(sql, account_id=account_id, start_id=start_id,
-                              state=state, limit=limit,
-                              cache_key=cache_key, cache_ttl=30)
+                              limit=limit,
+                              cache_key=cache_key, cache_ttl=cache_ttl)
 
 
 async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
     """Get a list of accounts followed by a given account."""
     account_id = await _get_account_id(db, account)
-    state = (2, 3) if follow_type == 'ignore' else (1, 3)
+    # Hardcode the state filter so the normal branch (state IN (1,3)) can match
+    # the partial index idx_follows_follower_state_created_desc. The ignore
+    # branch (state IN (2,3)) cannot match that partial index (predicate is
+    # state IN (1,3)) and falls back to ix5b; hardcoding still beats a tuple
+    # bind via better cardinality estimates.
+    state_clause = ("AND hf.state IN (2, 3)"
+                    if follow_type == 'ignore'
+                    else "AND hf.state IN (1, 3)")
 
+    # Optimized: Use INNER JOIN instead of LEFT JOIN for better performance.
+    # This aligns with the other three follow* functions, which were migrated
+    # to INNER JOIN (3274329, 67c6d5e); this function was missed at the time.
+    # Assumes data integrity (all following IDs exist in hive_accounts).
     sql = """
-        SELECT name,reputation,state FROM hive_follows hf
-     LEFT JOIN hive_accounts ON hf.following = id
-         WHERE hf.follower = :account_id
-           AND state IN :state
-      ORDER BY hf.created_at DESC
-         LIMIT :limit OFFSET :offset
-    """
+        SELECT ha.name, ha.reputation, hf.state
+        FROM hive_follows hf
+        INNER JOIN hive_accounts ha ON hf.following = ha.id
+        WHERE hf.follower = :account_id
+          %s
+        ORDER BY hf.created_at DESC
+        LIMIT :limit OFFSET :offset
+    """ % state_clause
+
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'get_following_by_page',
+        str(account_id),
+        follow_type or 'blog',
+        str(page),
+        str(page_size)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+    cache_ttl = 300 if follow_type == 'ignore' else 30
 
     return await db.query_all(sql, account_id=account_id,
-                              state=state, limit=page_size, offset=page*page_size)
+                              limit=page_size, offset=page*page_size,
+                              cache_key=cache_key, cache_ttl=cache_ttl)
 
 
 async def get_follow_counts(db, account: str):
@@ -248,7 +322,19 @@ async def pids_by_query(db, sort, start_author, start_permlink, limit, tag):
     sql = ("SELECT post_id FROM %s WHERE %s ORDER BY %s DESC LIMIT :limit"
            % (table, ' AND '.join(where), field))
 
-    return await db.query_col(sql, tag=tag, start_id=start_id, limit=limit)
+    # Generate cache key with all parameters that affect the result
+    cache_key_parts = [
+        'pids_by_query',
+        str(sort),
+        str(tag),
+        str(start_author),
+        str(start_permlink),
+        str(limit)
+    ]
+    cache_key = '_'.join(cache_key_parts)
+
+    return await db.query_col(sql, tag=tag, start_id=start_id, limit=limit,
+                              cache_key=cache_key, cache_ttl=60)
 
 
 async def pids_by_blog(db, account: str, start_author: str = '',

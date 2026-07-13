@@ -219,8 +219,13 @@ class Sync:
             if num % 1200 == 0: #1hr
                 log.warning("head block %d @ %s", num, block['timestamp'])
                 log.info("[LIVE] hourly stats")
-                Accounts.fetch_ranks()
                 #Community.recalc_pending_payouts()
+            if num % 7200 == 0: #6hr
+                # Rank is an approximate score used for notification buckets; a 6h
+                # stale window is acceptable. Run less often than the previous 1h
+                # cadence to avoid the full-table ORDER BY vote_weight DESC (~12s,
+                # million-scale) competing for RDS IOPS with API queries.
+                Accounts.fetch_ranks()
             if num % 200 == 0: #10min
                 Community.recalc_pending_payouts()
             if num % 100 == 0: #5min
