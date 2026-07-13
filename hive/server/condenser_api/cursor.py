@@ -55,10 +55,12 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
     """Get a list of accounts following a given account."""
     account_id = await _get_account_id(db, account)
     start_id = await _get_account_id(db, start) if start else None
-    # Hardcode state IN (...) so the planner can match the partial index
-    # idx_follows_following_state_created_desc (WHERE state IN (1,3)).
-    # A parameterized `state IN :state` tuple cannot be proven to satisfy the
-    # partial-index predicate at plan time.
+    # Hardcode the state filter (instead of a parameterized `state IN :state`
+    # tuple) so the normal branch (state IN (1,3)) can match the partial index
+    # idx_follows_following_state_created_desc. The ignore branch (state IN
+    # (2,3)) cannot match that partial index (predicate is state IN (1,3)) and
+    # falls back to ix5a; hardcoding still beats a tuple bind via better
+    # cardinality estimates.
     state_clause = ("AND hf.state IN (2, 3)"
                     if follow_type == 'ignore'
                     else "AND hf.state IN (1, 3)")
@@ -87,7 +89,7 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
         'get_followers',
         str(account_id),
         follow_type or 'blog',
-        str(start_id) if start_id else '',
+        'none' if start_id is None else str(start_id),
         str(limit)
     ]
     cache_key = '_'.join(cache_key_parts)
@@ -100,8 +102,11 @@ async def get_followers(db, account: str, start: str, follow_type: str, limit: i
 async def get_followers_by_page(db, account: str, page: int, page_size: int, follow_type: str):
     """Get a list of accounts following a given account."""
     account_id = await _get_account_id(db, account)
-    # Hardcode state IN (...) so the planner can match the partial index
-    # idx_follows_following_state_created_desc (WHERE state IN (1,3)).
+    # Hardcode the state filter so the normal branch (state IN (1,3)) can match
+    # the partial index idx_follows_following_state_created_desc. The ignore
+    # branch (state IN (2,3)) cannot match that partial index (predicate is
+    # state IN (1,3)) and falls back to ix5a; hardcoding still beats a tuple
+    # bind via better cardinality estimates.
     state_clause = ("AND hf.state IN (2, 3)"
                     if follow_type == 'ignore'
                     else "AND hf.state IN (1, 3)")
@@ -136,8 +141,11 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
     """Get a list of accounts followed by a given account."""
     account_id = await _get_account_id(db, account)
     start_id = await _get_account_id(db, start) if start else None
-    # Hardcode state IN (...) so the planner can match the partial index
-    # idx_follows_follower_state_created_desc (WHERE state IN (1,3)).
+    # Hardcode the state filter so the normal branch (state IN (1,3)) can match
+    # the partial index idx_follows_follower_state_created_desc. The ignore
+    # branch (state IN (2,3)) cannot match that partial index (predicate is
+    # state IN (1,3)) and falls back to ix5b; hardcoding still beats a tuple
+    # bind via better cardinality estimates.
     state_clause = ("AND hf.state IN (2, 3)"
                     if follow_type == 'ignore'
                     else "AND hf.state IN (1, 3)")
@@ -166,7 +174,7 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
         'get_following',
         str(account_id),
         follow_type or 'blog',
-        str(start_id) if start_id else '',
+        'none' if start_id is None else str(start_id),
         str(limit)
     ]
     cache_key = '_'.join(cache_key_parts)
@@ -179,8 +187,11 @@ async def get_following(db, account: str, start: str, follow_type: str, limit: i
 async def get_following_by_page(db, account: str, page: int, page_size: int, follow_type: str):
     """Get a list of accounts followed by a given account."""
     account_id = await _get_account_id(db, account)
-    # Hardcode state IN (...) so the planner can match the partial index
-    # idx_follows_follower_state_created_desc (WHERE state IN (1,3)).
+    # Hardcode the state filter so the normal branch (state IN (1,3)) can match
+    # the partial index idx_follows_follower_state_created_desc. The ignore
+    # branch (state IN (2,3)) cannot match that partial index (predicate is
+    # state IN (1,3)) and falls back to ix5b; hardcoding still beats a tuple
+    # bind via better cardinality estimates.
     state_clause = ("AND hf.state IN (2, 3)"
                     if follow_type == 'ignore'
                     else "AND hf.state IN (1, 3)")
