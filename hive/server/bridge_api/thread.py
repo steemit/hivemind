@@ -71,7 +71,7 @@ async def _child_ids(db, parent_ids):
         GROUP BY p.parent_id
     """
     rows = await db.query_all(sql, ids=tuple(parent_ids),
-        cache_key="_child_ids_" + "_".join(map(str, parent_ids)), cache_ttl=30)
+        cache_key="_child_ids_" + "_".join(map(str, parent_ids)), cache_ttl=120)
     return [[row['parent_id'], row['child_ids']] for row in rows]
 
 async def _load_discussion(db, root_id):
