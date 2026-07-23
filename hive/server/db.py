@@ -99,6 +99,7 @@ class Db:
                                       host=conf.host,
                                       port=conf.port,
                                       maxsize=pool_size,
+                                      timeout=10,
                                       **conf.query)
         if redis_url is not None:
             self.redis_cache = Cache.from_url(redis_url)
