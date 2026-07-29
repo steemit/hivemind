@@ -85,29 +85,49 @@ async def load_posts_keyed(db, ids, truncate_body=0):
                 ctx[cid] = []
             ctx[cid].append(author['id'])
 
-    # TODO: optimize
-    titles = {}
-    roles = {}
-    for cid, account_ids in ctx.items():
-        sql = "SELECT title FROM hive_communities WHERE id = :id"
-        titles[cid] = await db.query_one(sql, id=cid)
-        sql = """SELECT account_id, role_id, title
-                   FROM hive_roles
-                  WHERE community_id = :cid
-                    AND account_id IN :ids"""
-        roles[cid] = {}
-        ret = await db.query_all(sql, cid=cid, ids=tuple(account_ids))
-        for row in ret:
-            name = author_ids[row['account_id']]
-            roles[cid][name] = (row['role_id'], row['title'])
+    # Batch load community titles and roles in 2 queries instead of one
+    # pair of queries per community, which could tie up many DB connections
+    # under burst traffic across threads spanning many communities.
+    # Pre-initialize maps for every referenced community so lookups below
+    # never raise KeyError when a community_id points at a row that no longer
+    # exists in hive_communities (e.g. after a fork rollback deletes it) --
+    # such rows simply fall back to the post category / default guest role,
+    # matching the pre-batch behavior.
+    titles = {cid: None for cid in ctx}
+    roles = {cid: {} for cid in ctx}
+    if ctx:
+        all_cids = tuple(ctx.keys())
+
+        # 1 query for all community titles
+        sql = "SELECT id, title FROM hive_communities WHERE id IN :cids"
+        for r in await db.query_all(sql, cids=all_cids):
+            titles[r['id']] = r['title']
+
+        # Collect unique account_ids across all communities
+        all_aids = set()
+        for aids in ctx.values():
+            all_aids.update(aids)
+
+        if all_aids:
+            # 1 query for all roles across all communities
+            sql = """SELECT community_id, account_id, role_id, title
+                       FROM hive_roles
+                      WHERE community_id IN :cids
+                        AND account_id IN :aids"""
+            ret = await db.query_all(sql, cids=all_cids, aids=tuple(all_aids))
+            for row in ret:
+                cid = row['community_id']
+                name = author_ids.get(row['account_id'])
+                if name and cid in roles:
+                    roles[cid][name] = (row['role_id'], row['title'])
 
     for pid, post in posts_by_id.items():
         author = post['author']
         cid = post_cids[pid]
         if cid:
             post['community'] = post['category'] # TODO: True?
-            post['community_title'] = titles[cid] or post['category']
-            role = roles[cid][author] if author in roles[cid] else (0, '')
+            post['community_title'] = titles.get(cid) or post['category']
+            role = roles[cid][author] if cid in roles and author in roles[cid] else (0, '')
             post['author_role'] = ROLES[role[0]]
             post['author_title'] = role[1]
         else:
