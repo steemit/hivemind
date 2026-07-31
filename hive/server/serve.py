@@ -35,7 +35,10 @@ async def db_head_state(context):
     db = context['db']
     sql = ("SELECT num, created_at, extract(epoch from created_at) ts "
            "FROM hive_blocks ORDER BY num DESC LIMIT 1")
-    row = await db.query_row(sql)
+    # Use the isolated health engine so a saturated main pool (e.g. many slow
+    # get_discussion queries) cannot cause /health to time out and get the
+    # instance killed by the ELB.
+    row = await db.query_row_health(sql)
     return dict(db_head_block=row['num'],
                 db_head_time=str(row['created_at']),
                 db_head_age=int(time.time() - float(row['ts'])))
