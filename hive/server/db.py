@@ -16,6 +16,14 @@ log = logging.getLogger(__name__)
 
 CACHE_NAMESPACE = "hivemind"
 
+# Per-query execution timeout (milliseconds). PostgreSQL cancels any statement
+# running longer than this, immediately releasing the connection back to the
+# pool. This is the safety net that prevents a single pathological query (e.g.
+# 160s get_discussion lookups) from exhausting the aiopg pool. The pool's
+# acquire `timeout` only bounds how long we wait for a free connection, NOT
+# query execution time. See connection-pool-exhaustion incident.
+STATEMENT_TIMEOUT_MS = 30000  # 30 seconds
+
 # Sentinel value to represent 'record not found' in cache.
 # Using a string marker that can be easily serialized/deserialized.
 # This allows us to distinguish between:
@@ -87,12 +95,31 @@ class Db:
 
     def __init__(self):
         self.db = None
+        # Dedicated single-connection engine for health checks, isolated from
+        # the main pool so that a saturated main pool cannot starve /health and
+        # /head_age (which would cause the ELB to mark the instance unhealthy).
+        self.health_db = None
         self.redis_cache = None
         self._prep_sql = {}
 
     async def init(self, url, redis_url, pool_size=20):
         """Initialize the aiopg.sa engine."""
         conf = make_url(url)
+        # statement_timeout (ms) cancels runaway queries server-side so a single
+        # slow query cannot hold a pool connection indefinitely. See note on
+        # STATEMENT_TIMEOUT_MS above. Passed via the standard libpq `options`
+        # string (every psycopg2/libpq version accepts this); the newer
+        # `server_settings` dict is rejected as an invalid DSN option by the
+        # older psycopg2 shipped in the runtime image. Merge into conf.query
+        # (rather than a separate kwarg) so a DATABASE_URL that already carries
+        # an `options=...` query param does not cause a duplicate-keyword error;
+        # any pre-existing options string is preserved and appended to.
+        query = dict(conf.query)
+        timeout_opt = '-c statement_timeout=%d' % STATEMENT_TIMEOUT_MS
+        if 'options' in query and query['options']:
+            query['options'] = query['options'] + ' ' + timeout_opt
+        else:
+            query['options'] = timeout_opt
         self.db = await create_engine(user=conf.username,
                                       database=conf.database,
                                       password=conf.password,
@@ -100,7 +127,17 @@ class Db:
                                       port=conf.port,
                                       maxsize=pool_size,
                                       timeout=10,
-                                      **conf.query)
+                                      **query)
+        # Lightweight isolated engine (1 connection) for health checks. A short
+        # acquire timeout keeps health checks responsive instead of blocking.
+        self.health_db = await create_engine(user=conf.username,
+                                             database=conf.database,
+                                             password=conf.password,
+                                             host=conf.host,
+                                             port=conf.port,
+                                             maxsize=1,
+                                             timeout=2,
+                                             **query)
         if redis_url is not None:
             self.redis_cache = Cache.from_url(redis_url)
             self.redis_cache.serializer = SafeUniversalSerializer()
@@ -108,12 +145,27 @@ class Db:
     def close(self):
         """Close pool."""
         self.db.close()
+        if self.health_db is not None:
+            self.health_db.close()
         if self.redis_cache is not None:
             self.redis_cache.close()
 
     async def wait_closed(self):
         """Wait for releasing and closing all acquired connections."""
         await self.db.wait_closed()
+        if self.health_db is not None:
+            await self.health_db.wait_closed()
+
+    async def query_row_health(self, sql, **kwargs):
+        """Run a `SELECT 1*m` on the isolated health engine.
+
+        Bypasses the cache decorator and the main pool so that health checks
+        remain responsive even when the main pool is fully saturated by slow
+        API queries.
+        """
+        async with self.health_db.acquire() as conn:
+            cur = await self._query(conn, sql, **kwargs)
+            return await cur.first()
 
     @sqltimer
     @cacher
