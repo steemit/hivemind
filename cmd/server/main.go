@@ -53,6 +53,17 @@ func main() {
 	}
 	defer database.Close()
 
+	// Run schema migrations (skippable via HIVE_DB_MIGRATE=false).
+	// The server only needs read access; migrations also run in the indexer,
+	// but running here too keeps dev/test environments self-bootstrapping.
+	if cfg.Database.Migrate {
+		if err := db.RunMigrations(cfg.Database.URL, 0); err != nil {
+			logger.Fatal("Failed to run database migrations", zap.Error(err))
+		}
+	} else {
+		logger.Info("Database migrations skipped (HIVE_DB_MIGRATE=false)")
+	}
+
 	// Initialize Redis cache
 	redisCache, err := cache.New(&cfg.Redis)
 	if err != nil {
@@ -80,10 +91,14 @@ func main() {
 	apiRouter := api.NewRouter(database, redisCache)
 	apiRouter.SetupRoutes(router)
 
-	// Create HTTP server
+	// Create HTTP server with timeouts to prevent slow-client goroutine leaks
+	// (see connection-pool-exhaustion-go-rewrite.md Issue 4).
 	srv := &http.Server{
-		Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler: router,
+		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:      router,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
 	}
 
 	// Start server in goroutine
