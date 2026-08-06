@@ -49,6 +49,26 @@ func main() {
 	}
 	defer database.Close()
 
+	// Run schema migrations before indexing.
+	//
+	// For a NEW database, forceVersion=0 runs the baseline migration (0001)
+	// from scratch, building the full schema (DB_VERSION 29 shape).
+	//
+	// For an EXISTING database already provisioned by the Python legacy,
+	// set HIVE_DB_MIGRATE_FORCE=1 to stamp version 1 without running DDL,
+	// after which subsequent versions (if any) apply normally.
+	if cfg.Database.Migrate {
+		force := 0
+		if cfg.Indexer.MigrateForceBaseline {
+			force = 1
+		}
+		if err := db.RunMigrations(cfg.Database.URL, force); err != nil {
+			logger.Fatal("Failed to run database migrations", zap.Error(err))
+		}
+	} else {
+		logger.Info("Database migrations skipped (HIVE_DB_MIGRATE=false)")
+	}
+
 	// Initialize Steem client
 	steemClient, err := steem.New(&cfg.Steem)
 	if err != nil {
@@ -90,4 +110,3 @@ func main() {
 
 	logger.Info("Indexer exited")
 }
-
