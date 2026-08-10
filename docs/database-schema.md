@@ -352,7 +352,12 @@ Transaction ID to block number mapping.
 
 ## Database Version
 
-Current schema version: **22**
+Current schema version: **29** (DB_VERSION from legacy `schema.py`)
 
-Migrations are handled automatically on startup via `DbState._check_migrations()`.
+Migrations are managed by golang-migrate (embedded library, `internal/db/migrations/`).
+The baseline migration (`0001_init_schema`) mirrors the legacy production v29 shape.
+Both server and indexer run pending migrations on startup (gated by `HIVE_DB_MIGRATE`,
+default on). For an existing database already provisioned by the Python legacy, set
+`HIVE_DB_MIGRATE_FORCE=1` on first startup to stamp the baseline version without
+re-running DDL, then unset it.
 

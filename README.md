@@ -86,9 +86,19 @@ Configuration is managed via environment variables or config file:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `HIVE_DATABASE_URL` | PostgreSQL connection string | Required |
+| `HIVE_DB_MIGRATE` | Run schema migrations on startup | true |
+| `HIVE_DB_MIGRATE_FORCE` | Stamp baseline version without DDL (first run on a legacy-provisioned DB) | false |
+| `HIVE_DB_MAX_OPEN_CONNS` | Max open DB connections | 25 |
+| `HIVE_DB_MAX_IDLE_CONNS` | Max idle DB connections | 10 |
+| `HIVE_DB_CONN_MAX_LIFETIME` | Max connection lifetime | 1h |
+| `HIVE_DB_CONN_MAX_IDLE_TIME` | Max idle connection time | 10m |
+| `HIVE_DB_STATEMENT_TIMEOUT` | Per-session statement timeout (0 = disabled) | 30s |
 | `HIVE_STEEMD_URL` | Steemd node URL | Required |
 | `HIVE_REDIS_URL` | Redis connection | Optional |
 | `HIVE_HTTP_SERVER_PORT` | API server port | 8080 |
+| `HIVE_HTTP_READ_TIMEOUT` | HTTP read timeout | 30s |
+| `HIVE_HTTP_WRITE_TIMEOUT` | HTTP write timeout | 30s |
+| `HIVE_HTTP_IDLE_TIMEOUT` | HTTP idle timeout | 120s |
 | `HIVE_LOG_LEVEL` | Logging level | INFO |
 | `HIVE_TRACES_ENDPOINT` | OTLP traces endpoint | localhost:4318 |
 | `HIVE_PROMETHEUS_ENABLED` | Enable Prometheus metrics | true |
