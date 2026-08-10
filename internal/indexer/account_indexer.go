@@ -10,21 +10,26 @@ import (
 
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
+	"github.com/steemit/hivemind/internal/steem"
 )
 
 // AccountIndexer handles account indexing
 type AccountIndexer struct {
 	repo   *db.Repository
+	steem  steem.Provider
 	logger *zap.Logger
 	dirty  map[string]bool // Dirty queue for accounts that need updates
 }
 
-// NewAccountIndexer creates a new account indexer
-func NewAccountIndexer(repo *db.Repository, logger *zap.Logger) *AccountIndexer {
+// NewAccountIndexer creates a new account indexer. The steem provider is used
+// by Flush (KR3) to pull fresh account data from steemd; it may be nil in tests
+// that only exercise Register/MarkDirty.
+func NewAccountIndexer(repo *db.Repository, logger *zap.Logger, steemProvider steem.Provider) *AccountIndexer {
 	return &AccountIndexer{
 		repo:   repo,
+		steem:  steemProvider,
 		logger: logger,
-		dirty:   make(map[string]bool),
+		dirty:  make(map[string]bool),
 	}
 }
 
@@ -35,7 +40,7 @@ func (ai *AccountIndexer) Register(ctx context.Context, tx *gorm.DB, names []str
 	}
 
 	accountRepo := db.NewAccountRepository(ai.repo)
-	
+
 	// Filter out accounts that already exist
 	newNames := make([]string, 0)
 	for _, name := range names {
@@ -55,15 +60,15 @@ func (ai *AccountIndexer) Register(ctx context.Context, tx *gorm.DB, names []str
 	// Create new accounts
 	for _, name := range newNames {
 		account := &models.Account{
-			Name:      name,
-			CreatedAt: blockDate,
+			Name:       name,
+			CreatedAt:  blockDate,
 			Reputation: 25.0, // Default reputation
 		}
-		
+
 		if err := tx.WithContext(ctx).Create(account).Error; err != nil {
 			return fmt.Errorf("failed to create account %s: %w", name, err)
 		}
-		
+
 		ai.logger.Debug("Registered new account", zap.String("name", name))
 	}
 
@@ -84,7 +89,7 @@ func (ai *AccountIndexer) Flush(ctx context.Context) error {
 	// TODO: Fetch accounts from steemd and update cache
 	// For now, just clear the dirty queue
 	ai.dirty = make(map[string]bool)
-	
+
 	return nil
 }
 
@@ -100,4 +105,3 @@ func (ai *AccountIndexer) GetID(ctx context.Context, name string) (int64, error)
 	}
 	return account.ID, nil
 }
-
