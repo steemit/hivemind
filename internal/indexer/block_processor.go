@@ -253,6 +253,37 @@ func (bp *BlockProcessor) saveTransactionIDs(ctx context.Context, tx *gorm.DB, t
 	return nil
 }
 
+// extractAccountName pulls the account name that a create/pow-style operation
+// introduces, registering it into accountNames. This is the pure (DB-free)
+// part of processOperation's account branch, factored out for unit testing.
+// Returns true if an account name was registered.
+func extractAccountName(opType string, opValue map[string]interface{}, accountNames map[string]bool) bool {
+	switch opType {
+	case "pow_operation":
+		if worker, ok := opValue["worker_account"].(string); ok && worker != "" {
+			accountNames[worker] = true
+			return true
+		}
+	case "pow2_operation":
+		if work, ok := opValue["work"].(map[string]interface{}); ok {
+			if value, ok := work["value"].(map[string]interface{}); ok {
+				if input, ok := value["input"].(map[string]interface{}); ok {
+					if worker, ok := input["worker_account"].(string); ok && worker != "" {
+						accountNames[worker] = true
+						return true
+					}
+				}
+			}
+		}
+	case "account_create_operation", "account_create_with_delegation_operation", "create_claimed_account_operation":
+		if name, ok := opValue["new_account_name"].(string); ok && name != "" {
+			accountNames[name] = true
+			return true
+		}
+	}
+	return false
+}
+
 // processOperation processes a single operation
 func (bp *BlockProcessor) processOperation(
 	ctx context.Context,
@@ -266,33 +297,11 @@ func (bp *BlockProcessor) processOperation(
 	jsonOps *[]map[string]interface{},
 ) error {
 	switch opType {
-	// Account operations
-	case "pow_operation":
-		if worker, ok := opValue["worker_account"].(string); ok {
-			accountNames[worker] = true
-		}
-	case "pow2_operation":
-		if work, ok := opValue["work"].(map[string]interface{}); ok {
-			if value, ok := work["value"].(map[string]interface{}); ok {
-				if input, ok := value["input"].(map[string]interface{}); ok {
-					if worker, ok := input["worker_account"].(string); ok {
-						accountNames[worker] = true
-					}
-				}
-			}
-		}
-	case "account_create_operation":
-		if name, ok := opValue["new_account_name"].(string); ok {
-			accountNames[name] = true
-		}
-	case "account_create_with_delegation_operation":
-		if name, ok := opValue["new_account_name"].(string); ok {
-			accountNames[name] = true
-		}
-	case "create_claimed_account_operation":
-		if name, ok := opValue["new_account_name"].(string); ok {
-			accountNames[name] = true
-		}
+	// Account operations — registration candidates (pure extraction).
+	case "pow_operation", "pow2_operation",
+		"account_create_operation", "account_create_with_delegation_operation",
+		"create_claimed_account_operation":
+		extractAccountName(opType, opValue, accountNames)
 	case "account_update_operation":
 		if !isInitialSync {
 			if account, ok := opValue["account"].(string); ok {
