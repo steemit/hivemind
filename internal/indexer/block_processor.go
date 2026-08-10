@@ -12,6 +12,7 @@ import (
 
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
+	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/logging"
 )
 
@@ -19,6 +20,7 @@ import (
 type BlockProcessor struct {
 	db               *db.DB
 	repo             *db.Repository
+	steem            steem.Provider
 	accounts         *AccountIndexer
 	posts            *PostIndexer
 	follows          *FollowIndexer
@@ -28,14 +30,18 @@ type BlockProcessor struct {
 	logger           *zap.Logger
 }
 
-// NewBlockProcessor creates a new block processor
-func NewBlockProcessor(database *db.DB, repo *db.Repository) *BlockProcessor {
+// NewBlockProcessor creates a new block processor. The steemProvider is passed
+// down to indexers that need to hit steemd (currently AccountIndexer.Flush;
+// CachedPost in KR2 will use it for get_content_batch). Pass nil only in tests
+// that exercise pure-DB code paths.
+func NewBlockProcessor(database *db.DB, repo *db.Repository, steemProvider steem.Provider) *BlockProcessor {
 	logger := logging.GetLogger().With(zap.String("component", "block-processor"))
 
 	return &BlockProcessor{
 		db:               database,
 		repo:             repo,
-		accounts:         NewAccountIndexer(repo, logger),
+		steem:            steemProvider,
+		accounts:         NewAccountIndexer(repo, logger, steemProvider),
 		posts:            NewPostIndexer(repo, logger),
 		follows:          NewFollowIndexer(repo, logger),
 		payments:         NewPaymentIndexer(repo, logger),

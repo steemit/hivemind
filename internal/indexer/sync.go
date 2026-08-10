@@ -18,15 +18,17 @@ import (
 type Sync struct {
 	config         *config.Config
 	db             *db.DB
-	steem          *steem.Client
+	steem          steem.Provider
 	blockProcessor *BlockProcessor
 	logger         *zap.Logger
 }
 
-// NewSync creates a new sync manager
-func NewSync(cfg *config.Config, database *db.DB, steemClient *steem.Client) (*Sync, error) {
+// NewSync creates a new sync manager. The steemClient is accepted as the
+// Provider interface so tests can inject a mock; the concrete *steem.Client
+// satisfies it (see internal/steem/provider.go).
+func NewSync(cfg *config.Config, database *db.DB, steemClient steem.Provider) (*Sync, error) {
 	repo := db.NewRepository(database.DB)
-	blockProcessor := NewBlockProcessor(database, repo)
+	blockProcessor := NewBlockProcessor(database, repo, steemClient)
 
 	return &Sync{
 		config:         cfg,
@@ -102,7 +104,7 @@ func (s *Sync) initialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepos
 		s.logger.Info("Syncing blocks for initial sync",
 			zap.Int64("from", currentHead+1),
 			zap.Int64("to", irreversible))
-		
+
 		if err := s.syncBlocks(ctx, currentHead+1, irreversible); err != nil {
 			return fmt.Errorf("failed to sync blocks: %w", err)
 		}
