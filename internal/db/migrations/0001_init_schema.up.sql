@@ -182,7 +182,7 @@ CREATE INDEX idx_feed_cache_created_account_post
     ON hive_feed_cache (created_at DESC, account_id, post_id);
 
 -- ---------------------------------------------------------------------
--- hive_posts_cache  (33 columns; most complex table)
+-- hive_posts_cache  (32 columns; most complex table)
 -- ---------------------------------------------------------------------
 CREATE TABLE hive_posts_cache (
     post_id      INTEGER NOT NULL,

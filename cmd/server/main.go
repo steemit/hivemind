@@ -57,7 +57,11 @@ func main() {
 	// The server only needs read access; migrations also run in the indexer,
 	// but running here too keeps dev/test environments self-bootstrapping.
 	if cfg.Database.Migrate {
-		if err := db.RunMigrations(cfg.Database.URL, 0); err != nil {
+		force := 0
+		if cfg.Database.MigrateForceBaseline {
+			force = 1
+		}
+		if err := db.RunMigrations(cfg.Database.URL, force); err != nil {
 			logger.Fatal("Failed to run database migrations", zap.Error(err))
 		}
 	} else {

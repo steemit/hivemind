@@ -1,12 +1,11 @@
 package db
 
 import (
-	"context"
 	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
-	"time"
+	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5" // pgx5 driver
@@ -21,10 +20,6 @@ var migrationsFS embed.FS
 
 // migrationsSubdir is the directory inside the embed.FS holding the .sql files.
 const migrationsSubdir = "migrations"
-
-// ErrAlreadyAtLatest is returned by RunMigrations when the database is already
-// at the newest version; it is not a failure condition.
-var ErrAlreadyAtLatest = migrate.ErrNoChange
 
 // RunMigrations applies all pending schema migrations embedded in the binary.
 //
@@ -70,10 +65,6 @@ func RunMigrations(dbURL string, forceVersion int) error {
 			zap.Int("version", forceVersion))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	_ = ctx // migrate.Up is not context-aware; timeout is advisory for the caller.
-
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("failed to apply migrations: %w", err)
 	}
@@ -88,8 +79,9 @@ func RunMigrations(dbURL string, forceVersion int) error {
 	return nil
 }
 
-// Version reports the current schema migration version, or 0 if migrations
-// have never run (no schema_migrations table).
+// Version reports the current schema migration version. Returns (0, false, nil)
+// if migrations have never run (no schema_migrations table), rather than an
+// error, so callers can treat "never migrated" as a normal condition.
 func Version(dbURL string) (uint, bool, error) {
 	d, err := iofs.New(migrationsFS, migrationsSubdir)
 	if err != nil {
@@ -104,7 +96,14 @@ func Version(dbURL string) (uint, bool, error) {
 		return 0, false, err
 	}
 	defer m.Close()
-	return m.Version()
+	v, dirty, err := m.Version()
+	if err != nil {
+		if errors.Is(err, migrate.ErrNilVersion) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return v, dirty, nil
 }
 
 // MigrationsList returns the embedded migration directory entries, useful for
@@ -121,7 +120,7 @@ func normalizeMigrateAddr(dbURL string) (string, error) {
 		return "", fmt.Errorf("database url is empty")
 	}
 	for _, scheme := range []string{"postgres://", "postgresql://", "pgx5://"} {
-		if len(dbURL) >= len(scheme) && dbURL[:len(scheme)] == scheme {
+		if strings.HasPrefix(dbURL, scheme) {
 			return "pgx5://" + dbURL[len(scheme):], nil
 		}
 	}

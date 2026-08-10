@@ -30,6 +30,12 @@ type DatabaseConfig struct {
 	// Migrate controls whether schema migrations run on startup.
 	Migrate bool
 
+	// MigrateForceBaseline, when true, stamps the schema migration version to 1
+	// without executing DDL on startup. Use this the FIRST time you point the
+	// binary (server or indexer) at an existing database already provisioned by
+	// the Python legacy, then unset it.
+	MigrateForceBaseline bool
+
 	// MaxOpenConns caps total connections. Default 25 (matches Python legacy).
 	MaxOpenConns int
 
@@ -89,12 +95,6 @@ type IndexerConfig struct {
 	TestMaxBlock         int
 	TestDisableSync      bool
 	RecommendCommunities string
-
-	// MigrateForceBaseline, when true, stamps the schema migration version to 1
-	// without executing DDL on startup. Use this the FIRST time you point the
-	// Go indexer at an existing database already provisioned by the Python
-	// legacy. It is ignored for fresh databases. After the first run, unset it.
-	MigrateForceBaseline bool
 }
 
 // LoggingConfig holds logging configuration
@@ -139,13 +139,14 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		Database: DatabaseConfig{
-			URL:              getString("database_url", "postgresql://user:pass@localhost:5432/hive"),
-			Migrate:          getBool("db_migrate", true),
-			MaxOpenConns:     getInt("db_max_open_conns", 25),
-			MaxIdleConns:     getInt("db_max_idle_conns", 10),
-			ConnMaxLifetime:  getDuration("db_conn_max_lifetime", time.Hour),
-			ConnMaxIdleTime:  getDuration("db_conn_max_idle_time", 10*time.Minute),
-			StatementTimeout: getDuration("db_statement_timeout", 30*time.Second),
+			URL:                  getString("database_url", "postgresql://user:pass@localhost:5432/hive"),
+			Migrate:              getBool("db_migrate", true),
+			MigrateForceBaseline: getBool("db_migrate_force", false),
+			MaxOpenConns:         getInt("db_max_open_conns", 25),
+			MaxIdleConns:         getInt("db_max_idle_conns", 10),
+			ConnMaxLifetime:      getDuration("db_conn_max_lifetime", time.Hour),
+			ConnMaxIdleTime:      getDuration("db_conn_max_idle_time", 10*time.Minute),
+			StatementTimeout:     getDuration("db_statement_timeout", 30*time.Second),
 		},
 		Steem: SteemConfig{
 			URL:        getString("steemd_url", "https://api.steemit.com"),
@@ -173,7 +174,6 @@ func Load() (*Config, error) {
 			TestMaxBlock:         getInt("test_max_block", 0),
 			TestDisableSync:      getBool("test_disable_sync", false),
 			RecommendCommunities: getString("recommend_communities", "hive-108451,hive-172186,hive-187187"),
-			MigrateForceBaseline: getBool("db_migrate_force", false),
 		},
 		Logging: LoggingConfig{
 			Level:        getString("log_level", "INFO"),
@@ -201,6 +201,7 @@ func Load() (*Config, error) {
 func setDefaults() {
 	viper.SetDefault("database_url", "postgresql://user:pass@localhost:5432/hive")
 	viper.SetDefault("db_migrate", true)
+	viper.SetDefault("db_migrate_force", false)
 	viper.SetDefault("db_max_open_conns", 25)
 	viper.SetDefault("db_max_idle_conns", 10)
 	viper.SetDefault("db_conn_max_lifetime", time.Hour)
@@ -319,8 +320,26 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("db_max_idle_conns (%d) must not exceed db_max_open_conns (%d)",
 			c.Database.MaxIdleConns, c.Database.MaxOpenConns)
 	}
-	if c.Database.StatementTimeout <= 0 {
-		return fmt.Errorf("db_statement_timeout must be positive")
+	// StatementTimeout: negative is invalid; 0 means "disabled" (no DSN injection).
+	if c.Database.StatementTimeout < 0 {
+		return fmt.Errorf("db_statement_timeout must not be negative (0 = disabled)")
+	}
+	if c.Database.ConnMaxLifetime < 0 || c.Database.ConnMaxIdleTime < 0 {
+		return fmt.Errorf("db_conn_max_lifetime and db_conn_max_idle_time must not be negative")
+	}
+	// HTTP timeouts: 0 means "disabled" (http.Server treats 0 as no timeout);
+	// negative is invalid.
+	for _, d := range []struct {
+		name string
+		v    time.Duration
+	}{
+		{"http_read_timeout", c.Server.ReadTimeout},
+		{"http_write_timeout", c.Server.WriteTimeout},
+		{"http_idle_timeout", c.Server.IdleTimeout},
+	} {
+		if d.v < 0 {
+			return fmt.Errorf("%s must not be negative", d.name)
+		}
 	}
 	return nil
 }

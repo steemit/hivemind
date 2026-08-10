@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -109,30 +110,19 @@ func New(cfg *config.DatabaseConfig, logLevel string) (*DB, error) {
 // pgx (used by the GORM postgres driver) parses `statement_timeout` as a
 // session default that applies to every pooled connection, which prevents a
 // single slow query from holding a connection indefinitely.
+//
+// StatementTimeout == 0 disables the injection (and thus the timeout), which
+// is useful for migration/DDL runners that need long-running statements.
 func buildDSN(cfg *config.DatabaseConfig) string {
 	if cfg.StatementTimeout <= 0 {
 		return cfg.URL
 	}
 	st := cfg.StatementTimeout.Milliseconds()
 	sep := "&"
-	if !contains(cfg.URL, "?") {
+	if !strings.Contains(cfg.URL, "?") {
 		sep = "?"
 	}
 	return fmt.Sprintf("%s%soptions=-c%%20statement_timeout%%3D%d", cfg.URL, sep, st)
-}
-
-// contains is a tiny helper to avoid pulling strings just for one call.
-func contains(s, sub string) bool {
-	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
 
 // Close closes the database connection

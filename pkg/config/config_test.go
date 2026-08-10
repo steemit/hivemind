@@ -92,11 +92,16 @@ func TestValidateDatabasePool(t *testing.T) {
 		t.Error("Expected error when idle exceeds open")
 	}
 
-	// StatementTimeout must be positive.
+	// StatementTimeout: 0 means disabled (valid), negative is invalid.
 	c = base()
 	c.Database.StatementTimeout = 0
+	if err := c.Validate(); err != nil {
+		t.Errorf("StatementTimeout=0 (disabled) should be valid, got: %v", err)
+	}
+	c = base()
+	c.Database.StatementTimeout = -1 * time.Second
 	if err := c.Validate(); err == nil {
-		t.Error("Expected error for zero statement_timeout")
+		t.Error("Expected error for negative statement_timeout")
 	}
 }
 

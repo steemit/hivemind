@@ -59,7 +59,7 @@ func main() {
 	// after which subsequent versions (if any) apply normally.
 	if cfg.Database.Migrate {
 		force := 0
-		if cfg.Indexer.MigrateForceBaseline {
+		if cfg.Database.MigrateForceBaseline {
 			force = 1
 		}
 		if err := db.RunMigrations(cfg.Database.URL, force); err != nil {
