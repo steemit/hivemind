@@ -149,9 +149,10 @@ The API server provides JSON-RPC endpoints for querying indexed data.
 
 ### 3. Database Layer
 
-- **Schema Management**: SQLAlchemy-based schema definitions
-- **Migrations**: Automatic migration system (version 22)
-- **Query Interface**: Async database adapter with connection pooling
+- **Schema Management**: GORM models (`internal/models/`) mirroring legacy Python schema (DB_VERSION 29)
+- **Migrations**: golang-migrate embedded library (`internal/db/migrations/`); runs on startup (gated by `HIVE_DB_MIGRATE`, default on). Existing legacy DBs can be baselined via `HIVE_DB_MIGRATE_FORCE=1`.
+- **Connection Pool**: Configurable via `HIVE_DB_MAX_OPEN_CONNS` (default 25), `MAX_IDLE_CONNS`, `CONN_MAX_LIFETIME`, `CONN_MAX_IDLE_TIME`. `statement_timeout` injected per-connection via DSN (`HIVE_DB_STATEMENT_TIMEOUT`, default 30s, 0 = disabled).
+- **Query Interface**: GORM repository pattern (`internal/db/repository.go`)
 
 ### 4. Steem Client
 
