@@ -59,12 +59,12 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 		if len(parts) == 2 {
 			author := parts[0]
 			permlink := parts[1]
-			
+
 			postRepo := db.NewPostRepository(pay.repo)
 			post, err := postRepo.GetByAuthorPermlink(ctx, author, permlink)
 			if err == nil && post != nil {
 				postID = post.ID
-				
+
 				// Update post promoted amount
 				post.Promoted += amount
 				if err := tx.WithContext(ctx).Save(post).Error; err != nil {
@@ -74,17 +74,30 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 		}
 	}
 
+	// Resolve account names to IDs (hive_payments.from_account/to_account are
+	// INTEGER FKs to hive_accounts.id). 'null' and the sender must already be
+	// registered (block_processor registers accounts observed in the block).
+	accountRepo := db.NewAccountRepository(pay.repo)
+	fromAccount, err := accountRepo.GetByName(ctx, from)
+	if err != nil || fromAccount == nil {
+		return fmt.Errorf("payment sender not registered: %s", from)
+	}
+	toAccount, err := accountRepo.GetByName(ctx, to)
+	if err != nil || toAccount == nil {
+		return fmt.Errorf("payment recipient not registered: %s", to)
+	}
+
 	// Record payment
 	payment := &models.Payment{
-		BlockNum: blockNum,
-		TXIndex:  0, // TODO: Get actual transaction index
-		From:     from,
-		To:       to,
-		Amount:   amount,
-		Token:    token,
-		Memo:     memo,
-		PostID:   postID,
-		CreatedAt: blockDate,
+		BlockNum:      blockNum,
+		TXIndex:       0, // TODO: Get actual transaction index
+		PostID:        postID,
+		FromAccountID: fromAccount.ID,
+		ToAccountID:   toAccount.ID,
+		Amount:        amount,
+		Token:         token,
+		Memo:          memo,
+		CreatedAt:     blockDate,
 	}
 
 	if err := tx.WithContext(ctx).Create(payment).Error; err != nil {
@@ -106,12 +119,11 @@ func parseAmount(amountStr string) (float64, error) {
 	if len(parts) == 0 {
 		return 0, fmt.Errorf("invalid amount format")
 	}
-	
+
 	amount, err := strconv.ParseFloat(parts[0], 64)
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return amount, nil
 }
-
