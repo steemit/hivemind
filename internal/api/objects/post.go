@@ -110,32 +110,32 @@ func (l *PostLoader) buildPostObject(ctx context.Context, post *models.Post, cac
 		body = body[:truncateBody]
 	}
 
-	jsonMetadata := cache.JSONMeta
+	jsonMetadata := cache.JSON
 	if jsonMetadata == "" {
 		jsonMetadata = "{}"
 	}
 
 	postObj := map[string]interface{}{
-		"id":                post.ID,
-		"author":            account.Name,
-		"permlink":          post.Permlink,
-		"category":          post.Category,
-		"title":             cache.Title,
-		"body":              body,
-		"json_metadata":     jsonMetadata,
-		"created":           post.CreatedAt.Format(time.RFC3339),
-		"last_update":       cache.UpdatedAt.Format(time.RFC3339),
-		"depth":             post.Depth,
-		"children":          cache.Children,
-		"net_rshares":       cache.RShares,
-		"url":               fmt.Sprintf("/%s/@%s/%s", post.Category, account.Name, post.Permlink),
-		"active_votes":      []interface{}{}, // TODO: Load active votes from cache.Votes (format needs to be parsed)
-		"replies":           []interface{}{},  // TODO: Load replies (requires querying child posts)
-		"reblogged_by":      l.getRebloggedBy(ctx, post.ID), // Load reblogs
-		"body_length":       len(cache.Body),
-		"author_reputation": account.Reputation,
-		"promoted":          post.Promoted,
-		"payout":            cache.Payout,
+		"id":                   post.ID,
+		"author":               account.Name,
+		"permlink":             post.Permlink,
+		"category":             post.Category,
+		"title":                cache.Title,
+		"body":                 body,
+		"json_metadata":        jsonMetadata,
+		"created":              post.CreatedAt.Format(time.RFC3339),
+		"last_update":          cache.UpdatedAt.Format(time.RFC3339),
+		"depth":                post.Depth,
+		"children":             cache.Children,
+		"net_rshares":          cache.RShares,
+		"url":                  fmt.Sprintf("/%s/@%s/%s", post.Category, account.Name, post.Permlink),
+		"active_votes":         []interface{}{},                // TODO: Load active votes from cache.Votes (format needs to be parsed)
+		"replies":              []interface{}{},                // TODO: Load replies (requires querying child posts)
+		"reblogged_by":         l.getRebloggedBy(ctx, post.ID), // Load reblogs
+		"body_length":          len(cache.Body),
+		"author_reputation":    account.Reputation,
+		"promoted":             post.Promoted,
+		"payout":               cache.Payout,
 		"pending_payout_value": cache.Payout, // TODO: Check if paid out
 	}
 
@@ -203,4 +203,3 @@ func (l *PostLoader) getRebloggedBy(ctx context.Context, postID int64) []interfa
 
 	return result
 }
-
