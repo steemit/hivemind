@@ -42,11 +42,11 @@ const (
 
 // Role represents a community role
 type Role struct {
-	CommunityID int64          `gorm:"primaryKey;column:community_id"`
-	AccountID   int64          `gorm:"primaryKey;column:account_id"`
-	Role        int16          `gorm:"type:smallint;not null;default:0;column:role"`
-	Title       sql.NullString `gorm:"type:varchar(140);column:title"`
-	CreatedAt   time.Time      `gorm:"not null;column:created_at"`
+	CommunityID int64     `gorm:"primaryKey;column:community_id"`
+	AccountID   int64     `gorm:"primaryKey;column:account_id"`
+	RoleID      int16     `gorm:"type:smallint;not null;default:0;column:role_id"`
+	Title       string    `gorm:"type:varchar(140);not null;default:'';column:title"`
+	CreatedAt   time.Time `gorm:"not null;column:created_at"`
 
 	// Relationships
 	Community *Community `gorm:"foreignKey:CommunityID;references:ID"`
@@ -83,4 +83,3 @@ type Subscription struct {
 func (Subscription) TableName() string {
 	return "hive_subscriptions"
 }
-

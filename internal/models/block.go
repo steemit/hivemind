@@ -21,4 +21,3 @@ type Block struct {
 func (Block) TableName() string {
 	return "hive_blocks"
 }
-

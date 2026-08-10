@@ -82,7 +82,7 @@ func (ci *CommunityIndexer) Register(ctx context.Context, tx *gorm.DB, accountNa
 		role := &models.Role{
 			CommunityID: account.ID,
 			AccountID:   account.ID,
-			Role:        models.RoleOwner,
+			RoleID:      models.RoleOwner,
 			CreatedAt:   blockDate,
 		}
 
@@ -247,13 +247,13 @@ func (ci *CommunityIndexer) processSetRole(ctx context.Context, tx *gorm.DB, op 
 	role := &models.Role{
 		CommunityID: communityID,
 		AccountID:   account.ID,
-		Role:        roleID,
+		RoleID:      roleID,
 		CreatedAt:   blockDate,
 	}
 
 	if err := tx.WithContext(ctx).
 		Where("community_id = ? AND account_id = ?", communityID, account.ID).
-		Assign(models.Role{Role: roleID, CreatedAt: blockDate}).
+		Assign(models.Role{RoleID: roleID, CreatedAt: blockDate}).
 		FirstOrCreate(role).Error; err != nil {
 		return fmt.Errorf("failed to set role: %w", err)
 	}
@@ -416,4 +416,3 @@ func (ci *CommunityIndexer) roleNameToID(roleName string) int16 {
 		return models.RoleGuest
 	}
 }
-

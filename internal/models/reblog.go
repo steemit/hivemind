@@ -19,4 +19,3 @@ type Reblog struct {
 func (Reblog) TableName() string {
 	return "hive_reblogs"
 }
-

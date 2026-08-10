@@ -2,7 +2,9 @@ package indexer
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -15,31 +17,31 @@ import (
 
 // BlockProcessor processes blockchain blocks
 type BlockProcessor struct {
-	db              *db.DB
-	repo            *db.Repository
-	accounts        *AccountIndexer
-	posts           *PostIndexer
-	follows         *FollowIndexer
-	payments        *PaymentIndexer
-	customOps       *CustomOpProcessor
+	db               *db.DB
+	repo             *db.Repository
+	accounts         *AccountIndexer
+	posts            *PostIndexer
+	follows          *FollowIndexer
+	payments         *PaymentIndexer
+	customOps        *CustomOpProcessor
 	communityIndexer *CommunityIndexer
-	logger          *zap.Logger
+	logger           *zap.Logger
 }
 
 // NewBlockProcessor creates a new block processor
 func NewBlockProcessor(database *db.DB, repo *db.Repository) *BlockProcessor {
 	logger := logging.GetLogger().With(zap.String("component", "block-processor"))
-	
+
 	return &BlockProcessor{
-		db:              database,
-		repo:            repo,
-		accounts:        NewAccountIndexer(repo, logger),
-		posts:           NewPostIndexer(repo, logger),
-		follows:         NewFollowIndexer(repo, logger),
-		payments:        NewPaymentIndexer(repo, logger),
-		customOps:       NewCustomOpProcessor(repo, logger),
+		db:               database,
+		repo:             repo,
+		accounts:         NewAccountIndexer(repo, logger),
+		posts:            NewPostIndexer(repo, logger),
+		follows:          NewFollowIndexer(repo, logger),
+		payments:         NewPaymentIndexer(repo, logger),
+		customOps:        NewCustomOpProcessor(repo, logger),
 		communityIndexer: NewCommunityIndexer(repo, logger),
-		logger:          logger,
+		logger:           logger,
 	}
 }
 
@@ -78,7 +80,7 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 	blockHash := block["block_id"].(string)
 	prevHash := block["previous"].(string)
 	timestamp := block["timestamp"].(string)
-	
+
 	blockDate, err := time.Parse("2006-01-02T15:04:05", timestamp)
 	if err != nil {
 		return fmt.Errorf("failed to parse block timestamp: %w", err)
@@ -175,7 +177,7 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 		if err := bp.accounts.Register(ctx, tx, accountNamesList, blockDate); err != nil {
 			return fmt.Errorf("failed to register accounts: %w", err)
 		}
-		
+
 		// Check if any new accounts are communities and register them
 		if err := bp.communityIndexer.Register(ctx, tx, accountNamesList, blockDate); err != nil {
 			bp.logger.Warn("Failed to register communities", zap.Error(err))
@@ -207,7 +209,7 @@ func (bp *BlockProcessor) saveTransactionIDs(ctx context.Context, tx *gorm.DB, t
 			continue
 		}
 		records = append(records, models.TransactionBlock{
-			TrxID:    trxID,
+			TrxID:    sql.NullString{String: trxID, Valid: true},
 			BlockNum: blockNum,
 		})
 	}
@@ -216,18 +218,26 @@ func (bp *BlockProcessor) saveTransactionIDs(ctx context.Context, tx *gorm.DB, t
 		return nil
 	}
 
-	// Use ON CONFLICT DO NOTHING to handle duplicates
+	// Batch insert with ON CONFLICT DO NOTHING. The legacy v19 schema uses a
+	// PARTIAL unique index (hive_trxid_ix1 ON (trx_id) WHERE trx_id IS NOT
+	// NULL), so the conflict target is that index name.
+	values := make([]string, 0, len(records))
+	args := make([]interface{}, 0, len(records)*2)
+	for _, r := range records {
+		values = append(values, "(?, ?)")
+		args = append(args, r.TrxID.String, r.BlockNum)
+	}
 	if err := tx.WithContext(ctx).
 		Exec("INSERT INTO hive_trxid_block_num (trx_id, block_num) VALUES "+
-			"(?, ?) ON CONFLICT (trx_id) DO NOTHING",
-			records[0].TrxID, records[0].BlockNum).Error; err != nil {
+			strings.Join(values, ", ")+" ON CONFLICT (trx_id) DO NOTHING",
+			args...).Error; err != nil {
 		// Fallback to individual inserts if batch fails
 		for _, record := range records {
 			if err := tx.WithContext(ctx).
 				Where("trx_id = ?", record.TrxID).
 				FirstOrCreate(&record).Error; err != nil {
 				bp.logger.Warn("Failed to save transaction ID",
-					zap.String("trx_id", record.TrxID),
+					zap.String("trx_id", record.TrxID.String),
 					zap.Int64("block", blockNum),
 					zap.Error(err))
 			}
@@ -302,14 +312,14 @@ func (bp *BlockProcessor) processOperation(
 			author, _ := opValue["author"].(string)
 			voter, _ := opValue["voter"].(string)
 			permlink, _ := opValue["permlink"].(string)
-			
+
 			if author != "" {
 				bp.accounts.MarkDirty(author)
 			}
 			if voter != "" {
 				bp.accounts.MarkDirty(voter)
 			}
-			
+
 			// Mark post for cache update
 			if author != "" && permlink != "" {
 				if err := bp.posts.MarkPostDirty(ctx, tx, author, permlink); err != nil {
@@ -332,4 +342,3 @@ func (bp *BlockProcessor) processOperation(
 
 	return nil
 }
-

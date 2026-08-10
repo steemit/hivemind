@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"gorm.io/gorm"
 	"github.com/steemit/hivemind/internal/models"
+	"gorm.io/gorm"
 )
 
 // Repository provides database access methods
@@ -206,11 +206,11 @@ func (r *NotificationRepository) GetByDstID(ctx context.Context, dstID int64, mi
 		Where("dst_id = ? AND score >= ?", dstID, minScore).
 		Order("id DESC").
 		Limit(limit)
-	
+
 	if lastID > 0 {
 		query = query.Where("id < ?", lastID)
 	}
-	
+
 	if err := query.Find(&notifications).Error; err != nil {
 		return nil, err
 	}
@@ -224,11 +224,11 @@ func (r *NotificationRepository) GetByCommunityID(ctx context.Context, community
 		Where("community_id = ? AND score >= ?", communityID, minScore).
 		Order("id DESC").
 		Limit(limit)
-	
+
 	if lastID > 0 {
 		query = query.Where("id < ?", lastID)
 	}
-	
+
 	if err := query.Find(&notifications).Error; err != nil {
 		return nil, err
 	}
@@ -242,11 +242,11 @@ func (r *NotificationRepository) GetByPostID(ctx context.Context, postID int64, 
 		Where("post_id = ? AND score >= ?", postID, minScore).
 		Order("id DESC").
 		Limit(limit)
-	
+
 	if lastID > 0 {
 		query = query.Where("id < ?", lastID)
 	}
-	
+
 	if err := query.Find(&notifications).Error; err != nil {
 		return nil, err
 	}
@@ -508,7 +508,7 @@ func (r *FollowRepository) GetByFollowerFollowing(ctx context.Context, followerI
 // CreateOrUpdate creates or updates a follow relationship
 func (r *FollowRepository) CreateOrUpdate(ctx context.Context, follow *models.Follow) error {
 	return r.db.WithContext(ctx).
-		Where("follower = ? AND following = ?", follow.Follower, follow.Following).
+		Where("follower = ? AND following = ?", follow.FollowerID, follow.FollowingID).
 		Assign(*follow).
 		FirstOrCreate(follow).Error
 }
@@ -560,4 +560,3 @@ func (r *FollowRepository) GetFollowingPaginated(ctx context.Context, followerID
 
 	return follows, nil
 }
-
