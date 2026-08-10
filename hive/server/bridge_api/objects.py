@@ -45,8 +45,10 @@ MAX_BATCH_SIZE = 1000
 async def load_posts_keyed(db, ids, truncate_body=0):
     """Given an array of post ids, returns full posts objects keyed by id."""
     # pylint: disable=too-many-locals
+    from time import perf_counter
     assert ids, 'no ids passed to load_posts_keyed'
 
+    t0 = perf_counter()
     # Optimized: Split large id lists into batches to avoid performance issues
     # with very large IN clauses (>1000 items)
     if len(ids) <= MAX_BATCH_SIZE:
@@ -59,7 +61,11 @@ async def load_posts_keyed(db, ids, truncate_body=0):
             batch_ids = ids[i:i + MAX_BATCH_SIZE]
             batch_result = await _fetch_posts_batch(db, batch_ids)
             result.extend(batch_result)
+    ms_fetch = (perf_counter() - t0) * 1000
+
+    t1 = perf_counter()
     author_map = await _query_author_map(db, result)
+    ms_author = (perf_counter() - t1) * 1000
 
     # TODO: author affiliation?
     ctx = {}
@@ -95,6 +101,7 @@ async def load_posts_keyed(db, ids, truncate_body=0):
     # matching the pre-batch behavior.
     titles = {cid: None for cid in ctx}
     roles = {cid: {} for cid in ctx}
+    t_comm = perf_counter()
     if ctx:
         all_cids = tuple(ctx.keys())
 
@@ -141,6 +148,14 @@ async def load_posts_keyed(db, ids, truncate_body=0):
     for pid in await db.query_col(sql, ids=tuple(ids)):
         if pid in posts_by_id:
             posts_by_id[pid]['stats']['is_pinned'] = True
+
+    ms_comm = (perf_counter() - t_comm) * 1000
+    ms_total = (perf_counter() - t0) * 1000
+    if ms_total > 500:
+        log.warning(
+            "[POSTS_KEYED_SLOW] ids=%d total=%.0fms "
+            "fetch=%.0fms author=%.0fms comm_roles=%.0fms",
+            len(ids), ms_total, ms_fetch, ms_author, ms_comm)
 
     return posts_by_id
 

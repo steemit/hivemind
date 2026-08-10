@@ -29,7 +29,12 @@ def sqltimer(function):
     async def _wrapper(*args, **kwargs):
         start = perf()
         result = await function(*args, **kwargs)
-        Stats.log_db(args[1], perf() - start)
+        elapsed = perf() - start
+        Stats.log_db(args[1], elapsed)
+        if elapsed > 3.0:
+            log.warning(
+                "[DB_SLOW] %.3fs %s",
+                elapsed, args[1][:200])
         return result
     return _wrapper
 

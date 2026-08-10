@@ -1,6 +1,7 @@
 """Routes then builds a get_state response object"""
 
 import logging
+from time import perf_counter
 
 from hive.server.bridge_api.objects import load_posts_keyed
 from hive.server.common.helpers import (
@@ -24,19 +25,40 @@ MAX_DEPTH = 50
 async def get_discussion(context, author, permlink):
     """Modified `get_state` thread implementation."""
     db = context['db']
+    t_total = perf_counter()
 
     author = valid_account(author)
     permlink = valid_permlink(permlink)
+
+    t = perf_counter()
     root_id = await _get_post_id(db, author, permlink)
+    ms_pid = (perf_counter() - t) * 1000
+
+    t = perf_counter()
     hide_id = await _get_author_hide_id(db, author)
+    ms_hide = (perf_counter() - t) * 1000
+
     if not root_id or hide_id:
         return {}
 
+    t = perf_counter()
     post_hide_id = await _check_posts_hide_id(db, root_id)
+    ms_phi = (perf_counter() - t) * 1000
     if post_hide_id:
         return {}
 
-    return await _load_discussion(db, root_id)
+    t = perf_counter()
+    result = await _load_discussion(db, root_id)
+    ms_load = (perf_counter() - t) * 1000
+
+    ms_all = (perf_counter() - t_total) * 1000
+    if ms_all > 1000:
+        log.warning(
+            "[DISCUSSION_SLOW] %s/%s total=%.0fms post_id=%.0fms "
+            "hide_chk=%.0fms post_hide=%.0fms load=%.0fms",
+            author, permlink, ms_all, ms_pid, ms_hide, ms_phi, ms_load)
+
+    return result
 
 async def _get_post_id(db, author, permlink):
     """Given an author/permlink, retrieve the id from db."""
@@ -96,6 +118,8 @@ async def _load_discussion(db, root_id):
     todo = [root_id]
     depth = 0
     truncated = False
+    child_ids_queries = 0
+    t_tree = perf_counter()
     while todo:
         # Bound the number of sequential _child_ids queries (one per depth).
         if depth >= MAX_DEPTH:
@@ -108,12 +132,14 @@ async def _load_discussion(db, root_id):
             todo = todo[:MAX_THREAD_POSTS - len(ids)]
             ids.extend(todo)
             rows = await _child_ids(db, todo)
+            child_ids_queries += 1
             for pid, _cids in rows:
                 tree[pid] = []
             truncated = True
             break
         ids.extend(todo)
         rows = await _child_ids(db, todo)
+        child_ids_queries += 1
         todo = []
         for pid, cids in rows:
             if cids:
@@ -126,12 +152,22 @@ async def _load_discussion(db, root_id):
             todo.extend(cids)
         depth += 1
 
+    ms_tree = (perf_counter() - t_tree) * 1000
+
     if truncated:
         log.warning("discussion %s truncated at depth=%d posts=%d",
                     root_id, depth, len(ids))
 
     # load all post objects, build ref-map
+    t_posts = perf_counter()
     posts = await load_posts_keyed(db, ids)
+    ms_posts = (perf_counter() - t_posts) * 1000
+
+    if ms_tree > 500 or ms_posts > 500:
+        log.warning(
+            "[DISCUSSION_BREAKDOWN] root_id=%d tree_walk=%.0fms(%d queries, "
+            "depth=%d posts=%d) load_posts=%.0fms",
+            root_id, ms_tree, child_ids_queries, depth, len(ids), ms_posts)
 
     # remove posts/comments from muted accounts
     rem_pids = []
