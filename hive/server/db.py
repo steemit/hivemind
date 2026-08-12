@@ -32,9 +32,12 @@ def sqltimer(function):
         elapsed = perf() - start
         Stats.log_db(args[1], elapsed)
         if elapsed > 3.0:
+            # Collapse newlines/whitespace: multi-line SQL would otherwise be
+            # truncated at the first line break by syslog (observed in prod:
+            # DB_SLOW entries with an empty SQL body).
             log.warning(
                 "[DB_SLOW] %.3fs %s",
-                elapsed, args[1][:200])
+                elapsed, ' '.join(args[1].split())[:200])
         return result
     return _wrapper
 
