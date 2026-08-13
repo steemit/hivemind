@@ -29,7 +29,15 @@ def sqltimer(function):
     async def _wrapper(*args, **kwargs):
         start = perf()
         result = await function(*args, **kwargs)
-        Stats.log_db(args[1], perf() - start)
+        elapsed = perf() - start
+        Stats.log_db(args[1], elapsed)
+        if elapsed > 3.0:
+            # Collapse newlines/whitespace: multi-line SQL would otherwise be
+            # truncated at the first line break by syslog (observed in prod:
+            # DB_SLOW entries with an empty SQL body).
+            log.warning(
+                "[DB_SLOW] %.3fs %s",
+                elapsed, ' '.join(args[1].split())[:200])
         return result
     return _wrapper
 
