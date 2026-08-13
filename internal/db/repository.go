@@ -19,6 +19,12 @@ func NewRepository(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// DB returns the underlying *gorm.DB. Used by API handlers that need to
+// create PostLoaders or run raw queries (e.g. the CTE in get_discussion).
+func (r *Repository) DB() *gorm.DB {
+	return r.db
+}
+
 // AccountRepository provides account-related database operations
 type AccountRepository struct {
 	*Repository

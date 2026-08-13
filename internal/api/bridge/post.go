@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/steemit/hivemind/internal/api/objects"
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/pkg/telemetry"
 )
@@ -181,10 +182,38 @@ func (p *PostAPI) GetPostHeader(ctx *gin.Context, params json.RawMessage) (inter
 	}, nil
 }
 
-// GetDiscussion handles bridge.get_discussion
-// Returns a discussion thread with all replies
+// getDiscussionCTE is the recursive CTE that fetches the entire comment tree
+// for a root post in a SINGLE query (replacing the legacy while-loop BFS that
+// caused connection-pool exhaustion). See get-discussion-incident-and-otel-plan.md §11.2.
+//
+// Safety limits: MAX_DEPTH=50, MAX_THREAD_POSTS=500 (matching legacy).
+const getDiscussionCTE = `
+WITH RECURSIVE descendants AS (
+    SELECT id, parent_id, 1 AS level
+    FROM hive_posts
+    WHERE parent_id = ? AND is_deleted = '0'
+    UNION ALL
+    SELECT p.id, p.parent_id, d.level + 1
+    FROM hive_posts p
+    JOIN descendants d ON p.parent_id = d.id
+    WHERE p.is_deleted = '0' AND d.level < 50
+)
+SELECT id, parent_id, level FROM descendants
+ORDER BY level, id
+LIMIT 500`
+
+// descendantRow holds a CTE result row.
+type descendantRow struct {
+	ID       int64 `gorm:"column:id"`
+	ParentID int64 `gorm:"column:parent_id"`
+	Level    int   `gorm:"column:level"`
+}
+
+// GetDiscussion handles bridge.get_discussion.
+// Returns a discussion thread with all replies using a single CTE query
+// (not the legacy while-loop BFS that caused connection-pool exhaustion).
 func (p *PostAPI) GetDiscussion(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	_, span := telemetry.StartSpanWithName(ctx.Request.Context(), "bridge.get_discussion")
+	rootCtx, span := telemetry.StartSpanWithName(ctx.Request.Context(), "bridge.get_discussion")
 	defer span.End()
 
 	var pMap map[string]interface{}
@@ -195,6 +224,7 @@ func (p *PostAPI) GetDiscussion(ctx *gin.Context, params json.RawMessage) (inter
 	author, _ := pMap["author"].(string)
 	permlink, _ := pMap["permlink"].(string)
 	observer, _ := pMap["observer"].(string)
+	_ = observer
 
 	telemetry.AddSpanAttributes(span, map[string]string{
 		"author":   author,
@@ -205,35 +235,109 @@ func (p *PostAPI) GetDiscussion(ctx *gin.Context, params json.RawMessage) (inter
 		return nil, fmt.Errorf("missing required parameters: author, permlink")
 	}
 
+	// Sub-span: resolve root post ID.
+	pidCtx, pidSpan := telemetry.StartSpanWithName(rootCtx, "db.get_post_id")
 	postRepo := db.NewPostRepository(p.repo)
-	post, err := postRepo.GetByAuthorPermlink(ctx.Request.Context(), author, permlink)
+	rootPost, err := postRepo.GetByAuthorPermlink(pidCtx, author, permlink)
+	pidSpan.End()
 	if err != nil {
 		telemetry.RecordSpanError(span, err)
 		return nil, err
 	}
-	if post == nil {
+	if rootPost == nil {
 		return nil, nil
 	}
 
-	// Build discussion map with root post
-	discussion := make(map[string]interface{})
-	rootKey := author + "/" + permlink
-
-	discussion[rootKey] = map[string]interface{}{
-		"id":       post.ID,
-		"author":   post.Author,
-		"permlink": post.Permlink,
-		"category": post.Category,
-		"depth":    post.Depth,
-		"children": post.Children,
+	// Sub-span: CTE tree walk — the single query that replaces the legacy
+	// while-loop. Records depth/post_count for observability.
+	treeCtx, treeSpan := telemetry.StartSpanWithName(rootCtx, "discussion.tree_walk")
+	var descendants []descendantRow
+	if err := p.repo.DB().WithContext(treeCtx).Raw(getDiscussionCTE, rootPost.ID).Scan(&descendants).Error; err != nil {
+		treeSpan.End()
+		telemetry.RecordSpanError(span, err)
+		return nil, fmt.Errorf("failed to fetch discussion tree: %w", err)
 	}
 
-	// TODO: Fetch all replies recursively
-	// For now, return just the root post
+	maxDepth := 0
+	if len(descendants) > 0 {
+		maxDepth = descendants[len(descendants)-1].Level // sorted by level
+	}
+	telemetry.AddSpanAttributes(treeSpan, map[string]string{
+		"discussion.depth":       fmt.Sprintf("%d", maxDepth),
+		"discussion.posts_count": fmt.Sprintf("%d", len(descendants)),
+	})
+	treeSpan.End()
 
-	_ = observer
+	// Collect all post IDs (root + descendants).
+	allIDs := make([]int64, 0, len(descendants)+1)
+	allIDs = append(allIDs, rootPost.ID)
+	parentMap := make(map[int64]int64) // child_id → parent_id
+	idSet := make(map[int64]bool)
+	idSet[rootPost.ID] = true
+	for _, d := range descendants {
+		if !idSet[d.ID] {
+			allIDs = append(allIDs, d.ID)
+			idSet[d.ID] = true
+		}
+		parentMap[d.ID] = d.ParentID
+	}
 
-	telemetry.PostsFetched.WithLabelValues("bridge.get_discussion").Inc()
+	// Sub-span: load post objects via LoadPostsKeyed (bridge_api shape).
+	postsCtx, postsSpan := telemetry.StartSpanWithName(rootCtx, "discussion.load_posts")
+	loader := objects.NewPostLoader(p.repo.DB())
+	postsByKeyed, err := loader.LoadPostsKeyed(postsCtx, allIDs, 0)
+	postsSpan.End()
+	if err != nil {
+		telemetry.RecordSpanError(span, err)
+		return nil, fmt.Errorf("failed to load posts: %w", err)
+	}
+
+	// Build the discussion tree: map[author/permlink] → post object.
+	// Each post gets a "replies" key listing its children's keys.
+	discussion := make(map[string]interface{})
+	keyByID := make(map[int64]string) // post_id → "author/permlink"
+
+	// First pass: create keys for all posts.
+	for pid, obj := range postsByKeyed {
+		pa, _ := obj["author"].(string)
+		pp, _ := obj["permlink"].(string)
+		keyByID[pid] = pa + "/" + pp
+	}
+
+	// Second pass: build tree structure.
+	childrenByKey := make(map[string][]string) // parent_key → [child_keys...]
+	for _, d := range descendants {
+		childKey, ok := keyByID[d.ID]
+		if !ok {
+			continue // post not in cache, skip
+		}
+		parentKey, ok := keyByID[d.ParentID]
+		if !ok {
+			parentKey = keyByID[rootPost.ID] // root
+		}
+		childrenByKey[parentKey] = append(childrenByKey[parentKey], childKey)
+
+		// Ensure the child has a "replies" key initialized.
+		obj := postsByKeyed[d.ID]
+		if obj != nil {
+			if _, has := obj["replies"]; !has {
+				obj["replies"] = []string{}
+			}
+		}
+	}
+
+	// Third pass: assign replies arrays and populate discussion map.
+	for pid, obj := range postsByKeyed {
+		key := keyByID[pid]
+		if children, ok := childrenByKey[key]; ok {
+			obj["replies"] = children
+		} else {
+			obj["replies"] = []string{}
+		}
+		discussion[key] = obj
+	}
+
+	telemetry.PostsFetched.WithLabelValues("bridge.get_discussion").Add(float64(len(allIDs)))
 	telemetry.SetSpanSuccess(span)
 
 	return discussion, nil
