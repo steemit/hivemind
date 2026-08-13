@@ -3,6 +3,9 @@ package objects
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -72,16 +75,16 @@ func (l *PostLoader) LoadPosts(ctx context.Context, ids []int64, truncateBody in
 		accountMap[accounts[i].Name] = &accounts[i]
 	}
 
+	// Build index maps for O(1) lookup (avoids O(n²) scan per ID).
+	postMap := make(map[int64]*models.Post, len(posts))
+	for i := range posts {
+		postMap[posts[i].ID] = &posts[i]
+	}
+
 	// Build result in order
 	result := make([]map[string]interface{}, 0, len(ids))
 	for _, id := range ids {
-		var post *models.Post
-		for i := range posts {
-			if posts[i].ID == id {
-				post = &posts[i]
-				break
-			}
-		}
+		post := postMap[id]
 		if post == nil {
 			continue // Skip missing posts
 		}
@@ -115,6 +118,26 @@ func (l *PostLoader) buildPostObject(ctx context.Context, post *models.Post, cac
 		jsonMetadata = "{}"
 	}
 
+	// Payout logic mirrors legacy condenser_api/objects.py:
+	// - If paid out: total_payout_value = payout, pending = 0
+	// - If not paid: total_payout_value = 0, pending = payout
+	var totalPayout, pendingPayout float64
+	if cache.IsPaidout {
+		totalPayout = cache.Payout
+		pendingPayout = 0
+	} else {
+		totalPayout = 0
+		pendingPayout = cache.Payout
+	}
+
+	// cashout_time: nil if paid out, otherwise payout_at
+	var cashoutTime interface{}
+	if cache.IsPaidout {
+		cashoutTime = nil
+	} else {
+		cashoutTime = cache.PayoutAt.Format(time.RFC3339)
+	}
+
 	postObj := map[string]interface{}{
 		"id":                   post.ID,
 		"author":               account.Name,
@@ -129,38 +152,115 @@ func (l *PostLoader) buildPostObject(ctx context.Context, post *models.Post, cac
 		"children":             cache.Children,
 		"net_rshares":          cache.RShares,
 		"url":                  fmt.Sprintf("/%s/@%s/%s", post.Category, account.Name, post.Permlink),
-		"active_votes":         []interface{}{},                // TODO: Load active votes from cache.Votes (format needs to be parsed)
-		"replies":              []interface{}{},                // TODO: Load replies (requires querying child posts)
-		"reblogged_by":         l.getRebloggedBy(ctx, post.ID), // Load reblogs
+		"active_votes":         hydrateActiveVotes(cache.Votes),
+		"replies":              []interface{}{},
+		"reblogged_by":         l.getRebloggedBy(ctx, post.ID),
 		"body_length":          len(cache.Body),
-		"author_reputation":    account.Reputation,
-		"promoted":             post.Promoted,
+		"author_reputation":    repToRaw(cache.AuthorRep),
+		"promoted":             formatAmount(cache.Promoted),
 		"payout":               cache.Payout,
-		"pending_payout_value": cache.Payout, // TODO: Check if paid out
+		"total_payout_value":   formatAmount(totalPayout),
+		"curator_payout_value": formatAmount(0),
+		"pending_payout_value": formatAmount(pendingPayout),
+		"last_payout":          payoutDate(cache.IsPaidout, cache.PayoutAt),
+		"cashout_time":         cashoutTime,
+		"total_votes":          cache.TotalVotes,
 	}
 
 	return postObj
 }
 
+// hydrateActiveVotes converts the minimal CSV representation in
+// hive_posts_cache.votes into steemd-style vote objects.
+// Format: one vote per line, fields: voter,rshares,percent,reputation
+// Mirrors legacy _hydrate_active_votes (condenser_api/objects.py:207).
+func hydrateActiveVotes(voteCSV string) []interface{} {
+	if voteCSV == "" {
+		return []interface{}{}
+	}
+	votes := []interface{}{}
+	for _, line := range strings.Split(voteCSV, "\n") {
+		parts := strings.Split(line, ",")
+		if len(parts) != 4 {
+			continue
+		}
+		votes = append(votes, map[string]interface{}{
+			"voter":      parts[0],
+			"rshares":    parts[1],
+			"percent":    parts[2],
+			"reputation": repToRawStr(parts[3]),
+		})
+	}
+	return votes
+}
+
+// repToRaw converts a UI-ready reputation score back into its approximate
+// raw steemd value. Mirrors legacy rep_to_raw (utils/normalize.py:136).
+func repToRaw(rep float64) float64 {
+	if rep == 25 {
+		return 0
+	}
+	rep = rep - 25
+	rep = rep / 9
+	sign := 1.0
+	if rep < 0 {
+		sign = -1
+	}
+	return sign * math.Pow(10, math.Abs(rep)+9)
+}
+
+// repToRawStr is the string-input variant used by hydrateActiveVotes.
+// The reputation in the CSV is a UI-ready float stored as a string.
+func repToRawStr(repStr string) float64 {
+	rep, err := strconv.ParseFloat(repStr, 64)
+	if err != nil {
+		return 0
+	}
+	return repToRaw(rep)
+}
+
+// formatAmount returns a steem-style amount string ("X.XXX SBD").
+// Mirrors legacy _amount (condenser_api/objects.py:202).
+func formatAmount(amount float64) string {
+	return fmt.Sprintf("%.3f SBD", amount)
+}
+
+// payoutDate returns the payout_at timestamp if paid out, nil otherwise.
+// Mirrors legacy json_date(row['payout_at'] if paid else None).
+func payoutDate(isPaidout bool, payoutAt time.Time) interface{} {
+	if !isPaidout {
+		return nil
+	}
+	return payoutAt.Format(time.RFC3339)
+}
+
 // LoadPostsReblogs loads posts with reblog information
 func (l *PostLoader) LoadPostsReblogs(ctx context.Context, idsWithReblogs [][]int64, truncateBody int) ([]map[string]interface{}, error) {
-	// Extract all post IDs
+	// Extract all post IDs and collect reblogger account IDs for batch lookup
 	allIDs := make([]int64, 0, len(idsWithReblogs))
-	idToReblog := make(map[int64]string) // post_id -> reblogger
+	rebloggerIDs := make([]int64, 0, len(idsWithReblogs))
+	idToRebloggerID := make(map[int64]int64) // post_id -> reblogger_id
 
 	for _, pair := range idsWithReblogs {
 		if len(pair) >= 2 {
 			postID := pair[0]
 			rebloggerID := pair[1]
 			allIDs = append(allIDs, postID)
+			rebloggerIDs = append(rebloggerIDs, rebloggerID)
+			idToRebloggerID[postID] = rebloggerID
+		}
+	}
 
-			// Get reblogger account name
-			var account models.Account
-			if err := l.db.WithContext(ctx).
-				Where("id = ?", rebloggerID).
-				Select("name").
-				First(&account).Error; err == nil {
-				idToReblog[postID] = account.Name
+	// Batch-load all reblogger account names in ONE query (was N+1).
+	idToName := make(map[int64]string)
+	if len(rebloggerIDs) > 0 {
+		var accounts []models.Account
+		if err := l.db.WithContext(ctx).
+			Where("id IN ?", rebloggerIDs).
+			Select("id", "name").
+			Find(&accounts).Error; err == nil {
+			for _, acc := range accounts {
+				idToName[acc.ID] = acc.Name
 			}
 		}
 	}
@@ -173,10 +273,12 @@ func (l *PostLoader) LoadPostsReblogs(ctx context.Context, idsWithReblogs [][]in
 
 	// Add reblog information
 	for i := range posts {
-		postID := int64(posts[i]["id"].(int64))
-		if reblogger, ok := idToReblog[postID]; ok {
-			rebloggedBy, _ := posts[i]["reblogged_by"].([]interface{})
-			posts[i]["reblogged_by"] = append(rebloggedBy, reblogger)
+		postID := posts[i]["id"].(int64)
+		if rebloggerID, ok := idToRebloggerID[postID]; ok {
+			if reblogger, ok := idToName[rebloggerID]; ok {
+				rebloggedBy, _ := posts[i]["reblogged_by"].([]interface{})
+				posts[i]["reblogged_by"] = append(rebloggedBy, reblogger)
+			}
 		}
 	}
 
