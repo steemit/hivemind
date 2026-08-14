@@ -19,6 +19,27 @@ def test_valid_account():
     for key, safe_value in safe_profile.items():
         assert raw_profile[key] == safe_value
 
+def test_string_version_account():
+    # Some third-party Steem clients serialize "version" as a JSON string ("2")
+    # instead of a number (2).  Such accounts should still be parsed correctly.
+    raw_profile = dict(
+        name='Test User',
+        about='Hello world',
+        location='Earth',
+        website='https://example.com/',
+        cover_image='https://example.com/cover.jpg',
+        profile_image='https://example.com/avatar.jpg',
+        version='2',
+    )
+    account = {'name': 'foo', 'json_metadata': '{}',
+               'posting_json_metadata': json.dumps(dict(profile=raw_profile))}
+
+    safe_profile = safe_profile_metadata(account)
+    assert safe_profile['name'] == 'Test User'
+    assert safe_profile['about'] == 'Hello world'
+    assert safe_profile['profile_image'] == 'https://example.com/avatar.jpg'
+    assert safe_profile['cover_image'] == 'https://example.com/cover.jpg'
+
 def test_invalid_account():
     raw_profile = dict(
         name='NameIsTooBigByOneChar',

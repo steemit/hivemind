@@ -11,7 +11,14 @@ def safe_profile_metadata(account):
         # read from posting_json_metadata, if version==2
         prof = json.loads(account['posting_json_metadata'])['profile']
         assert isinstance(prof, dict)
-        assert 'version' in prof and prof['version'] == 2
+        # The "version" field is serialized inconsistently across Steem clients:
+        # the official condenser writes a JSON number (2), but some third-party
+        # clients write a JSON string ("2").  Accept both forms so that accounts
+        # created/updated by third-party clients are not silently dropped to
+        # empty profile data.
+        # TODO: when a new profile version is introduced, standardize on a single
+        # canonical type (JSON number) and migrate legacy string-form accounts.
+        assert 'version' in prof and prof['version'] in (2, '2')
     except Exception:
         try:
             # fallback to json_metadata
