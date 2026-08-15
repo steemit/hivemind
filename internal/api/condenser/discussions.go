@@ -12,8 +12,8 @@ import (
 
 // DiscussionsAPI provides discussion query API methods
 type DiscussionsAPI struct {
-	repo      *db.Repository
-	cursor    *Cursor
+	repo       *db.Repository
+	cursor     *Cursor
 	postLoader *objects.PostLoader
 }
 
@@ -168,8 +168,8 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 
 // GetDiscussionsByFeed handles condenser_api.get_discussions_by_feed
 func (d *DiscussionsAPI) GetDiscussionsByFeed(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	// Feed is similar to blog but includes posts from followed accounts
-	// For now, use blog implementation
-	return d.GetDiscussionsByBlog(ctx, params)
+	// TODO: Implement personalized feed (follows join feed_cache, see legacy
+	// pids_by_feed_with_reblog). Must NOT silently return blog results —
+	// feed and blog are different result sets.
+	return nil, fmt.Errorf("not implemented")
 }
-

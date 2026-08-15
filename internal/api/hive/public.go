@@ -46,13 +46,13 @@ func (p *PublicAPI) GetAccount(ctx *gin.Context, params json.RawMessage) (interf
 	_ = observer
 
 	return map[string]interface{}{
-		"id":          account.ID,
-		"name":        account.Name,
+		"id":           account.ID,
+		"name":         account.Name,
 		"display_name": account.DisplayName.String,
-		"about":       account.About.String,
-		"reputation":  account.Reputation,
-		"followers":   account.Followers,
-		"following":   account.Following,
+		"about":        account.About.String,
+		"reputation":   account.Reputation,
+		"followers":    account.Followers,
+		"following":    account.Following,
 	}, nil
 }
 
@@ -127,8 +127,10 @@ func (p *PublicAPI) ListFollowers(ctx *gin.Context, params json.RawMessage) (int
 
 // ListFollowing handles hive_api.list_following
 func (p *PublicAPI) ListFollowing(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	// Similar to ListFollowers but reversed
-	return p.ListFollowers(ctx, params)
+	// TODO: Implement (query hive_follows in the following direction).
+	// Must NOT delegate to ListFollowers — different semantics, would return
+	// wrong data.
+	return nil, fmt.Errorf("not implemented")
 }
 
 // ListAllMuted handles hive_api.list_all_muted
@@ -175,13 +177,14 @@ func (p *PublicAPI) ListAccountBlog(ctx *gin.Context, params json.RawMessage) (i
 
 // ListAccountPosts handles hive_api.list_account_posts
 func (p *PublicAPI) ListAccountPosts(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	// Similar to ListAccountBlog but only posts (no reblogs)
-	return p.ListAccountBlog(ctx, params)
+	// TODO: Implement (author's own posts only, no reblogs).
+	// Must NOT delegate to ListAccountBlog — different semantics.
+	return nil, fmt.Errorf("not implemented")
 }
 
 // ListAccountFeed handles hive_api.list_account_feed
 func (p *PublicAPI) ListAccountFeed(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	// Similar to ListAccountBlog but personalized feed
-	return p.ListAccountBlog(ctx, params)
+	// TODO: Implement (personalized feed from follows).
+	// Must NOT delegate to ListAccountBlog — different semantics.
+	return nil, fmt.Errorf("not implemented")
 }
-
