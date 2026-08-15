@@ -153,6 +153,45 @@ func (r *PostRepository) GetByAuthorPermlink(ctx context.Context, author, permli
 	return &post, nil
 }
 
+// PostStatusRepository provides operations on hive_posts_status, the
+// append-only moderation table (list_type 1 = article block, 3 = user block).
+type PostStatusRepository struct {
+	*Repository
+}
+
+// NewPostStatusRepository creates a new post status repository
+func NewPostStatusRepository(repo *Repository) *PostStatusRepository {
+	return &PostStatusRepository{Repository: repo}
+}
+
+// IsAuthorHidden reports whether the author is user-blocked (list_type=3):
+// legacy hides every discussion whose root author is on this list
+// (bridge_api/thread.py::_get_author_hide_id).
+func (r *PostStatusRepository) IsAuthorHidden(ctx context.Context, author string) (bool, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&models.PostStatus{}).
+		Where("list_type = ? AND author = ?", models.PostStatusUserBlock, author).
+		Limit(1).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// IsPostHidden reports whether the post is article-blocked (list_type=1):
+// legacy hides discussions whose root post is on this list
+// (bridge_api/thread.py::_check_posts_hide_id).
+func (r *PostStatusRepository) IsPostHidden(ctx context.Context, postID int64) (bool, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&models.PostStatus{}).
+		Where("list_type = ? AND post_id = ?", models.PostStatusArticleBlock, postID).
+		Limit(1).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // Create creates a new post
 func (r *PostRepository) Create(ctx context.Context, post *models.Post) error {
 	return r.db.WithContext(ctx).Create(post).Error

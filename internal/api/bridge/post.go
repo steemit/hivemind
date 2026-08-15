@@ -187,16 +187,26 @@ func (p *PostAPI) GetPostHeader(ctx *gin.Context, params json.RawMessage) (inter
 // caused connection-pool exhaustion). See get-discussion-incident-and-otel-plan.md §11.2.
 //
 // Safety limits: MAX_DEPTH=50, MAX_THREAD_POSTS=500 (matching legacy).
+//
+// Moderation: article-blocked posts (list_type=1) and posts by user-blocked
+// authors (list_type=3) are excluded at EVERY level of the recursion, so their
+// subtrees are never traversed — mirrors legacy thread.py::_DISCUSSION_TREE_SQL.
 const getDiscussionCTE = `
 WITH RECURSIVE descendants AS (
-    SELECT id, parent_id, 1 AS level
-    FROM hive_posts
-    WHERE parent_id = ? AND is_deleted = '0'
+    SELECT p.id, p.parent_id, 1 AS level
+    FROM hive_posts p
+    LEFT JOIN hive_posts_status s3 ON s3.list_type = 3 AND s3.author = p.author
+    LEFT JOIN hive_posts_status s1 ON s1.list_type = 1 AND s1.post_id = p.id
+    WHERE p.parent_id = ? AND p.is_deleted = '0'
+      AND s3.id IS NULL AND s1.id IS NULL
     UNION ALL
     SELECT p.id, p.parent_id, d.level + 1
     FROM hive_posts p
     JOIN descendants d ON p.parent_id = d.id
+    LEFT JOIN hive_posts_status s3 ON s3.list_type = 3 AND s3.author = p.author
+    LEFT JOIN hive_posts_status s1 ON s1.list_type = 1 AND s1.post_id = p.id
     WHERE p.is_deleted = '0' AND d.level < 50
+      AND s3.id IS NULL AND s1.id IS NULL
 )
 SELECT id, parent_id, level FROM descendants
 ORDER BY level, id
@@ -245,6 +255,36 @@ func (p *PostAPI) GetDiscussion(ctx *gin.Context, params json.RawMessage) (inter
 		return nil, err
 	}
 	if rootPost == nil {
+		return nil, nil
+	}
+	// Legacy resolves the root with `is_deleted = '0'` in SQL
+	// (thread.py::_get_post_id); deleted roots yield an empty discussion.
+	if rootPost.IsDeleted {
+		return nil, nil
+	}
+
+	// Sub-span: moderation checks — hide the whole discussion when the root
+	// author is user-blocked (list_type=3) or the root post is article-blocked
+	// (list_type=1). Mirrors thread.py::get_discussion entry checks.
+	hideCtx, hideSpan := telemetry.StartSpanWithName(rootCtx, "discussion.hide_check")
+	statusRepo := db.NewPostStatusRepository(p.repo)
+	authorHidden, err := statusRepo.IsAuthorHidden(hideCtx, rootPost.Author)
+	if err != nil {
+		hideSpan.End()
+		telemetry.RecordSpanError(span, err)
+		return nil, err
+	}
+	postHidden := false
+	if !authorHidden {
+		postHidden, err = statusRepo.IsPostHidden(hideCtx, rootPost.ID)
+		if err != nil {
+			hideSpan.End()
+			telemetry.RecordSpanError(span, err)
+			return nil, err
+		}
+	}
+	hideSpan.End()
+	if authorHidden || postHidden {
 		return nil, nil
 	}
 
