@@ -258,7 +258,7 @@ func (l *PostLoader) buildBridgePost(post *models.Post, cache *models.PostCache,
 		"active_votes":         votes,
 		"author_reputation":    authorRep, // raw float, no repToRaw for bridge_api
 		"stats": map[string]interface{}{
-			"hide":        false, // TODO: integrate Mutes (PR#6a)
+			"hide":        false, // display flag from Mutes/irredeemables list (TODO); DB-level hiding is enforced by get_discussion via hive_posts_status
 			"gray":        cache.IsGrayed,
 			"total_votes": cache.TotalVotes,
 			"flag_weight": cache.FlagWeight,
