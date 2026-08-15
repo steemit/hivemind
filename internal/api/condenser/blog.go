@@ -73,8 +73,8 @@ func (b *BlogAPI) GetBlog(ctx *gin.Context, params json.RawMessage) (interface{}
 	result := make([]interface{}, len(ids))
 	for i, id := range ids {
 		result[i] = map[string]interface{}{
-			"blog":      account,
-			"entry_id":  startEntryID + int64(i),
+			"blog":     account,
+			"entry_id": startEntryID + int64(i),
 			"comment": map[string]interface{}{
 				"id": id,
 			},
@@ -86,7 +86,8 @@ func (b *BlogAPI) GetBlog(ctx *gin.Context, params json.RawMessage) (interface{}
 
 // GetBlogEntries handles condenser_api.get_blog_entries
 func (b *BlogAPI) GetBlogEntries(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	// Similar to get_blog but returns minimal post references
-	return b.GetBlog(ctx, params)
+	// TODO: Implement (legacy returns a LIGHTWEIGHT shape: {blog, entry_id,
+	// author, permlink, reblog_on} — delegating to GetBlog would return full
+	// post objects, which is the wrong response shape).
+	return nil, fmt.Errorf("not implemented")
 }
-

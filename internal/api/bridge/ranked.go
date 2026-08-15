@@ -7,9 +7,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/steemit/hivemind/internal/api/condenser"
 	"github.com/steemit/hivemind/internal/cache"
 	"github.com/steemit/hivemind/internal/db"
-	"github.com/steemit/hivemind/internal/api/condenser"
 )
 
 // RankedAPI provides ranked posts API methods
@@ -72,7 +72,7 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 		tag,
 	}
 	cacheKey := cache.HashKey(cacheKeyParts...)
-	
+
 	// Check cache
 	if r.cache != nil {
 		var cachedResult []interface{}
@@ -83,13 +83,13 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 
 	// Map sort types
 	sortMap := map[string]string{
-		"trending": "trending",
-		"hot":      "hot",
-		"created":  "created",
-		"promoted": "promoted",
-		"payout":   "payout",
+		"trending":        "trending",
+		"hot":             "hot",
+		"created":         "created",
+		"promoted":        "promoted",
+		"payout":          "payout",
 		"payout_comments": "payout_comments",
-		"muted":    "muted", // Special case
+		"muted":           "muted", // Special case
 	}
 
 	querySort, ok := sortMap[sort]
@@ -187,8 +187,10 @@ func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (i
 		}
 		return result, nil
 	case "feed":
-		// Similar to blog but personalized
-		return r.GetAccountPosts(ctx, params) // TODO: Implement feed logic
+		// TODO: Implement personalized feed (follows join feed_cache, see
+		// legacy pids_by_feed_with_reblog). Must NOT delegate to self with
+		// unchanged params — that is infinite recursion (stack overflow).
+		return nil, fmt.Errorf("feed sort is not implemented")
 	case "posts":
 		// Author's posts only (no reblogs)
 		// TODO: Implement
@@ -236,4 +238,3 @@ func (r *RankedAPI) GetTrendingTopics(ctx *gin.Context, params json.RawMessage) 
 	// For now, return empty result
 	return []interface{}{}, nil
 }
-
