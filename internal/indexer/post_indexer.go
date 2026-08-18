@@ -18,14 +18,16 @@ import (
 // PostIndexer handles post indexing
 type PostIndexer struct {
 	repo          *db.Repository
+	cachedPost    *CachedPost
 	logger        *zap.Logger
 	notifyIndexer *NotifyIndexer
 }
 
 // NewPostIndexer creates a new post indexer
-func NewPostIndexer(repo *db.Repository, logger *zap.Logger) *PostIndexer {
+func NewPostIndexer(repo *db.Repository, cachedPost *CachedPost, logger *zap.Logger) *PostIndexer {
 	return &PostIndexer{
 		repo:          repo,
+		cachedPost:    cachedPost,
 		logger:        logger,
 		notifyIndexer: NewNotifyIndexer(repo),
 	}
@@ -50,16 +52,29 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 	}
 
 	if existing != nil {
-		// Update existing post
 		if existing.IsDeleted {
-			// Undelete
+			// Undelete: reuse the slot and re-enter the cache pipeline.
 			existing.IsDeleted = false
 			existing.CreatedAt = blockDate
-		} else {
-			// Update content
-			// Note: In Steem, posts can be edited, but we track the latest version
+			if err := tx.WithContext(ctx).Save(existing).Error; err != nil {
+				return err
+			}
+			if pi.cachedPost != nil {
+				if err := pi.cachedPost.Undelete(ctx, existing.ID, author, permlink, existing.Category); err != nil {
+					pi.logger.Warn("cached-post undelete failed",
+						zap.String("url", author+"/"+permlink), zap.Error(err))
+				}
+			}
+			return nil
 		}
-		return tx.WithContext(ctx).Save(existing).Error
+		// Update content: posts can be edited; track the latest version.
+		if err := tx.WithContext(ctx).Save(existing).Error; err != nil {
+			return err
+		}
+		if pi.cachedPost != nil {
+			pi.cachedPost.Update(author, permlink, existing.ID)
+		}
+		return nil
 	}
 
 	// Create new post
@@ -127,17 +142,10 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 		zap.String("permlink", permlink),
 		zap.Int16("depth", post.Depth))
 
-	return nil
-}
+	if pi.cachedPost != nil {
+		pi.cachedPost.Insert(author, permlink, post.ID)
+	}
 
-// MarkPostDirty marks a post as needing cache update (e.g., after vote)
-func (pi *PostIndexer) MarkPostDirty(ctx context.Context, tx *gorm.DB, author, permlink string) error {
-	// This is a placeholder for future cache update logic
-	// For now, we just log that the post needs updating
-	// TODO: Implement proper cache dirty tracking
-	pi.logger.Debug("Post marked dirty for cache update",
-		zap.String("author", author),
-		zap.String("permlink", permlink))
 	return nil
 }
 
@@ -168,6 +176,14 @@ func (pi *PostIndexer) ProcessDelete(ctx context.Context, tx *gorm.DB, op map[st
 		if err == nil && account != nil {
 			tx.WithContext(ctx).Where("post_id = ? AND account_id = ?", post.ID, account.ID).
 				Delete(&models.FeedCache{})
+		}
+	}
+
+	// Evict from both cache tables, tags, and the dirty queue.
+	if pi.cachedPost != nil {
+		if err := pi.cachedPost.Delete(ctx, post.ID, author, permlink); err != nil {
+			pi.logger.Warn("cached-post delete failed",
+				zap.String("url", author+"/"+permlink), zap.Error(err))
 		}
 	}
 

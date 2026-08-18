@@ -226,6 +226,16 @@ func (s *Sync) syncBlocks(ctx context.Context, from, to int64) error {
 			}
 		}
 
+		// Flush the post-cache dirty queue (steemd fetch + dual-write) after
+		// each batch, mirroring legacy blocks.process_multi.
+		if counts, err := s.blockProcessor.CachedPost().Flush(ctx, false); err != nil {
+			s.logger.Warn("post cache flush failed", zap.Error(err))
+		} else if total := len(counts); total > 0 {
+			s.logger.Debug("Post cache flushed",
+				zap.Int("inserts", counts["insert"]),
+				zap.Int("updates", counts["update"]+counts["payout"]+counts["upvote"]+counts["recount"]))
+		}
+
 		s.logger.Debug("Synced block batch",
 			zap.Int64("from", start),
 			zap.Int64("to", end))

@@ -21,6 +21,7 @@ type BlockProcessor struct {
 	db               *db.DB
 	repo             *db.Repository
 	steem            steem.Provider
+	cachedPost       *CachedPost
 	accounts         *AccountIndexer
 	posts            *PostIndexer
 	follows          *FollowIndexer
@@ -31,24 +32,35 @@ type BlockProcessor struct {
 }
 
 // NewBlockProcessor creates a new block processor. The steemProvider is passed
-// down to indexers that need to hit steemd (currently AccountIndexer.Flush;
-// CachedPost in KR2 will use it for get_content_batch). Pass nil only in tests
-// that exercise pure-DB code paths.
+// down to indexers that need to hit steemd (AccountIndexer.Flush, and
+// CachedPost's get_content_batch flush). Pass nil only in tests that exercise
+// pure-DB code paths.
 func NewBlockProcessor(database *db.DB, repo *db.Repository, steemProvider steem.Provider) *BlockProcessor {
 	logger := logging.GetLogger().With(zap.String("component", "block-processor"))
+
+	cachedPost := NewCachedPost(database.DB, steemProvider)
+	// Notifications (reply/mention/vote) are wired in PR#6d; the hook stays
+	// nil until then.
 
 	return &BlockProcessor{
 		db:               database,
 		repo:             repo,
 		steem:            steemProvider,
+		cachedPost:       cachedPost,
 		accounts:         NewAccountIndexer(repo, logger, steemProvider),
-		posts:            NewPostIndexer(repo, logger),
+		posts:            NewPostIndexer(repo, cachedPost, logger),
 		follows:          NewFollowIndexer(repo, logger),
 		payments:         NewPaymentIndexer(repo, logger),
 		customOps:        NewCustomOpProcessor(repo, logger),
 		communityIndexer: NewCommunityIndexer(repo, logger),
 		logger:           logger,
 	}
+}
+
+// CachedPost exposes the shared CachedPost instance (used by Sync to flush
+// after each block batch).
+func (bp *BlockProcessor) CachedPost() *CachedPost {
+	return bp.cachedPost
 }
 
 // ProcessBlock processes a single block
@@ -335,14 +347,10 @@ func (bp *BlockProcessor) processOperation(
 				bp.accounts.MarkDirty(voter)
 			}
 
-			// Mark post for cache update
+			// Queue the post for a cache update (upvote level); the id is
+			// resolved lazily at flush time when not known.
 			if author != "" && permlink != "" {
-				if err := bp.posts.MarkPostDirty(ctx, tx, author, permlink); err != nil {
-					bp.logger.Warn("Failed to mark post dirty for vote",
-						zap.String("author", author),
-						zap.String("permlink", permlink),
-						zap.Error(err))
-				}
+				bp.cachedPost.Vote(author, permlink, 0, voter)
 			}
 		}
 
