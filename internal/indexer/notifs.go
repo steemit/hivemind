@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -27,10 +26,6 @@ type PostNotifs struct {
 	cp     *CachedPost
 	notify *NotifyIndexer
 	logger *zap.Logger
-
-	ranksMu   sync.RWMutex
-	ranks     map[int64]int // account_id -> 1-based vote_weight rank
-	ranksLoad bool
 }
 
 // NewPostNotifs creates the notifier; call Hook to install it on a CachedPost.
@@ -100,7 +95,7 @@ func (p *PostNotifs) replyNotifs(ctx context.Context, post map[string]interface{
 	if depth, _ := numberInt(post["depth"]); depth == 1 {
 		typeID = models.NotifyTypeReply
 	}
-	score := p.defaultScore(ctx, authorID)
+	score := defaultScoreForAccount(ctx, p.db, authorID)
 	if err := p.notify.Write(ctx, typeID, when, &authorID, &parentID, nil, &pid, nil, &score); err != nil {
 		p.logger.Warn("reply notif write failed", zap.Error(err))
 	}
@@ -124,7 +119,7 @@ func (p *PostNotifs) mentionNotifs(ctx context.Context, post map[string]interfac
 		return
 	}
 
-	score := p.defaultScore(ctx, authorID)
+	score := defaultScoreForAccount(ctx, p.db, authorID)
 	maxMentions := 25
 	if score < 30 {
 		maxMentions = 5
@@ -371,54 +366,4 @@ func (p *PostNotifs) existingVotes(ctx context.Context, dstID, postID int64, src
 		out[id] = true
 	}
 	return out, nil
-}
-
-// defaultScore maps an account's vote_weight rank to a notification score
-// (legacy Accounts.default_score / fetch_ranks; rank is 1-based).
-func (p *PostNotifs) defaultScore(ctx context.Context, accountID int64) int16 {
-	p.ranksMu.RLock()
-	loaded := p.ranksLoad
-	p.ranksMu.RUnlock()
-	if !loaded {
-		p.fetchRanks(ctx)
-	}
-	p.ranksMu.RLock()
-	rank, ok := p.ranks[accountID]
-	p.ranksMu.RUnlock()
-	if !ok {
-		rank = 1000000
-	}
-	switch {
-	case rank < 200:
-		return 70 // top 0.02%
-	case rank < 1000:
-		return 60 // top 0.1%
-	case rank < 6500:
-		return 50 // top 0.5%
-	case rank < 25000:
-		return 40 // top 2%
-	case rank < 100000:
-		return 30 // top 8%
-	default:
-		return 20
-	}
-}
-
-func (p *PostNotifs) fetchRanks(ctx context.Context) {
-	var ids []int64
-	if err := p.db.WithContext(ctx).
-		Table("hive_accounts").
-		Select("id").
-		Order("vote_weight DESC").
-		Scan(&ids).Error; err != nil {
-		p.logger.Warn("fetch_ranks failed; defaulting all scores", zap.Error(err))
-	}
-	ranks := make(map[int64]int, len(ids))
-	for i, id := range ids {
-		ranks[id] = i + 1 // 1-based, like legacy enumerate(rank+1)
-	}
-	p.ranksMu.Lock()
-	p.ranks = ranks
-	p.ranksLoad = true
-	p.ranksMu.Unlock()
 }

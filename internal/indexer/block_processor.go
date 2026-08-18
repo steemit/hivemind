@@ -63,6 +63,16 @@ func (bp *BlockProcessor) CachedPost() *CachedPost {
 	return bp.cachedPost
 }
 
+// Follows exposes the follow indexer (Sync flushes count deltas).
+func (bp *BlockProcessor) Follows() *FollowIndexer {
+	return bp.follows
+}
+
+// Accounts exposes the account indexer (Sync flushes dirty accounts).
+func (bp *BlockProcessor) Accounts() *AccountIndexer {
+	return bp.accounts
+}
+
 // ProcessBlock processes a single block
 func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]interface{}, isInitialSync bool) error {
 	// Start transaction
