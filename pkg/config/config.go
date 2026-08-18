@@ -100,6 +100,11 @@ type IndexerConfig struct {
 	TestMaxBlock         int
 	TestDisableSync      bool
 	RecommendCommunities string
+
+	// JobsInterval is the cache-audit jobs period in seconds
+	// (audit_cache_missing/deleted/undelete). 0 disables the scheduler;
+	// the jobs remain available for manual invocation.
+	JobsInterval int
 }
 
 // LoggingConfig holds logging configuration
@@ -180,6 +185,7 @@ func Load() (*Config, error) {
 			TestMaxBlock:         getInt("test_max_block", 0),
 			TestDisableSync:      getBool("test_disable_sync", false),
 			RecommendCommunities: getString("recommend_communities", "hive-108451,hive-172186,hive-187187"),
+			JobsInterval:         getInt("jobs_interval", 0),
 		},
 		Logging: LoggingConfig{
 			Level:        getString("log_level", "INFO"),
@@ -224,6 +230,7 @@ func setDefaults() {
 	viper.SetDefault("log_format", "json")
 	viper.SetDefault("log_scalyr_format", true)
 	viper.SetDefault("trail_blocks", 2)
+	viper.SetDefault("jobs_interval", 0)
 	viper.SetDefault("max_batch", 50)
 	viper.SetDefault("max_workers", 4)
 	viper.SetDefault("telemetry_enabled", true)

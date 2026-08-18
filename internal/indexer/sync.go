@@ -60,12 +60,38 @@ func (s *Sync) Run(ctx context.Context) error {
 		s.logger.Info("Resuming normal sync")
 	}
 
+	// Prune hive_posts_cache_temp outside the 90-day hot window (60s tick).
+	go NewCacheSync(s.db.DB).Run(ctx)
+
+	// Optional periodic cache-consistency audits (0 = disabled; legacy runs
+	// these manually).
+	if interval := s.config.Indexer.JobsInterval; interval > 0 {
+		go s.runCacheJobsLoop(ctx, interval)
+	}
+
 	// Determine sync strategy based on configuration
 	// For now, we'll use Strategy B (irreversible blocks only)
 	// This is simpler and more reliable
 
 	// Start sync loop
 	return s.syncIrreversible(ctx)
+}
+
+// runCacheJobsLoop periodically runs the cache audit jobs.
+func (s *Sync) runCacheJobsLoop(ctx context.Context, intervalSec int) {
+	interval := time.Duration(intervalSec) * time.Second
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := RunCacheJobs(ctx, s.db.DB, s.blockProcessor.CachedPost(), s.steem); err != nil {
+				s.logger.Warn("cache jobs run failed", zap.Error(err))
+			}
+		}
+	}
 }
 
 // checkInitialSync checks if initial sync is needed by checking if feed cache is empty
