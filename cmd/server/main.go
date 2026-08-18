@@ -16,6 +16,7 @@ import (
 	"github.com/steemit/hivemind/internal/cache"
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/middleware"
+	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/config"
 	"github.com/steemit/hivemind/pkg/logging"
 	"github.com/steemit/hivemind/pkg/telemetry"
@@ -45,6 +46,10 @@ func main() {
 		logger.Fatal("Failed to initialize telemetry", zap.Error(err))
 	}
 	defer telemetryShutdown()
+
+	// Install the shared mutes list (irredeemables) used by API object
+	// builders (stats.hide/blacklists). Empty URL = disabled list.
+	steem.SetSharedMutes(steem.NewMutes(cfg.Steem.MutedAccountsURL))
 
 	// Initialize database
 	database, err := db.New(&cfg.Database, cfg.Logging.Level)

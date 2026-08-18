@@ -59,6 +59,11 @@ type SteemConfig struct {
 	URL        string
 	MaxBatch   int
 	MaxWorkers int
+
+	// MutedAccountsURL is the irredeemables list endpoint (whitespace-
+	// separated account names), refreshed hourly. Empty disables the list.
+	// Mirrors legacy config key muted_accounts_url.
+	MutedAccountsURL string
 }
 
 // RedisConfig holds Redis configuration
@@ -149,9 +154,10 @@ func Load() (*Config, error) {
 			StatementTimeout:     getDuration("db_statement_timeout", 30*time.Second),
 		},
 		Steem: SteemConfig{
-			URL:        getString("steemd_url", "https://api.steemit.com"),
-			MaxBatch:   getInt("max_batch", 50),
-			MaxWorkers: getInt("max_workers", 4),
+			URL:              getString("steemd_url", "https://api.steemit.com"),
+			MaxBatch:         getInt("max_batch", 50),
+			MaxWorkers:       getInt("max_workers", 4),
+			MutedAccountsURL: getString("muted_accounts_url", ""),
 		},
 		Redis: RedisConfig{
 			URL:     getString("redis_url", ""),
@@ -208,6 +214,7 @@ func setDefaults() {
 	viper.SetDefault("db_conn_max_idle_time", 10*time.Minute)
 	viper.SetDefault("db_statement_timeout", 30*time.Second)
 	viper.SetDefault("steemd_url", "https://api.steemit.com")
+	viper.SetDefault("muted_accounts_url", "")
 	viper.SetDefault("http_server_port", 8080)
 	viper.SetDefault("http_server_host", "0.0.0.0")
 	viper.SetDefault("http_read_timeout", 30*time.Second)

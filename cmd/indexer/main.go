@@ -49,6 +49,10 @@ func main() {
 	}
 	defer database.Close()
 
+	// Install the shared mutes list (irredeemables) used by CachedPost
+	// notifications (PR#6d). Empty URL = disabled list.
+	steem.SetSharedMutes(steem.NewMutes(cfg.Steem.MutedAccountsURL))
+
 	// Run schema migrations before indexing.
 	//
 	// For a NEW database, forceVersion=0 runs the baseline migration (0001)
