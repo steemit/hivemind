@@ -170,6 +170,15 @@ func (c *CachedPost) Undelete(ctx context.Context, postID int64, author, permlin
 	return nil
 }
 
+// PopPendingVoters removes and returns the voters queued for a vote notif.
+func (c *CachedPost) PopPendingVoters(url string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	voters := c.votes[url]
+	delete(c.votes, url)
+	return voters
+}
+
 // dirty marks a post at the given level; priority only ever upgrades.
 func (c *CachedPost) dirty(level int, author, permlink string, pid int64) {
 	url := author + "/" + permlink
