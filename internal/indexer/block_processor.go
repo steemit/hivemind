@@ -39,8 +39,8 @@ func NewBlockProcessor(database *db.DB, repo *db.Repository, steemProvider steem
 	logger := logging.GetLogger().With(zap.String("component", "block-processor"))
 
 	cachedPost := NewCachedPost(database.DB, steemProvider)
-	// Notifications (reply/mention/vote) are wired in PR#6d; the hook stays
-	// nil until then.
+	// Reply/mention/vote notifications ride along the cache flush.
+	NewPostNotifs(database.DB, cachedPost, NewNotifyIndexer(repo)).Install()
 
 	return &BlockProcessor{
 		db:               database,
