@@ -110,10 +110,12 @@ func (s *Sync) initialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepos
 		}
 	}
 
-	// Recover missing posts (post cache recovery)
+	// Recover missing posts (post cache recovery): fill hive_posts_cache
+	// entries for any posts indexed beyond the cache cursor.
 	s.logger.Info("Recovering missing posts")
-	// TODO: Implement post cache recovery
-	// This should check for posts without cache entries and fetch them from steemd
+	if err := s.blockProcessor.CachedPost().RecoverMissingPosts(ctx); err != nil {
+		return fmt.Errorf("failed to recover missing posts: %w", err)
+	}
 
 	// Rebuild feed cache
 	s.logger.Info("Rebuilding feed cache")
@@ -121,10 +123,11 @@ func (s *Sync) initialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepos
 		return fmt.Errorf("failed to rebuild feed cache: %w", err)
 	}
 
-	// Force follow recount
+	// Force follow recount: recompute followers/following from hive_follows.
 	s.logger.Info("Recounting follows")
-	// TODO: Implement follow recount
-	// This should recalculate follow counts for all accounts
+	if err := s.blockProcessor.Follows().ForceRecount(ctx); err != nil {
+		return fmt.Errorf("failed to recount follows: %w", err)
+	}
 
 	s.logger.Info("Initial sync completed successfully")
 	return nil
@@ -234,6 +237,19 @@ func (s *Sync) syncBlocks(ctx context.Context, from, to int64) error {
 			s.logger.Debug("Post cache flushed",
 				zap.Int("inserts", counts["insert"]),
 				zap.Int("updates", counts["update"]+counts["payout"]+counts["upvote"]+counts["recount"]))
+		}
+
+		// Flush pending follow count deltas (legacy: Follow.flush(trx=False)
+		// after each block batch).
+		if err := s.blockProcessor.Follows().Flush(ctx); err != nil {
+			s.logger.Warn("follow delta flush failed", zap.Error(err))
+		}
+
+		// Flush dirty accounts (steemd get_accounts + ~17-column update).
+		if n, err := s.blockProcessor.Accounts().FlushBatch(ctx, false); err != nil {
+			s.logger.Warn("account flush failed", zap.Error(err))
+		} else if n > 0 {
+			s.logger.Debug("Accounts flushed", zap.Int("count", n))
 		}
 
 		s.logger.Debug("Synced block batch",

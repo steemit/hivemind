@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -18,6 +19,7 @@ type AccountIndexer struct {
 	repo   *db.Repository
 	steem  steem.Provider
 	logger *zap.Logger
+	mu     sync.Mutex
 	dirty  map[string]bool // Dirty queue for accounts that need updates
 }
 
@@ -77,20 +79,48 @@ func (ai *AccountIndexer) Register(ctx context.Context, tx *gorm.DB, names []str
 
 // MarkDirty marks an account as needing cache update
 func (ai *AccountIndexer) MarkDirty(name string) {
+	ai.mu.Lock()
 	ai.dirty[name] = true
+	ai.mu.Unlock()
 }
 
-// Flush processes dirty accounts (to be called periodically)
-func (ai *AccountIndexer) Flush(ctx context.Context) error {
-	if len(ai.dirty) == 0 {
-		return nil
+// DirtySet marks a batch of accounts for update (legacy dirty_set).
+func (ai *AccountIndexer) DirtySet(names []string) {
+	ai.mu.Lock()
+	for _, n := range names {
+		ai.dirty[n] = true
 	}
+	ai.mu.Unlock()
+}
 
-	// TODO: Fetch accounts from steemd and update cache
-	// For now, just clear the dirty queue
-	ai.dirty = make(map[string]bool)
+// DirtyOldest flags the limit least-recently-cached accounts for update
+// (legacy dirty_oldest; used by periodic maintenance sweeps).
+func (ai *AccountIndexer) DirtyOldest(ctx context.Context, limit int) (int, error) {
+	var names []string
+	if err := ai.repo.DB().WithContext(ctx).
+		Table("hive_accounts").
+		Select("name").
+		Order("cached_at").
+		Limit(limit).
+		Scan(&names).Error; err != nil {
+		return 0, err
+	}
+	ai.DirtySet(names)
+	return len(names), nil
+}
 
-	return nil
+// PendingDirtyLen reports the dirty queue size (diagnostics/tests).
+func (ai *AccountIndexer) PendingDirtyLen() int {
+	ai.mu.Lock()
+	defer ai.mu.Unlock()
+	return len(ai.dirty)
+}
+
+// Flush is the legacy-compatible wrapper around the real flush in
+// account_update.go (to be called periodically by Sync).
+func (ai *AccountIndexer) Flush(ctx context.Context) error {
+	_, err := ai.FlushBatch(ctx, true)
+	return err
 }
 
 // GetID retrieves account ID by name

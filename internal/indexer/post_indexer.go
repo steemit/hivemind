@@ -169,14 +169,12 @@ func (pi *PostIndexer) ProcessDelete(ctx context.Context, tx *gorm.DB, op map[st
 		return fmt.Errorf("failed to delete post: %w", err)
 	}
 
-	// Remove from feed cache if root post
+	// Remove from feed cache: a deleted root post evicts ALL entries
+	// (the author's own plus every reblog), mirroring legacy
+	// FeedCache.delete(post_id).
 	if post.Depth == 0 {
-		accountRepo := db.NewAccountRepository(pi.repo)
-		account, err := accountRepo.GetByName(ctx, author)
-		if err == nil && account != nil {
-			tx.WithContext(ctx).Where("post_id = ? AND account_id = ?", post.ID, account.ID).
-				Delete(&models.FeedCache{})
-		}
+		tx.WithContext(ctx).Where("post_id = ?", post.ID).
+			Delete(&models.FeedCache{})
 	}
 
 	// Evict from both cache tables, tags, and the dirty queue.
