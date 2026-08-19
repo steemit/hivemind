@@ -3,6 +3,7 @@ package condenser
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -27,7 +28,7 @@ func (c *Cursor) GetPostIDByAuthorPermlink(ctx context.Context, author, permlink
 		Where("author = ? AND permlink = ?", author, permlink).
 		Select("id").
 		First(&post).Error
-	
+
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return 0, nil
@@ -45,7 +46,7 @@ func (c *Cursor) GetPostIDsByQuery(ctx context.Context, sort, startAuthor, start
 		"hot":             true,
 		"created":         true,
 		"promoted":        true,
-		"payout":           true,
+		"payout":          true,
 		"payout_comments": true,
 	}
 	if !validSorts[sort] {
@@ -55,7 +56,7 @@ func (c *Cursor) GetPostIDsByQuery(ctx context.Context, sort, startAuthor, start
 	// Build query based on sort type
 	query := c.db.WithContext(ctx).
 		Model(&models.PostCache{}).
-		Select("post_id")
+		Select("hive_posts_cache.post_id")
 
 	// Apply filters based on sort type
 	switch sort {
@@ -67,7 +68,7 @@ func (c *Cursor) GetPostIDsByQuery(ctx context.Context, sort, startAuthor, start
 			Order("sc_hot DESC")
 	case "created":
 		query = query.Where("depth = ?", 0).
-			Order("post_id DESC")
+			Order("hive_posts_cache.post_id DESC")
 	case "promoted":
 		query = query.Where("is_paidout = ? AND promoted > ?", false, 0).
 			Order("promoted DESC")
@@ -81,7 +82,7 @@ func (c *Cursor) GetPostIDsByQuery(ctx context.Context, sort, startAuthor, start
 
 	// Filter by tag if provided
 	if tag != "" {
-		if tag[:5] == "hive-" {
+		if strings.HasPrefix(tag, "hive-") {
 			// Community tag
 			query = query.Where("category = ?", tag)
 			if sort == "trending" || sort == "hot" {
@@ -128,7 +129,7 @@ func (c *Cursor) GetPostIDsByQuery(ctx context.Context, sort, startAuthor, start
 			case "hot":
 				query = query.Where("sc_hot <= ?", startValue)
 			case "created", "payout", "payout_comments":
-				query = query.Where("post_id <= ?", startValue)
+				query = query.Where("hive_posts_cache.post_id <= ?", startValue)
 			}
 		}
 	}
@@ -205,4 +206,3 @@ func (c *Cursor) GetPostIDsByBlog(ctx context.Context, account string, startAuth
 
 	return ids, nil
 }
-
