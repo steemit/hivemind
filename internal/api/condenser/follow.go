@@ -3,6 +3,7 @@ package condenser
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -34,7 +35,7 @@ func (f *FollowAPI) GetFollowers(c *gin.Context, params json.RawMessage) (interf
 	}
 
 	if len(p) < 1 {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	account, _ := p[0].(string)
@@ -122,7 +123,7 @@ func (f *FollowAPI) GetFollowing(c *gin.Context, params json.RawMessage) (interf
 	}
 
 	if len(p) < 1 {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	account, _ := p[0].(string)
@@ -210,7 +211,7 @@ func (f *FollowAPI) GetFollowCount(c *gin.Context, params json.RawMessage) (inte
 	}
 
 	if len(p) < 1 {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	account, _ := p[0].(string)
@@ -225,7 +226,7 @@ func (f *FollowAPI) GetFollowCount(c *gin.Context, params json.RawMessage) (inte
 	}
 
 	return map[string]interface{}{
-		"account":        account,
+		"account":         account,
 		"following_count": acc.Following,
 		"follower_count":  acc.Followers,
 	}, nil
@@ -239,7 +240,7 @@ func (f *FollowAPI) GetRebloggedBy(c *gin.Context, params json.RawMessage) (inte
 	}
 
 	if len(p) < 2 {
-		return nil, fmt.Errorf("missing required parameters: author, permlink")
+		return nil, apierrors.PublicError("missing required parameters: author, permlink")
 	}
 
 	author, _ := p[0].(string)
@@ -434,4 +435,3 @@ func (f *FollowAPI) GetFollowingByPage(c *gin.Context, params json.RawMessage) (
 
 	return result, nil
 }
-

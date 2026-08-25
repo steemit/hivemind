@@ -2,7 +2,7 @@ package condenser
 
 import (
 	"encoding/json"
-	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 
@@ -54,7 +54,7 @@ func (d *DiscussionsAPI) getDiscussionsBySort(ctx *gin.Context, sort string, par
 		// Try array format
 		var arr []interface{}
 		if err2 := json.Unmarshal(params, &arr); err2 != nil {
-			return nil, fmt.Errorf("invalid parameters format")
+			return nil, apierrors.PublicError("invalid parameters format")
 		}
 		// Convert array to map (legacy format)
 		p = make(map[string]interface{})
@@ -111,7 +111,7 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 	if err := json.Unmarshal(params, &p); err != nil {
 		var arr []interface{}
 		if err2 := json.Unmarshal(params, &arr); err2 != nil {
-			return nil, fmt.Errorf("invalid parameters format")
+			return nil, apierrors.PublicError("invalid parameters format")
 		}
 		if len(arr) > 0 {
 			if m, ok := arr[0].(map[string]interface{}); ok {
@@ -143,7 +143,7 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 	// tag parameter is actually the account name for blog queries
 	account := tag
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: tag (account name)")
+		return nil, apierrors.PublicError("missing required parameter: tag (account name)")
 	}
 
 	// Get post IDs from feed cache
@@ -171,5 +171,5 @@ func (d *DiscussionsAPI) GetDiscussionsByFeed(ctx *gin.Context, params json.RawM
 	// TODO: Implement personalized feed (follows join feed_cache, see legacy
 	// pids_by_feed_with_reblog). Must NOT silently return blog results —
 	// feed and blog are different result sets.
-	return nil, fmt.Errorf("not implemented")
+	return nil, apierrors.PublicError("not implemented")
 }

@@ -2,7 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
-	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 
@@ -23,14 +23,14 @@ func NewProfileAPI(repo *db.Repository) *ProfileAPI {
 func (pr *ProfileAPI) GetProfile(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	account, _ := pMap["account"].(string)
 	observer, _ := pMap["observer"].(string)
 
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	accountRepo := db.NewAccountRepository(pr.repo)
@@ -46,17 +46,16 @@ func (pr *ProfileAPI) GetProfile(ctx *gin.Context, params json.RawMessage) (inte
 	_ = observer
 
 	return map[string]interface{}{
-		"id":          acc.ID,
-		"name":        acc.Name,
-		"display_name": acc.DisplayName.String,
-		"about":       acc.About.String,
-		"location":    acc.Location.String,
-		"website":     acc.Website.String,
+		"id":            acc.ID,
+		"name":          acc.Name,
+		"display_name":  acc.DisplayName.String,
+		"about":         acc.About.String,
+		"location":      acc.Location.String,
+		"website":       acc.Website.String,
 		"profile_image": acc.ProfileImage,
 		"cover_image":   acc.CoverImage,
-		"followers":    acc.Followers,
-		"following":    acc.Following,
-		"reputation":   acc.Reputation,
+		"followers":     acc.Followers,
+		"following":     acc.Following,
+		"reputation":    acc.Reputation,
 	}, nil
 }
-
