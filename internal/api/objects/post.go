@@ -234,57 +234,6 @@ func payoutDate(isPaidout bool, payoutAt time.Time) interface{} {
 	return payoutAt.Format(time.RFC3339)
 }
 
-// LoadPostsReblogs loads posts with reblog information
-func (l *PostLoader) LoadPostsReblogs(ctx context.Context, idsWithReblogs [][]int64, truncateBody int) ([]map[string]interface{}, error) {
-	// Extract all post IDs and collect reblogger account IDs for batch lookup
-	allIDs := make([]int64, 0, len(idsWithReblogs))
-	rebloggerIDs := make([]int64, 0, len(idsWithReblogs))
-	idToRebloggerID := make(map[int64]int64) // post_id -> reblogger_id
-
-	for _, pair := range idsWithReblogs {
-		if len(pair) >= 2 {
-			postID := pair[0]
-			rebloggerID := pair[1]
-			allIDs = append(allIDs, postID)
-			rebloggerIDs = append(rebloggerIDs, rebloggerID)
-			idToRebloggerID[postID] = rebloggerID
-		}
-	}
-
-	// Batch-load all reblogger account names in ONE query (was N+1).
-	idToName := make(map[int64]string)
-	if len(rebloggerIDs) > 0 {
-		var accounts []models.Account
-		if err := l.db.WithContext(ctx).
-			Where("id IN ?", rebloggerIDs).
-			Select("id", "name").
-			Find(&accounts).Error; err == nil {
-			for _, acc := range accounts {
-				idToName[acc.ID] = acc.Name
-			}
-		}
-	}
-
-	// Load posts normally
-	posts, err := l.LoadPosts(ctx, allIDs, truncateBody)
-	if err != nil {
-		return nil, err
-	}
-
-	// Add reblog information
-	for i := range posts {
-		postID := posts[i]["id"].(int64)
-		if rebloggerID, ok := idToRebloggerID[postID]; ok {
-			if reblogger, ok := idToName[rebloggerID]; ok {
-				rebloggedBy, _ := posts[i]["reblogged_by"].([]interface{})
-				posts[i]["reblogged_by"] = append(rebloggedBy, reblogger)
-			}
-		}
-	}
-
-	return posts, nil
-}
-
 // getRebloggedBy gets account names that reblogged a post
 func (l *PostLoader) getRebloggedBy(ctx context.Context, postID int64) []interface{} {
 	// Create a temporary repository to query reblogs

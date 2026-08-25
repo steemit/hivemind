@@ -192,6 +192,26 @@ func (r *PostStatusRepository) IsPostHidden(ctx context.Context, postID int64) (
 	return count > 0, nil
 }
 
+// GetHiddenPostIDs returns the set of article-blocked (list_type=1) post IDs
+// among `ids` in a single query. Mirrors legacy hide_pids_by_ids, used to
+// filter ranked/blog/payout result lists.
+func (r *PostStatusRepository) GetHiddenPostIDs(ctx context.Context, ids []int64) (map[int64]bool, error) {
+	hidden := make(map[int64]bool)
+	if len(ids) == 0 {
+		return hidden, nil
+	}
+	var rows []int64
+	if err := r.db.WithContext(ctx).Model(&models.PostStatus{}).
+		Where("list_type = ? AND post_id IN ?", models.PostStatusArticleBlock, ids).
+		Pluck("post_id", &rows).Error; err != nil {
+		return nil, err
+	}
+	for _, id := range rows {
+		hidden[id] = true
+	}
+	return hidden, nil
+}
+
 // Create creates a new post
 func (r *PostRepository) Create(ctx context.Context, post *models.Post) error {
 	return r.db.WithContext(ctx).Create(post).Error

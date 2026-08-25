@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -210,6 +211,79 @@ func (l *PostLoader) LoadPostsKeyed(ctx context.Context, ids []int64, truncateBo
 	return postsByID, nil
 }
 
+// LoadPostsBridge loads posts by ID and returns them as an ordered array of
+// bridge_api post objects (same shape as LoadPostsKeyed). Mirrors legacy
+// bridge objects.load_posts.
+func (l *PostLoader) LoadPostsBridge(ctx context.Context, ids []int64, truncateBody int) ([]map[string]interface{}, error) {
+	byID, err := l.LoadPostsKeyed(ctx, ids, truncateBody)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]interface{}, 0, len(ids))
+	for _, id := range ids {
+		if obj, ok := byID[id]; ok {
+			out = append(out, obj)
+		}
+	}
+	return out, nil
+}
+
+// LoadPostsReblogsBridge extends LoadPostsBridge with reblog attribution:
+// rebloggers is a post_id → CSV-of-names map (from pids_by_feed_with_reblog's
+// string_agg). The post author is excluded from the list, matching legacy
+// bridge objects.load_posts_reblogs.
+func (l *PostLoader) LoadPostsReblogsBridge(ctx context.Context, ids []int64, rebloggers map[int64]string, truncateBody int) ([]map[string]interface{}, error) {
+	posts, err := l.LoadPostsBridge(ctx, ids, truncateBody)
+	if err != nil {
+		return nil, err
+	}
+	for _, post := range posts {
+		csv, ok := rebloggers[post["post_id"].(int64)]
+		if !ok || csv == "" {
+			continue
+		}
+		author, _ := post["author"].(string)
+		seen := make(map[string]bool)
+		rby := make([]string, 0, 4)
+		for _, name := range splitCommas(csv) {
+			if name == "" || name == author || seen[name] {
+				continue
+			}
+			seen[name] = true
+			rby = append(rby, name)
+		}
+		if len(rby) > 0 {
+			post["reblogged_by"] = rby
+		}
+	}
+	return posts, nil
+}
+
+// sbdAmount parses a steemd-style SBD amount ("1.234 SBD" string, bare
+// number, or {amount, precision, nai} object) into its numeric value.
+// Mirrors legacy utils/normalize.py sbd_amount/parse_amount.
+func sbdAmount(value interface{}) float64 {
+	switch v := value.(type) {
+	case float64:
+		return v
+	case string:
+		fields := strings.Fields(v)
+		if len(fields) == 0 {
+			return 0
+		}
+		amt, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil {
+			return 0
+		}
+		return amt
+	case map[string]interface{}:
+		if amt, ok := v["amount"].(float64); ok {
+			return amt / 1000 // asset amount is fixed-point with precision 3
+		}
+	}
+	return 0
+}
+
 // buildBridgePost builds a single bridge_api-shape post object.
 // Mirrors legacy _condenser_post_object (bridge_api/objects.py:231).
 func (l *PostLoader) buildBridgePost(post *models.Post, cache *models.PostCache, authorRep float64, truncateBody int) map[string]interface{} {
@@ -234,24 +308,35 @@ func (l *PostLoader) buildBridgePost(post *models.Post, cache *models.PostCache,
 	// Parse raw_json for import fields.
 	rawFields := parseRawJSON(cache.RawJSON)
 
+	// Payout split: pending before payout, author+curator after.
+	var pendingPayout, authorPayout float64
+	if cache.IsPaidout {
+		authorPayout = cache.Payout
+	} else {
+		pendingPayout = cache.Payout
+	}
+
 	obj := map[string]interface{}{
-		"post_id":              post.ID,
-		"author":               post.Author,
-		"permlink":             post.Permlink,
-		"category":             post.Category,
-		"title":                cache.Title,
-		"body":                 body,
-		"json_metadata":        jsonMeta,
-		"created":              post.CreatedAt.Format(time.RFC3339),
-		"updated":              cache.UpdatedAt.Format(time.RFC3339),
-		"depth":                post.Depth,
-		"children":             cache.Children,
-		"net_rshares":          cache.RShares,
-		"is_paidout":           cache.IsPaidout,
-		"payout_at":            cache.PayoutAt.Format(time.RFC3339),
-		"payout":               cache.Payout,
-		"pending_payout_value": formatAmount(cache.Payout),
-		"author_payout_value":  formatAmount(0), // TODO: compute from raw_json when paid
+		"post_id":       post.ID,
+		"author":        post.Author,
+		"permlink":      post.Permlink,
+		"category":      post.Category,
+		"title":         cache.Title,
+		"body":          body,
+		"json_metadata": jsonMeta,
+		"created":       post.CreatedAt.Format(time.RFC3339),
+		"updated":       cache.UpdatedAt.Format(time.RFC3339),
+		"depth":         post.Depth,
+		"children":      cache.Children,
+		"net_rshares":   cache.RShares,
+		"is_paidout":    cache.IsPaidout,
+		"payout_at":     cache.PayoutAt.Format(time.RFC3339),
+		"payout":        cache.Payout,
+		// Payout split mirrors legacy bridge _condenser_post_object: before
+		// payout the whole amount is pending; after payout the author value is
+		// recomputed from raw_json.curator_payout_value below.
+		"pending_payout_value": formatAmount(pendingPayout),
+		"author_payout_value":  formatAmount(authorPayout),
 		"curator_payout_value": formatAmount(0),
 		"promoted":             formatAmount(cache.Promoted),
 		"replies":              []interface{}{},
@@ -268,6 +353,16 @@ func (l *PostLoader) buildBridgePost(post *models.Post, cache *models.PostCache,
 	// Merge raw_json import fields if available.
 	for k, v := range rawFields {
 		obj[k] = v
+	}
+
+	// For paid posts, split the total payout between author and curators
+	// using the curator payout recorded at payout time (raw_json).
+	if cache.IsPaidout {
+		if raw, ok := rawFields["curator_payout_value"]; ok {
+			curator := sbdAmount(raw)
+			obj["author_payout_value"] = formatAmount(cache.Payout - curator)
+			obj["curator_payout_value"] = formatAmount(curator)
+		}
 	}
 
 	// URL: prefer raw_json url, fall back to constructed.

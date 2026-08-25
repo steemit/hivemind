@@ -180,45 +180,108 @@ func (n *NotifyAPI) UnreadNotifications(ctx *gin.Context, params json.RawMessage
 	}, nil
 }
 
-// renderNotifications renders notifications with full details
+// renderNotifications renders notifications with full details.
+//
+// Related entities (source/destination accounts, posts, communities) are
+// batch-preloaded with one IN query per entity type instead of a per-row
+// lookup, capping the query count regardless of notification volume
+// (previously 4 queries per notification).
 func (n *NotifyAPI) renderNotifications(ctx context.Context, notifications []*models.Notification) ([]interface{}, error) {
 	result := make([]interface{}, 0, len(notifications))
+	if len(notifications) == 0 {
+		return result, nil
+	}
 
-	accountRepo := db.NewAccountRepository(n.repo)
-	postRepo := db.NewPostRepository(n.repo)
-	communityRepo := db.NewCommunityRepository(n.repo)
+	gdb := n.repo.DB()
+
+	// Collect the referenced IDs.
+	accountIDs := make(map[int64]bool)
+	postIDs := make(map[int64]bool)
+	communityIDs := make(map[int64]bool)
+	for _, notif := range notifications {
+		if notif.SrcID.Valid {
+			accountIDs[notif.SrcID.Int64] = true
+		}
+		if notif.DstID.Valid {
+			accountIDs[notif.DstID.Int64] = true
+		}
+		if notif.PostID.Valid {
+			postIDs[notif.PostID.Int64] = true
+		}
+		if notif.CommunityID.Valid {
+			communityIDs[notif.CommunityID.Int64] = true
+		}
+	}
+
+	// Batch query 1: accounts.
+	accountNames := make(map[int64]string, len(accountIDs))
+	if len(accountIDs) > 0 {
+		ids := int64SetToSlice(accountIDs)
+		var accounts []models.Account
+		if err := gdb.WithContext(ctx).Where("id IN ?", ids).
+			Select("id", "name").Find(&accounts).Error; err != nil {
+			return nil, err
+		}
+		for _, acc := range accounts {
+			accountNames[acc.ID] = acc.Name
+		}
+	}
+
+	// Batch query 2: posts (author/permlink).
+	type postRef struct {
+		Author   string
+		Permlink string
+	}
+	postRefs := make(map[int64]postRef, len(postIDs))
+	if len(postIDs) > 0 {
+		ids := int64SetToSlice(postIDs)
+		var posts []models.Post
+		if err := gdb.WithContext(ctx).Where("id IN ?", ids).
+			Select("id", "author", "permlink").Find(&posts).Error; err != nil {
+			return nil, err
+		}
+		for _, post := range posts {
+			postRefs[post.ID] = postRef{Author: post.Author, Permlink: post.Permlink}
+		}
+	}
+
+	// Batch query 3: communities (name/title).
+	type commRef struct {
+		Name  string
+		Title string
+	}
+	commRefs := make(map[int64]commRef, len(communityIDs))
+	if len(communityIDs) > 0 {
+		ids := int64SetToSlice(communityIDs)
+		var comms []models.Community
+		if err := gdb.WithContext(ctx).Where("id IN ?", ids).
+			Select("id", "name", "title").Find(&comms).Error; err != nil {
+			return nil, err
+		}
+		for _, comm := range comms {
+			commRefs[comm.ID] = commRef{Name: comm.Name, Title: comm.Title}
+		}
+	}
 
 	for _, notif := range notifications {
-		// Load related entities
 		var srcName, dstName, author, permlink, communityName, communityTitle string
 
 		if notif.SrcID.Valid {
-			src, err := accountRepo.GetByID(ctx, notif.SrcID.Int64)
-			if err == nil && src != nil {
-				srcName = src.Name
-			}
+			srcName = accountNames[notif.SrcID.Int64]
 		}
-
 		if notif.DstID.Valid {
-			dst, err := accountRepo.GetByID(ctx, notif.DstID.Int64)
-			if err == nil && dst != nil {
-				dstName = dst.Name
-			}
+			dstName = accountNames[notif.DstID.Int64]
 		}
-
 		if notif.PostID.Valid {
-			post, err := postRepo.GetByID(ctx, notif.PostID.Int64)
-			if err == nil && post != nil {
-				author = post.Author
-				permlink = post.Permlink
+			if ref, ok := postRefs[notif.PostID.Int64]; ok {
+				author = ref.Author
+				permlink = ref.Permlink
 			}
 		}
-
 		if notif.CommunityID.Valid {
-			comm, err := communityRepo.GetByID(ctx, notif.CommunityID.Int64)
-			if err == nil && comm != nil {
-				communityName = comm.Name
-				communityTitle = comm.Title
+			if ref, ok := commRefs[notif.CommunityID.Int64]; ok {
+				communityName = ref.Name
+				communityTitle = ref.Title
 			}
 		}
 
@@ -236,6 +299,15 @@ func (n *NotifyAPI) renderNotifications(ctx context.Context, notifications []*mo
 	}
 
 	return result, nil
+}
+
+// int64SetToSlice converts a set of int64 into a slice for IN clauses.
+func int64SetToSlice(set map[int64]bool) []int64 {
+	ids := make([]int64, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // Helper functions
