@@ -3,6 +3,7 @@ package bridge
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 
@@ -28,7 +29,7 @@ func (p *PostAPI) GetPost(ctx *gin.Context, params json.RawMessage) (interface{}
 
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	author, _ := pMap["author"].(string)
@@ -41,7 +42,7 @@ func (p *PostAPI) GetPost(ctx *gin.Context, params json.RawMessage) (interface{}
 	})
 
 	if author == "" || permlink == "" {
-		return nil, fmt.Errorf("missing required parameters: author, permlink")
+		return nil, apierrors.PublicError("missing required parameters: author, permlink")
 	}
 
 	postRepo := db.NewPostRepository(p.repo)
@@ -145,7 +146,7 @@ func (p *PostAPI) GetPostHeader(ctx *gin.Context, params json.RawMessage) (inter
 
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	author, _ := pMap["author"].(string)
@@ -157,7 +158,7 @@ func (p *PostAPI) GetPostHeader(ctx *gin.Context, params json.RawMessage) (inter
 	})
 
 	if author == "" || permlink == "" {
-		return nil, fmt.Errorf("missing required parameters: author, permlink")
+		return nil, apierrors.PublicError("missing required parameters: author, permlink")
 	}
 
 	postRepo := db.NewPostRepository(p.repo)
@@ -228,7 +229,7 @@ func (p *PostAPI) GetDiscussion(ctx *gin.Context, params json.RawMessage) (inter
 
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	author, _ := pMap["author"].(string)
@@ -242,7 +243,15 @@ func (p *PostAPI) GetDiscussion(ctx *gin.Context, params json.RawMessage) (inter
 	})
 
 	if author == "" || permlink == "" {
-		return nil, fmt.Errorf("missing required parameters: author, permlink")
+		return nil, apierrors.PublicError("missing required parameters: author, permlink")
+	}
+	// Input validation (legacy helpers.valid_account/valid_permlink) —
+	// rejects malformed names before any DB access.
+	if _, err := apierrors.ValidAccount(author, false); err != nil {
+		return nil, err
+	}
+	if _, err := apierrors.ValidPermlink(permlink, false); err != nil {
+		return nil, err
 	}
 
 	// Sub-span: resolve root post ID.

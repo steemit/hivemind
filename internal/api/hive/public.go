@@ -3,6 +3,7 @@ package hive
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 
@@ -23,14 +24,14 @@ func NewPublicAPI(repo *db.Repository) *PublicAPI {
 func (p *PublicAPI) GetAccount(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	name, _ := pMap["name"].(string)
 	observer, _ := pMap["observer"].(string)
 
 	if name == "" {
-		return nil, fmt.Errorf("missing required parameter: name")
+		return nil, apierrors.PublicError("missing required parameter: name")
 	}
 
 	accountRepo := db.NewAccountRepository(p.repo)
@@ -60,7 +61,7 @@ func (p *PublicAPI) GetAccount(ctx *gin.Context, params json.RawMessage) (interf
 func (p *PublicAPI) GetAccounts(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	namesInterface, ok := pMap["names"].([]interface{})
@@ -98,12 +99,12 @@ func (p *PublicAPI) GetAccounts(ctx *gin.Context, params json.RawMessage) (inter
 func (p *PublicAPI) ListFollowers(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	account, _ := pMap["account"].(string)
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	start := ""
@@ -130,19 +131,19 @@ func (p *PublicAPI) ListFollowing(ctx *gin.Context, params json.RawMessage) (int
 	// TODO: Implement (query hive_follows in the following direction).
 	// Must NOT delegate to ListFollowers — different semantics, would return
 	// wrong data.
-	return nil, fmt.Errorf("not implemented")
+	return nil, apierrors.PublicError("not implemented")
 }
 
 // ListAllMuted handles hive_api.list_all_muted
 func (p *PublicAPI) ListAllMuted(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	account, _ := pMap["account"].(string)
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	// TODO: Query muted accounts from hive_follows where state includes ignore
@@ -153,12 +154,12 @@ func (p *PublicAPI) ListAllMuted(ctx *gin.Context, params json.RawMessage) (inte
 func (p *PublicAPI) ListAccountBlog(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	account, _ := pMap["account"].(string)
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	limit := 10
@@ -179,12 +180,12 @@ func (p *PublicAPI) ListAccountBlog(ctx *gin.Context, params json.RawMessage) (i
 func (p *PublicAPI) ListAccountPosts(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	// TODO: Implement (author's own posts only, no reblogs).
 	// Must NOT delegate to ListAccountBlog — different semantics.
-	return nil, fmt.Errorf("not implemented")
+	return nil, apierrors.PublicError("not implemented")
 }
 
 // ListAccountFeed handles hive_api.list_account_feed
 func (p *PublicAPI) ListAccountFeed(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	// TODO: Implement (personalized feed from follows).
 	// Must NOT delegate to ListAccountBlog — different semantics.
-	return nil, fmt.Errorf("not implemented")
+	return nil, apierrors.PublicError("not implemented")
 }

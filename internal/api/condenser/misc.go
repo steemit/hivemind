@@ -3,6 +3,7 @@ package condenser
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 
@@ -29,7 +30,7 @@ func (m *MiscAPI) GetDiscussionsByComments(ctx *gin.Context, params json.RawMess
 	if err := json.Unmarshal(params, &p); err != nil {
 		var arr []interface{}
 		if err2 := json.Unmarshal(params, &arr); err2 != nil {
-			return nil, fmt.Errorf("invalid parameters format")
+			return nil, apierrors.PublicError("invalid parameters format")
 		}
 		if len(arr) > 0 {
 			if mp, ok := arr[0].(map[string]interface{}); ok {
@@ -73,7 +74,7 @@ func (m *MiscAPI) GetRepliesByLastUpdate(ctx *gin.Context, params json.RawMessag
 	}
 
 	if len(p) < 1 {
-		return nil, fmt.Errorf("missing required parameter: start_author")
+		return nil, apierrors.PublicError("missing required parameter: start_author")
 	}
 
 	startAuthor, _ := p[0].(string)
@@ -107,7 +108,7 @@ func (m *MiscAPI) GetDiscussionsByAuthorBeforeDate(ctx *gin.Context, params json
 	}
 
 	if len(p) < 1 {
-		return nil, fmt.Errorf("missing required parameter: author")
+		return nil, apierrors.PublicError("missing required parameter: author")
 	}
 
 	author, _ := p[0].(string)
@@ -157,7 +158,7 @@ func (m *MiscAPI) getDiscussionsByPayout(ctx *gin.Context, params json.RawMessag
 	if err := json.Unmarshal(params, &p); err != nil {
 		var arr []interface{}
 		if err2 := json.Unmarshal(params, &arr); err2 != nil {
-			return nil, fmt.Errorf("invalid parameters format")
+			return nil, apierrors.PublicError("invalid parameters format")
 		}
 		if len(arr) > 0 {
 			if mp, ok := arr[0].(map[string]interface{}); ok {
@@ -215,7 +216,7 @@ func (m *MiscAPI) GetTransaction(ctx *gin.Context, params json.RawMessage) (inte
 	}
 
 	if len(p) < 1 {
-		return nil, fmt.Errorf("missing required parameter: trx_id")
+		return nil, apierrors.PublicError("missing required parameter: trx_id")
 	}
 
 	trxID, _ := p[0].(string)
@@ -235,7 +236,7 @@ func (m *MiscAPI) GetState(ctx *gin.Context, params json.RawMessage) (interface{
 	}
 
 	if len(p) < 1 {
-		return nil, fmt.Errorf("missing required parameter: path")
+		return nil, apierrors.PublicError("missing required parameter: path")
 	}
 
 	path, _ := p[0].(string)
@@ -256,6 +257,5 @@ func (m *MiscAPI) GetState(ctx *gin.Context, params json.RawMessage) (interface{
 // GetAccountVotes handles condenser_api.get_account_votes (dummy method)
 func (m *MiscAPI) GetAccountVotes(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	// This method is no longer supported
-	return nil, fmt.Errorf("get_account_votes is no longer supported")
+	return nil, apierrors.PublicError("get_account_votes is no longer supported")
 }
-

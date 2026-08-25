@@ -2,7 +2,7 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/steemit/hivemind/internal/apierrors"
 	"github.com/steemit/hivemind/pkg/logging"
 	"github.com/steemit/hivemind/pkg/telemetry"
 )
@@ -27,9 +28,9 @@ type JSONRPCRequest struct {
 
 // JSONRPCResponse represents a JSON-RPC 2.0 response
 type JSONRPCResponse struct {
-	JSONRPC string       `json:"jsonrpc"`
-	ID      interface{}  `json:"id"`
-	Result  interface{}  `json:"result,omitempty"`
+	JSONRPC string        `json:"jsonrpc"`
+	ID      interface{}   `json:"id"`
+	Result  interface{}   `json:"result,omitempty"`
 	Error   *JSONRPCError `json:"error,omitempty"`
 }
 
@@ -92,7 +93,7 @@ func (h *JSONRPCHandler) Handle(c *gin.Context) {
 	// Validate JSON-RPC version
 	if req.JSONRPC != "2.0" {
 		telemetry.RecordError("jsonrpc", req.Method, "invalid_request")
-		h.sendError(c, req.ID, -32600, "Invalid Request", fmt.Errorf("invalid jsonrpc version"))
+		h.sendError(c, req.ID, -32600, "Invalid Request", apierrors.PublicError("invalid jsonrpc version"))
 		return
 	}
 
@@ -107,7 +108,7 @@ func (h *JSONRPCHandler) Handle(c *gin.Context) {
 	handler, ok := h.methods[req.Method]
 	if !ok {
 		telemetry.RecordError(namespace, method, "method_not_found")
-		h.sendError(c, req.ID, -32601, "Method not found", fmt.Errorf("method %s not found", req.Method))
+		h.sendError(c, req.ID, -32601, "Method not found", apierrors.Publicf("method %s not found", req.Method))
 		return
 	}
 
@@ -181,8 +182,15 @@ func (h *JSONRPCHandler) sendError(c *gin.Context, id interface{}, code int, mes
 		Error: &JSONRPCError{
 			Code:    code,
 			Message: message,
-			Data:    err.Error(),
 		},
+	}
+	// Sanitize: only PublicError messages (input validation, documented
+	// refusals) are safe for the client. Internal errors (SQL details,
+	// file paths, stack fragments) are withheld — the full error is
+	// already logged and recorded on the span above.
+	var pub apierrors.PublicError
+	if errors.As(err, &pub) {
+		resp.Error.Data = pub.Error()
 	}
 	c.JSON(http.StatusOK, resp)
 }

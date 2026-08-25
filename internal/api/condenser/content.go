@@ -2,7 +2,7 @@ package condenser
 
 import (
 	"encoding/json"
-	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -14,8 +14,8 @@ import (
 
 // ContentAPI provides content-related API methods
 type ContentAPI struct {
-	repo      *db.Repository
-	database  *gorm.DB
+	repo       *db.Repository
+	database   *gorm.DB
 	postLoader *objects.PostLoader
 }
 
@@ -41,7 +41,7 @@ func (c *ContentAPI) GetContent(ctx *gin.Context, params json.RawMessage) (inter
 	}
 
 	if len(p) < 2 {
-		return nil, fmt.Errorf("missing required parameters: author, permlink")
+		return nil, apierrors.PublicError("missing required parameters: author, permlink")
 	}
 
 	author, _ := p[0].(string)
@@ -84,7 +84,7 @@ func (c *ContentAPI) GetContentReplies(ctx *gin.Context, params json.RawMessage)
 	}
 
 	if len(p) < 2 {
-		return nil, fmt.Errorf("missing required parameters: author, permlink")
+		return nil, apierrors.PublicError("missing required parameters: author, permlink")
 	}
 
 	author, _ := p[0].(string)
@@ -130,4 +130,3 @@ func (c *ContentAPI) GetContentReplies(ctx *gin.Context, params json.RawMessage)
 
 	return posts, nil
 }
-

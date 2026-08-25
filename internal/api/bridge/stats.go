@@ -2,7 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
-	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,7 +38,7 @@ func (s *StatsAPI) GetPayoutStats(ctx *gin.Context, params json.RawMessage) (int
 
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	// Extract parameters

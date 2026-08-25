@@ -2,7 +2,7 @@ package condenser
 
 import (
 	"context"
-	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -50,7 +50,7 @@ func (c *Cursor) GetPostIDsByQuery(ctx context.Context, sort, startAuthor, start
 		"payout_comments": true,
 	}
 	if !validSorts[sort] {
-		return nil, fmt.Errorf("invalid sort type: %s", sort)
+		return nil, apierrors.Publicf("invalid sort type: %s", sort)
 	}
 
 	// Build query based on sort type
@@ -134,8 +134,9 @@ func (c *Cursor) GetPostIDsByQuery(ctx context.Context, sort, startAuthor, start
 		}
 	}
 
-	// Apply limit
-	query = query.Limit(limit)
+	// Apply limit (clamped: a negative SQL LIMIT is treated as unbounded,
+	// which would full-scan the cache table).
+	query = query.Limit(apierrors.ClampLimit(limit))
 
 	// Execute query
 	var results []struct {
@@ -190,7 +191,7 @@ func (c *Cursor) GetPostIDsByBlog(ctx context.Context, account string, startAuth
 		}
 	}
 
-	query = query.Order("created_at DESC").Limit(limit)
+	query = query.Order("created_at DESC").Limit(apierrors.ClampLimit(limit))
 
 	var results []struct {
 		PostID int64 `gorm:"column:post_id"`

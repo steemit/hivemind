@@ -2,7 +2,7 @@ package condenser
 
 import (
 	"encoding/json"
-	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 
@@ -31,7 +31,7 @@ func (b *BlogAPI) GetBlog(ctx *gin.Context, params json.RawMessage) (interface{}
 	}
 
 	if len(p) < 1 {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	account, _ := p[0].(string)
@@ -89,5 +89,5 @@ func (b *BlogAPI) GetBlogEntries(ctx *gin.Context, params json.RawMessage) (inte
 	// TODO: Implement (legacy returns a LIGHTWEIGHT shape: {blog, entry_id,
 	// author, permlink, reblog_on} — delegating to GetBlog would return full
 	// post objects, which is the wrong response shape).
-	return nil, fmt.Errorf("not implemented")
+	return nil, apierrors.PublicError("not implemented")
 }

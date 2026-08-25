@@ -98,4 +98,3 @@ func (t *TagsAPI) GetAccountReputations(ctx *gin.Context, params json.RawMessage
 		"reputations": reputations,
 	}, nil
 }
-

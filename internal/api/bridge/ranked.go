@@ -3,6 +3,7 @@ package bridge
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,12 +33,12 @@ func NewRankedAPI(repo *db.Repository, database *db.DB, redisCache *cache.Cache)
 func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	sort, _ := pMap["sort"].(string)
 	if sort == "" {
-		return nil, fmt.Errorf("missing required parameter: sort")
+		return nil, apierrors.PublicError("missing required parameter: sort")
 	}
 
 	startAuthor := ""
@@ -94,7 +95,7 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 
 	querySort, ok := sortMap[sort]
 	if !ok {
-		return nil, fmt.Errorf("invalid sort type: %s", sort)
+		return nil, apierrors.Publicf("invalid sort type: %s", sort)
 	}
 
 	// Get post IDs
@@ -144,17 +145,17 @@ func (r *RankedAPI) getCacheTTL(sort string) time.Duration {
 func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	sort, _ := pMap["sort"].(string)
 	if sort == "" {
-		return nil, fmt.Errorf("missing required parameter: sort")
+		return nil, apierrors.PublicError("missing required parameter: sort")
 	}
 
 	account, _ := pMap["account"].(string)
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	startAuthor := ""
@@ -190,7 +191,7 @@ func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (i
 		// TODO: Implement personalized feed (follows join feed_cache, see
 		// legacy pids_by_feed_with_reblog). Must NOT delegate to self with
 		// unchanged params — that is infinite recursion (stack overflow).
-		return nil, fmt.Errorf("feed sort is not implemented")
+		return nil, apierrors.PublicError("feed sort is not implemented")
 	case "posts":
 		// Author's posts only (no reblogs)
 		// TODO: Implement
@@ -215,7 +216,7 @@ func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (i
 		}
 		return result, nil
 	default:
-		return nil, fmt.Errorf("invalid sort type: %s", sort)
+		return nil, apierrors.Publicf("invalid sort type: %s", sort)
 	}
 }
 
@@ -223,7 +224,7 @@ func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (i
 func (r *RankedAPI) GetTrendingTopics(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	limit := 10

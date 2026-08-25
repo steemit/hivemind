@@ -3,6 +3,7 @@ package hive
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 
@@ -23,12 +24,12 @@ func NewCommunityAPI(repo *db.Repository) *CommunityAPI {
 func (c *CommunityAPI) GetCommunity(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	name, _ := pMap["name"].(string)
 	if name == "" {
-		return nil, fmt.Errorf("missing required parameter: name")
+		return nil, apierrors.PublicError("missing required parameter: name")
 	}
 
 	// TODO: Query community from hive_communities
@@ -43,7 +44,7 @@ func (c *CommunityAPI) GetCommunity(ctx *gin.Context, params json.RawMessage) (i
 func (c *CommunityAPI) GetCommunityContext(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	name, _ := pMap["name"].(string)
@@ -65,7 +66,7 @@ func (c *CommunityAPI) GetCommunityContext(ctx *gin.Context, params json.RawMess
 func (c *CommunityAPI) ListCommunities(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	last := ""
@@ -97,7 +98,7 @@ func (c *CommunityAPI) ListTopCommunities(ctx *gin.Context, params json.RawMessa
 func (c *CommunityAPI) ListPopCommunities(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	limit := 25
@@ -118,12 +119,12 @@ func (c *CommunityAPI) ListPopCommunities(ctx *gin.Context, params json.RawMessa
 func (c *CommunityAPI) ListCommunityRoles(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	community, _ := pMap["community"].(string)
 	if community == "" {
-		return nil, fmt.Errorf("missing required parameter: community")
+		return nil, apierrors.PublicError("missing required parameter: community")
 	}
 
 	// TODO: Query roles from hive_roles
@@ -136,12 +137,12 @@ func (c *CommunityAPI) ListCommunityRoles(ctx *gin.Context, params json.RawMessa
 func (c *CommunityAPI) ListSubscribers(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	community, _ := pMap["community"].(string)
 	if community == "" {
-		return nil, fmt.Errorf("missing required parameter: community")
+		return nil, apierrors.PublicError("missing required parameter: community")
 	}
 
 	// TODO: Query subscribers from hive_subscriptions
@@ -154,12 +155,12 @@ func (c *CommunityAPI) ListSubscribers(ctx *gin.Context, params json.RawMessage)
 func (c *CommunityAPI) ListAllSubscriptions(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	account, _ := pMap["account"].(string)
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	// TODO: Query subscriptions from hive_subscriptions
@@ -167,4 +168,3 @@ func (c *CommunityAPI) ListAllSubscriptions(ctx *gin.Context, params json.RawMes
 
 	return []interface{}{}, nil
 }
-

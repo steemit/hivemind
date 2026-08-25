@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
+	"github.com/steemit/hivemind/internal/apierrors"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,14 +27,14 @@ func NewNotifyAPI(repo *db.Repository) *NotifyAPI {
 func (n *NotifyAPI) PostNotifications(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	author, _ := pMap["author"].(string)
 	permlink, _ := pMap["permlink"].(string)
 
 	if author == "" || permlink == "" {
-		return nil, fmt.Errorf("missing required parameters: author, permlink")
+		return nil, apierrors.PublicError("missing required parameters: author, permlink")
 	}
 
 	minScore := int16(25)
@@ -77,12 +77,12 @@ func (n *NotifyAPI) PostNotifications(ctx *gin.Context, params json.RawMessage) 
 func (n *NotifyAPI) AccountNotifications(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	account, _ := pMap["account"].(string)
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	minScore := int16(25)
@@ -135,12 +135,12 @@ func (n *NotifyAPI) AccountNotifications(ctx *gin.Context, params json.RawMessag
 func (n *NotifyAPI) UnreadNotifications(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var pMap map[string]interface{}
 	if err := json.Unmarshal(params, &pMap); err != nil {
-		return nil, fmt.Errorf("invalid parameters format")
+		return nil, apierrors.PublicError("invalid parameters format")
 	}
 
 	account, _ := pMap["account"].(string)
 	if account == "" {
-		return nil, fmt.Errorf("missing required parameter: account")
+		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
 	minScore := int16(25)
@@ -378,4 +378,3 @@ func findSubstring(s, substr string, start int) int {
 	}
 	return -1
 }
-
