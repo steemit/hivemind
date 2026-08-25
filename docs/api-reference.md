@@ -383,7 +383,9 @@ Get state for a path (compatibility method).
 **Parameters:**
 - `path` (string, required): State path
 
-**Returns:** State object (varies by path)
+**Returns:** Not implemented — returns an explicit error. The full get_state
+router only served the retired condenser frontend; use the bridge/condenser
+discussion methods instead.
 
 #### condenser_api.get_account_votes
 

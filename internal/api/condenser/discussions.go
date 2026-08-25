@@ -2,11 +2,12 @@ package condenser
 
 import (
 	"encoding/json"
-	"github.com/steemit/hivemind/internal/apierrors"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/steemit/hivemind/internal/api/objects"
+	"github.com/steemit/hivemind/internal/apierrors"
 	"github.com/steemit/hivemind/internal/db"
 )
 
@@ -48,42 +49,16 @@ func (d *DiscussionsAPI) GetDiscussionsByPromoted(ctx *gin.Context, params json.
 
 // getDiscussionsBySort is a helper that handles all sort-based discussion queries
 func (d *DiscussionsAPI) getDiscussionsBySort(ctx *gin.Context, sort string, params json.RawMessage) (interface{}, error) {
-	// Parse parameters
-	var p map[string]interface{}
-	if err := json.Unmarshal(params, &p); err != nil {
-		// Try array format
-		var arr []interface{}
-		if err2 := json.Unmarshal(params, &arr); err2 != nil {
-			return nil, apierrors.PublicError("invalid parameters format")
-		}
-		// Convert array to map (legacy format)
-		p = make(map[string]interface{})
-		if len(arr) > 0 {
-			if m, ok := arr[0].(map[string]interface{}); ok {
-				p = m
-			}
-		}
+	// Parse parameters (object, nested-query, or positional form).
+	p, err := parseQueryParams(params, "tag", "start_author", "start_permlink", "limit", "truncate_body")
+	if err != nil {
+		return nil, err
 	}
 
-	startAuthor := ""
-	if sa, ok := p["start_author"].(string); ok {
-		startAuthor = sa
-	}
-	startPermlink := ""
-	if sp, ok := p["start_permlink"].(string); ok {
-		startPermlink = sp
-	}
-	limit := 20
-	if l, ok := p["limit"].(float64); ok {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
-	}
-	tag := ""
-	if t, ok := p["tag"].(string); ok {
-		tag = t
-	}
+	startAuthor, _ := p["start_author"].(string)
+	startPermlink, _ := p["start_permlink"].(string)
+	limit := limitFromQuery(p, 20, 100)
+	tag, _ := p["tag"].(string)
 
 	// Get post IDs
 	ids, err := d.cursor.GetPostIDsByQuery(ctx.Request.Context(), sort, startAuthor, startPermlink, limit, tag)
@@ -92,10 +67,7 @@ func (d *DiscussionsAPI) getDiscussionsBySort(ctx *gin.Context, sort string, par
 	}
 
 	// Load full post objects
-	truncateBody := 0
-	if tb, ok := p["truncate_body"].(float64); ok {
-		truncateBody = int(tb)
-	}
+	truncateBody := truncateBodyFromQuery(p)
 
 	posts, err := d.postLoader.LoadPosts(ctx.Request.Context(), ids, truncateBody)
 	if err != nil {
@@ -107,38 +79,15 @@ func (d *DiscussionsAPI) getDiscussionsBySort(ctx *gin.Context, sort string, par
 
 // GetDiscussionsByBlog handles condenser_api.get_discussions_by_blog
 func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	var p map[string]interface{}
-	if err := json.Unmarshal(params, &p); err != nil {
-		var arr []interface{}
-		if err2 := json.Unmarshal(params, &arr); err2 != nil {
-			return nil, apierrors.PublicError("invalid parameters format")
-		}
-		if len(arr) > 0 {
-			if m, ok := arr[0].(map[string]interface{}); ok {
-				p = m
-			}
-		}
+	p, err := parseQueryParams(params, "tag", "start_author", "start_permlink", "limit", "truncate_body")
+	if err != nil {
+		return nil, err
 	}
 
-	tag := ""
-	if t, ok := p["tag"].(string); ok {
-		tag = t
-	}
-	startAuthor := ""
-	if sa, ok := p["start_author"].(string); ok {
-		startAuthor = sa
-	}
-	startPermlink := ""
-	if sp, ok := p["start_permlink"].(string); ok {
-		startPermlink = sp
-	}
-	limit := 20
-	if l, ok := p["limit"].(float64); ok {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
-	}
+	tag, _ := p["tag"].(string)
+	startAuthor, _ := p["start_author"].(string)
+	startPermlink, _ := p["start_permlink"].(string)
+	limit := limitFromQuery(p, 20, 100)
 
 	// tag parameter is actually the account name for blog queries
 	account := tag
@@ -153,10 +102,7 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 	}
 
 	// Load full post objects
-	truncateBody := 0
-	if tb, ok := p["truncate_body"].(float64); ok {
-		truncateBody = int(tb)
-	}
+	truncateBody := truncateBodyFromQuery(p)
 
 	posts, err := d.postLoader.LoadPosts(ctx.Request.Context(), ids, truncateBody)
 	if err != nil {
@@ -167,9 +113,78 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 }
 
 // GetDiscussionsByFeed handles condenser_api.get_discussions_by_feed
+// The account's personalized feed: posts + resteems from everyone they follow,
+// with reblogged_by attribution (mirrors legacy pids_by_feed_with_reblog +
+// load_posts_reblogs).
 func (d *DiscussionsAPI) GetDiscussionsByFeed(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	// TODO: Implement personalized feed (follows join feed_cache, see legacy
-	// pids_by_feed_with_reblog). Must NOT silently return blog results —
-	// feed and blog are different result sets.
-	return nil, apierrors.PublicError("not implemented")
+	p, err := parseQueryParams(params, "tag", "start_author", "start_permlink", "limit", "truncate_body")
+	if err != nil {
+		return nil, err
+	}
+
+	tag, _ := p["tag"].(string)
+	if tag == "" {
+		return nil, apierrors.PublicError("`tag` cannot be blank")
+	}
+	account, err := apierrors.ValidAccount(tag, false)
+	if err != nil {
+		return nil, err
+	}
+	startAuthor, _ := p["start_author"].(string)
+	if startAuthor != "" {
+		startAuthor, err = apierrors.ValidAccount(startAuthor, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	startPermlink, _ := p["start_permlink"].(string)
+	if startPermlink != "" {
+		if _, err := apierrors.ValidPermlink(startPermlink, false); err != nil {
+			return nil, err
+		}
+	}
+	limit := limitFromQuery(p, 20, 100)
+	truncateBody := truncateBodyFromQuery(p)
+
+	entries, err := d.cursor.GetPostIDsByFeedWithReblog(ctx.Request.Context(), account, startAuthor, startPermlink, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]int64, 0, len(entries))
+	rebloggers := make(map[int64]string, len(entries))
+	for _, e := range entries {
+		ids = append(ids, e.PostID)
+		rebloggers[e.PostID] = e.Accounts
+	}
+
+	posts, err := d.postLoader.LoadPosts(ctx.Request.Context(), ids, truncateBody)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge reblogged_by (comma-joined names, author excluded) — mirrors
+	// legacy condenser load_posts_reblogs.
+	for _, post := range posts {
+		pid, _ := post["id"].(int64)
+		csv, ok := rebloggers[pid]
+		if !ok || csv == "" {
+			continue
+		}
+		author, _ := post["author"].(string)
+		seen := make(map[string]bool)
+		rby := make([]interface{}, 0, 4)
+		for _, name := range strings.Split(csv, ",") {
+			if name == "" || name == author || seen[name] {
+				continue
+			}
+			seen[name] = true
+			rby = append(rby, name)
+		}
+		if len(rby) > 0 {
+			post["reblogged_by"] = rby
+		}
+	}
+
+	return posts, nil
 }

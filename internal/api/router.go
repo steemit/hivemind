@@ -12,6 +12,7 @@ import (
 	"github.com/steemit/hivemind/internal/api/hive"
 	"github.com/steemit/hivemind/internal/cache"
 	"github.com/steemit/hivemind/internal/db"
+	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/logging"
 	"github.com/steemit/hivemind/pkg/telemetry"
 )
@@ -24,8 +25,10 @@ type Router struct {
 	logger  *zap.Logger
 }
 
-// NewRouter creates a new API router
-func NewRouter(database *db.DB, redisCache *cache.Cache) *Router {
+// NewRouter creates a new API router. The steemd client is optional (nil
+// disables steemd-backed methods like get_transaction);
+// recommendCommunities is the HIVE_RECOMMEND_COMMUNITIES comma list.
+func NewRouter(database *db.DB, redisCache *cache.Cache, steemd *steem.Client, recommendCommunities string) *Router {
 	handler := NewJSONRPCHandler()
 	router := &Router{
 		handler: handler,
@@ -35,7 +38,7 @@ func NewRouter(database *db.DB, redisCache *cache.Cache) *Router {
 	}
 
 	// Register all API methods
-	router.registerMethods()
+	router.registerMethods(steemd, recommendCommunities)
 
 	return router
 }
@@ -51,7 +54,7 @@ func (r *Router) SetupRoutes(engine *gin.Engine) {
 }
 
 // registerMethods registers all API methods
-func (r *Router) registerMethods() {
+func (r *Router) registerMethods(steemd *steem.Client, recommendCommunities string) {
 	repo := db.NewRepository(r.db.DB)
 
 	// Hive core API
@@ -71,7 +74,7 @@ func (r *Router) registerMethods() {
 	r.handler.RegisterMethod("condenser_api.get_following_by_page", condenserFollow.GetFollowingByPage)
 	r.handler.RegisterMethod("condenser_api.get_content", condenserContent.GetContent)
 	r.handler.RegisterMethod("condenser_api.get_content_replies", condenserContent.GetContentReplies)
-	
+
 	// Discussion queries
 	r.handler.RegisterMethod("condenser_api.get_discussions_by_trending", condenserDiscussions.GetDiscussionsByTrending)
 	r.handler.RegisterMethod("condenser_api.get_discussions_by_hot", condenserDiscussions.GetDiscussionsByHot)
@@ -79,23 +82,23 @@ func (r *Router) registerMethods() {
 	r.handler.RegisterMethod("condenser_api.get_discussions_by_promoted", condenserDiscussions.GetDiscussionsByPromoted)
 	r.handler.RegisterMethod("condenser_api.get_discussions_by_blog", condenserDiscussions.GetDiscussionsByBlog)
 	r.handler.RegisterMethod("condenser_api.get_discussions_by_feed", condenserDiscussions.GetDiscussionsByFeed)
-	
+
 	// Blog and Tags API
 	condenserBlog := condenser.NewBlogAPI(repo, r.db)
 	condenserTags := condenser.NewTagsAPI(repo, r.db)
-	
+
 	r.handler.RegisterMethod("condenser_api.get_blog", condenserBlog.GetBlog)
 	r.handler.RegisterMethod("condenser_api.get_blog_entries", condenserBlog.GetBlogEntries)
 	r.handler.RegisterMethod("condenser_api.get_trending_tags", condenserTags.GetTrendingTags)
 	r.handler.RegisterMethod("condenser_api.get_account_reputations", condenserTags.GetAccountReputations)
-	
+
 	// Follow API aliases for blog
 	r.handler.RegisterMethod("follow_api.get_blog", condenserBlog.GetBlog)
 	r.handler.RegisterMethod("follow_api.get_blog_entries", condenserBlog.GetBlogEntries)
-	
+
 	// Misc API
-	condenserMisc := condenser.NewMiscAPI(repo, r.db)
-	
+	condenserMisc := condenser.NewMiscAPI(repo, r.db, steemd)
+
 	r.handler.RegisterMethod("condenser_api.get_discussions_by_comments", condenserMisc.GetDiscussionsByComments)
 	r.handler.RegisterMethod("condenser_api.get_replies_by_last_update", condenserMisc.GetRepliesByLastUpdate)
 	r.handler.RegisterMethod("condenser_api.get_discussions_by_author_before_date", condenserMisc.GetDiscussionsByAuthorBeforeDate)
@@ -104,7 +107,7 @@ func (r *Router) registerMethods() {
 	r.handler.RegisterMethod("condenser_api.get_transaction", condenserMisc.GetTransaction)
 	r.handler.RegisterMethod("condenser_api.get_state", condenserMisc.GetState)
 	r.handler.RegisterMethod("condenser_api.get_account_votes", condenserMisc.GetAccountVotes)
-	
+
 	// Tags API aliases
 	r.handler.RegisterMethod("tags_api.get_discussions_by_trending", condenserDiscussions.GetDiscussionsByTrending)
 	r.handler.RegisterMethod("tags_api.get_discussions_by_hot", condenserDiscussions.GetDiscussionsByHot)
@@ -121,7 +124,7 @@ func (r *Router) registerMethods() {
 	// Bridge API
 	bridgePost := bridge.NewPostAPI(repo)
 	bridgeProfile := bridge.NewProfileAPI(repo)
-	bridgeRanked := bridge.NewRankedAPI(repo, r.db, r.cache)
+	bridgeRanked := bridge.NewRankedAPI(repo, r.db, r.cache, recommendCommunities)
 	bridgeStats := bridge.NewStatsAPI(repo, r.db)
 
 	r.handler.RegisterMethod("bridge.get_post", bridgePost.GetPost)
@@ -135,8 +138,8 @@ func (r *Router) registerMethods() {
 	r.handler.RegisterMethod("bridge.get_payout_stats", bridgeStats.GetPayoutStats)
 
 	// Hive API
-	hivePublic := hive.NewPublicAPI(repo)
-	hiveCommunity := hive.NewCommunityAPI(repo)
+	hivePublic := hive.NewPublicAPI(repo, r.db)
+	hiveCommunity := hive.NewCommunityAPI(repo, recommendCommunities)
 	hiveNotify := hive.NewNotifyAPI(repo)
 
 	r.handler.RegisterMethod("hive_api.get_account", hivePublic.GetAccount)
@@ -205,4 +208,3 @@ func (r *Router) dbHeadState(c *gin.Context, params json.RawMessage) (interface{
 		"db_head_age":   age,
 	}, nil
 }
-

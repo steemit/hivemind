@@ -51,6 +51,14 @@ func main() {
 	// builders (stats.hide/blacklists). Empty URL = disabled list.
 	steem.SetSharedMutes(steem.NewMutes(cfg.Steem.MutedAccountsURL))
 
+	// Steemd client: backs condenser_api.get_transaction (block lookups).
+	// Client creation is lazy (no connection is made until called), so the
+	// server still starts when steemd is unreachable.
+	steemd, err := steem.New(&cfg.Steem)
+	if err != nil {
+		logger.Fatal("Failed to create steemd client", zap.Error(err))
+	}
+
 	// Initialize database
 	database, err := db.New(&cfg.Database, cfg.Logging.Level)
 	if err != nil {
@@ -97,7 +105,7 @@ func main() {
 	router.Use(middleware.MetricsMiddleware())
 
 	// Setup API routes
-	apiRouter := api.NewRouter(database, redisCache)
+	apiRouter := api.NewRouter(database, redisCache, steemd, cfg.Indexer.RecommendCommunities)
 	apiRouter.SetupRoutes(router)
 
 	// Create HTTP server with timeouts to prevent slow-client goroutine leaks

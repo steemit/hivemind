@@ -3,7 +3,9 @@ package bridge
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/steemit/hivemind/internal/apierrors"
+	"github.com/steemit/hivemind/internal/models"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,6 +37,7 @@ func (p *PostAPI) GetPost(ctx *gin.Context, params json.RawMessage) (interface{}
 	author, _ := pMap["author"].(string)
 	permlink, _ := pMap["permlink"].(string)
 	observer, _ := pMap["observer"].(string)
+	_ = observer // TODO: observer context (user-post state)
 
 	telemetry.AddSpanAttributes(span, map[string]string{
 		"author":   author,
@@ -57,17 +60,22 @@ func (p *PostAPI) GetPost(ctx *gin.Context, params json.RawMessage) (interface{}
 
 	// Record metrics
 	telemetry.PostsFetched.WithLabelValues("bridge.get_post").Inc()
+
+	// Build the full bridge post object (cache-backed, mirrors legacy
+	// get_post -> load_posts).
+	loader := objects.NewPostLoader(p.repo.DB())
+	posts, err := loader.LoadPostsBridge(ctx.Request.Context(), []int64{post.ID}, 0)
+	if err != nil {
+		telemetry.RecordSpanError(span, err)
+		return nil, err
+	}
+	if len(posts) == 0 {
+		// Post exists in hive_posts but has no cache row yet.
+		return nil, nil
+	}
+
 	telemetry.SetSpanSuccess(span)
-
-	// TODO: Build full post object with cached data and observer context
-	_ = observer
-
-	return map[string]interface{}{
-		"id":       post.ID,
-		"author":   post.Author,
-		"permlink": post.Permlink,
-		"category": post.Category,
-	}, nil
+	return posts[0], nil
 }
 
 // NormalizePost handles bridge.normalize_post
@@ -171,13 +179,23 @@ func (p *PostAPI) GetPostHeader(ctx *gin.Context, params json.RawMessage) (inter
 		return nil, nil
 	}
 
+	// Title comes from the cached post data (hive_posts_cache).
+	var cacheRow models.PostCache
+	title := ""
+	if err := p.repo.DB().WithContext(ctx.Request.Context()).
+		Where("post_id = ?", post.ID).
+		Select("title").
+		First(&cacheRow).Error; err == nil {
+		title = cacheRow.Title
+	}
+
 	telemetry.PostsFetched.WithLabelValues("bridge.get_post_header").Inc()
 	telemetry.SetSpanSuccess(span)
 
 	return map[string]interface{}{
 		"author":   post.Author,
 		"permlink": post.Permlink,
-		"title":    "", // TODO: Get from cached post data
+		"title":    title,
 		"category": post.Category,
 		"depth":    post.Depth,
 	}, nil
