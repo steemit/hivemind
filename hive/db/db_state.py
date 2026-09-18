@@ -525,6 +525,57 @@ class DbState:
             log.info("[HIVE] hive_follows index optimization complete")
             cls._set_ver(29)
 
+        if cls._ver == 29:
+            # Repair + complete hive_follows partial-index coverage.
+            #
+            # 1) idx_follows_following_state_created_desc (added in v29) was found
+            #    INVALID (indisvalid = false, 0 bytes) in production: when
+            #    CREATE INDEX CONCURRENTLY fails (e.g. two instances entering
+            #    migration concurrently during a rolling deploy), it leaves an
+            #    unusable husk behind, and `IF NOT EXISTS` then skips the rebuild
+            #    on every subsequent boot. Drop the husk and rebuild, then verify.
+            #
+            # 2) get_following(follow_type='ignore') runs
+            #    `WHERE follower = :id AND state IN (2,3) ORDER BY created_at DESC`,
+            #    which no existing partial index covers (all are
+            #    `WHERE state IN (1,3)`) and degrades to a parallel seq scan over
+            #    the full hive_follows table (~120M rows, planner cost ~1.5M,
+            #    3-4s wall time each). These scans pinned RDS CPU during the
+            #    2026-09-18 connection-pool storm. Add the (2,3) counterpart of
+            #    the follower-led index.
+            #
+            # Both indexes use drop-then-create so a partially-applied v30
+            # (crash between CREATE and _set_ver) self-heals on retry instead of
+            # erroring on the existing index. get_followers/get_following keep
+            # serving from the untouched follower/following-led (1,3) indexes
+            # during the rebuild window.
+            log.info("[HIVE] Repairing/completing hive_follows partial indexes...")
+            cls.db().query("DROP INDEX CONCURRENTLY IF EXISTS idx_follows_following_state_created_desc")
+            cls.db().query("""
+                CREATE INDEX CONCURRENTLY idx_follows_following_state_created_desc
+                ON hive_follows (following, state, created_at DESC, follower)
+                WHERE state IN (1,3)
+            """)
+            cls.db().query("DROP INDEX CONCURRENTLY IF EXISTS idx_follows_follower_state_created_2_3")
+            cls.db().query("""
+                CREATE INDEX CONCURRENTLY idx_follows_follower_state_created_2_3
+                ON hive_follows (follower, state, created_at DESC, following)
+                WHERE state IN (2,3)
+            """)
+            # Guard against another silent CONCURRENTLY failure: refuse to
+            # continue (and retry on next boot) if either index is not valid.
+            invalid = cls.db().query_all("""
+                SELECT indexrelid::regclass::text FROM pg_index
+                WHERE indisvalid = false
+                  AND indexrelid::regclass::text IN (
+                      'idx_follows_following_state_created_desc',
+                      'idx_follows_follower_state_created_2_3')
+            """)
+            assert not invalid, "hive_follows indexes invalid after v30 repair: %s" % invalid
+            cls.db().query("ANALYZE hive_follows")
+            log.info("[HIVE] hive_follows partial index repair complete")
+            cls._set_ver(30)
+
         reset_autovac(cls.db())
 
         log.info("[HIVE] db version: %d", cls._ver)
