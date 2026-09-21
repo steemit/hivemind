@@ -52,7 +52,7 @@ repeated here because they gate every change:
    mixed naively.** The block processor runs one DB transaction per block;
    repository calls that use the pool connection cannot see (and can
    partially duplicate or orphan) writes made inside that transaction. See
-   [pitfalls.md](pitfalls.md#4-mixing-tx-and-pool-connections-in-block-processing).
+   [pitfalls.md](pitfalls.md#5-mixing-block-tx-and-pool-connections).
 5. **English for code comments, docs, commit messages, and error strings.**
    User-facing conversation defaults to Chinese. Conventions live in
    `AGENTS.md` and `.cursor/rules/core.mdc`.
