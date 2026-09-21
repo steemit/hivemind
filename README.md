@@ -48,6 +48,7 @@ See the [docs/](docs/) directory for detailed documentation:
 - [Database Schema](docs/database-schema.md) - Database structure
 - [Indexer Flow](docs/indexer-flow.md) - Indexer workflow
 - [Golang Rewrite Plan](.cursor/plans/hivemind-golang-rewrite-plan.md) - Implementation plan
+- [AI-Driver Docs](docs/AI-driver/README.md) - Engineering reference for AI agents: architecture rules, module playbooks, known pitfalls
 
 ## Development Status
 
