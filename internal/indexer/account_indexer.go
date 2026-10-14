@@ -35,13 +35,15 @@ func NewAccountIndexer(repo *db.Repository, logger *zap.Logger, steemProvider st
 	}
 }
 
-// Register registers new accounts from blockchain operations
+// Register registers new accounts from blockchain operations. The
+// existence filter reads through the block transaction (P1-15) so accounts
+// inserted earlier in the same block are visible and not double-inserted.
 func (ai *AccountIndexer) Register(ctx context.Context, tx *gorm.DB, names []string, blockDate time.Time) error {
 	if len(names) == 0 {
 		return nil
 	}
 
-	accountRepo := db.NewAccountRepository(ai.repo)
+	accountRepo := db.NewAccountRepository(ai.repo.WithTx(tx))
 
 	// Filter out accounts that already exist
 	newNames := make([]string, 0)

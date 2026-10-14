@@ -117,7 +117,13 @@ func parseFollowPluginOp(jsonStr string, blockNum int64) (cmd string, payload ma
 	return arrayEnvelope(raw)
 }
 
-// ProcessOps processes a list of custom JSON operations
+// ProcessOps processes a list of custom JSON operations. Error handling
+// follows the legacy blocks.process_multi contract (P1-1): an operation
+// that fails with an infrastructure error (DB/RPC/context -- anything
+// IsInfraError) aborts the whole batch by returning the error, so the
+// sync layer retries the block with its transaction rolled back and no op
+// is lost; a data error (opValidationError: deterministic bad chain data)
+// is logged with the block/op identification and the op is skipped.
 func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops []map[string]interface{}, blockNum int64, blockDate time.Time, isInitialSync bool) error {
 	for _, op := range ops {
 		opID, _ := op["id"].(string)
@@ -156,6 +162,20 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 			continue
 		}
 
+		// skipOp logs a data error and drops the op (block continues);
+		// infraErr fails the whole block so sync retries it.
+		skipOp := func(err error) {
+			cop.logger.Warn("Skipping custom_json op (data error)",
+				zap.Int64("block", blockNum),
+				zap.String("id", opID),
+				zap.String("account", account),
+				zap.String("json", truncateJSON(jsonStr)),
+				zap.Error(err))
+		}
+		infraErr := func(err error) error {
+			return fmt.Errorf("custom_json op failed (id %s, account %s, block %d): %w", opID, account, blockNum, err)
+		}
+
 		// Process based on operation ID
 		switch opID {
 		case "follow":
@@ -177,15 +197,17 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 			switch cmd {
 			case "follow":
 				if err := cop.followIndexer.ProcessFollow(ctx, tx, account, payload, blockDate, isInitialSync); err != nil {
-					cop.logger.Warn("Failed to process follow",
-						zap.String("account", account),
-						zap.Error(err))
+					if IsInfraError(err) {
+						return infraErr(err)
+					}
+					skipOp(err)
 				}
 			case "reblog":
 				if err := cop.ProcessReblog(ctx, tx, account, payload, blockDate, isInitialSync); err != nil {
-					cop.logger.Warn("Failed to process reblog",
-						zap.String("account", account),
-						zap.Error(err))
+					if IsInfraError(err) {
+						return infraErr(err)
+					}
+					skipOp(err)
 				}
 			default:
 				cop.logger.Debug("Dropping unknown follow-plugin command",
@@ -198,18 +220,19 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 			// Process community operations only after START_BLOCK
 			if blockNum > START_BLOCK {
 				if err := cop.communityIndexer.ProcessCommunityOp(ctx, tx, account, jsonStr, blockDate, isInitialSync); err != nil {
-					cop.logger.Warn("Failed to process community op",
-						zap.String("account", account),
-						zap.String("json", jsonStr),
-						zap.Error(err))
+					if IsInfraError(err) {
+						return infraErr(err)
+					}
+					skipOp(err)
 				}
 			}
 		case "notify":
 			// Process notify operations
 			if err := cop.processNotify(ctx, tx, account, jsonStr, blockDate); err != nil {
-				cop.logger.Warn("Failed to process notify op",
-					zap.String("account", account),
-					zap.Error(err))
+				if IsInfraError(err) {
+					return infraErr(err)
+				}
+				skipOp(err)
 			}
 		}
 	}
@@ -286,8 +309,10 @@ func (cop *CustomOpProcessor) processNotify(ctx context.Context, tx *gorm.DB, ac
 		return nil
 	}
 
-	// Update notification last read time
-	if err := cop.notifyIndexer.SetLastRead(ctx, account, readDate); err != nil {
+	// Update notification last read time. The write rides the block
+	// transaction (P1-15: a pool-side UPDATE here would survive a block
+	// rollback and update an account the block never committed to).
+	if err := cop.notifyIndexer.WithTx(tx).SetLastRead(ctx, account, readDate); err != nil {
 		return fmt.Errorf("failed to set last read: %w", err)
 	}
 
@@ -297,23 +322,30 @@ func (cop *CustomOpProcessor) processNotify(ctx context.Context, tx *gorm.DB, ac
 	return nil
 }
 
-// ProcessReblog processes a reblog operation
+// ProcessReblog processes a reblog operation. All reads and writes go
+// through the block transaction (P1-15): pool-bound reads could not see
+// rows created earlier in the same block, and a pool-bound write would
+// survive a block rollback as an orphan row. Deterministic chain-data
+// failures (missing author/permlink, unknown post/account, non-root post)
+// are data errors -- legacy returns silently in all these cases, so here
+// they return opValidationError and the caller skips the op while the
+// block continues; infrastructure failures propagate for block-level retry.
 func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, account string, opJSON map[string]interface{}, blockDate time.Time, isInitialSync bool) error {
 	author, _ := opJSON["author"].(string)
 	permlink, _ := opJSON["permlink"].(string)
 
 	if author == "" || permlink == "" {
-		return fmt.Errorf("missing author or permlink in reblog op")
+		return opValidationErr("missing author or permlink in reblog op")
 	}
 
 	// Get post ID
-	postRepo := db.NewPostRepository(cop.repo)
+	postRepo := db.NewPostRepository(cop.repo.WithTx(tx))
 	post, err := postRepo.GetByAuthorPermlink(ctx, author, permlink)
 	if err != nil {
 		return fmt.Errorf("failed to get post: %w", err)
 	}
 	if post == nil {
-		return fmt.Errorf("post not found: @%s/%s", author, permlink)
+		return opValidationErr("reblog post not found: @%s/%s", author, permlink)
 	}
 
 	// Only root posts can be reblogged
@@ -325,17 +357,17 @@ func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, ac
 	}
 
 	// Get account ID
-	accountRepo := db.NewAccountRepository(cop.repo)
+	accountRepo := db.NewAccountRepository(cop.repo.WithTx(tx))
 	accountObj, err := accountRepo.GetByName(ctx, account)
 	if err != nil {
 		return fmt.Errorf("failed to get account: %w", err)
 	}
 	if accountObj == nil {
-		return fmt.Errorf("account not found: %s", account)
+		return opValidationErr("reblog account not found: %s", account)
 	}
 
-	reblogRepo := db.NewReblogRepository(cop.repo)
-	feedCacheRepo := db.NewFeedCacheRepository(cop.repo)
+	reblogRepo := db.NewReblogRepository(cop.repo.WithTx(tx))
+	feedCacheRepo := db.NewFeedCacheRepository(cop.repo.WithTx(tx))
 
 	// Check if this is a delete operation
 	if deleteFlag, ok := opJSON["delete"].(string); ok && deleteFlag == "delete" {
@@ -348,10 +380,7 @@ func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, ac
 		if !isInitialSync {
 			accountID := accountObj.ID
 			if err := feedCacheRepo.Delete(ctx, post.ID, &accountID); err != nil {
-				cop.logger.Warn("Failed to delete from feed cache",
-					zap.Int64("post_id", post.ID),
-					zap.Int64("account_id", accountID),
-					zap.Error(err))
+				return fmt.Errorf("failed to delete from feed cache: %w", err)
 			}
 		}
 
@@ -360,37 +389,41 @@ func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, ac
 			zap.String("author", author),
 			zap.String("permlink", permlink))
 	} else {
-		// Create reblog
+		// Create reblog. The insert mirrors legacy
+		// `ON CONFLICT (account, post_id) DO NOTHING`: a duplicate pair is
+		// an idempotent no-op (inserted == 0, no error). Any real failure is
+		// infrastructure and propagates for block-level retry (PR#406 audit
+		// P2: no swallowed DB errors on write paths -- and no SQL-level
+		// duplicate error either, which would abort the transaction).
 		reblog := &models.Reblog{
 			Account:   account,
 			PostID:    post.ID,
 			CreatedAt: blockDate,
 		}
-
-		if err := reblogRepo.Create(ctx, reblog); err != nil {
-			// Ignore duplicate reblog errors
-			cop.logger.Debug("Reblog already exists or failed to create",
-				zap.String("account", account),
-				zap.Int64("post_id", post.ID),
-				zap.Error(err))
-		} else {
-			// Add to feed cache (only if not in initial sync)
-			if !isInitialSync {
-				if err := feedCacheRepo.Insert(ctx, post.ID, accountObj.ID, blockDate); err != nil {
-					cop.logger.Warn("Failed to insert into feed cache",
-						zap.Int64("post_id", post.ID),
-						zap.Int64("account_id", accountObj.ID),
-						zap.Error(err))
-				}
-			}
-
-			// Send notification to post author
-			// TODO: Implement notification for reblog
-			cop.logger.Debug("Created reblog",
-				zap.String("account", account),
-				zap.String("author", author),
-				zap.String("permlink", permlink))
+		inserted, err := reblogRepo.Create(ctx, reblog)
+		if err != nil {
+			return fmt.Errorf("failed to create reblog: %w", err)
 		}
+		if inserted == 0 {
+			cop.logger.Debug("Reblog already exists",
+				zap.String("account", account),
+				zap.Int64("post_id", post.ID))
+			return nil
+		}
+
+		// Add to feed cache (only if not in initial sync)
+		if !isInitialSync {
+			if err := feedCacheRepo.Insert(ctx, post.ID, accountObj.ID, blockDate); err != nil {
+				return fmt.Errorf("failed to insert into feed cache: %w", err)
+			}
+		}
+
+		// Send notification to post author
+		// TODO: Implement notification for reblog (#407)
+		cop.logger.Debug("Created reblog",
+			zap.String("account", account),
+			zap.String("author", author),
+			zap.String("permlink", permlink))
 	}
 
 	return nil

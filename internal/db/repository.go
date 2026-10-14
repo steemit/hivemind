@@ -7,6 +7,7 @@ import (
 
 	"github.com/steemit/hivemind/internal/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Repository provides database access methods
@@ -23,6 +24,18 @@ func NewRepository(db *gorm.DB) *Repository {
 // create PostLoaders or run raw queries (e.g. the CTE in get_discussion).
 func (r *Repository) DB() *gorm.DB {
 	return r.db
+}
+
+// WithTx derives a Repository view bound to tx: every repository constructed
+// from the result (NewAccountRepository, NewPostRepository, ...) executes its
+// reads and writes on tx's transaction. The block processor uses this so that
+// the read-modify-write sequences inside a block (post/payment/custom-op
+// validation reads and writes) see the block's own uncommitted rows and leave
+// no orphan rows behind a rollback -- a pool-bound read cannot see rows the
+// transaction has not committed yet (P1-15). The receiver itself is not
+// modified: non-block callers keep using the pool-bound view.
+func (r *Repository) WithTx(tx *gorm.DB) *Repository {
+	return &Repository{db: tx}
 }
 
 // AccountRepository provides account-related database operations
@@ -456,9 +469,19 @@ func NewReblogRepository(repo *Repository) *ReblogRepository {
 	return &ReblogRepository{Repository: repo}
 }
 
-// Create creates a new reblog
-func (r *ReblogRepository) Create(ctx context.Context, reblog *models.Reblog) error {
-	return r.db.WithContext(ctx).Create(reblog).Error
+// Create creates a new reblog. Mirrors the legacy insert
+// (`ON CONFLICT (account, post_id) DO NOTHING`): a duplicate pair is a
+// no-op -- RowsAffected 0, no error, and the surrounding block transaction
+// stays usable (a plain INSERT that errors would abort the transaction and
+// turn the duplicate into a block-level retry).
+func (r *ReblogRepository) Create(ctx context.Context, reblog *models.Reblog) (int64, error) {
+	res := r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "account"}, {Name: "post_id"}},
+			DoNothing: true,
+		}).
+		Create(reblog)
+	return res.RowsAffected, res.Error
 }
 
 // Delete deletes a reblog

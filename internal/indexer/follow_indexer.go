@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -88,7 +89,13 @@ func followStateFromWhat(what []interface{}) int16 {
 //     `if new_state == (old_state or 0): return`), which also means a
 //     state-0 op for a pair with no existing row inserts nothing;
 //   - count deltas and the follow notification are only tracked outside
-//     initial sync (legacy gates on `not DbState.is_initial_sync()`).
+//     initial sync (legacy gates on `not DbState.is_initial_sync()`);
+//   - account lookups and the follow-row read/write go through the block
+//     transaction so same-block registrations are visible (P1-3/P1-15);
+//   - validation failures of deterministic chain data return an
+//     opValidationError (data error: skip the op, keep processing the
+//     block); infrastructure failures (DB) propagate for block-level retry
+//     (P1-1).
 func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account string, opJSON map[string]interface{}, blockDate time.Time, isInitialSync bool) error {
 	follower, followerIsStr := opJSON["follower"].(string)
 	following, followingIsStr := opJSON["following"].(string)
@@ -105,25 +112,31 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 
 	// Legacy rejects self-follows and follower/signer mismatches.
 	if follower == following {
-		return fmt.Errorf("invalid follow operation: cannot follow self")
+		return opValidationErr("invalid follow operation: cannot follow self")
 	}
 	if follower != account {
-		return fmt.Errorf("follower account mismatch")
+		return opValidationErr("follower account mismatch")
 	}
 
-	// Get account IDs. A missing account rejects the op (legacy
-	// Accounts.exists check). Note: legacy registers same-block new
-	// accounts before processing custom ops; Go's registration ordering is
-	// tracked separately as audit P1-3 and intentionally not changed here.
-	accountRepo := db.NewAccountRepository(fi.repo)
+	// Get account IDs through the block transaction: legacy registers
+	// same-block new accounts before processing custom ops, and the
+	// WithTx view makes those uncommitted rows visible here. A missing
+	// account rejects the op (legacy Accounts.exists check -> skip).
+	accountRepo := db.NewAccountRepository(fi.repo.WithTx(tx))
 	followerAcc, err := accountRepo.GetByName(ctx, follower)
-	if err != nil || followerAcc == nil {
-		return fmt.Errorf("follower account not found: %s", follower)
+	if err != nil {
+		return fmt.Errorf("failed to look up follower account %s: %w", follower, err)
+	}
+	if followerAcc == nil {
+		return opValidationErr("follower account not found: %s", follower)
 	}
 
 	followingAcc, err := accountRepo.GetByName(ctx, following)
-	if err != nil || followingAcc == nil {
-		return fmt.Errorf("following account not found: %s", following)
+	if err != nil {
+		return fmt.Errorf("failed to look up following account %s: %w", following, err)
+	}
+	if followingAcc == nil {
+		return opValidationErr("following account not found: %s", following)
 	}
 
 	// Calculate state.
@@ -137,7 +150,7 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 
 	// Determine old state (0 when creating).
 	oldState := int16(0)
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// Idempotent short-circuit for pairs with no row: legacy never
 		// inserts a state-0 row for a pair that was not followed.
 		if state == 0 {
@@ -172,19 +185,27 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 	//    terminal ForceRecount instead)
 	//  - ignore-only toggles (0<->2) change nothing
 	//  - blog set -> follow; blog cleared -> unfollow
-	//  - notify on 0 -> 1 transitions, scored by follower rank
+	//  - notify on 0 -> 1 transitions, scored by follower rank; the write
+	//    rides the block transaction (§2.10) and a failure propagates
+	//    (P1-1: a follow row committed without its notification would be a
+	//    partial application).
 	if !isInitialSync {
 		if state^oldState == 2 {
 			// ignore-only jump
 		} else if state == models.FollowStateBlog {
 			fi.follow(followerAcc.ID, followingAcc.ID)
 			if oldState == 0 {
+				// The rank lookup deliberately stays on the pool view: the
+				// rank map is a process-wide cache bound to one *gorm.DB,
+				// and re-binding it per block transaction would rebuild the
+				// full account ranking on every follow op. Ranks are a
+				// stable snapshot used only for notification scoring.
 				score := defaultScoreForAccount(ctx, fi.repo.DB(), followerAcc.ID)
 				followerID := followerAcc.ID
 				followingID := followingAcc.ID
-				if err := fi.notifyIndexer.Write(ctx, models.NotifyTypeFollow, blockDate,
+				if err := fi.notifyIndexer.WithTx(tx).Write(ctx, models.NotifyTypeFollow, blockDate,
 					&followerID, &followingID, nil, nil, nil, &score); err != nil {
-					fi.logger.Warn("follow notif write failed", zap.Error(err))
+					return fmt.Errorf("failed to write follow notification: %w", err)
 				}
 			}
 		} else if oldState&models.FollowStateBlog == models.FollowStateBlog {
@@ -240,6 +261,43 @@ func (fi *FollowIndexer) Flush(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// SnapshotDeltas deep-copies both pending delta maps and returns a restore
+// closure that swaps them back in. The count deltas accumulate in memory
+// OUTSIDE the block transaction, so a block rollback does not touch them:
+// without a restore, a failed block leaves its deltas pending, the sync
+// layer's retry of the same block re-accumulates them, and the next Flush
+// applies them twice -- permanently inflating hive_accounts.followers/
+// following (ForceRecount only runs at the end of initial sync and never
+// self-heals live drift; PR#406 audit P1).
+//
+// The snapshot granularity is a single block, not a batch: deltas of blocks
+// that already committed earlier in the batch live on in the snapshot and
+// survive the restore. Replacing both maps wholesale is correct because the
+// sync loop processes blocks single-threaded -- between SnapshotDeltas and
+// restore, the only writers are the ops of the block being snapshotted.
+func (fi *FollowIndexer) SnapshotDeltas() func() {
+	fi.mu.Lock()
+	foll := make(map[int64]int, len(fi.deltaFoll))
+	for id, d := range fi.deltaFoll {
+		foll[id] = d
+	}
+	fing := make(map[int64]int, len(fi.deltaFing))
+	for id, d := range fi.deltaFing {
+		fing[id] = d
+	}
+	fi.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			fi.mu.Lock()
+			fi.deltaFoll = foll
+			fi.deltaFing = fing
+			fi.mu.Unlock()
+		})
+	}
 }
 
 // PendingDeltasLen reports pending delta entries (diagnostics/tests).
