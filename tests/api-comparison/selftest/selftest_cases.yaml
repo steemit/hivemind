@@ -106,6 +106,19 @@ test_cases:
     # (non-envelope) JSON-RPC response. Expected FAIL.
     params: []
 
+  - id: selftest-result-and-error-envelope
+    name: "result and error coexisting in the envelope never judged green (negative control)"
+    api: "stub.result_and_error"
+    priority: "P2"
+    # PR#420-review-r3 negative control: both stubs answer 200 with a body
+    # carrying BOTH "result" and "error" (identical error, divergent
+    # results: alice vs bob). The old client inspected only the error
+    # branch, so the identical application-error text masked the divergent
+    # results and the case judged green. "result" and "error" are
+    # mutually exclusive per JSON-RPC 2.0; both sides must fail red as a
+    # malformed envelope. Expected FAIL.
+    params: []
+
   - id: selftest-redirect-302
     name: "both sides 302 redirect: never followed, judged red (negative control)"
     api: "stub.redirect_302"

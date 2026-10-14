@@ -57,6 +57,11 @@
     "validate": "any",
     "raw_json": {"status": "ok"}
   },
+  "stub.result_and_error": {
+    "validate": "any",
+    "raw_json": {"jsonrpc": "2.0", "id": 1, "result": {"author": "bob"},
+                 "error": {"code": 10, "message": "partial failure"}}
+  },
   "stub.redirect_302": {
     "validate": "any",
     "redirect": "/health"

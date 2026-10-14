@@ -26,7 +26,10 @@ or network access beyond loopback:
       health-check body like {"status": "ok"} on BOTH sides -- the
       mispointed-URL scenario) is judged RED as a malformed response;
   PR#420-review-r2: a 3xx redirect is not followed (POST 301/302 would be
-      rewritten to GET by requests) and fails red as a transport error.
+      rewritten to GET by requests) and fails red as a transport error;
+  PR#420-review-r3: a body carrying BOTH "result" and "error" (identical
+      error, divergent results on the two sides) is judged RED -- the
+      identical error text must not mask divergent results.
 
 Run from tests/api-comparison/:  python3 selftest/run_selftest.py
 """
@@ -59,6 +62,7 @@ EXPECTED = {
     "selftest-error-text": True,
     "selftest-both-transport-500": False,           # transport errors stay red
     "selftest-non-envelope-200": False,             # non-envelope 200 stays red
+    "selftest-result-and-error-envelope": False,    # result+error stays red
     "selftest-redirect-302": False,                 # redirects not followed
     "selftest-real-diff-control": False,            # genuine diff stays red
 }
@@ -196,6 +200,19 @@ def main() -> int:
               and entry["go_error"] and "malformed JSON-RPC" in entry["go_error"],
               "non-envelope-200 control: malformed response fails red on "
               "both sides (health-body scenario)",
+              failures)
+
+        # PR#420-review-r3 evidence: a body carrying BOTH "result" and
+        # "error" (identical error on both stubs, divergent results) is
+        # red on both sides. The old client only inspected the error
+        # branch, so the identical application-error text compared green
+        # while the alice-vs-bob results were silently dropped.
+        entry = results["selftest-result-and-error-envelope"]
+        check(not entry["passed"]
+              and entry["python_error"] and "mutually exclusive" in entry["python_error"]
+              and entry["go_error"] and "mutually exclusive" in entry["go_error"],
+              "result-and-error control: envelope exclusivity violation "
+              "fails red on both sides (masked-divergence scenario)",
               failures)
 
         # PR#420-review-r2 evidence: a 302 is not followed. requests would

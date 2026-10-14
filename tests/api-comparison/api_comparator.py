@@ -49,6 +49,11 @@ Comparison semantics:
     refused, timeout, HTTP status error, malformed response) are NEVER
     judged green, even when both sides fail identically -- identical
     transport errors carry no consistency evidence.
+  * Response envelope contract: "result" and "error" are mutually
+    exclusive (by key existence, so {"result": null, "error": null} is
+    rejected too), the response must echo the request id (int 1), and
+    an error object must carry an int "code" and a str "message".
+    Violations are transport-level malformations and fail closed.
   * ignore_fields patterns are path-aware; a bare name matches that dict key
     at any depth, a dotted pattern matches only the exact path. This keeps a
     global ignore such as `author.id` from also masking a top-level `id`.
@@ -662,17 +667,52 @@ class APIClient:
                 f"(body: {_short(data)})",
                 transport=True)
 
-        if data.get("error"):
-            error = data["error"]
-            message = error.get("message", str(error)) if isinstance(error, dict) else str(error)
-            raise ApiCallError(message, code=error.get("code") if isinstance(error, dict) else None)
-        if "result" not in data:
-            # e.g. {"error": null}: envelope-shaped but neither a result
-            # nor a usable error -- fail closed.
+        # "result" and "error" are mutually exclusive per JSON-RPC 2.0.
+        # Key EXISTENCE decides, never truthiness: {"result": null,
+        # "error": null} is rejected exactly like a populated pair. The
+        # old code only inspected the error branch, so an identical error
+        # on both endpoints masked divergent results ({"result": A,
+        # "error": E} vs {"result": B, "error": E} was judged green).
+        if "error" in data and "result" in data:
             raise ApiCallError(
-                f"malformed JSON-RPC response: no 'result' key "
-                f"(body: {_short(data)})",
+                "malformed JSON-RPC response: result and error are "
+                "mutually exclusive",
                 transport=True)
+
+        # Every request is sent with id=1, so a well-formed response must
+        # echo int 1. A missing id (notification form), a wrong value, or
+        # a type variant ("1", 1.0, true) means cross-talk or a canned
+        # response; the body itself may be well-formed and identical on
+        # both endpoints, so only the echoed id pins it to this request.
+        response_id = data.get("id")
+        if type(response_id) is not int or response_id != 1:
+            raise ApiCallError(
+                f"malformed JSON-RPC response: response id must be 1 "
+                f"(got {response_id!r})",
+                transport=True)
+
+        if "error" in data:
+            error = data["error"]
+            # Strict error-object shape: a comparable JSON-RPC application
+            # error is an object with an int "code" and a str "message".
+            # Anything else (missing/null/non-int code, missing/null/
+            # non-str message, or a bare string error) is a malformed
+            # envelope, not an application error. The old fallbacks
+            # raised ApiCallError(str(error)) for a message-less error,
+            # and that dict-repr text could compare "equal" on both
+            # endpoints (e12 probe) while message=None produced an
+            # ApiCallError(message=None) rescued only further upstream.
+            if not (isinstance(error, dict)
+                    and isinstance(error.get("code"), int)
+                    and isinstance(error.get("message"), str)):
+                raise ApiCallError(
+                    f"malformed JSON-RPC response: error object must carry "
+                    f"int 'code' and str 'message' (error: {_short(error)})",
+                    transport=True)
+            raise ApiCallError(error["message"], code=error["code"])
+
+        # The envelope + exclusivity checks above guarantee "result" is
+        # present here.
         return data["result"]
 
 

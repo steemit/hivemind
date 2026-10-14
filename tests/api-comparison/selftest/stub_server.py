@@ -33,10 +33,14 @@ semantics): "array" rejects non-list params (like legacy condenser
 `_strict_list`), "object" rejects non-dict params, "any" accepts
 everything (like the Go server's three-form params.go parsing).
 `http_status` responds with a bare HTTP error status to exercise the
-comparator's transport-level failure handling. `raw_json` and
-`redirect` are PR#420-review-r2 negative controls: they simulate a
-URL mispointed at a health-check service (200 + non-envelope body)
-and a redirecting endpoint respectively -- both must be judged red.
+comparator's transport-level failure handling. `raw_json` serves an
+arbitrary body verbatim: the PR#420-review-r2 health-endpoint shape
+({"status": "ok"}) and the PR#420-review-r3 envelope violation
+({"result": ..., "error": ...} -- mutually exclusive keys coexisting)
+are both scripted through it. `redirect` is a PR#420-review-r2
+negative control: it simulates a
+redirecting endpoint (302 + Location) -- the comparator must disable
+redirect following and fail closed.
 """
 
 import argparse

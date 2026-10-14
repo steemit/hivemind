@@ -22,6 +22,11 @@ Covers the Q4 planned-PR#420 fixes and the PR#420-review hardening:
   * PR#420-review-r2: units_compatible None contract (no silent
     amount-to-number bridging), epoch boundaries (1e8 / 1e12), negative
     epochs, is_duration_field exact naming
+  * PR#420-review-r3: response envelope contract in APIClient.call --
+    result/error mutual exclusivity (by key existence, incl. both-null),
+    response id echo (strict int 1; notification form / id mismatch /
+    type variants rejected), and strict error-object shape (int "code"
+    + str "message"; no str(error) fallbacks)
 
 Run:  python3 -m pytest test_api_comparator.py  (from tests/api-comparison/)
 """
@@ -853,10 +858,212 @@ class TestAPIClientRedirects:
 
     def test_post_disables_redirect_following(self):
         client, session = make_client(
-            _FakeResponse(json_data={"result": None}))
+            _FakeResponse(json_data={"jsonrpc": "2.0", "id": 1, "result": None}))
         client.call("condenser_api.get_content", [])
         assert session.calls, "fake session saw no request"
         assert session.calls[0].get("allow_redirects") is False
+
+
+# ---------------------------------------------------------------------------
+# PR#420-review-r3 (P1): result/error mutual exclusivity, response id,
+# error-object shape -- the audited false-greens in APIClient.call
+# ---------------------------------------------------------------------------
+
+class TestResultErrorExclusivity:
+    """PR#420-review-r3 (P1): a body carrying BOTH "result" and "error"
+    used to fall into the error branch only, so an identical error on
+    both endpoints masked divergent results ({"result": A, "error": E} vs
+    {"result": B, "error": E} judged green -- probes e5/e5b/e13). Key
+    EXISTENCE decides: even {"result": null, "error": null} is rejected."""
+
+    def test_result_and_error_populated_is_malformed(self):
+        body = {"jsonrpc": "2.0", "id": 1, "result": {"author": "alice"},
+                "error": {"code": 10, "message": "partial failure"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "malformed JSON-RPC" in excinfo.value.message
+        assert "mutually exclusive" in excinfo.value.message
+
+    def test_result_null_error_null_is_malformed(self):
+        """Key existence, not truthiness: both keys null must still be
+        rejected (a truthiness check would let {"result": null,
+        "error": null} slip through the exclusivity gate)."""
+        body = {"jsonrpc": "2.0", "id": 1, "result": None, "error": None}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "mutually exclusive" in excinfo.value.message
+
+    def test_result_populated_error_null_is_malformed(self):
+        body = {"jsonrpc": "2.0", "id": 1, "result": {"author": "alice"},
+                "error": None}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "mutually exclusive" in excinfo.value.message
+
+    def test_result_null_error_populated_is_malformed(self):
+        body = {"jsonrpc": "2.0", "id": 1, "result": None,
+                "error": {"code": 10, "message": "partial failure"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "mutually exclusive" in excinfo.value.message
+
+    def test_masked_divergence_judged_red_end_to_end(self):
+        """The full audited false-green (probe e5): python answers
+        {"result": A, "error": E}, go answers {"result": B, same E}. The
+        old client raised the identical application error on both sides,
+        and the both-error branch compared the texts green -- the results
+        A vs B were silently dropped. Now both sides are transport
+        malformations and evaluate_error_pair fails the case."""
+        error = {"code": 10, "message": "partial failure"}
+        py_client, _ = make_client(_FakeResponse(json_data={
+            "jsonrpc": "2.0", "id": 1, "result": {"author": "alice"},
+            "error": error}))
+        go_client, _ = make_client(_FakeResponse(json_data={
+            "jsonrpc": "2.0", "id": 1, "result": {"author": "bob"},
+            "error": error}))
+        excs = []
+        for client in (py_client, go_client):
+            with pytest.raises(ApiCallError) as excinfo:
+                client.call("condenser_api.get_content", [])
+            excs.append(excinfo.value)
+        ok, diff = evaluate_error_pair(*excs)
+        assert not ok and "transport" in diff
+
+
+class TestResponseIdValidation:
+    """PR#420-review-r3 (P2): the client always sends id=1 but never
+    checked the response id (probe e6) -- a notification-form body (no
+    id) or an id=999 canned response compared green when both endpoints
+    served the same shape. The response must echo int 1 exactly; type
+    variants ("1", 1.0, true) count as mismatches too."""
+
+    def test_missing_id_is_malformed(self):
+        body = {"jsonrpc": "2.0", "result": {"author": "steemit"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "malformed JSON-RPC" in excinfo.value.message
+        assert "id" in excinfo.value.message
+
+    def test_wrong_id_value_is_malformed(self):
+        body = {"jsonrpc": "2.0", "id": 999, "result": {"author": "steemit"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "id" in excinfo.value.message
+
+    def test_string_id_is_malformed(self):
+        """Type must match: "1" is not int 1 (cross-talk must not pass
+        just because the value stringifies the same)."""
+        body = {"jsonrpc": "2.0", "id": "1", "result": {"author": "steemit"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "id" in excinfo.value.message
+
+    def test_float_id_is_malformed(self):
+        body = {"jsonrpc": "2.0", "id": 1.0, "result": {"author": "steemit"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+
+    def test_null_id_is_malformed(self):
+        body = {"jsonrpc": "2.0", "id": None, "result": {"author": "steemit"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+
+    def test_error_envelope_without_id_is_malformed(self):
+        """The id gate applies to error responses too: a well-formed
+        error object without an echoed id is a canned/cross-wired
+        response, not a comparable application error."""
+        body = {"jsonrpc": "2.0",
+                "error": {"code": 10, "message": "unsupported"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_account_votes", [])
+        assert excinfo.value.is_transport
+        assert "id" in excinfo.value.message
+
+    def test_correct_id_result_passes(self):
+        body = {"jsonrpc": "2.0", "id": 1, "result": {"author": "steemit"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        assert client.call("condenser_api.get_content", []) == {
+            "author": "steemit"}
+
+
+class TestErrorObjectShape:
+    """PR#420-review-r3 (P2): the error branch validated code and message
+    asymmetrically. A missing message fell back to str(error) -- the dict
+    repr compared "equal" on both endpoints (probe e12) -- and a null
+    message produced ApiCallError(message=None) rescued only by run_case.
+    Now an error must be an object with int "code" and str "message";
+    anything else is a transport malformation."""
+
+    def _expect_malformed(self, error):
+        client, _ = make_client(_FakeResponse(json_data={
+            "jsonrpc": "2.0", "id": 1, "error": error}))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_account_votes", [])
+        assert excinfo.value.is_transport
+        assert "malformed JSON-RPC" in excinfo.value.message
+
+    def test_missing_message_is_malformed(self):
+        """The e12 probe: {"error": {"code": -1}} used to raise
+        ApiCallError(str(error)) whose dict-repr text matched on both
+        sides and judged the case green."""
+        self._expect_malformed({"code": -1})
+
+    def test_null_message_is_malformed(self):
+        self._expect_malformed({"code": -1, "message": None})
+
+    def test_non_string_message_is_malformed(self):
+        self._expect_malformed({"code": -1, "message": 123})
+
+    def test_missing_code_is_malformed(self):
+        """Code omission was already fail-closed via the codeless-error
+        rule, but only implicitly; now it is an explicit malformation."""
+        self._expect_malformed({"message": "boom"})
+
+    def test_null_code_is_malformed(self):
+        self._expect_malformed({"code": None, "message": "boom"})
+
+    def test_string_code_is_malformed(self):
+        self._expect_malformed({"code": "-32601", "message": "boom"})
+
+    def test_float_code_is_malformed(self):
+        self._expect_malformed({"code": -32601.0, "message": "boom"})
+
+    def test_list_code_is_malformed(self):
+        self._expect_malformed({"code": [-32601], "message": "boom"})
+
+    def test_bare_string_error_is_malformed(self):
+        """A non-object error value is a malformed envelope, not an
+        application error with a codeless dict-repr text."""
+        self._expect_malformed("boom")
+
+    def test_well_formed_error_still_application_error(self):
+        body = {"jsonrpc": "2.0", "id": 1,
+                "error": {"code": -32601, "message": "method not found"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("no.such_method", [])
+        assert not excinfo.value.is_transport
+        assert excinfo.value.code == -32601
+        assert excinfo.value.message == "method not found"
 
     def test_302_is_transport_error(self):
         client, _ = make_client(_FakeResponse(
