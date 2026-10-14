@@ -13,9 +13,10 @@ import "context"
 //
 // # Error contract (fake ↔ real alignment)
 //
-// The real *Client (steemgosdk api/v2, PR#400) obeys the following contract;
-// test doubles used by indexer/API tests must mirror it so that behavior
-// verified against fakes matches production:
+// The real *Client (steemgosdk api/v2 + wrapper-level JSON-RPC batch, PR#400/
+// PR#401) obeys the following contract; test doubles used by indexer/API
+// tests must mirror it so that behavior verified against fakes matches
+// production:
 //
 //   - On failure paths, a malformed/bad JSON response, a null result where
 //     steemd never legitimately returns null (get_accounts, get_content),
@@ -25,6 +26,15 @@ import "context"
 //     returns a nil/empty result alongside a nil error. Explicitly empty
 //     requests are not failures: GetContentBatch with zero posts returns
 //     an empty slice and a nil error.
+//   - GetContentBatch uses real JSON-RPC batch semantics (PR#401): a POST
+//     body of request objects (chunked by max_batch, fetched on a
+//     max_workers-bounded pool), results always in request order with
+//     exactly one entry per request, per-item response id alignment, and
+//     ALL-OR-NOTHING failure — a single batch item carrying a JSON-RPC
+//     error, a null result, or a missing author field fails the whole call
+//     (mirroring legacy http_client._validated_batch_result). Callers must
+//     treat any GetContentBatch error as "no results", never index into a
+//     partial slice.
 //   - GetBlock for a block beyond the chain head fails with an error wrapping
 //     ErrBlockNotFound (see client.go), not an empty block.
 //   - GetBlocksRange is all-or-nothing: any per-block failure after retries
