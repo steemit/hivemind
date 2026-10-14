@@ -332,12 +332,14 @@ func TestDataErrorSkipsOpBlockCommits(t *testing.T) {
 //   - the account_create value is steem block 9,000,078 verbatim except the
 //     bulky key-auth objects the indexer never reads ("steem" creates
 //     "guthran" for 35.000 STEEM);
-//   - the follow envelope is the block 8,000,245 shape
-//     (["follow",{"follower":"baerdric","following":"cathynsons","what":["blog"]}])
-//     with the follower swapped to the same-block-created account. A block
-//     in which the newly created account itself follows someone was not
-//     found in a 3,000-block scan (mined/created accounts rarely act inside
-//     their creation block), so the two real payloads are combined here.
+//   - the follow envelope is a canonical on-chain follow-plugin shape
+//     (["follow",{"follower":"...","following":"cathynsons","what":["blog"]}]),
+//     matching the byte-verified goldens captured in custom_op_follow_test.go
+//     (block 14,000,000 family), with the follower swapped to the
+//     same-block-created account. A block in which the newly created
+//     account itself follows someone was not found in a 3,000-block scan
+//     (mined/created accounts rarely act inside their creation block), so
+//     the two real payloads are combined here.
 var goldenAccountCreateValue = map[string]interface{}{
 	"creator":          "steem",
 	"fee":              "35.000 STEEM",
