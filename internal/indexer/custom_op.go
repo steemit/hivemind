@@ -36,13 +36,16 @@ type CustomOpProcessor struct {
 // instance would never be flushed and its counts would be silently lost
 // (audit P0-4). A nil followIndexer therefore fails fast here -- constructing
 // a fallback instance in its place would resurrect exactly that bug.
-func NewCustomOpProcessor(repo *db.Repository, followIndexer *FollowIndexer, logger *zap.Logger) *CustomOpProcessor {
+// cachedPost is likewise the BlockProcessor's shared CachedPost instance:
+// community mute/unmute ops must queue their post on the one dirty queue
+// that Sync flushes.
+func NewCustomOpProcessor(repo *db.Repository, followIndexer *FollowIndexer, cachedPost *CachedPost, logger *zap.Logger) *CustomOpProcessor {
 	if followIndexer == nil {
 		panic("NewCustomOpProcessor: followIndexer must not be nil; inject the BlockProcessor's shared FollowIndexer (audit P0-4)")
 	}
 	return &CustomOpProcessor{
 		repo:             repo,
-		communityIndexer: NewCommunityIndexer(repo, logger),
+		communityIndexer: NewCommunityIndexer(repo, cachedPost, logger),
 		notifyIndexer:    NewNotifyIndexer(repo),
 		followIndexer:    followIndexer,
 		logger:           logger,
@@ -224,9 +227,10 @@ const naiveDateTimeLayout = "2006-01-02T15:04:05"
 //   - the payload must carry exactly the `date` key (legacy
 //     valid_keys(required=['date']) with no optional keys);
 //   - the date must be a naive YYYY-MM-DDTHH:MM:SS string (legacy
-//     valid_date regex rejects timezone suffixes) and must not be after the
-//     block date (legacy asserts date <= block_date; future dates are
-//     rejected, not clamped).
+//     valid_date regex rejects timezone suffixes AND fractional seconds /
+//     non-padded fields, enforced by a format round-trip) and must not be
+//     after the block date (legacy asserts date <= block_date; future dates
+//     are rejected, not clamped).
 //
 // Validation failures skip the op (legacy logs a warning); only the
 // SetLastRead write error propagates.
@@ -258,6 +262,16 @@ func (cop *CustomOpProcessor) processNotify(ctx context.Context, tx *gorm.DB, ac
 	readDate, err := time.Parse(naiveDateTimeLayout, dateStr)
 	if err != nil {
 		cop.logger.Warn("notify op fail: invalid date format",
+			zap.String("account", account),
+			zap.String("date", dateStr))
+		return nil
+	}
+	// Strict round-trip: Go's time.Parse accepts extensions the legacy
+	// VALID_DATE regex (`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$`) rejects --
+	// fractional seconds (`...T07:17:23.5`) and non-padded fields.
+	// Re-formatting with the layout and comparing pins the exact form.
+	if readDate.Format(naiveDateTimeLayout) != dateStr {
+		cop.logger.Warn("notify op fail: date not in naive YYYY-MM-DDTHH:MM:SS form",
 			zap.String("account", account),
 			zap.String("date", dateStr))
 		return nil

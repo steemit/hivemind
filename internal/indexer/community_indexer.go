@@ -3,10 +3,12 @@ package indexer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -69,11 +71,34 @@ func init() {
 	}
 }
 
+// opValidationError marks an assertion-style validation failure of a
+// community custom_json op -- the class legacy CommunityOp.validate turns
+// into an `error` notification for the actor (it only catches
+// AssertionError). ProcessCommunityOp writes the notification and drops the
+// op only for these. Any other error escaping the validation phase is an
+// infrastructure failure (e.g. a DB error) which must propagate to the
+// caller; legacy lets non-assertion exceptions bubble up for block-level
+// retry instead of eating them.
+type opValidationError struct {
+	err error
+}
+
+func (e *opValidationError) Error() string { return e.err.Error() }
+func (e *opValidationError) Unwrap() error { return e.err }
+
+// opValidationErr builds an opValidationError carrying the legacy assertion
+// message (mirrors the `assert cond, 'message'` payloads).
+func opValidationErr(format string, args ...interface{}) error {
+	return &opValidationError{err: fmt.Errorf(format, args...)}
+}
+
 // communityAvatarURLValid mirrors legacy _valid_url_proto for the
 // updateProps settings.avatar_url value: when non-empty it must be
-// http(s) and shorter than 1024 characters (empty string is allowed).
+// http(s) and shorter than 1024 characters (codepoints; Python len()),
+// case-sensitive like legacy's byte-prefix comparison (empty string is
+// allowed).
 func communityAvatarURLValid(avatar string) bool {
-	return avatar == "" || (len(avatar) < 1024 && validURLProto(avatar))
+	return avatar == "" || (utf8.RuneCountInString(avatar) < 1024 && validURLProto(avatar))
 }
 
 // CommunityIndexer handles community-related indexing
@@ -81,14 +106,22 @@ type CommunityIndexer struct {
 	repo          *db.Repository
 	logger        *zap.Logger
 	notifyIndexer *NotifyIndexer
+	// cachedPost is the shared CachedPost instance owned by the
+	// BlockProcessor; mute/unmute must queue the affected post for a cache
+	// refresh (legacy community.py). Nil only in validation-only usage
+	// (tests); production always injects the shared instance.
+	cachedPost *CachedPost
 }
 
-// NewCommunityIndexer creates a new community indexer
-func NewCommunityIndexer(repo *db.Repository, logger *zap.Logger) *CommunityIndexer {
+// NewCommunityIndexer creates a new community indexer. cachedPost must be
+// the BlockProcessor's shared CachedPost instance so that mute/unmute ops
+// reach the single dirty-post queue that Sync flushes.
+func NewCommunityIndexer(repo *db.Repository, cachedPost *CachedPost, logger *zap.Logger) *CommunityIndexer {
 	return &CommunityIndexer{
 		repo:          repo,
 		logger:        logger,
 		notifyIndexer: NewNotifyIndexer(repo),
+		cachedPost:    cachedPost,
 	}
 }
 
@@ -204,26 +237,36 @@ type communityOp struct {
 //   - a validation failure writes an `error` notification for the actor
 //     (legacy Notify('error', ...)) and skips the op -- no state change, no
 //     retry;
-//   - only infrastructure (DB) errors propagate to the caller.
+//   - infrastructure (DB) errors propagate to the caller (legacy validate
+//     only catches AssertionError, so DB exceptions bubble up for
+//     block-level handling).
 func (ci *CommunityIndexer) ProcessCommunityOp(ctx context.Context, tx *gorm.DB, actor, opJSON string, blockDate time.Time, isInitialSync bool) error {
 	op := &communityOp{date: blockDate, actor: actor, rawJSON: opJSON}
 
 	action, payload, ok := parseOpEnvelope(opJSON)
 	if !ok {
 		// legacy _validate_raw_op assertion -> error notif with dst unset
-		ci.writeOpError(ctx, op, fmt.Errorf("op json must be [action, payload] array"))
+		ci.writeOpError(ctx, op, opValidationErr("op json must be [action, payload] array"))
 		return nil
 	}
 	op.action = action
 	op.op = payload
 	if _, known := communityOpSchema[action]; !known {
-		ci.writeOpError(ctx, op, fmt.Errorf("invalid action"))
+		ci.writeOpError(ctx, op, opValidationErr("invalid action"))
 		return nil
 	}
 
 	if err := ci.validateCommunityOp(ctx, tx, op); err != nil {
-		ci.writeOpError(ctx, op, err)
-		return nil
+		var verr *opValidationError
+		if errors.As(err, &verr) {
+			// Assertion-class failure: legacy writes the error notif and
+			// drops the op (no retry).
+			ci.writeOpError(ctx, op, err)
+			return nil
+		}
+		// Infrastructure failure: no error notif (nothing user-visible went
+		// wrong); propagate to the caller for block-level handling.
+		return fmt.Errorf("community op validation failed: %w", err)
 	}
 
 	return ci.applyCommunityOp(ctx, tx, op, isInitialSync)
@@ -251,16 +294,18 @@ func (ci *CommunityIndexer) writeOpError(ctx context.Context, op *communityOp, e
 }
 
 // validateCommunityOp mirrors legacy CommunityOp._read_schema +
-// _validate_permissions. Returns the legacy assertion message on failure.
-// All lookups go through the block transaction so that rows written by
-// earlier operations in the same block are visible (legacy reads within
-// the trx).
+// _validate_permissions. Assertion-class failures return an
+// opValidationError carrying the legacy assertion message; infrastructure
+// (DB) failures return the raw wrapped error so ProcessCommunityOp can
+// propagate them. All lookups go through the block transaction so that rows
+// written by earlier operations in the same block are visible (legacy reads
+// within the trx).
 func (ci *CommunityIndexer) validateCommunityOp(ctx context.Context, tx *gorm.DB, op *communityOp) error {
 	// Resolve actor account id (legacy Accounts.get_id asserts existence).
 	var actorAccount models.Account
 	err := tx.WithContext(ctx).Where("name = ?", op.actor).First(&actorAccount).Error
 	if err == gorm.ErrRecordNotFound {
-		return fmt.Errorf("account does not exist: %s", op.actor)
+		return opValidationErr("account does not exist: %s", op.actor)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to look up actor account: %s: %w", op.actor, err)
@@ -327,7 +372,7 @@ func assertKeysMatch(keys map[string]interface{}, expected []string, allowMissin
 			}
 		}
 		if len(missing) > 0 {
-			return fmt.Errorf("missing keys: %s", strings.Join(missing, ", "))
+			return opValidationErr("missing keys: %s", strings.Join(missing, ", "))
 		}
 	}
 	valid := make(map[string]bool, len(expected))
@@ -341,7 +386,7 @@ func assertKeysMatch(keys map[string]interface{}, expected []string, allowMissin
 		}
 	}
 	if len(extra) > 0 {
-		return fmt.Errorf("extraneous keys: %s", strings.Join(extra, ", "))
+		return opValidationErr("extraneous keys: %s", strings.Join(extra, ", "))
 	}
 	return nil
 }
@@ -356,7 +401,9 @@ func containsString(list []string, s string) bool {
 }
 
 // readKeyStr mirrors legacy read_key_str: a present key must be a string,
-// non-blank (unless allowBlank), unpadded, and within maxlen.
+// non-blank (unless allowBlank), unpadded, and within maxlen. maxlen counts
+// Unicode codepoints, matching Python's len() (e.g. 120 CJK notes are 360
+// UTF-8 bytes but 120 characters).
 func readKeyStr(op map[string]interface{}, key string, maxlen int, allowBlank bool) (string, error) {
 	raw, present := op[key]
 	if !present {
@@ -364,16 +411,16 @@ func readKeyStr(op map[string]interface{}, key string, maxlen int, allowBlank bo
 	}
 	s, isStr := raw.(string)
 	if !isStr {
-		return "", fmt.Errorf("key `%s` was not str", key)
+		return "", opValidationErr("key `%s` was not str", key)
 	}
 	if !allowBlank && s == "" {
-		return "", fmt.Errorf("key `%s` was blank", key)
+		return "", opValidationErr("key `%s` was blank", key)
 	}
 	if s != strings.TrimSpace(s) {
-		return "", fmt.Errorf("invalid padding: %s", key)
+		return "", opValidationErr("invalid padding: %s", key)
 	}
-	if maxlen > 0 && len(s) > maxlen {
-		return "", fmt.Errorf("exceeds max len: %s", key)
+	if maxlen > 0 && utf8.RuneCountInString(s) > maxlen {
+		return "", opValidationErr("exceeds max len: %s", key)
 	}
 	return s, nil
 }
@@ -386,7 +433,7 @@ func readKeyBool(op map[string]interface{}, key string) (bool, error) {
 	}
 	b, isBool := raw.(bool)
 	if !isBool {
-		return false, fmt.Errorf("must be bool: %s", key)
+		return false, opValidationErr("must be bool: %s", key)
 	}
 	return b, nil
 }
@@ -396,11 +443,11 @@ func readKeyBool(op map[string]interface{}, key string) (bool, error) {
 func readKeyDict(obj map[string]interface{}, key string) (map[string]interface{}, error) {
 	raw, present := obj[key]
 	if !present {
-		return nil, fmt.Errorf("key `%s` not found", key)
+		return nil, opValidationErr("key `%s` not found", key)
 	}
 	d, isDict := raw.(map[string]interface{})
 	if !isDict || len(d) == 0 {
-		return nil, fmt.Errorf("key `%s` was blank or not a dict", key)
+		return nil, opValidationErr("key `%s` was blank or not a dict", key)
 	}
 	return d, nil
 }
@@ -412,17 +459,17 @@ func (ci *CommunityIndexer) readCommunity(ctx context.Context, tx *gorm.DB, op *
 		return err
 	}
 	if name == "" {
-		return fmt.Errorf("must name a community")
+		return opValidationErr("must name a community")
 	}
 	if !communityNamePattern.MatchString(name) {
-		return fmt.Errorf("community `%s` does not exist", name)
+		return opValidationErr("community `%s` does not exist", name)
 	}
 	communityID, err := ci.getCommunityID(ctx, tx, name)
 	if err != nil {
 		return fmt.Errorf("failed to get community ID: %w", err)
 	}
 	if communityID == 0 {
-		return fmt.Errorf("community `%s` does not exist", name)
+		return opValidationErr("community `%s` does not exist", name)
 	}
 	op.community = name
 	op.communityID = communityID
@@ -436,12 +483,12 @@ func (ci *CommunityIndexer) readAccount(ctx context.Context, tx *gorm.DB, op *co
 		return err
 	}
 	if name == "" {
-		return fmt.Errorf("must name an account")
+		return opValidationErr("must name an account")
 	}
 	var account models.Account
 	err = tx.WithContext(ctx).Where("name = ?", name).First(&account).Error
 	if err == gorm.ErrRecordNotFound {
-		return fmt.Errorf("account `%s` not found", name)
+		return opValidationErr("account `%s` not found", name)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to look up account: %s: %w", name, err)
@@ -455,14 +502,14 @@ func (ci *CommunityIndexer) readAccount(ctx context.Context, tx *gorm.DB, op *co
 // belong to the named community.
 func (ci *CommunityIndexer) readPermlink(ctx context.Context, tx *gorm.DB, op *communityOp) error {
 	if op.account == "" {
-		return fmt.Errorf("permlink requires named account")
+		return opValidationErr("permlink requires named account")
 	}
 	permlink, err := readKeyStr(op.op, "permlink", 256, false)
 	if err != nil {
 		return err
 	}
 	if permlink == "" {
-		return fmt.Errorf("must name a permlink")
+		return opValidationErr("must name a permlink")
 	}
 
 	var post models.Post
@@ -470,13 +517,13 @@ func (ci *CommunityIndexer) readPermlink(ctx context.Context, tx *gorm.DB, op *c
 		Where("author = ? AND permlink = ?", op.account, permlink).
 		First(&post).Error
 	if err == gorm.ErrRecordNotFound {
-		return fmt.Errorf("invalid post: %s/%s", op.account, permlink)
+		return opValidationErr("invalid post: %s/%s", op.account, permlink)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to get post: %w", err)
 	}
 	if !post.CommunityID.Valid || post.CommunityID.Int64 != op.communityID {
-		return fmt.Errorf("post does not belong to community")
+		return opValidationErr("post does not belong to community")
 	}
 
 	op.permlink = permlink
@@ -491,12 +538,12 @@ func (ci *CommunityIndexer) readRole(op *communityOp) error {
 		return err
 	}
 	if roleName == "" {
-		return fmt.Errorf("must name a role")
+		return opValidationErr("must name a role")
 	}
 	roleID := roleNameToID(roleName)
 	if roleName != "muted" && roleName != "guest" && roleName != "member" &&
 		roleName != "mod" && roleName != "admin" && roleName != "owner" {
-		return fmt.Errorf("invalid role")
+		return opValidationErr("invalid role")
 	}
 	op.role = roleName
 	op.roleID = roleID
@@ -510,7 +557,7 @@ func (ci *CommunityIndexer) readNotes(op *communityOp) error {
 		return err
 	}
 	if notes == "" {
-		return fmt.Errorf("notes cannot be blank")
+		return opValidationErr("notes cannot be blank")
 	}
 	op.notes = notes
 	return nil
@@ -547,11 +594,13 @@ func (ci *CommunityIndexer) readProps(op *communityOp) error {
 		if err != nil {
 			return err
 		}
-		if len(title) < 3 {
-			return fmt.Errorf("title too short")
+		// Python len() counts codepoints: a 1-CJK-char title is 3 UTF-8
+		// bytes but still too short.
+		if utf8.RuneCountInString(title) < 3 {
+			return opValidationErr("title too short")
 		}
 		if title[0] == '@' || title[0] == '#' {
-			return fmt.Errorf("invalid title prefix")
+			return opValidationErr("invalid title prefix")
 		}
 		out["title"] = title
 	}
@@ -568,7 +617,7 @@ func (ci *CommunityIndexer) readProps(op *communityOp) error {
 			return err
 		}
 		if !communityValidLangs[lang] {
-			return fmt.Errorf("invalid lang")
+			return opValidationErr("invalid lang")
 		}
 		out["lang"] = lang
 	}
@@ -608,16 +657,16 @@ func (ci *CommunityIndexer) readProps(op *communityOp) error {
 			// avatar_url or _valid_url_proto(avatar_url)`
 			avatar, isStr := avatarRaw.(string)
 			if !isStr {
-				return fmt.Errorf("invalid avatar_url")
+				return opValidationErr("invalid avatar_url")
 			}
 			if !communityAvatarURLValid(avatar) {
-				return fmt.Errorf("invalid avatar_url")
+				return opValidationErr("invalid avatar_url")
 			}
 			out["avatar_url"] = avatar
 		}
 	}
 	if len(out) == 0 {
-		return fmt.Errorf("props were blank")
+		return opValidationErr("props were blank")
 	}
 	op.props = out
 	return nil
@@ -632,73 +681,73 @@ func (ci *CommunityIndexer) validatePermissions(ctx context.Context, tx *gorm.DB
 	switch op.action {
 	case "setRole":
 		if actorRole < models.RoleMod {
-			return fmt.Errorf("only mods and up can alter roles")
+			return opValidationErr("only mods and up can alter roles")
 		}
 		if actorRole <= op.roleID {
-			return fmt.Errorf("cannot promote to or above own rank")
+			return opValidationErr("cannot promote to or above own rank")
 		}
 		if op.actor != op.account {
 			accountRole := ci.getUserRoleID(ctx, tx, op.communityID, op.accountID)
 			if accountRole >= actorRole {
-				return fmt.Errorf("cant modify higher-role user")
+				return opValidationErr("cant modify higher-role user")
 			}
 			if accountRole == op.roleID {
-				return fmt.Errorf("role would not change")
+				return opValidationErr("role would not change")
 			}
 		}
 	case "updateProps":
 		if actorRole < models.RoleAdmin {
-			return fmt.Errorf("only admins can update props")
+			return opValidationErr("only admins can update props")
 		}
 	case "setUserTitle":
 		if actorRole < models.RoleMod {
-			return fmt.Errorf("only mods can set user titles")
+			return opValidationErr("only mods can set user titles")
 		}
 	case "mutePost":
 		if op.post.IsMuted {
-			return fmt.Errorf("post is already muted")
+			return opValidationErr("post is already muted")
 		}
 		if actorRole < models.RoleMod {
-			return fmt.Errorf("only mods can mute posts")
+			return opValidationErr("only mods can mute posts")
 		}
 	case "unmutePost":
 		if !op.post.IsMuted {
-			return fmt.Errorf("post is already not muted")
+			return opValidationErr("post is already not muted")
 		}
 		if ci.isParentMuted(ctx, tx, op.post) {
-			return fmt.Errorf("parent post is muted")
+			return opValidationErr("parent post is muted")
 		}
 		if actorRole < models.RoleMod {
-			return fmt.Errorf("only mods can unmute posts")
+			return opValidationErr("only mods can unmute posts")
 		}
 	case "pinPost":
 		if op.post.IsPinned {
-			return fmt.Errorf("post is already pinned")
+			return opValidationErr("post is already pinned")
 		}
 		if actorRole < models.RoleMod {
-			return fmt.Errorf("only mods can pin posts")
+			return opValidationErr("only mods can pin posts")
 		}
 	case "unpinPost":
 		if !op.post.IsPinned {
-			return fmt.Errorf("post is already not pinned")
+			return opValidationErr("post is already not pinned")
 		}
 		if actorRole < models.RoleMod {
-			return fmt.Errorf("only mods can unpin posts")
+			return opValidationErr("only mods can unpin posts")
 		}
 	case "flagPost":
 		if actorRole <= models.RoleMuted {
-			return fmt.Errorf("muted users cannot flag posts")
+			return opValidationErr("muted users cannot flag posts")
 		}
 		if ci.isFlagged(ctx, tx, op) {
-			return fmt.Errorf("user already flagged this post")
+			return opValidationErr("user already flagged this post")
 		}
 	case "subscribe":
 		if ci.isSubscribed(ctx, tx, op.communityID, op.actorID) {
-			return fmt.Errorf("already subscribed")
+			return opValidationErr("already subscribed")
 		}
 	case "unsubscribe":
 		if !ci.isSubscribed(ctx, tx, op.communityID, op.actorID) {
-			return fmt.Errorf("already unsubscribed")
+			return opValidationErr("already unsubscribed")
 		}
 	}
 	return nil
@@ -804,6 +853,7 @@ func (ci *CommunityIndexer) applyCommunityOp(ctx context.Context, tx *gorm.DB, o
 		}
 		notes := op.notes
 		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeMutePost, &notes, isInitialSync)
+		ci.refreshCachedPost(op, isInitialSync)
 
 	case "unmutePost":
 		if err := ci.updatePostFlag(ctx, tx, op, "is_muted", false); err != nil {
@@ -811,6 +861,7 @@ func (ci *CommunityIndexer) applyCommunityOp(ctx context.Context, tx *gorm.DB, o
 		}
 		notes := op.notes
 		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeUnmutePost, &notes, isInitialSync)
+		ci.refreshCachedPost(op, isInitialSync)
 
 	case "pinPost":
 		if err := ci.updatePostFlag(ctx, tx, op, "is_pinned", true); err != nil {
@@ -840,6 +891,18 @@ func (ci *CommunityIndexer) updatePostFlag(ctx context.Context, tx *gorm.DB, op 
 		return fmt.Errorf("failed to update %s: %w", column, err)
 	}
 	return nil
+}
+
+// refreshCachedPost mirrors legacy community.py: after a successful
+// mute/unmute (and only outside initial sync) the affected post is queued
+// on the shared CachedPost dirty queue so the next flush recomputes its
+// gray/hide display flags. pin/unpin and flagPost do not refresh (legacy
+// does not either).
+func (ci *CommunityIndexer) refreshCachedPost(op *communityOp, isInitialSync bool) {
+	if isInitialSync || ci.cachedPost == nil {
+		return
+	}
+	ci.cachedPost.Update(op.account, op.permlink, op.post.ID)
 }
 
 // notifyCommunityOp mirrors legacy CommunityOp._notify: notifications are

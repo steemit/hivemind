@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ import (
 //	  ["unsubscribe",{"community":"hive-100421"}]
 //	block 40001938 (2020-01-17T08:05:51), auth wakeupkitty.pal, id=community:
 //	  ["subscribe",{"community":"hive-100421"}]
-//	block 41001314 (2020-02-21T02:37:03), auth vikvitnik, id=community:
+//	block 41001314 (2020-02-21T02:37:06), auth vikvitnik, id=community:
 //	  ["updateProps",{"community":"hive-151876","props":{...}}]
 //	block 41002885+ ops from vikvitnik:
 //	  ["setRole",{"community":"hive-151876","account":"ashlank","role":"mod"}]
@@ -320,7 +321,7 @@ func TestCommunityUpdatePropsGolden(t *testing.T) {
 	seedRole(t, database, communityID, vikvitnik.ID, models.RoleOwner) // founder
 
 	bp := NewBlockProcessor(database, repo, &fakeSteemProvider{})
-	if err := bp.ProcessBlock(ctx, followPluginBlock(41001314, "2020-02-21T02:37:03",
+	if err := bp.ProcessBlock(ctx, followPluginBlock(41001314, "2020-02-21T02:37:06",
 		customJSONOpWithID("community", "vikvitnik", goldenUpdatePropsJSON)), false); err != nil {
 		t.Fatalf("ProcessBlock updateProps: %v", err)
 	}
@@ -755,6 +756,28 @@ func TestNotifySetLastReadGolden(t *testing.T) {
 		t.Errorf("lastread_at after extra-keys op = %+v, want unchanged (rejected)", claudio83.LastreadAt)
 	}
 
+	// Fractional seconds: Go's time.Parse accepts `...T07:17:23.5` for the
+	// naive layout, but legacy valid_date is a strict regex that rejects
+	// them -- the format round-trip pins the exact naive form.
+	frac := `["setLastRead",{"date":"2020-01-17T07:17:23.5"}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(40000977, "2020-01-17T07:17:27",
+		customJSONOpWithID("notify", "claudio83", frac)), false); err != nil {
+		t.Fatalf("ProcessBlock fractional date: %v", err)
+	}
+	claudio83 = getAccount(t, database, ctx, "claudio83")
+	if !claudio83.LastreadAt.Equal(time.Date(2020, 1, 17, 7, 17, 23, 0, time.UTC)) {
+		t.Errorf("lastread_at after fractional-date op = %+v, want unchanged (rejected)", claudio83.LastreadAt)
+	}
+	fracMicro := `["setLastRead",{"date":"2020-01-17T07:17:23.123456"}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(40000978, "2020-01-17T07:17:27",
+		customJSONOpWithID("notify", "claudio83", fracMicro)), false); err != nil {
+		t.Fatalf("ProcessBlock microsecond date: %v", err)
+	}
+	claudio83 = getAccount(t, database, ctx, "claudio83")
+	if !claudio83.LastreadAt.Equal(time.Date(2020, 1, 17, 7, 17, 23, 0, time.UTC)) {
+		t.Errorf("lastread_at after microsecond-date op = %+v, want unchanged (rejected)", claudio83.LastreadAt)
+	}
+
 	// Unknown command and object format are skipped; the notify plugin
 	// never writes error notifications (legacy only warns).
 	if err := bp.ProcessBlock(ctx, followPluginBlock(40000975, "2020-01-17T07:17:27",
@@ -934,5 +957,483 @@ func TestCommunityRegisterStartDateGate(t *testing.T) {
 	database.DB.WithContext(ctx).Table("hive_communities").Count(&communities)
 	if communities != 1 {
 		t.Errorf("hive_communities rows after non-community name = %d, want 1", communities)
+	}
+}
+
+// TestCommunityMuteUnmuteCachedPostRefresh pins the legacy
+// `if not DbState.is_initial_sync(): CachedPost.update(...)` call after
+// mute/unmute (community.py): applied outside initial sync, the post enters
+// the shared CachedPost dirty queue and the next flush recomputes its
+// gray/hide display flags from hive_posts; during initial sync the flag is
+// applied but nothing is queued. pin/unpin never queue (legacy parity).
+func TestCommunityMuteUnmuteCachedPostRefresh(t *testing.T) {
+	database, repo, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "mod1", "author1")
+	communityID := seedCommunity(t, database, "hive-152200", time.Date(2020, 2, 19, 16, 5, 15, 0, time.UTC))
+	mod1 := getAccount(t, database, ctx, "mod1")
+	seedRole(t, database, communityID, mod1.ID, models.RoleMod)
+
+	newPost := func(permlink string) *models.Post {
+		p := &models.Post{
+			Author:      "author1",
+			Permlink:    permlink,
+			Category:    "hive-152200",
+			CommunityID: sql.NullInt64{Int64: communityID, Valid: true},
+			CreatedAt:   time.Date(2020, 5, 20, 0, 0, 0, 0, time.UTC),
+			Depth:       0,
+			IsValid:     true,
+		}
+		if err := database.DB.WithContext(ctx).Create(p).Error; err != nil {
+			t.Fatalf("seed post %s: %v", permlink, err)
+		}
+		return p
+	}
+	post := newPost("spam-post")
+	post2 := newPost("spam-post-2")
+
+	steemd := steemdPostFor("author1", "spam-post", "plain body")
+	provider := &fakeSteemProvider{getContentBatch: func(_ context.Context, posts [][]string) ([]map[string]interface{}, error) {
+		out := make([]map[string]interface{}, len(posts))
+		for i, p := range posts {
+			if p[0] == "author1" && p[1] == "spam-post" {
+				out[i] = steemd
+			} else {
+				out[i] = map[string]interface{}{} // blank = not found
+			}
+		}
+		return out, nil
+	}}
+	bp := NewBlockProcessor(database, repo, provider)
+	cp := bp.CachedPost()
+
+	// Prime the cache row (insert + flush) so the later update path is
+	// observable as a column change.
+	cp.Insert("author1", "spam-post", post.ID)
+	if _, err := cp.Flush(ctx, false); err != nil {
+		t.Fatalf("prime flush: %v", err)
+	}
+	loadCache := func() models.PostCache {
+		var row models.PostCache
+		if err := database.DB.WithContext(ctx).
+			Where("post_id = ?", post.ID).First(&row).Error; err != nil {
+			t.Fatalf("load cache row: %v", err)
+		}
+		return row
+	}
+	if loadCache().IsGrayed {
+		t.Fatal("pre-mute cache row already grayed")
+	}
+
+	mute := `["mutePost",{"community":"hive-152200","account":"author1","permlink":"spam-post","notes":"spam"}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(43740610, "2020-05-27T19:30:03",
+		customJSONOpWithID("community", "mod1", mute)), false); err != nil {
+		t.Fatalf("ProcessBlock mute: %v", err)
+	}
+	if cp.PendingQueueLen() != 1 {
+		t.Fatalf("cached-post queue after live mute = %d, want 1", cp.PendingQueueLen())
+	}
+	if _, err := cp.Flush(ctx, false); err != nil {
+		t.Fatalf("post-mute flush: %v", err)
+	}
+	// Community posts mirror hive_posts.is_muted into the cache gray flag.
+	if !loadCache().IsGrayed {
+		t.Error("cache row not grayed after muted post recompute")
+	}
+
+	unmute := `["unmutePost",{"community":"hive-152200","account":"author1","permlink":"spam-post","notes":"ok"}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(43740611, "2020-05-27T19:30:06",
+		customJSONOpWithID("community", "mod1", unmute)), false); err != nil {
+		t.Fatalf("ProcessBlock unmute: %v", err)
+	}
+	if cp.PendingQueueLen() != 1 {
+		t.Fatalf("cached-post queue after live unmute = %d, want 1", cp.PendingQueueLen())
+	}
+	if _, err := cp.Flush(ctx, false); err != nil {
+		t.Fatalf("post-unmute flush: %v", err)
+	}
+	if loadCache().IsGrayed {
+		t.Error("cache row still grayed after unmuted post recompute")
+	}
+
+	// pinPost must NOT queue (legacy has no CachedPost.update there).
+	pin := `["pinPost",{"community":"hive-152200","account":"author1","permlink":"spam-post"}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(43740612, "2020-05-27T19:30:09",
+		customJSONOpWithID("community", "mod1", pin)), false); err != nil {
+		t.Fatalf("ProcessBlock pin: %v", err)
+	}
+	if cp.PendingQueueLen() != 0 {
+		t.Errorf("cached-post queue after pin = %d, want 0 (legacy pins do not refresh)", cp.PendingQueueLen())
+	}
+
+	// Initial sync: the flag is applied but the post is NOT queued and no
+	// notification is written.
+	mute2 := `["mutePost",{"community":"hive-152200","account":"author1","permlink":"spam-post-2","notes":"spam"}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(43740613, "2020-05-27T19:30:12",
+		customJSONOpWithID("community", "mod1", mute2)), true); err != nil {
+		t.Fatalf("ProcessBlock initial-sync mute: %v", err)
+	}
+	var got models.Post
+	if err := database.DB.WithContext(ctx).Where("id = ?", post2.ID).First(&got).Error; err != nil {
+		t.Fatalf("reload post2: %v", err)
+	}
+	if !got.IsMuted {
+		t.Error("post2 is_muted = false after initial-sync mute, want true (flag still applies)")
+	}
+	if cp.PendingQueueLen() != 0 {
+		t.Errorf("cached-post queue after initial-sync mute = %d, want 0", cp.PendingQueueLen())
+	}
+	if n := countNotifs(t, database, models.NotifyTypeMutePost, ""); n != 1 {
+		t.Errorf("mute_post notifs total = %d, want 1 (initial sync suppressed)", n)
+	}
+}
+
+// TestCommunityOpInfraErrorPropagates pins the validation/infrastructure
+// error split (legacy CommunityOp.validate only catches AssertionError):
+// a DB failure during validation must propagate to the caller without
+// writing a user-visible error notification, while assertion failures
+// still write the error notif and return nil.
+func TestCommunityOpInfraErrorPropagates(t *testing.T) {
+	database, repo, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "alice")
+	ci := NewCommunityIndexer(repo, nil, testLogger())
+	blockDate := time.Date(2020, 1, 17, 7, 44, 54, 0, time.UTC)
+
+	// Infrastructure failure: a canceled context fails the actor lookup
+	// before any assertion can run.
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	err := ci.ProcessCommunityOp(canceled, database.DB.WithContext(canceled),
+		"alice", goldenSubscribeJSON, blockDate, false)
+	if err == nil {
+		t.Fatal("ProcessCommunityOp with dead context = nil error, want infra error propagated")
+	}
+	var notifs int64
+	database.DB.WithContext(ctx).Table("hive_notifs").Count(&notifs)
+	if notifs != 0 {
+		t.Errorf("hive_notifs rows after infra failure = %d, want 0 (no error notif)", notifs)
+	}
+
+	// Contrast: an assertion failure (unknown community) writes the error
+	// notif and swallows the op.
+	unknown := `["subscribe",{"community":"hive-999999"}]`
+	if err := ci.ProcessCommunityOp(ctx, database.DB, "alice", unknown, blockDate, false); err != nil {
+		t.Fatalf("ProcessCommunityOp assertion failure returned err: %v (want nil)", err)
+	}
+	if n := countNotifs(t, database, models.NotifyTypeError, "community `hive-999999`"); n != 1 {
+		t.Errorf("'does not exist' error notifs = %d, want 1", n)
+	}
+}
+
+// TestCommunityAvatarURLValidation pins the updateProps
+// settings.avatar_url acceptance shape (legacy _valid_url_proto: http(s)
+// prefix, case-sensitive, <1024 chars; empty string allowed; None/non-str
+// rejected) and asserts the whitelisted write actually reaches
+// hive_communities.settings + avatar_url.
+func TestCommunityAvatarURLValidation(t *testing.T) {
+	database, repo, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "vikvitnik")
+	communityID := seedCommunity(t, database, "hive-151876", time.Date(2020, 2, 21, 2, 34, 45, 0, time.UTC))
+	vikvitnik := getAccount(t, database, ctx, "vikvitnik")
+	seedRole(t, database, communityID, vikvitnik.ID, models.RoleOwner)
+
+	bp := NewBlockProcessor(database, repo, &fakeSteemProvider{})
+	propsOp := func(settings string) string {
+		return `["updateProps",{"community":"hive-151876","props":{"settings":` + settings + `}}]`
+	}
+	process := func(block int64, ts, jsonStr string) {
+		t.Helper()
+		if err := bp.ProcessBlock(ctx, followPluginBlock(block, ts,
+			customJSONOpWithID("community", "vikvitnik", jsonStr)), false); err != nil {
+			t.Fatalf("ProcessBlock: %v", err)
+		}
+	}
+
+	// Valid write: settings JSON persisted, avatar_url column persisted.
+	process(41001400, "2020-02-21T02:40:00",
+		propsOp(`{"avatar_url":"https://example.com/a.png"}`))
+	c := getCommunity(t, database, "hive-151876")
+	if c.AvatarURL != "https://example.com/a.png" {
+		t.Errorf("avatar_url = %q, want the https URL", c.AvatarURL)
+	}
+	if !c.Settings.Valid || c.Settings.String != `{"avatar_url":"https://example.com/a.png"}` {
+		t.Errorf("settings = %+v, want the settings JSON", c.Settings)
+	}
+
+	// Empty string is explicitly allowed (legacy: `not avatar_url or ...`).
+	process(41001401, "2020-02-21T02:40:03",
+		propsOp(`{"avatar_url":""}`))
+	if c := getCommunity(t, database, "hive-151876"); c.AvatarURL != "" {
+		t.Errorf("avatar_url after empty-string op = %q, want \"\"", c.AvatarURL)
+	}
+	if n := countNotifs(t, database, models.NotifyTypeError, "invalid avatar_url"); n != 0 {
+		t.Errorf("'invalid avatar_url' notifs after valid ops = %d, want 0", n)
+	}
+
+	// Rejected shapes: uppercase scheme, protocol-relative, javascript:,
+	// non-string, JSON null.
+	for i, raw := range []string{
+		`"HTTP://example.com/a.png"`,
+		`"//example.com/a.png"`,
+		`"javascript:alert(1)"`,
+		`123`,
+		`null`,
+	} {
+		process(41001410+int64(i), "2020-02-21T02:41:00",
+			propsOp(`{"avatar_url":`+raw+`}`))
+	}
+	if n := countNotifs(t, database, models.NotifyTypeError, "invalid avatar_url"); n != 5 {
+		t.Errorf("'invalid avatar_url' notifs = %d, want 5", n)
+	}
+	if c := getCommunity(t, database, "hive-151876"); c.AvatarURL != "" {
+		t.Errorf("avatar_url after rejected ops = %q, want unchanged empty", c.AvatarURL)
+	}
+}
+
+// TestCommunityUnmuteFlagPostGolden covers the unmutePost and flagPost
+// positive paths (audit test gap): unmuting a muted post clears the flag
+// and notifies with the notes payload; flagging writes a flag_post notif
+// without touching the post, and a repeat flag by the same actor is
+// rejected.
+func TestCommunityUnmuteFlagPostGolden(t *testing.T) {
+	database, repo, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "mod1", "author1")
+	communityID := seedCommunity(t, database, "hive-152200", time.Date(2020, 2, 19, 16, 5, 15, 0, time.UTC))
+	mod1 := getAccount(t, database, ctx, "mod1")
+	seedRole(t, database, communityID, mod1.ID, models.RoleMod)
+
+	post := &models.Post{
+		Author:      "author1",
+		Permlink:    "muted-post",
+		Category:    "hive-152200",
+		CommunityID: sql.NullInt64{Int64: communityID, Valid: true},
+		CreatedAt:   time.Date(2020, 5, 20, 0, 0, 0, 0, time.UTC),
+		Depth:       0,
+		IsValid:     true,
+		IsMuted:     true,
+	}
+	if err := database.DB.WithContext(ctx).Create(post).Error; err != nil {
+		t.Fatalf("seed post: %v", err)
+	}
+
+	bp := NewBlockProcessor(database, repo, &fakeSteemProvider{})
+
+	// flagPost: no post mutation, flag_post notif carries the notes.
+	flag := `["flagPost",{"community":"hive-152200","account":"author1","permlink":"muted-post","notes":"abuse"}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(43740620, "2020-05-27T19:31:00",
+		customJSONOpWithID("community", "mod1", flag)), false); err != nil {
+		t.Fatalf("ProcessBlock flagPost: %v", err)
+	}
+	var got models.Post
+	if err := database.DB.WithContext(ctx).Where("id = ?", post.ID).First(&got).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if !got.IsMuted || got.IsPinned {
+		t.Errorf("post flags changed by flagPost: muted=%v pinned=%v", got.IsMuted, got.IsPinned)
+	}
+	var notif models.Notification
+	if err := database.DB.WithContext(ctx).
+		Where("type_id = ?", models.NotifyTypeFlagPost).First(&notif).Error; err != nil {
+		t.Fatalf("flag_post notif: %v", err)
+	}
+	if !notif.Payload.Valid || notif.Payload.String != "abuse" {
+		t.Errorf("flag_post notif payload = %+v, want 'abuse'", notif.Payload)
+	}
+	if !notif.PostID.Valid || notif.PostID.Int64 != post.ID {
+		t.Errorf("flag_post notif post_id = %+v, want %d", notif.PostID, post.ID)
+	}
+	if !notif.SrcID.Valid || notif.SrcID.Int64 != mod1.ID {
+		t.Errorf("flag_post notif src_id = %+v, want mod1", notif.SrcID)
+	}
+
+	// Repeat flag by the same actor is rejected (dedup via hive_notifs).
+	if err := bp.ProcessBlock(ctx, followPluginBlock(43740621, "2020-05-27T19:31:03",
+		customJSONOpWithID("community", "mod1", flag)), false); err != nil {
+		t.Fatalf("ProcessBlock repeat flagPost: %v", err)
+	}
+	if n := countNotifs(t, database, models.NotifyTypeError, "user already flagged this post"); n != 1 {
+		t.Errorf("'user already flagged' error notifs = %d, want 1", n)
+	}
+
+	// unmutePost positive path: flag cleared, unmute_post notif with notes.
+	unmute := `["unmutePost",{"community":"hive-152200","account":"author1","permlink":"muted-post","notes":"appeal accepted"}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(43740622, "2020-05-27T19:31:06",
+		customJSONOpWithID("community", "mod1", unmute)), false); err != nil {
+		t.Fatalf("ProcessBlock unmutePost: %v", err)
+	}
+	if err := database.DB.WithContext(ctx).Where("id = ?", post.ID).First(&got).Error; err != nil {
+		t.Fatalf("reload post after unmute: %v", err)
+	}
+	if got.IsMuted {
+		t.Error("is_muted after unmutePost = true, want false")
+	}
+	if n := countNotifs(t, database, models.NotifyTypeUnmutePost, "appeal accepted"); n != 1 {
+		t.Errorf("unmute_post notifs with notes payload = %d, want 1", n)
+	}
+
+	// Unmuting a not-muted post is rejected.
+	if err := bp.ProcessBlock(ctx, followPluginBlock(43740623, "2020-05-27T19:31:09",
+		customJSONOpWithID("community", "mod1", unmute)), false); err != nil {
+		t.Fatalf("ProcessBlock double unmute: %v", err)
+	}
+	if n := countNotifs(t, database, models.NotifyTypeError, "post is already not muted"); n != 1 {
+		t.Errorf("'post is already not muted' error notifs = %d, want 1", n)
+	}
+}
+
+// TestCommunitySelfSetRole pins the legacy self-setRole branch
+// (`if self.actor != self.account:` skips the target-role guards): an actor
+// may demote themself to a strictly lower rank without the would-not-change
+// or higher-role checks, but never to their own rank or above.
+func TestCommunitySelfSetRole(t *testing.T) {
+	database, repo, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "owner1", "guest1")
+	communityID := seedCommunity(t, database, "hive-152200", time.Date(2020, 2, 19, 16, 5, 15, 0, time.UTC))
+	owner1 := getAccount(t, database, ctx, "owner1")
+	seedRole(t, database, communityID, owner1.ID, models.RoleOwner)
+
+	bp := NewBlockProcessor(database, repo, &fakeSteemProvider{})
+	process := func(block int64, ts, auth, jsonStr string) {
+		t.Helper()
+		if err := bp.ProcessBlock(ctx, followPluginBlock(block, ts,
+			customJSONOpWithID("community", auth, jsonStr)), false); err != nil {
+			t.Fatalf("ProcessBlock: %v", err)
+		}
+	}
+
+	// Owner demotes self to mod: allowed (own rank strictly above target;
+	// the account-level guards are skipped for self ops).
+	demote := `["setRole",{"community":"hive-152200","account":"owner1","role":"mod"}]`
+	process(43740630, "2020-05-27T19:32:00", "owner1", demote)
+	var role models.Role
+	if err := database.DB.WithContext(ctx).
+		Where("community_id = ? AND account_id = ?", communityID, owner1.ID).First(&role).Error; err != nil {
+		t.Fatalf("role row: %v", err)
+	}
+	if role.RoleID != models.RoleMod {
+		t.Errorf("role_id after self-demote = %d, want %d (mod)", role.RoleID, models.RoleMod)
+	}
+	if n := countNotifs(t, database, models.NotifyTypeSetRole, "mod"); n != 1 {
+		t.Errorf("set_role 'mod' notifs = %d, want 1", n)
+	}
+
+	// Owner tries to restore own rank: rejected (not strictly above own
+	// rank); the self branch does not offer a 'role would not change' pass.
+	restore := `["setRole",{"community":"hive-152200","account":"owner1","role":"owner"}]`
+	process(43740631, "2020-05-27T19:32:03", "owner1", restore)
+	if err := database.DB.WithContext(ctx).
+		Where("community_id = ? AND account_id = ?", communityID, owner1.ID).First(&role).Error; err != nil {
+		t.Fatalf("role row after restore attempt: %v", err)
+	}
+	if role.RoleID != models.RoleMod {
+		t.Errorf("role_id after rejected self-restore = %d, want still mod", role.RoleID)
+	}
+	if n := countNotifs(t, database, models.NotifyTypeError, "cannot promote to or above own rank"); n != 1 {
+		t.Errorf("'cannot promote' error notifs = %d, want 1", n)
+	}
+
+	// A guest cannot even enter the matrix for a self op.
+	guestSelf := `["setRole",{"community":"hive-152200","account":"guest1","role":"member"}]`
+	process(43740632, "2020-05-27T19:32:06", "guest1", guestSelf)
+	if n := countNotifs(t, database, models.NotifyTypeError, "only mods and up can alter roles"); n != 1 {
+		t.Errorf("'only mods and up' error notifs = %d, want 1", n)
+	}
+}
+
+// TestCommunityRuneCountLimits pins the codepoint-based length semantics
+// (Python len()) for user-facing text: 120 CJK notes (360 UTF-8 bytes) are
+// accepted at the 120 limit, 200 runes are rejected, and a 1-CJK-char
+// props title (3 bytes) is still 'too short' while 3 runes pass.
+func TestCommunityRuneCountLimits(t *testing.T) {
+	database, repo, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "mod1", "author1")
+	communityID := seedCommunity(t, database, "hive-152200", time.Date(2020, 2, 19, 16, 5, 15, 0, time.UTC))
+	mod1 := getAccount(t, database, ctx, "mod1")
+	seedRole(t, database, communityID, mod1.ID, models.RoleOwner) // owner: both mute and updateProps
+
+	post := &models.Post{
+		Author:      "author1",
+		Permlink:    "cjk-post",
+		Category:    "hive-152200",
+		CommunityID: sql.NullInt64{Int64: communityID, Valid: true},
+		CreatedAt:   time.Date(2020, 5, 20, 0, 0, 0, 0, time.UTC),
+		Depth:       0,
+		IsValid:     true,
+	}
+	if err := database.DB.WithContext(ctx).Create(post).Error; err != nil {
+		t.Fatalf("seed post: %v", err)
+	}
+
+	bp := NewBlockProcessor(database, repo, &fakeSteemProvider{})
+	process := func(block int64, ts, auth, jsonStr string) {
+		t.Helper()
+		if err := bp.ProcessBlock(ctx, followPluginBlock(block, ts,
+			customJSONOpWithID("community", auth, jsonStr)), false); err != nil {
+			t.Fatalf("ProcessBlock: %v", err)
+		}
+	}
+
+	notes120 := strings.Repeat("规", 120)
+	if len(notes120) != 360 {
+		t.Fatalf("fixture sanity: 120 CJK runes = %d bytes, want 360", len(notes120))
+	}
+	notes200 := strings.Repeat("规", 200)
+
+	// 200-rune notes rejected at the 120 limit.
+	mute200 := `["mutePost",{"community":"hive-152200","account":"author1","permlink":"cjk-post","notes":"` + notes200 + `"}]`
+	process(43740640, "2020-05-27T19:33:00", "mod1", mute200)
+	if n := countNotifs(t, database, models.NotifyTypeError, "exceeds max len"); n != 1 {
+		t.Errorf("'exceeds max len' error notifs = %d, want 1 (200 runes)", n)
+	}
+	var got models.Post
+	if err := database.DB.WithContext(ctx).Where("id = ?", post.ID).First(&got).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if got.IsMuted {
+		t.Error("post muted despite over-length notes (validation must gate the write)")
+	}
+
+	// 120-rune (360-byte) notes accepted.
+	mute120 := `["mutePost",{"community":"hive-152200","account":"author1","permlink":"cjk-post","notes":"` + notes120 + `"}]`
+	process(43740641, "2020-05-27T19:33:03", "mod1", mute120)
+	if err := database.DB.WithContext(ctx).Where("id = ?", post.ID).First(&got).Error; err != nil {
+		t.Fatalf("reload post after mute: %v", err)
+	}
+	if !got.IsMuted {
+		t.Error("post not muted with 120-rune notes, want muted (codepoints, not bytes)")
+	}
+	if n := countNotifs(t, database, models.NotifyTypeMutePost, notes120); n != 1 {
+		t.Errorf("mute_post notifs with 120-rune notes = %d, want 1", n)
+	}
+
+	// 1-CJK-char props title (3 bytes, 1 rune) is too short.
+	titleOne := `["updateProps",{"community":"hive-152200","props":{"title":"汉"}}]`
+	process(43740642, "2020-05-27T19:33:06", "mod1", titleOne)
+	if n := countNotifs(t, database, models.NotifyTypeError, "title too short"); n != 1 {
+		t.Errorf("'title too short' error notifs = %d, want 1 (1 rune)", n)
+	}
+
+	// 3-rune title passes the len >= 3 gate.
+	titleThree := `["updateProps",{"community":"hive-152200","props":{"title":"汉字标"}}]`
+	process(43740643, "2020-05-27T19:33:09", "mod1", titleThree)
+	if c := getCommunity(t, database, "hive-152200"); c.Title != "汉字标" {
+		t.Errorf("title = %q, want the 3-rune CJK title", c.Title)
 	}
 }
