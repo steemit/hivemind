@@ -95,7 +95,7 @@ Configuration is managed via environment variables or config file:
 | `HIVE_DB_CONN_MAX_IDLE_TIME` | Max idle connection time | 10m |
 | `HIVE_DB_STATEMENT_TIMEOUT` | Per-session statement timeout (0 = disabled) | 30s |
 | `HIVE_STEEMD_URL` | Steemd node URL | Required |
-| `HIVE_STEEMD_MAX_RETRIES` | Transport-level RPC retries (0 = SDK default) | 3 |
+| `HIVE_STEEMD_MAX_RETRIES` | Transport-level RPC retries (0 = SDK default; retries cannot be fully disabled) | 3 |
 | `HIVE_STEEMD_RPC_TIMEOUT` | Per-attempt RPC timeout against steemd | 15s |
 | `HIVE_REDIS_URL` | Redis connection | Optional |
 | `HIVE_HTTP_SERVER_PORT` | API server port | 8080 |

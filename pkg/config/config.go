@@ -62,7 +62,8 @@ type SteemConfig struct {
 
 	// MaxRetries bounds transport-level retries per RPC after the first
 	// attempt (steemgosdk api/v2 WithMaxRetry; exponential backoff between
-	// attempts, doubled on 429). 0 selects the SDK default (3).
+	// attempts, doubled on 429). Retries cannot be fully disabled: 0 falls
+	// back to the SDK default (3) rather than disabling retrying.
 	MaxRetries int
 
 	// RPCTimeout bounds each HTTP attempt against steemd (steemgosdk api/v2

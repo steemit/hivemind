@@ -35,9 +35,11 @@ var ErrBlockNotFound = v2api.ErrBlockNotFound
 //     by the caller's sync loop.
 //   - Malformed responses are errors, never empty results: a bad JSON body
 //     fails json decoding inside the SDK and propagates; a null result for
-//     get_block maps to ErrBlockNotFound; null results for calls that steemd
-//     never legitimately answers with null are rejected here. The indexer
-//     must never advance head on the back of an empty/garbage response.
+//     get_block maps to ErrBlockNotFound; null/empty results for calls that
+//     steemd never legitimately answers that way are rejected here
+//     (get_accounts/get_content null, zero-value DGP, response/request
+//     length mismatches). The indexer must never advance head on the back
+//     of an empty/garbage response.
 type Client struct {
 	api    *v2api.API
 	logger *zap.Logger
@@ -153,6 +155,11 @@ func (c *Client) GetAccounts(ctx context.Context, names []string) ([]map[string]
 	if accounts == nil {
 		return nil, fmt.Errorf("failed to get accounts: unexpected null result for %d names", len(names))
 	}
+	// Mirror legacy client.py: steemd answers get_accounts with exactly one
+	// entry per requested name, in order; a length mismatch is malformed.
+	if len(accounts) != len(names) {
+		return nil, fmt.Errorf("malformed accounts response: requested %d names, got %d results", len(names), len(accounts))
+	}
 
 	return accounts, nil
 }
@@ -182,20 +189,30 @@ func (c *Client) GetContent(ctx context.Context, author, permlink string) (map[s
 // [author, permlink] pairs, which real steemd rejects. Real batch semantics
 // (batched request objects + per-item validation) ship with PR#401; this PR
 // only carries the minimal adaptation to the v0.0.31 context-aware SDK.
+//
+// Length guard (PR#400 review): callers index the response by the request's
+// position (cached_post.go updateBatchTuples, jobs.go audit_cache_undelete),
+// so a response whose length differs from the number of requested posts is
+// an explicit error, never a short/long slice that would panic or silently
+// shift entries. An explicitly empty request is not a failure: it returns
+// an empty slice and a nil error.
 func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_content_batch")
 	defer span.End()
 
-	// Build batch request
-	params := make([]interface{}, 0, len(posts))
-	for _, post := range posts {
-		if len(post) >= 2 {
-			params = append(params, []interface{}{post[0], post[1]})
-		}
+	if len(posts) == 0 {
+		return []map[string]interface{}{}, nil
 	}
 
-	if len(params) == 0 {
-		return []map[string]interface{}{}, nil
+	// Build batch request. Malformed tuples are rejected up front instead
+	// of silently dropped: dropping would desynchronize the response from
+	// the caller's request slice.
+	params := make([]interface{}, 0, len(posts))
+	for i, post := range posts {
+		if len(post) < 2 {
+			return nil, fmt.Errorf("invalid post tuple at index %d: want [author, permlink], got %d element(s)", i, len(post))
+		}
+		params = append(params, []interface{}{post[0], post[1]})
 	}
 
 	var contents []map[string]interface{}
@@ -206,11 +223,21 @@ func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[s
 	if contents == nil {
 		return nil, fmt.Errorf("failed to get content batch: unexpected null result for %d posts", len(params))
 	}
+	if len(contents) != len(posts) {
+		return nil, fmt.Errorf("malformed content batch response: got %d results for %d requested posts", len(contents), len(posts))
+	}
 
 	return contents, nil
 }
 
 // GetDynamicGlobalProperties fetches dynamic global properties.
+//
+// The SDK decodes `result:null` and `result:{}` into a zero-value struct
+// WITHOUT an error (json.Unmarshal of "null" is a no-op). A zero-value DGP
+// would make HeadBlock()/LastIrreversible() report 0 with err==nil, and the
+// initial-sync check (sync.go) would then conclude the chain is empty and
+// skip syncing. Mirroring legacy client.py's `assert 'time' in ret`, such
+// responses are rejected as malformed here.
 func (c *Client) GetDynamicGlobalProperties(ctx context.Context) (map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_dynamic_global_properties")
 	defer span.End()
@@ -218,6 +245,13 @@ func (c *Client) GetDynamicGlobalProperties(ctx context.Context) (map[string]int
 	dgp, err := c.api.GetDynamicGlobalProperties(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get dynamic global properties: %w", err)
+	}
+	// Zero-value hazard: an empty time, or head and LIB both 0, only occurs
+	// for null/empty/garbage responses — real chain state always has them.
+	if dgp.Time == "" || (dgp.HeadBlockNumber == 0 && dgp.LastIrreversibleBlockNum == 0) {
+		return nil, fmt.Errorf(
+			"malformed dynamic global properties response: time=%q head_block_number=%d last_irreversible_block_num=%d",
+			dgp.Time, dgp.HeadBlockNumber, dgp.LastIrreversibleBlockNum)
 	}
 
 	// Convert to map for compatibility

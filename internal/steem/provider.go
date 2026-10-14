@@ -17,9 +17,14 @@ import "context"
 // test doubles used by indexer/API tests must mirror it so that behavior
 // verified against fakes matches production:
 //
-//   - A malformed/bad JSON response, a null result where steemd never
-//     legitimately returns null, or an exhausted bounded retry are ALL
-//     errors. A nil/empty result is never returned alongside a nil error.
+//   - On failure paths, a malformed/bad JSON response, a null result where
+//     steemd never legitimately returns null (get_accounts, get_content),
+//     a zero-value dynamic-global-properties payload, a response whose
+//     length does not match the request (get_accounts, get_content batch),
+//     or an exhausted bounded retry are ALL errors — a failed call never
+//     returns a nil/empty result alongside a nil error. Explicitly empty
+//     requests are not failures: GetContentBatch with zero posts returns
+//     an empty slice and a nil error.
 //   - GetBlock for a block beyond the chain head fails with an error wrapping
 //     ErrBlockNotFound (see client.go), not an empty block.
 //   - GetBlocksRange is all-or-nothing: any per-block failure after retries

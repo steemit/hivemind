@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -45,22 +47,26 @@ type recordedRPCCall struct {
 	Params json.RawMessage
 }
 
-// ParamInt returns the i-th positional param coerced to int64. It fails the
-// test when the param is absent or not a number.
-func (c recordedRPCCall) ParamInt(t *testing.T, i int) int64 {
-	t.Helper()
+// ParamInt returns the i-th positional param coerced to int64, and whether
+// the param exists and is a number. It deliberately takes no *testing.T:
+// it is also called from respond closures running on the HTTP handler
+// goroutine, where Fatalf/FailNow would terminate the wrong goroutine
+// (runtime.Goexit, leaving the test hanging). Handlers should answer 500
+// when !ok; parameter assertions belong to the test goroutine after the
+// call, via the recorded requests.
+func (c recordedRPCCall) ParamInt(i int) (int64, bool) {
 	var params []interface{}
 	if err := json.Unmarshal(c.Params, &params); err != nil {
-		t.Fatalf("harness: params of %s are not a positional array: %v", c.Method, err)
+		return 0, false
 	}
 	if i >= len(params) {
-		t.Fatalf("harness: %s has no param %d (params: %s)", c.Method, i, c.Params)
+		return 0, false
 	}
 	num, ok := params[i].(float64)
 	if !ok {
-		t.Fatalf("harness: param %d of %s is not a number: %s", i, c.Method, c.Params)
+		return 0, false
 	}
-	return int64(num)
+	return int64(num), true
 }
 
 // scriptedSteemd is an httptest server impersonating a steemd JSON-RPC
@@ -102,12 +108,7 @@ func (s *scriptedSteemd) handle(w http.ResponseWriter, r *http.Request) {
 		s.t.Logf("harness: unparsable request body: %v", err)
 	}
 
-	s.mu.Lock()
-	call := recordedRPCCall{Method: req.Method, Params: req.Params}
-	seq := len(s.calls)
-	s.calls = append(s.calls, call)
-	resp := s.respond(call, seq)
-	s.mu.Unlock()
+	resp := s.record(recordedRPCCall{Method: req.Method, Params: req.Params})
 
 	if resp.delay > 0 {
 		time.Sleep(resp.delay)
@@ -119,6 +120,21 @@ func (s *scriptedSteemd) handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	fmt.Fprint(w, resp.body)
+}
+
+// record appends the call and consults the script under the record lock.
+// The unlock is deferred (not a plain call after respond): a runtime.Goexit
+// inside respond — e.g. a testing helper calling FailNow on the handler
+// goroutine — would otherwise skip the unlock and deadlock every later
+// request. Deferring inside record (rather than handle) also keeps the lock
+// from being held while the response is delayed/written, so concurrent
+// range fetches still overlap in the harness.
+func (s *scriptedSteemd) record(call recordedRPCCall) rpcScriptResponse {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seq := len(s.calls)
+	s.calls = append(s.calls, call)
+	return s.respond(call, seq)
 }
 
 // URL returns the harness endpoint.
@@ -193,6 +209,11 @@ const blockOneResult = `{
 
 // newTestClient builds a real Client against the harness URL with explicit
 // retry/timeout knobs so tests stay fast and deterministic.
+//
+// Gotcha: maxRetries <= 0 does NOT disable or pin retries — the SDK's
+// WithMaxRetry falls back to its default (3) for n <= 0. Always pass an
+// explicit positive value (1 keeps exhaustion tests fast) unless the SDK
+// default is deliberately what is under test.
 func newTestClient(t *testing.T, url string, maxRetries int) *Client {
 	t.Helper()
 	cfg := &config.SteemConfig{
@@ -307,8 +328,10 @@ func TestContractRateLimitedBacksOffAndRetries(t *testing.T) {
 	if got := s.call(0).Method; got != "condenser_api.get_block" {
 		t.Fatalf("first request method = %q, want condenser_api.get_block", got)
 	}
-	if got := s.call(0).ParamInt(t, 0); got != 1 {
-		t.Fatalf("first request block param = %d, want 1", got)
+	// Parameter assertions run here in the test goroutine (after the fact),
+	// never inside the HTTP handler goroutine.
+	if got, ok := s.call(0).ParamInt(0); !ok || got != 1 {
+		t.Fatalf("first request block param = %d (ok=%v), want 1", got, ok)
 	}
 	// api/v2 doubles the backoff for 429: 100ms base << 0, doubled = 200ms.
 	// Assert a lower bound below that to stay robust to timer granularity.
@@ -347,10 +370,19 @@ func TestContractRateLimitedBacksOffAndRetries(t *testing.T) {
 // receive a partial/empty success it could advance past.
 func TestContractRangePartialFailureNeverSkipsBlocks(t *testing.T) {
 	// Script by request params (range fetches run concurrently): block 2
-	// answers 500 on every attempt, blocks 1 and 3 answer real blocks.
+	// answers 500 on every attempt, blocks 1 and 3 answer real blocks. The
+	// respond closure must not fail the test itself (it runs on a handler
+	// goroutine); on an unusable param it answers 500 so the request can
+	// never masquerade as a good block. Params are asserted afterwards,
+	// below.
 	s := newScriptedSteemd(t, func(call recordedRPCCall, seq int) rpcScriptResponse {
-		if call.Method == "condenser_api.get_block" && call.ParamInt(t, 0) == 2 {
+		if num, ok := call.ParamInt(0); ok && call.Method == "condenser_api.get_block" && num == 2 {
 			return rpcScriptResponse{status: http.StatusInternalServerError, body: `boom`}
+		}
+		if call.Method == "condenser_api.get_block" {
+			if _, ok := call.ParamInt(0); !ok {
+				return rpcScriptResponse{status: http.StatusInternalServerError, body: `harness: missing/unparsable block param`}
+			}
 		}
 		return rpcScriptResponse{body: rpcOK(blockOneResult)}
 	})
@@ -366,6 +398,24 @@ func TestContractRangePartialFailureNeverSkipsBlocks(t *testing.T) {
 	// 3 distinct blocks; block 2 attempted twice (initial + 1 retry).
 	if got := s.callCount(); got != 4 {
 		t.Fatalf("got %d requests, want 4 (blocks 1,3 once; block 2 twice)", got)
+	}
+	// After-the-fact param verification (test goroutine): the four requests
+	// must be exactly blocks 1, 2 (twice), 3 of condenser_api.get_block.
+	nums := make([]int, 0, s.callCount())
+	for i := 0; i < s.callCount(); i++ {
+		call := s.call(i)
+		if call.Method != "condenser_api.get_block" {
+			t.Fatalf("request %d method = %q, want condenser_api.get_block", i, call.Method)
+		}
+		num, ok := call.ParamInt(0)
+		if !ok {
+			t.Fatalf("request %d has no parsable block param (params: %s)", i, call.Params)
+		}
+		nums = append(nums, int(num))
+	}
+	sort.Ints(nums)
+	if !reflect.DeepEqual(nums, []int{1, 2, 2, 3}) {
+		t.Fatalf("requested block numbers = %v, want [1 2 2 3]", nums)
 	}
 }
 
@@ -403,19 +453,151 @@ func TestContractContextCancelAbortsInFlight(t *testing.T) {
 // semantics plus the quirk contract cases land in PR#401, which extends
 // this harness.
 func TestContractGetContentBatchShapeRecordsCurrentBehavior(t *testing.T) {
-	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{body: rpcOK(`[]`)}))
-	c := newTestClient(t, s.URL(), 0)
+	// One result per requested post: since the PR#400-review length guard,
+	// a short/empty response is an error, so the shape-recording script must
+	// answer with a length-matching array.
+	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
+		body: rpcOK(`[{"author":"alice"},{"author":"bob"}]`),
+	}))
+	// Explicit 1, not 0: WithMaxRetry(0) would silently fall back to the
+	// SDK default (3) — see newTestClient.
+	c := newTestClient(t, s.URL(), 1)
 
-	_, err := c.GetContentBatch(context.Background(), [][]string{
+	posts, err := c.GetContentBatch(context.Background(), [][]string{
 		{"alice", "p1"}, {"bob", "p2"},
 	})
 	if err != nil {
 		t.Fatalf("GetContentBatch failed against permissive harness: %v", err)
+	}
+	if len(posts) != 2 {
+		t.Fatalf("got %d posts, want 2", len(posts))
 	}
 	if got := s.callCount(); got != 1 {
 		t.Fatalf("got %d requests, want 1 (single non-batch request until PR#401)", got)
 	}
 	if got := s.call(0).Method; got != "condenser_api.get_content" {
 		t.Fatalf("method = %q, want condenser_api.get_content", got)
+	}
+}
+
+// TestContractNullAndEmptyDGPAreErrors pins the PR#400-review case: the SDK
+// decodes `result:null` and `result:{}` for get_dynamic_global_properties
+// into a zero-value struct with a NIL error (json.Unmarshal of "null" is a
+// no-op). The wrapper must reject such responses — a zero-value DGP would
+// make HeadBlock()/LastIrreversible() report 0 with err==nil, and the
+// initial-sync check (sync.go) would conclude the chain is empty and skip
+// syncing. Mirrors legacy client.py's `assert 'time' in ret`.
+func TestContractNullAndEmptyDGPAreErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result string
+	}{
+		{name: "null_result", result: `null`},
+		{name: "empty_object_result", result: `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newScriptedSteemd(t, seqScript(rpcScriptResponse{body: rpcOK(tc.result)}))
+			c := newTestClient(t, s.URL(), 1)
+
+			props, err := c.GetDynamicGlobalProperties(context.Background())
+			if err == nil {
+				t.Fatal("GetDynamicGlobalProperties succeeded on a null/empty result; want malformed-response error")
+			}
+			if props != nil {
+				t.Fatalf("GetDynamicGlobalProperties returned properties alongside the error; want nil, got %v", props)
+			}
+			// The sync loop drives its bounds through these two helpers;
+			// both must error on the same zero-value hazard instead of
+			// reporting 0.
+			if _, err := c.HeadBlock(context.Background()); err == nil {
+				t.Fatal("HeadBlock succeeded on a null/empty DGP result; want error")
+			}
+			if _, err := c.LastIrreversible(context.Background()); err == nil {
+				t.Fatal("LastIrreversible succeeded on a null/empty DGP result; want error")
+			}
+			// A 200 with a well-formed body is not retried: exactly one
+			// request per helper call must have hit the harness.
+			if got := s.callCount(); got != 3 {
+				t.Fatalf("got %d requests, want 3 (one per DGP-derived helper, no retries)", got)
+			}
+		})
+	}
+}
+
+// TestContractRateLimitExhaustionIsError pins the failure twin of the
+// recovery case (TestContractRateLimitedBacksOffAndRetries): when the node
+// keeps answering 429 until the bounded transport retries are exhausted,
+// the wrapper must surface an error — never a zero-value/empty block the
+// indexer could mistake for chain state — after exactly maxRetries+1
+// attempts.
+func TestContractRateLimitExhaustionIsError(t *testing.T) {
+	s := newScriptedSteemd(t, seqScript(
+		rpcScriptResponse{status: http.StatusTooManyRequests, body: `{"error":"rate limited"}`},
+	))
+	c := newTestClient(t, s.URL(), 1) // initial attempt + 1 retry
+
+	block, err := c.GetBlock(context.Background(), 1)
+	if err == nil {
+		t.Fatal("GetBlock succeeded after retries were exhausted; want error")
+	}
+	if block != nil {
+		t.Fatalf("GetBlock returned a block map alongside the error; want nil, got %v", block)
+	}
+	if got := s.callCount(); got != 2 {
+		t.Fatalf("got %d requests, want 2 (initial attempt + 1 retry)", got)
+	}
+}
+
+// TestContractContentBatchLengthMismatchIsError pins the PR#400-review
+// length guard: callers index the batch response by request position
+// (cached_post.go updateBatchTuples, jobs.go audit_cache_undelete do
+// posts[i]), so a response whose length differs from the number of
+// requested posts must be an explicit error — never a short/long slice
+// that would panic with index-out-of-range or silently shift entries.
+func TestContractContentBatchLengthMismatchIsError(t *testing.T) {
+	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
+		body: rpcOK(`[{"author":"alice"}]`), // 1 result for 2 requested posts
+	}))
+	c := newTestClient(t, s.URL(), 1)
+
+	posts, err := c.GetContentBatch(context.Background(), [][]string{
+		{"alice", "p1"}, {"bob", "p2"},
+	})
+	if err == nil {
+		t.Fatal("GetContentBatch succeeded on a length-mismatched response; want error")
+	}
+	if posts != nil {
+		t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
+	}
+
+	t.Run("malformed_tuple_rejected_before_request", func(t *testing.T) {
+		s := newScriptedSteemd(t, seqScript(rpcScriptResponse{body: rpcOK(`[]`)}))
+		c := newTestClient(t, s.URL(), 1)
+
+		if _, err := c.GetContentBatch(context.Background(), [][]string{{"authorless"}}); err == nil {
+			t.Fatal("GetContentBatch accepted a malformed [author] tuple; want input validation error")
+		}
+		if got := s.callCount(); got != 0 {
+			t.Fatalf("malformed tuples must fail before any request is sent; got %d requests", got)
+		}
+	})
+}
+
+// TestContractAccountsLengthMismatchIsError mirrors legacy client.py's
+// `assert len(requested) == len(response)`: steemd answers get_accounts
+// with exactly one entry per requested name, in order; anything else is a
+// malformed response and must not become a short/shifted success.
+func TestContractAccountsLengthMismatchIsError(t *testing.T) {
+	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
+		body: rpcOK(`[{"name":"alice"}]`), // 1 result for 2 requested names
+	}))
+	c := newTestClient(t, s.URL(), 1)
+
+	accts, err := c.GetAccounts(context.Background(), []string{"alice", "bob"})
+	if err == nil {
+		t.Fatal("GetAccounts succeeded on a length-mismatched response; want error")
+	}
+	if accts != nil {
+		t.Fatalf("GetAccounts returned accounts alongside the error; want nil, got %d", len(accts))
 	}
 }
