@@ -251,15 +251,21 @@ func (fi *FollowIndexer) PendingDeltasLen() int {
 
 // ForceRecount recomputes followers/following for every account from
 // hive_follows (legacy force_recount; run once after initial sync).
+// Legacy issues the statements on a single session; here they run inside one
+// transaction so the pool cannot spread the TEMP tables' lifecycle across
+// different connections (a temp table only exists in the session that
+// created it). ON COMMIT DROP also drops the tables at commit, so a later
+// call reusing the same pooled connection repopulates them instead of
+// reading stale rows.
 func (fi *FollowIndexer) ForceRecount(ctx context.Context) error {
 	gdb := fi.repo.DB()
 	statements := []string{
-		`CREATE TEMP TABLE IF NOT EXISTS following_counts AS (
+		`CREATE TEMP TABLE following_counts ON COMMIT DROP AS (
 			SELECT id account_id, COUNT(state) num
 			  FROM hive_accounts
 			  LEFT JOIN hive_follows hf ON id = hf.follower AND state IN (1,3)
 			 GROUP BY id)`,
-		`CREATE TEMP TABLE IF NOT EXISTS follower_counts AS (
+		`CREATE TEMP TABLE follower_counts ON COMMIT DROP AS (
 			SELECT id account_id, COUNT(state) num
 			  FROM hive_accounts
 			  LEFT JOIN hive_follows hf ON id = hf.following AND state IN (1,3)
@@ -269,10 +275,12 @@ func (fi *FollowIndexer) ForceRecount(ctx context.Context) error {
 		`UPDATE hive_accounts SET following = num FROM following_counts
 		  WHERE id = account_id AND following != num`,
 	}
-	for _, sql := range statements {
-		if err := gdb.WithContext(ctx).Exec(sql).Error; err != nil {
-			return fmt.Errorf("force recount: %w", err)
+	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, stmt := range statements {
+			if err := tx.Exec(stmt).Error; err != nil {
+				return fmt.Errorf("force recount: %w", err)
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }

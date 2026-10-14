@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,22 @@ import (
 	"github.com/steemit/hivemind/internal/models"
 	"github.com/steemit/hivemind/pkg/config"
 )
+
+// prevTestDB tracks the pool handed out by the most recent withMigratedDB
+// call. The next call closes it BEFORE dropping the schema so DROP SCHEMA
+// cannot race leftover connections of a finished test (idle transactions,
+// prepared statements); with -count>1 the same process re-enters this helper
+// repeatedly and each returned cleanup must also have run. Tests still close
+// their own pool via the returned cleanup -- this is the ordering guarantee
+// plus a safety net for future tests that forget to defer it.
+//
+// Process-wide singletons holding a *gorm.DB are handled at their own site:
+// sharedRankCache (account_rank.go) rebinds when handed a different DB
+// instance; the PostNotifs hook is per-CachedPost-instance, not global.
+var prevTestDB struct {
+	sync.Mutex
+	db *db.DB
+}
 
 // withMigratedDB ensures the schema is present (idempotent) and returns a
 // *db.DB + repository + cleanup. Used by DB-backed indexer integration tests.
@@ -24,6 +41,13 @@ func withMigratedDB(t *testing.T) (*db.DB, *db.Repository, func()) {
 	if url == "" {
 		t.Skip("HIVE_TEST_DATABASE_URL not set; skipping DB-backed indexer test")
 	}
+	prevTestDB.Lock()
+	if prevTestDB.db != nil {
+		_ = prevTestDB.db.Close()
+		prevTestDB.db = nil
+	}
+	prevTestDB.Unlock()
+
 	raw, err := sql.Open("pgx", url)
 	if err != nil {
 		t.Fatalf("open raw db: %v", err)
@@ -49,8 +73,18 @@ func withMigratedDB(t *testing.T) (*db.DB, *db.Repository, func()) {
 	if err != nil {
 		t.Fatalf("db.New: %v", err)
 	}
+	prevTestDB.Lock()
+	prevTestDB.db = database
+	prevTestDB.Unlock()
 	repo := db.NewRepository(database.DB)
-	return database, repo, func() { database.Close() }
+	return database, repo, func() {
+		_ = database.Close()
+		prevTestDB.Lock()
+		if prevTestDB.db == database {
+			prevTestDB.db = nil
+		}
+		prevTestDB.Unlock()
+	}
 }
 
 // TestExtractAccountName exercises the account-name extraction branches of

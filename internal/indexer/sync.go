@@ -131,7 +131,7 @@ func (s *Sync) initialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepos
 			zap.Int64("from", currentHead+1),
 			zap.Int64("to", irreversible))
 
-		if err := s.syncBlocks(ctx, currentHead+1, irreversible); err != nil {
+		if err := s.syncBlocks(ctx, currentHead+1, irreversible, true); err != nil {
 			return fmt.Errorf("failed to sync blocks: %w", err)
 		}
 	}
@@ -204,7 +204,7 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 					zap.Int64("irreversible", irreversible),
 					zap.Int64("blocks_to_sync", irreversible-currentHead))
 
-				if err := s.syncBlocks(ctx, currentHead+1, irreversible); err != nil {
+				if err := s.syncBlocks(ctx, currentHead+1, irreversible, false); err != nil {
 					s.logger.Error("Failed to sync blocks", zap.Error(err))
 					// Retry after a short delay
 					s.wait(ctx, syncInterval)
@@ -227,12 +227,18 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 	}
 }
 
-// syncBlocks syncs a range of blocks
-func (s *Sync) syncBlocks(ctx context.Context, from, to int64) error {
+// syncBlocks syncs a range of blocks. isInitialSync must reflect the phase
+// the indexer is in: historical catch-up during startup passes true (suppresses
+// follow count deltas, follow notifications and account dirty-marking, exactly
+// as legacy gates on DbState.is_initial_sync()), the steady-state
+// syncIrreversible loop passes false. Persisting the phase across restarts is
+// tracked separately (#405); here the flag follows the Run() code path.
+func (s *Sync) syncBlocks(ctx context.Context, from, to int64, isInitialSync bool) error {
 	s.logger.Info("Syncing blocks",
 		zap.Int64("from", from),
 		zap.Int64("to", to),
-		zap.Int64("count", to-from+1))
+		zap.Int64("count", to-from+1),
+		zap.Bool("initial_sync", isInitialSync))
 
 	// Fetch blocks in batches
 	batchSize := int64(s.config.Indexer.MaxBatch)
@@ -250,7 +256,7 @@ func (s *Sync) syncBlocks(ctx context.Context, from, to int64) error {
 
 		// Process each block
 		for _, block := range blocks {
-			if err := s.blockProcessor.ProcessBlock(ctx, block, false); err != nil {
+			if err := s.blockProcessor.ProcessBlock(ctx, block, isInitialSync); err != nil {
 				return fmt.Errorf("failed to process block: %w", err)
 			}
 		}

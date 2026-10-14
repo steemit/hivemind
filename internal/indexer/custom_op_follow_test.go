@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
+	"github.com/steemit/hivemind/pkg/config"
 )
 
 // Real follow-plugin custom_json payloads captured from the Steem chain via
@@ -657,8 +659,12 @@ func TestFollowBareObjectCompat(t *testing.T) {
 	seedAccounts(t, database, "alice", "bob", "carol", "dave")
 	bp := NewBlockProcessor(database, repo, &fakeSteemProvider{})
 
+	// Timestamps are synthetic but chain-plausible: interpolating from real
+	// anchors (genesis block 1 = 2016-03-24T16:05:00, real block 14000000 =
+	// 2017-07-25T18:58:15 -> ~3.0 s/block) puts block 6,000,000 around
+	// 2016-10-18 -- NOT 2017-01 as an earlier revision of this fixture had.
 	pre := `{"follower":"alice","following":"bob","what":["blog"]}`
-	if err := bp.ProcessBlock(ctx, followPluginBlock(5999999, "2017-01-14T02:47:00",
+	if err := bp.ProcessBlock(ctx, followPluginBlock(5999999, "2016-10-18T10:19:57",
 		customJSONOp("alice", pre)), false); err != nil {
 		t.Fatalf("ProcessBlock pre-6M: %v", err)
 	}
@@ -669,7 +675,7 @@ func TestFollowBareObjectCompat(t *testing.T) {
 	}
 
 	post := `{"follower":"carol","following":"dave","what":["blog"]}`
-	if err := bp.ProcessBlock(ctx, followPluginBlock(6000000, "2017-01-14T02:47:21",
+	if err := bp.ProcessBlock(ctx, followPluginBlock(6000000, "2016-10-18T10:20:00",
 		customJSONOp("carol", post)), false); err != nil {
 		t.Fatalf("ProcessBlock post-6M: %v", err)
 	}
@@ -734,4 +740,173 @@ func TestReblogArrayEnvelopeGolden(t *testing.T) {
 	if reblogs != 0 {
 		t.Errorf("hive_reblogs rows after delete = %d, want 0", reblogs)
 	}
+}
+
+// TestProcessBlockInitialSyncNotifGate pins the isInitialSync wiring at the
+// ProcessBlock level (PR#401 review P1-1): a follow 0->1 transition processed
+// as part of INITIAL SYNC must NOT write a hive_notifs row nor queue count
+// deltas (legacy follow.py gates on `not DbState.is_initial_sync()`), while
+// the same transition in live mode must notify. Legacy initial sync never
+// wrote follow notifications; before the sync.go wiring fix the gate never
+// fired in production because ProcessBlock was hardcoded to isInitialSync
+// false.
+func TestProcessBlockInitialSyncNotifGate(t *testing.T) {
+	database, repo, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "alice", "bob", "carol", "dave")
+	bp := NewBlockProcessor(database, repo, &fakeSteemProvider{})
+
+	countFollowNotifs := func() int64 {
+		var n int64
+		database.DB.WithContext(ctx).Table("hive_notifs").
+			Where("type_id = ?", models.NotifyTypeFollow).Count(&n)
+		return n
+	}
+
+	initial := `["follow",{"follower":"alice","following":"bob","what":["blog"]}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(14000000, "2017-07-25T18:58:15",
+		customJSONOp("alice", initial)), true); err != nil {
+		t.Fatalf("ProcessBlock initial-sync: %v", err)
+	}
+	alice := getAccount(t, database, ctx, "alice")
+	bob := getAccount(t, database, ctx, "bob")
+	if row := getFollowRow(t, database, ctx, alice.ID, bob.ID); row == nil || row.State != models.FollowStateBlog {
+		t.Fatalf("initial-sync follow row = %+v, want state 1 (rows ARE written during initial sync)", row)
+	}
+	if n := countFollowNotifs(); n != 0 {
+		t.Errorf("follow notifs after initial-sync block = %d, want 0 (initial sync never notifies)", n)
+	}
+	if d := bp.Follows().PendingDeltasLen(); d != 0 {
+		t.Errorf("pending deltas after initial-sync block = %d, want 0 (counts come from ForceRecount)", d)
+	}
+
+	live := `["follow",{"follower":"carol","following":"dave","what":["blog"]}]`
+	if err := bp.ProcessBlock(ctx, followPluginBlock(14000001, "2017-07-25T18:58:18",
+		customJSONOp("carol", live)), false); err != nil {
+		t.Fatalf("ProcessBlock live: %v", err)
+	}
+	if n := countFollowNotifs(); n != 1 {
+		t.Errorf("follow notifs after live block = %d, want 1 (0->1 transition notifies)", n)
+	}
+	if d := bp.Follows().PendingDeltasLen(); d != 2 {
+		t.Errorf("pending deltas after live block = %d, want 2 (follower+following)", d)
+	}
+}
+
+// TestSyncBlocksInitialSyncWiring pins the sync.go wiring itself (PR#401
+// review P1-1): syncBlocks must forward its isInitialSync argument into
+// ProcessBlock. It previously hardcoded false, which would have made the
+// follow_indexer gate dead code in production -- every historical follow
+// 0->1 transition during initial sync would emit a hive_notifs row (legacy
+// initial sync never writes them), polluting the 20M-row comparison and
+// bloating the table.
+func TestSyncBlocksInitialSyncWiring(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "alice", "bob", "carol", "dave")
+
+	blockInitial := followPluginBlock(14000000, "2017-07-25T18:58:15",
+		customJSONOp("alice", `["follow",{"follower":"alice","following":"bob","what":["blog"]}]`))
+	blockLive := followPluginBlock(14000001, "2017-07-25T18:58:18",
+		customJSONOp("carol", `["follow",{"follower":"carol","following":"dave","what":["blog"]}]`))
+
+	provider := &fakeSteemProvider{getBlocksRange: func(_ context.Context, from, _ int64) ([]map[string]interface{}, error) {
+		if from == 14000000 {
+			return []map[string]interface{}{blockInitial}, nil
+		}
+		return []map[string]interface{}{blockLive}, nil
+	}}
+	cfg := &config.Config{Indexer: config.IndexerConfig{MaxBatch: 50}}
+	s, err := NewSync(cfg, database, provider)
+	if err != nil {
+		t.Fatalf("NewSync: %v", err)
+	}
+
+	// initialSync() calls syncBlocks(..., true).
+	if err := s.syncBlocks(ctx, 14000000, 14000000, true); err != nil {
+		t.Fatalf("syncBlocks initial: %v", err)
+	}
+	var notifs int64
+	database.DB.WithContext(ctx).Table("hive_notifs").Count(&notifs)
+	if notifs != 0 {
+		t.Fatalf("notifs after initial-sync syncBlocks = %d, want 0", notifs)
+	}
+
+	// syncIrreversible's steady-state loop calls syncBlocks(..., false).
+	if err := s.syncBlocks(ctx, 14000001, 14000001, false); err != nil {
+		t.Fatalf("syncBlocks live: %v", err)
+	}
+	database.DB.WithContext(ctx).Table("hive_notifs").Count(&notifs)
+	if notifs != 1 {
+		t.Fatalf("notifs after live syncBlocks = %d, want 1", notifs)
+	}
+}
+
+// TestFollowSameBlockDuplicate pins the same-block idempotency: two identical
+// follow ops in ONE block collapse to a single hive_follows row, one count
+// delta and one notification, because the second op reads the row the first
+// op wrote within the same block transaction (read-your-own-writes
+// short-circuit).
+func TestFollowSameBlockDuplicate(t *testing.T) {
+	database, repo, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	seedAccounts(t, database, "carelesstrader", "jesta")
+	bp := NewBlockProcessor(database, repo, &fakeSteemProvider{})
+
+	if err := bp.ProcessBlock(ctx, followPluginBlock(14000000, "2017-07-25T18:58:15",
+		customJSONOp("carelesstrader", goldenFollowBlogJSON),
+		customJSONOp("carelesstrader", goldenFollowBlogJSON)), false); err != nil {
+		t.Fatalf("ProcessBlock: %v", err)
+	}
+
+	var rows int64
+	database.DB.WithContext(ctx).Table("hive_follows").Count(&rows)
+	if rows != 1 {
+		t.Errorf("hive_follows rows = %d, want 1 (same-block duplicate collapses)", rows)
+	}
+	if d := bp.Follows().PendingDeltasLen(); d != 2 {
+		t.Errorf("pending deltas = %d, want 2 (single follow delta pair)", d)
+	}
+	if err := bp.Follows().Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	follower := getAccount(t, database, ctx, "carelesstrader")
+	following := getAccount(t, database, ctx, "jesta")
+	if follower.Following != 1 || following.Followers != 1 {
+		t.Errorf("counts = following %d / followers %d, want 1/1 (counted once)",
+			follower.Following, following.Followers)
+	}
+	var notifs int64
+	database.DB.WithContext(ctx).Table("hive_notifs").
+		Where("type_id = ?", models.NotifyTypeFollow).Count(&notifs)
+	if notifs != 1 {
+		t.Errorf("follow notifs = %d, want 1 (0->1 notified once)", notifs)
+	}
+}
+
+// TestNewCustomOpProcessorNilFollowIndexer pins the fail-fast contract: a nil
+// followIndexer must panic at construction (English message) rather than let
+// a nil instance through and fail per-op, or worse, be papered over with a
+// privately-built instance whose deltas would never flush (audit P0-4).
+func TestNewCustomOpProcessorNilFollowIndexer(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for nil followIndexer, got none")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("panic value = %v (%T), want string", r, r)
+		}
+		if !strings.Contains(msg, "followIndexer") {
+			t.Errorf("panic message %q does not mention followIndexer", msg)
+		}
+	}()
+	NewCustomOpProcessor(db.NewRepository(nil), nil, testLogger())
 }

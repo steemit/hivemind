@@ -128,9 +128,18 @@ func TestFollowDeltaFlush(t *testing.T) {
 	tx.Create(&models.Account{Name: "b", CreatedAt: time.Unix(1458845200, 0)})
 	tx.Commit()
 
+	// GetByName returns (nil, nil) when the row is absent; dereferencing a
+	// nil result would panic the whole test binary instead of failing this
+	// test (schema-reset races surfaced exactly that).
 	accountRepo := db.NewAccountRepository(repo)
-	a, _ := accountRepo.GetByName(ctx, "a")
-	b, _ := accountRepo.GetByName(ctx, "b")
+	a, err := accountRepo.GetByName(ctx, "a")
+	if err != nil || a == nil {
+		t.Fatalf("account a lookup: acc=%v err=%v", a, err)
+	}
+	b, err := accountRepo.GetByName(ctx, "b")
+	if err != nil || b == nil {
+		t.Fatalf("account b lookup: acc=%v err=%v", b, err)
+	}
 
 	fi := NewFollowIndexer(repo, testLogger())
 
@@ -174,9 +183,18 @@ func TestFollowForceRecount(t *testing.T) {
 	tx.Commit()
 
 	accountRepo := db.NewAccountRepository(repo)
-	a, _ := accountRepo.GetByName(ctx, "a")
-	b, _ := accountRepo.GetByName(ctx, "b")
-	c, _ := accountRepo.GetByName(ctx, "c")
+	a, err := accountRepo.GetByName(ctx, "a")
+	if err != nil || a == nil {
+		t.Fatalf("account a lookup: acc=%v err=%v", a, err)
+	}
+	b, err := accountRepo.GetByName(ctx, "b")
+	if err != nil || b == nil {
+		t.Fatalf("account b lookup: acc=%v err=%v", b, err)
+	}
+	c, err := accountRepo.GetByName(ctx, "c")
+	if err != nil || c == nil {
+		t.Fatalf("account c lookup: acc=%v err=%v", c, err)
+	}
 
 	// Seed follows: a→b, a→c (state 1), b→a (state 3 = blog+ignore).
 	now := time.Now().UTC()
@@ -215,8 +233,14 @@ func TestProcessDelete_FeedEviction(t *testing.T) {
 	tx.Create(&models.Account{Name: "reblogger", CreatedAt: time.Unix(1458845200, 0)})
 	tx.Commit()
 	accountRepo := db.NewAccountRepository(repo)
-	author, _ := accountRepo.GetByName(ctx, "author")
-	reblogger, _ := accountRepo.GetByName(ctx, "reblogger")
+	author, err := accountRepo.GetByName(ctx, "author")
+	if err != nil || author == nil {
+		t.Fatalf("author lookup: acc=%v err=%v", author, err)
+	}
+	reblogger, err := accountRepo.GetByName(ctx, "reblogger")
+	if err != nil || reblogger == nil {
+		t.Fatalf("reblogger lookup: acc=%v err=%v", reblogger, err)
+	}
 
 	post := &models.Post{Author: "author", Permlink: "p1", Category: "life",
 		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Depth: 0, IsValid: true}
