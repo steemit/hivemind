@@ -91,9 +91,13 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start sync in goroutine
+	// Run returns when done (clean exit, TEST_MAX_BLOCK stop) or on error.
+	// syncDone closes in ALL cases so the shutdown path below can wait for
+	// the in-flight work to settle.
+	syncDone := make(chan struct{})
 	syncErr := make(chan error, 1)
 	go func() {
+		defer close(syncDone)
 		logger.Info("Starting indexer sync...")
 		if err := syncManager.Run(ctx); err != nil {
 			syncErr <- err
@@ -108,8 +112,26 @@ func main() {
 
 	select {
 	case <-quit:
-		logger.Info("Shutting down indexer...")
+		// Graceful shutdown (§2.9): cancel the context, then WAIT for Run
+		// to return before the deferred teardown (telemetry, DB pool) runs.
+		// Run's cancellation boundary sits between block batches: the
+		// in-flight batch completes -- its block transactions commit and
+		// the dirty queues flush (post cache, follow deltas, accounts) --
+		// so no queued work is lost and block/delta state stays consistent.
+		// Closing the DB pool before Run returns would abort exactly those
+		// final transactions.
+		logger.Info("Shutdown signal received; waiting for in-flight block batch to complete...")
 		cancel()
+		<-syncDone
+		select {
+		case err := <-syncErr:
+			// A real error during the final batch (context cancellation is
+			// mapped to nil inside Run). Not Fatal: Fatal would skip the
+			// deferred DB/telemetry teardown, and the committed prefix is
+			// resumable -- the error is recorded for the operator.
+			logger.Error("Indexer sync returned an error during shutdown", zap.Error(err))
+		default:
+		}
 	case err := <-syncErr:
 		logger.Fatal("Indexer sync failed", zap.Error(err))
 	}

@@ -116,6 +116,13 @@ type IndexerConfig struct {
 	// (audit_cache_missing/deleted/undelete). 0 disables the scheduler;
 	// the jobs remain available for manual invocation.
 	JobsInterval int
+
+	// CacheSyncCatchupBlocks is the CacheSync gate (§2.7): while the
+	// indexer trails the chain's last irreversible block by more than this
+	// many blocks (historical catch-up), the hive_posts_cache_temp 90-day
+	// prune pauses; at or below it (live), pruning resumes. Legacy only
+	// runs CacheSync from live mode; 100 mirrors the legacy stream max_gap.
+	CacheSyncCatchupBlocks int
 }
 
 // LoggingConfig holds logging configuration
@@ -189,16 +196,17 @@ func Load() (*Config, error) {
 			IdleTimeout:  getDuration("http_idle_timeout", 120*time.Second),
 		},
 		Indexer: IndexerConfig{
-			TrailBlocks:          getInt("trail_blocks", 2),
-			MaxBatch:             getInt("max_batch", 50),
-			MaxWorkers:           getInt("max_workers", 4),
-			SyncInterval:         getInt("sync_interval", 3),
-			SyncToS3:             getBool("sync_to_s3", false),
-			ForceFollowRecount:   getBool("force_follow_recount", false),
-			TestMaxBlock:         getInt("test_max_block", 0),
-			TestDisableSync:      getBool("test_disable_sync", false),
-			RecommendCommunities: getString("recommend_communities", "hive-108451,hive-172186,hive-187187"),
-			JobsInterval:         getInt("jobs_interval", 0),
+			TrailBlocks:            getInt("trail_blocks", 2),
+			MaxBatch:               getInt("max_batch", 50),
+			MaxWorkers:             getInt("max_workers", 4),
+			SyncInterval:           getInt("sync_interval", 3),
+			SyncToS3:               getBool("sync_to_s3", false),
+			ForceFollowRecount:     getBool("force_follow_recount", false),
+			TestMaxBlock:           getInt("test_max_block", 0),
+			TestDisableSync:        getBool("test_disable_sync", false),
+			RecommendCommunities:   getString("recommend_communities", "hive-108451,hive-172186,hive-187187"),
+			JobsInterval:           getInt("jobs_interval", 0),
+			CacheSyncCatchupBlocks: getInt("cache_sync_catchup_blocks", 100),
 		},
 		Logging: LoggingConfig{
 			Level:        getString("log_level", "INFO"),
@@ -246,6 +254,7 @@ func setDefaults() {
 	viper.SetDefault("log_scalyr_format", true)
 	viper.SetDefault("trail_blocks", 2)
 	viper.SetDefault("jobs_interval", 0)
+	viper.SetDefault("cache_sync_catchup_blocks", 100)
 	viper.SetDefault("max_batch", 50)
 	viper.SetDefault("max_workers", 4)
 	viper.SetDefault("telemetry_enabled", true)
@@ -345,6 +354,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Indexer.TrailBlocks < 0 || c.Indexer.TrailBlocks > 100 {
 		return fmt.Errorf("trail_blocks must be between 0 and 100")
+	}
+	if c.Indexer.CacheSyncCatchupBlocks < 0 {
+		return fmt.Errorf("cache_sync_catchup_blocks must not be negative")
 	}
 	// Pool sizing sanity checks. MaxOpenConns=0 means "unlimited" in
 	// database/sql, which defeats the purpose of pool protection, so reject it.

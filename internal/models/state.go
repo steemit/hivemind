@@ -13,6 +13,13 @@ type State struct {
 	USDPerSteem   float64        `gorm:"type:decimal(8,3);not null;column:usd_per_steem"`
 	SBDPerSteem   float64        `gorm:"type:decimal(8,3);not null;column:sbd_per_steem"`
 	DGPO          sql.NullString `gorm:"type:text;not null;column:dgpo"`
+
+	// Initial-sync semantics flags (migration 0003, planned PR#405).
+	// Nullable: NULL = never written by the Go indexer (legacy-provisioned
+	// database or fresh after the migration); startup then falls back to the
+	// legacy feed_cache-emptiness derivation and materializes a value.
+	IsInitialSync sql.NullBool `gorm:"column:is_initial_sync"`
+	RecountDone   sql.NullBool `gorm:"column:recount_done"`
 }
 
 // TableName specifies the table name for State

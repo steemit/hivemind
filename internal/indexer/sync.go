@@ -2,6 +2,8 @@ package indexer
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,6 +22,8 @@ type Sync struct {
 	db             *db.DB
 	steem          steem.Provider
 	blockProcessor *BlockProcessor
+	stateRepo      *db.StateRepository
+	cacheSync      *CacheSync
 	logger         *zap.Logger
 }
 
@@ -35,6 +39,7 @@ func NewSync(cfg *config.Config, database *db.DB, steemClient steem.Provider) (*
 		db:             database,
 		steem:          steemClient,
 		blockProcessor: blockProcessor,
+		stateRepo:      db.NewStateRepository(repo),
 		logger:         logging.GetLogger().With(zap.String("component", "indexer")),
 	}, nil
 }
@@ -43,25 +48,56 @@ func NewSync(cfg *config.Config, database *db.DB, steemClient steem.Provider) (*
 func (s *Sync) Run(ctx context.Context) error {
 	s.logger.Info("Starting indexer sync")
 
-	// Check if initial sync is needed
-	feedCacheRepo := db.NewFeedCacheRepository(s.blockProcessor.repo)
-	isInitialSync, err := s.checkInitialSync(ctx, feedCacheRepo)
+	// Determine the sync phase from the persisted hive_state markers
+	// (falling back to the legacy feed_cache derivation on databases that
+	// predate them), materializing the derived value so the flag is
+	// authoritative from this boot on.
+	flags, err := s.resolveInitialSyncState(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to check initial sync status: %w", err)
 	}
 
-	if isInitialSync {
+	if flags.IsInitialSync.Bool {
 		s.logger.Info("Initial sync detected, starting initial sync process")
-		if err := s.initialSync(ctx, feedCacheRepo); err != nil {
+		if err := runPhase(s.initialSync(ctx, flags)); err != nil {
 			return fmt.Errorf("initial sync failed: %w", err)
+		}
+		if s.testMaxBlock() > 0 {
+			// TEST_MAX_BLOCK stop point (legacy sync.py:86/154): the tail
+			// maintenance has completed, but the persisted initial-sync
+			// flag deliberately stays TRUE -- a subsequent continuation
+			// run (e.g. 20M -> 30M) must keep fast-sync semantics instead
+			// of dropping into live-mode processing mid-history.
+			head := s.headBlockNum(ctx)
+			s.logger.Info("TEST_MAX_BLOCK stop point reached; exiting cleanly (is_initial_sync stays true)",
+				zap.Int64("head_block", head),
+				zap.Int64("test_max_block", s.testMaxBlock()))
+			return nil
 		}
 		s.logger.Info("Initial sync completed")
 	} else {
-		s.logger.Info("Resuming normal sync")
+		s.logger.Info("Database already initialized; running light startup recovery")
+		if err := runPhase(s.recoverFromRestart(ctx, flags)); err != nil {
+			return fmt.Errorf("startup recovery failed: %w", err)
+		}
+		if s.testMaxBlock() > 0 {
+			// Legacy parity (sync.py:86-88): with test_max_block set, an
+			// already-initialized database catches up to the cap in normal
+			// semantics and then returns instead of entering the runloop.
+			if err := s.syncToCapAndExit(ctx); err != nil {
+				return err
+			}
+			return nil
+		}
 	}
 
 	// Prune hive_posts_cache_temp outside the 90-day hot window (60s tick).
-	go NewCacheSync(s.db.DB).Run(ctx)
+	// The pruner is gated: while the indexer is catching up farther than
+	// cache_sync_catchup_blocks behind the chain head it pauses (legacy only
+	// runs CacheSync from live mode, sync.py:236-237).
+	s.cacheSync = NewCacheSync(s.db.DB)
+	s.cacheSync.SetCatchupThreshold(s.catchupGateBlocks())
+	go s.cacheSync.Run(ctx)
 
 	// Optional periodic cache-consistency audits (0 = disabled; legacy runs
 	// these manually).
@@ -74,7 +110,28 @@ func (s *Sync) Run(ctx context.Context) error {
 	// This is simpler and more reliable
 
 	// Start sync loop
-	return s.syncIrreversible(ctx)
+	if err := s.syncIrreversible(ctx); err != nil {
+		// A cancelled context is the normal SIGTERM shutdown path, not a
+		// failure: the shutdown handler waits for this return after the
+		// in-flight batch completed and flushed.
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// runPhase executes a startup phase (initial sync / recovery), mapping a
+// context cancellation to a clean nil return: a shutdown arriving mid-phase
+// aborts the (idempotent, resumable) work -- in-flight block batches have
+// already completed and flushed inside syncBlocks -- and the next boot
+// resumes the phase from hive_blocks head and the persisted markers.
+func runPhase(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 // runCacheJobsLoop periodically runs the cache audit jobs.
@@ -94,77 +151,282 @@ func (s *Sync) runCacheJobsLoop(ctx context.Context, intervalSec int) {
 	}
 }
 
-// checkInitialSync checks if initial sync is needed by checking if feed cache is empty
-func (s *Sync) checkInitialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepository) (bool, error) {
+// resolveInitialSyncState decides whether this boot resumes the initial
+// sync. The persisted hive_state.is_initial_sync marker (migration 0003) is
+// authoritative; when it has never been written (NULL -- a legacy-provisioned
+// database or one migrated before 0003) the legacy derivation from
+// hive_feed_cache emptiness (db_state.py::_is_feed_cache_empty) is used and
+// then materialized, so the fragile table-emptiness heuristic is consulted
+// at most once per database.
+//
+// For a database derived as "not initial sync", recount_done is materialized
+// as TRUE as well: a database whose feed cache is populated has completed
+// the legacy initial sync (which ends with force_recount), and re-running a
+// full recount against tens of millions of accounts on first boot would be
+// catastrophic. HIVE_FORCE_FOLLOW_RECOUNT remains the manual override.
+func (s *Sync) resolveInitialSyncState(ctx context.Context) (*db.SyncFlags, error) {
+	flags, err := s.stateRepo.GetSyncFlags(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if flags.IsInitialSync.Valid {
+		s.logger.Info("Initial sync state read from persisted marker",
+			zap.Bool("is_initial_sync", flags.IsInitialSync.Bool),
+			zap.Bool("recount_done", flags.RecountDone.Bool))
+		return flags, nil
+	}
+
+	// Fallback: legacy feed_cache derivation.
 	var count int64
 	if err := s.db.DB.WithContext(ctx).
 		Model(&models.FeedCache{}).
 		Count(&count).Error; err != nil {
-		return false, err
+		return nil, err
 	}
-	return count == 0, nil
+	derived := db.SyncFlags{
+		IsInitialSync: sql.NullBool{Bool: count == 0, Valid: true},
+		RecountDone:   sql.NullBool{Bool: count != 0, Valid: true},
+	}
+	if err := s.stateRepo.UpdateSyncFlags(ctx, derived.IsInitialSync, derived.RecountDone); err != nil {
+		return nil, err
+	}
+	s.logger.Info("Initial sync state derived from feed cache (legacy heuristic) and persisted",
+		zap.Bool("is_initial_sync", derived.IsInitialSync.Bool),
+		zap.Int64("feed_cache_rows", count))
+	return &derived, nil
 }
 
-// initialSync performs the initial sync routine
-func (s *Sync) initialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepository) error {
+// headBlockNum reads the current head block from hive_blocks; returns 0 on
+// error (diagnostics-only callers).
+func (s *Sync) headBlockNum(ctx context.Context) int64 {
+	head, err := db.NewBlockRepository(s.blockProcessor.repo).GetHead(ctx)
+	if err != nil || head == nil {
+		return 0
+	}
+	return head.Num
+}
+
+// testMaxBlock returns the configured TEST_MAX_BLOCK stop point (0 = unset).
+func (s *Sync) testMaxBlock() int64 {
+	if s.config == nil {
+		return 0
+	}
+	return int64(s.config.Indexer.TestMaxBlock)
+}
+
+// catchupGateBlocks returns the CacheSync gating threshold in blocks.
+func (s *Sync) catchupGateBlocks() int64 {
+	if s.config == nil {
+		return CacheSyncCatchupBlocks
+	}
+	return int64(s.config.Indexer.CacheSyncCatchupBlocks)
+}
+
+// initialSync performs the initial sync routine: fast sync to the target
+// block (last irreversible, or TEST_MAX_BLOCK when set), then the tail
+// maintenance trio -- RecoverMissingPosts, FeedCache.Rebuild,
+// Follow.ForceRecount -- in the legacy order (sync.py:117-119: rebuild
+// BEFORE recount).
+//
+// Recovery ordering (PR#402 audit registration): the is_initial_sync flag is
+// only flipped AFTER the whole trio succeeds, and recount_done is written
+// immediately after ForceRecount. Legacy derives the phase from
+// hive_feed_cache emptiness, which flips as soon as Rebuild populates the
+// table -- a crash before recount then left the counts at 0 forever with no
+// retry path. With the persisted markers, any interruption before the flag
+// flip makes the next boot re-enter this routine (0 blocks to sync) and
+// re-run the missing tail steps; both steps are idempotent.
+//
+// TEST_MAX_BLOCK: when set, the trio runs at the stop point but the
+// is_initial_sync flag is NOT flipped (see Run).
+func (s *Sync) initialSync(ctx context.Context, flags *db.SyncFlags) error {
 	s.logger.Info("Starting initial fast sync")
 
-	// Fast sync from steemd up to last irreversible block
 	blockRepo := db.NewBlockRepository(s.blockProcessor.repo)
 	headBlock, err := blockRepo.GetHead(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get head block: %w", err)
 	}
-
-	currentHead := int64(0)
+	headBefore := int64(0)
 	if headBlock != nil {
-		currentHead = headBlock.Num
+		headBefore = headBlock.Num
 	}
 
 	irreversible, err := s.steem.LastIrreversible(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get last irreversible block: %w", err)
 	}
+	ubound := irreversible
+	if stop := s.testMaxBlock(); stop > 0 && stop < ubound {
+		ubound = stop
+	}
 
-	if currentHead < irreversible {
+	if headBefore < ubound {
 		s.logger.Info("Syncing blocks for initial sync",
-			zap.Int64("from", currentHead+1),
-			zap.Int64("to", irreversible))
+			zap.Int64("from", headBefore+1),
+			zap.Int64("to", ubound))
 
-		if err := s.syncBlocks(ctx, currentHead+1, irreversible, true); err != nil {
+		// Bounded-retry variant with poison-block observability: keeps the
+		// initial-sync fail-fast semantic (the process exits after
+		// poisonBlockThreshold consecutive failures of the same block)
+		// while riding out transient RPC/DB errors during a multi-week
+		// 0->30M sync.
+		if err := s.syncBlocksBoundedRetry(ctx, ubound, headBefore); err != nil {
 			return fmt.Errorf("failed to sync blocks: %w", err)
 		}
 	}
 
-	// Recover missing posts (post cache recovery): fill hive_posts_cache
-	// entries for any posts indexed beyond the cache cursor.
-	s.logger.Info("Recovering missing posts")
-	if err := s.blockProcessor.CachedPost().RecoverMissingPosts(ctx); err != nil {
-		return fmt.Errorf("failed to recover missing posts: %w", err)
+	// The tail trio only needs to re-run when blocks were synced since it
+	// last completed, or when it never completed (recount_done unset -- the
+	// interrupted-tail case). Skipping it keeps a restart at an already
+	// processed stop point (e.g. restart with the same TEST_MAX_BLOCK) a
+	// short path instead of re-running multi-day maintenance in place.
+	headAfter := s.headBlockNum(ctx)
+	tailAlreadyDone := flags.RecountDone.Valid && flags.RecountDone.Bool && headAfter <= headBefore
+	if tailAlreadyDone {
+		s.logger.Info("Initial-sync tail maintenance already completed at this head; skipping",
+			zap.Int64("head_block", headAfter))
+	} else {
+		// Recover missing posts (post cache recovery): fill hive_posts_cache
+		// entries for any posts indexed beyond the cache cursor.
+		s.logger.Info("Recovering missing posts")
+		if err := s.blockProcessor.CachedPost().RecoverMissingPosts(ctx); err != nil {
+			return fmt.Errorf("failed to recover missing posts: %w", err)
+		}
+
+		// Rebuild feed cache
+		s.logger.Info("Rebuilding feed cache")
+		feedCacheRepo := db.NewFeedCacheRepository(s.blockProcessor.repo)
+		if err := feedCacheRepo.Rebuild(ctx, true); err != nil {
+			return fmt.Errorf("failed to rebuild feed cache: %w", err)
+		}
+
+		// Force follow recount: recompute followers/following from hive_follows.
+		// Last step of the trio: only after it succeeds is the tail marked
+		// complete (recount_done), which is what gives a crash between
+		// rebuild and recount its recovery path on restart.
+		s.logger.Info("Recounting follows")
+		if err := s.blockProcessor.Follows().ForceRecount(ctx); err != nil {
+			return fmt.Errorf("failed to recount follows: %w", err)
+		}
+		if err := s.stateRepo.UpdateSyncFlags(ctx,
+			sql.NullBool{}, sql.NullBool{Bool: true, Valid: true}); err != nil {
+			return fmt.Errorf("failed to persist recount_done marker: %w", err)
+		}
+		flags.RecountDone = sql.NullBool{Bool: true, Valid: true}
 	}
 
-	// Rebuild feed cache
-	s.logger.Info("Rebuilding feed cache")
-	if err := feedCacheRepo.Rebuild(ctx, true); err != nil {
-		return fmt.Errorf("failed to rebuild feed cache: %w", err)
-	}
-
-	// Force follow recount: recompute followers/following from hive_follows.
-	s.logger.Info("Recounting follows")
-	if err := s.blockProcessor.Follows().ForceRecount(ctx); err != nil {
-		return fmt.Errorf("failed to recount follows: %w", err)
+	if s.testMaxBlock() == 0 {
+		// Initial sync complete: flip the persisted marker. Written last so
+		// every failure path above restarts into this routine rather than
+		// the normal loop.
+		if err := s.stateRepo.UpdateSyncFlags(ctx,
+			sql.NullBool{Bool: false, Valid: true}, sql.NullBool{}); err != nil {
+			return fmt.Errorf("failed to persist initial-sync completion: %w", err)
+		}
+		flags.IsInitialSync = sql.NullBool{Bool: false, Valid: true}
 	}
 
 	s.logger.Info("Initial sync completed successfully")
 	return nil
 }
 
+// recoverFromRestart performs the light recovery an already-initialized
+// database runs at boot (legacy sync.py:70-79): verify the cache against
+// hive_posts and heal any gap (RecoverMissingPosts is incremental and a
+// no-op when head and cache agree), plus the recount recovery markers.
+func (s *Sync) recoverFromRestart(ctx context.Context, flags *db.SyncFlags) error {
+	// Recover missing posts: short-circuits when the cache cursor already
+	// matches hive_posts (gap <= 0), making this an idempotent short path.
+	s.logger.Info("Recovering missing posts (startup recovery)")
+	if err := s.blockProcessor.CachedPost().RecoverMissingPosts(ctx); err != nil {
+		return fmt.Errorf("failed to recover missing posts: %w", err)
+	}
+
+	// Recount marker check (PR#402 audit registration): if the initial-sync
+	// tail never completed its ForceRecount, re-run it here so follow
+	// counts cannot stay at 0 forever.
+	if !flags.RecountDone.Valid || !flags.RecountDone.Bool {
+		s.logger.Warn("recount_done marker unset; re-running follow recount (interrupted initial-sync tail?)")
+		if err := s.blockProcessor.Follows().ForceRecount(ctx); err != nil {
+			return fmt.Errorf("failed to recount follows: %w", err)
+		}
+		if err := s.stateRepo.UpdateSyncFlags(ctx,
+			sql.NullBool{}, sql.NullBool{Bool: true, Valid: true}); err != nil {
+			return fmt.Errorf("failed to persist recount_done marker: %w", err)
+		}
+		flags.RecountDone = sql.NullBool{Bool: true, Valid: true}
+	}
+
+	// HIVE_FORCE_FOLLOW_RECOUNT (legacy conf force_follow_recount,
+	// sync.py:76-79): manual full recount of all follows at startup.
+	if s.config != nil && s.config.Indexer.ForceFollowRecount {
+		s.logger.Info("Force recount of all follows (HIVE_FORCE_FOLLOW_RECOUNT)")
+		if err := s.blockProcessor.Follows().ForceRecount(ctx); err != nil {
+			return fmt.Errorf("failed to recount follows: %w", err)
+		}
+	}
+	return nil
+}
+
+// syncToCapAndExit catches an already-initialized database up to the
+// TEST_MAX_BLOCK cap in normal semantics and returns (legacy sync.py:88:
+// `if test_max_block: return self.from_steemd()`).
+func (s *Sync) syncToCapAndExit(ctx context.Context) error {
+	stopAt := s.testMaxBlock()
+	head := s.headBlockNum(ctx)
+	if head >= stopAt {
+		s.logger.Info("TEST_MAX_BLOCK already reached; exiting cleanly",
+			zap.Int64("head_block", head), zap.Int64("test_max_block", stopAt))
+		return nil
+	}
+	s.logger.Info("Syncing to TEST_MAX_BLOCK before exit",
+		zap.Int64("from", head+1), zap.Int64("to", stopAt))
+	if err := s.syncBlocks(ctx, head+1, stopAt, false); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return fmt.Errorf("failed to sync blocks to test cap: %w", err)
+	}
+	s.logger.Info("TEST_MAX_BLOCK reached; exiting cleanly",
+		zap.Int64("head_block", s.headBlockNum(ctx)), zap.Int64("test_max_block", stopAt))
+	return nil
+}
+
 // poisonBlockThreshold is the number of consecutive failed sync attempts of
-// the SAME block after which the syncIrreversible loop escalates its log to a
-// marked `poison block` Error (block number + last error). Purely
-// observability (PR#406 audit P2): the loop keeps retrying -- halting or
-// skipping is a separate decision tracked in #405.
+// the SAME block after which the sync loops escalate their logs to a marked
+// `poison block` Error (block number + last error). Purely observability:
+// the steady-state loop keeps retrying, the initial-sync path gives up
+// (fail-fast). Halting or skipping is a separate decision tracked for the
+// operations runbook (PR#406 registration); the minimal #405 scope is the
+// fetch/process distinction and the block-number context in every error.
 const poisonBlockThreshold = 10
+
+// Error sentinels wrapping sync failures so callers (and logs) can
+// distinguish a failed block FETCH from a failed block PROCESS attempt --
+// the poison-block triage axis registered by PR#404 for #405.
+var (
+	errFetchBlocks  = errors.New("failed to fetch blocks")
+	errProcessBlock = errors.New("failed to process block")
+)
+
+// blockNumberOf extracts the block number from a raw block map; 0 when the
+// field is missing or malformed (the number is used for error context and
+// poison logging, never for control flow).
+func blockNumberOf(block map[string]interface{}) int64 {
+	if v, ok := block["block_num"].(float64); ok {
+		return int64(v)
+	}
+	return 0
+}
+
+// syncFailureKind classifies a syncBlocks error for poison logging.
+func syncFailureKind(err error) string {
+	if errors.Is(err, errFetchBlocks) {
+		return "fetch"
+	}
+	return "process"
+}
 
 // syncIrreversible implements Strategy B: sync only to irreversible blocks
 func (s *Sync) syncIrreversible(ctx context.Context) error {
@@ -213,14 +475,38 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 				continue
 			}
 
+			// Feed the CacheSync gate: prune pauses while catching up.
+			if s.cacheSync != nil {
+				s.cacheSync.SetBehind(irreversible - currentHead)
+			}
+
+			// TEST_MAX_BLOCK (§2.6): stop cleanly once the cap is reached
+			// instead of entering the steady-state runloop.
+			ubound := irreversible
+			if stop := s.testMaxBlock(); stop > 0 {
+				if currentHead >= stop {
+					s.logger.Info("TEST_MAX_BLOCK reached; exiting cleanly",
+						zap.Int64("head_block", currentHead),
+						zap.Int64("test_max_block", stop))
+					return nil
+				}
+				if stop < ubound {
+					ubound = stop
+				}
+			}
+
 			// Sync blocks from currentHead+1 to irreversible
-			if currentHead < irreversible {
+			if currentHead < ubound {
 				s.logger.Info("Syncing blocks",
 					zap.Int64("current_head", currentHead),
-					zap.Int64("irreversible", irreversible),
-					zap.Int64("blocks_to_sync", irreversible-currentHead))
+					zap.Int64("target", ubound),
+					zap.Int64("blocks_to_sync", ubound-currentHead))
 
-				if err := s.syncBlocks(ctx, currentHead+1, irreversible, false); err != nil {
+				if err := s.syncBlocks(ctx, currentHead+1, ubound, false); err != nil {
+					if ctx.Err() != nil {
+						// Shutdown requested mid-sync: not a poison block.
+						return ctx.Err()
+					}
 					if retryBlock := currentHead + 1; retryBlock == poisonBlock {
 						poisonFails++
 					} else {
@@ -234,11 +520,13 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 							zap.Int64("block", poisonBlock),
 							zap.Int("consecutive_failures", poisonFails),
 							zap.Int("threshold", poisonBlockThreshold),
+							zap.String("failure_kind", syncFailureKind(err)),
 							zap.Error(err))
 					} else {
 						s.logger.Error("Failed to sync blocks",
 							zap.Int64("block", poisonBlock),
 							zap.Int("attempt", poisonFails),
+							zap.String("failure_kind", syncFailureKind(err)),
 							zap.Error(err))
 					}
 					// Retry after a short delay
@@ -250,7 +538,7 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 
 				s.logger.Info("Successfully synced blocks",
 					zap.Int64("from", currentHead+1),
-					zap.Int64("to", irreversible))
+					zap.Int64("to", ubound))
 			} else {
 				// Already synced, wait before next check
 				s.logger.Debug("Already synced to irreversible block",
@@ -264,12 +552,78 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 	}
 }
 
+// syncBlocksBoundedRetry drives the initial-sync fast sync with the
+// poison-block observability the steady-state loop has, but bounded: after
+// poisonBlockThreshold consecutive failures of the same block it gives up
+// (the historical fail-fast semantic of the initial sync -- the process
+// exits, a restart resumes from hive_blocks head), instead of retrying
+// forever. Transient RPC/DB errors during a multi-week 0->30M sync are
+// ridden out in-process; every failure is logged with the block number,
+// the consecutive-failure count and the fetch/process classification.
+func (s *Sync) syncBlocksBoundedRetry(ctx context.Context, ubound, headBefore int64) error {
+	blockRepo := db.NewBlockRepository(s.blockProcessor.repo)
+	var poisonBlock int64
+	var poisonFails int
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		head := headBefore
+		if hb, err := blockRepo.GetHead(ctx); err == nil && hb != nil {
+			head = hb.Num
+		}
+		if head >= ubound {
+			return nil
+		}
+		err := s.syncBlocks(ctx, head+1, ubound, true)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// The first unprocessed block of the failed attempt: every block
+		// before the failure committed, so head+1 identifies the retry
+		// target (same convention as the steady-state loop).
+		retryBlock := head + 1
+		if retryBlock == poisonBlock {
+			poisonFails++
+		} else {
+			poisonBlock = retryBlock
+			poisonFails = 1
+		}
+		if poisonFails >= poisonBlockThreshold {
+			s.logger.Error("poison block: initial sync giving up after repeated failures of the same block",
+				zap.Int64("block", poisonBlock),
+				zap.Int("consecutive_failures", poisonFails),
+				zap.Int("threshold", poisonBlockThreshold),
+				zap.String("failure_kind", syncFailureKind(err)),
+				zap.Error(err))
+			return fmt.Errorf("initial sync stalled on block %d after %d attempts: %w",
+				poisonBlock, poisonFails, err)
+		}
+		s.logger.Error("Initial sync attempt failed; retrying",
+			zap.Int64("block", poisonBlock),
+			zap.Int("consecutive_failures", poisonFails),
+			zap.Int("threshold", poisonBlockThreshold),
+			zap.String("failure_kind", syncFailureKind(err)),
+			zap.Error(err))
+		s.wait(ctx, s.config.Indexer.SyncInterval)
+	}
+}
+
 // syncBlocks syncs a range of blocks. isInitialSync must reflect the phase
 // the indexer is in: historical catch-up during startup passes true (suppresses
 // follow count deltas, follow notifications and account dirty-marking, exactly
 // as legacy gates on DbState.is_initial_sync()), the steady-state
-// syncIrreversible loop passes false. Persisting the phase across restarts is
-// tracked separately (#405); here the flag follows the Run() code path.
+// syncIrreversible loop passes false. The phase itself is persisted in
+// hive_state.is_initial_sync (see resolveInitialSyncState).
+//
+// Shutdown semantics (§2.9): cancellation is only checked BETWEEN batches.
+// A batch whose fetch already succeeded always finishes -- its block
+// transactions and the trailing queue flushes run on a context with the
+// cancellation removed -- so a SIGTERM cannot leave a half-flushed dirty
+// queue or an aborted in-flight block transaction behind.
 func (s *Sync) syncBlocks(ctx context.Context, from, to int64, isInitialSync bool) error {
 	s.logger.Info("Syncing blocks",
 		zap.Int64("from", from),
@@ -280,27 +634,37 @@ func (s *Sync) syncBlocks(ctx context.Context, from, to int64, isInitialSync boo
 	// Fetch blocks in batches
 	batchSize := int64(s.config.Indexer.MaxBatch)
 	for start := from; start <= to; start += batchSize {
+		// Cancellation boundary between batches (see method comment).
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		end := start + batchSize - 1
 		if end > to {
 			end = to
 		}
 
-		// Fetch blocks from steemd
+		// Fetch blocks from steemd. Cancellable: a cancelled fetch leaves
+		// nothing in flight (the queue was drained at the previous batch's
+		// flush) and aborts the range.
 		blocks, err := s.steem.GetBlocksRange(ctx, start, end)
 		if err != nil {
-			return fmt.Errorf("failed to fetch blocks %d-%d: %w", start, end, err)
+			return fmt.Errorf("%w %d-%d: %w", errFetchBlocks, start, end, err)
 		}
 
-		// Process each block
+		// The in-flight batch completes regardless of cancellation: block
+		// transactions and flushes below must not be aborted by a shutdown
+		// signal (context.WithoutCancel keeps tracing values, drops the
+		// cancellation).
+		batchCtx := context.WithoutCancel(ctx)
 		for _, block := range blocks {
-			if err := s.blockProcessor.ProcessBlock(ctx, block, isInitialSync); err != nil {
-				return fmt.Errorf("failed to process block: %w", err)
+			if err := s.blockProcessor.ProcessBlock(batchCtx, block, isInitialSync); err != nil {
+				return fmt.Errorf("%w %d: %w", errProcessBlock, blockNumberOf(block), err)
 			}
 		}
 
 		// Flush the post-cache dirty queue (steemd fetch + dual-write) after
 		// each batch, mirroring legacy blocks.process_multi.
-		if counts, err := s.blockProcessor.CachedPost().Flush(ctx, false); err != nil {
+		if counts, err := s.blockProcessor.CachedPost().Flush(batchCtx, false); err != nil {
 			s.logger.Warn("post cache flush failed", zap.Error(err))
 		} else if total := len(counts); total > 0 {
 			s.logger.Debug("Post cache flushed",
@@ -310,12 +674,12 @@ func (s *Sync) syncBlocks(ctx context.Context, from, to int64, isInitialSync boo
 
 		// Flush pending follow count deltas (legacy: Follow.flush(trx=False)
 		// after each block batch).
-		if err := s.blockProcessor.Follows().Flush(ctx); err != nil {
+		if err := s.blockProcessor.Follows().Flush(batchCtx); err != nil {
 			s.logger.Warn("follow delta flush failed", zap.Error(err))
 		}
 
 		// Flush dirty accounts (steemd get_accounts + ~17-column update).
-		if n, err := s.blockProcessor.Accounts().FlushBatch(ctx, false); err != nil {
+		if n, err := s.blockProcessor.Accounts().FlushBatch(batchCtx, false); err != nil {
 			s.logger.Warn("account flush failed", zap.Error(err))
 		} else if n > 0 {
 			s.logger.Debug("Accounts flushed", zap.Int("count", n))
@@ -331,6 +695,15 @@ func (s *Sync) syncBlocks(ctx context.Context, from, to int64, isInitialSync boo
 
 // wait waits for the specified duration or until context is cancelled
 func (s *Sync) wait(ctx context.Context, seconds int) {
+	if seconds <= 0 {
+		// Yield once so cancellation is observed promptly; a zero interval
+		// is used by tests driving the retry loops.
+		select {
+		case <-ctx.Done():
+		default:
+		}
+		return
+	}
 	timer := time.NewTimer(time.Duration(seconds) * time.Second)
 	defer timer.Stop()
 

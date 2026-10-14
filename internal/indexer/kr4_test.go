@@ -21,6 +21,9 @@ func TestCacheSync_Prune(t *testing.T) {
 	tx.Commit()
 
 	cs := NewCacheSync(database.DB)
+	// Live mode (§2.7 gate): the prune only runs once the sync loop has
+	// reported the indexer caught up to the chain head.
+	cs.SetBehind(0)
 	cs.Sync(ctx)
 
 	var n int64

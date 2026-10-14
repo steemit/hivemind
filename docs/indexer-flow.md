@@ -8,19 +8,37 @@ The Hivemind indexer is responsible for synchronizing blockchain data into the d
 
 ### 1. Initial Sync
 
-Runs when the database is empty or `hive_feed_cache` is empty.
+Runs when the persisted `hive_state.is_initial_sync` marker is TRUE. For
+databases that predate the marker (NULL -- e.g. provisioned by the Python
+legacy), the phase derives once from `hive_feed_cache` emptiness (the legacy
+heuristic) and is then materialized; the marker is authoritative from then on.
 
 **Process:**
 1. Load database schema
 2. Disable non-critical indexes for faster sync
 3. Load from checkpoints (if available)
-4. Fast sync from steemd up to last irreversible block
-5. Build initial cache:
+4. Fast sync from steemd up to last irreversible block (bounded retry with
+   poison-block logging: after 10 consecutive failures of the same block the
+   process exits -- fail-fast -- and a restart resumes from `hive_blocks` head)
+5. Build initial cache (tail trio, legacy order):
    - Recover missing posts
    - Rebuild feed cache
    - Force recount follows
+   - (`recount_done` is persisted immediately after the recount succeeds, and
+   the tail is skipped wholesale on restart when nothing new was synced -- an
+   interrupted tail heals by re-running the missing steps)
 6. Re-enable indexes
-7. Mark initial sync as complete
+7. Flip `hive_state.is_initial_sync` to FALSE -- written only after the whole
+   tail trio succeeded, so every failure path restarts into this routine
+   instead of the normal loop
+8. `HIVE_TEST_MAX_BLOCK` stop point: when set, the tail trio still runs at the
+   cap but the flag deliberately stays TRUE (a subsequent continuation run
+   keeps fast-sync semantics) and the process exits cleanly
+
+Maintenance SQL above (rebuild, recount, missing-post sweeps, cache audits)
+runs with `SET LOCAL statement_timeout = 0`: these statements legitimately
+run minutes-long on a fully synced database and must not be killed by the
+indexer's default 30s session guard.
 
 ### 2. Fast Sync
 

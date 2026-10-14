@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/logging"
 )
@@ -419,13 +420,18 @@ func (c *CachedPost) dirtyMissing(ctx context.Context) (int64, error) {
 		Promoted float64
 	}
 	var rows []row
-	if err := c.db.WithContext(ctx).
-		Table("hive_posts").
-		Select("id", "author", "permlink", "promoted").
-		Where("is_deleted = '0' AND id > ?", lastCached).
-		Order("id").
-		Limit(1000000).
-		Scan(&rows).Error; err != nil {
+	// The scan can cover up to a million hive_posts rows in one statement
+	// (jobsBatchStep-sized sweep); run it with the statement timeout
+	// disabled so the 30s session guard cannot kill the recovery sweep
+	// mid-flight on a large database.
+	if err := db.WithoutStatementTimeout(ctx, c.db, func(tx *gorm.DB) error {
+		return tx.Table("hive_posts").
+			Select("id", "author", "permlink", "promoted").
+			Where("is_deleted = '0' AND id > ?", lastCached).
+			Order("id").
+			Limit(1000000).
+			Scan(&rows).Error
+	}); err != nil {
 		return gap, err
 	}
 	for _, r := range rows {
