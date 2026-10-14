@@ -141,7 +141,7 @@ jobs:
       # grep pattern covers all variants.
       - name: Integration tests (race detector, package-serial)
         run: |
-          set -o pipefail
+          set -eo pipefail
           go test -race -p 1 -count=1 -v ./... 2>&1 | tee integration-test.log
           skips="$(grep -c 'HIVE_TEST_DATABASE_URL not set' integration-test.log || true)"
           if [ "$skips" -ne 0 ]; then
@@ -198,7 +198,7 @@ jobs:
       # collapses (observed 15.3% reported green); grep makes it fatal.
       - name: Measure internal/indexer coverage
         run: |
-          set -o pipefail
+          set -eo pipefail
           go test -p 1 -count=1 -v -coverpkg=./internal/indexer ./internal/indexer/... -coverprofile=cover.out 2>&1 | tee coverage-test.log
           skips="$(grep -c 'HIVE_TEST_DATABASE_URL not set' coverage-test.log || true)"
           if [ "$skips" -ne 0 ]; then
