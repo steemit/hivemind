@@ -84,11 +84,18 @@ const (
 	batchBaseBackoff       = 100 * time.Millisecond
 
 	// batchResponseItemLimit bounds one get_content result object on the
-	// batch path (1 MiB). Real results are post metadata plus the
-	// active_votes array; even heavily-voted whale posts stay well below
-	// this, so the cap never clips a legitimate answer. Bodies beyond
-	// max_batch × this limit (+ slack) are rejected as malformed.
-	batchResponseItemLimit int64 = 1 << 20
+	// batch path (4 MiB). Real results are post metadata plus the
+	// active_votes array: each serialized vote is ~140-160 B, so a
+	// ten-thousand-vote whale post (Steem has precedent) carries ~1.5 MiB
+	// of votes alone — the previous 1 MiB cap rejected such an answer as
+	// "malformed", which is non-retryable and drags the whole max_batch
+	// chunk (up to 49 sibling posts) down with it. 4 MiB admits ~25k
+	// votes per item, while the cap formula (max_batch × limit) and the
+	// +1-byte over-cap detection still bound what a compromised node or
+	// MITM can make the decoder buffer. Audit note O1.5 (sampling of real
+	// get_content responses) confirmed the per-vote size math and that
+	// legitimate results stay comfortably under the new bound.
+	batchResponseItemLimit int64 = 4 << 20
 	// batchResponseEnvelopeSlack covers the JSON-RPC envelopes (jsonrpc/id
 	// keys) around the capped results.
 	batchResponseEnvelopeSlack int64 = 64 * 1024
@@ -563,23 +570,39 @@ func (c *Client) postBatch(ctx context.Context, payload []byte) ([]batchResponse
 	}
 
 	// Response size cap: max_batch items × a generous per-item bound plus
-	// envelope slack. A real get_content result (post metadata plus
-	// active_votes) stays far below 1 MiB per item, so the cap never clips a
-	// legitimate answer, while a compromised node or MITM cannot use the
-	// batch path to balloon process memory. Reading cap+1 bytes makes any
-	// body beyond the cap surface below as trailing data (or above, as a
-	// decode error on the truncated array).
+	// envelope slack (see batchResponseItemLimit for why 4 MiB is the
+	// right per-item bound). The cap keeps a compromised node or MITM from
+	// ballooning process memory through the batch decoder. Reading cap+1
+	// bytes makes any body beyond the cap surface below as trailing data
+	// (or above, as a decode error on the truncated array).
 	cap := int64(c.maxBatch)*batchResponseItemLimit + batchResponseEnvelopeSlack
 	dec := json.NewDecoder(io.LimitReader(res.Body, cap+1))
 	var resps []batchResponse
 	if err := dec.Decode(&resps); err != nil {
+		// Same classification as the Do failure above: http.Client.Timeout
+		// covers READING the body, so a node whose headers are fast but
+		// whose body dribbles slower than the per-attempt timeout fails
+		// here with a timeout-shaped error (net/http timeoutError, which
+		// on Go 1.23+ also satisfies errors.Is(err,
+		// context.DeadlineExceeded)) while the caller's context is still
+		// live. That is transient — wrap it in errBatchTimeout with the
+		// chain cut — not "malformed": a malformed verdict would be
+		// non-retryable and kill the whole chunk after one slow body.
+		if ctx.Err() == nil && isHTTPTimeout(err) {
+			return nil, fmt.Errorf("%w: %v", errBatchTimeout, err)
+		}
 		return nil, fmt.Errorf("malformed get_content batch response: %w", err)
 	}
 	// Legacy parses the whole body (json.loads), rejecting trailing data.
 	// json.Decoder stops after the first value, so demand EOF on a second
 	// read: any byte beyond the array — including a stray ']' that
-	// Decoder.More would miss — fails loud here as malformed.
+	// Decoder.More would miss — fails loud here as malformed. This second
+	// read can also fail with the body-read timeout above mid-trailing-
+	// value; classify that as transient before the trailing-data verdict.
 	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		if ctx.Err() == nil && isHTTPTimeout(err) {
+			return nil, fmt.Errorf("%w: %v", errBatchTimeout, err)
+		}
 		return nil, fmt.Errorf("malformed get_content batch response: trailing data after response array")
 	}
 	return resps, nil
@@ -638,8 +661,11 @@ func isBatchRetryable(err error) bool {
 	// with the underlying chain cut, because on Go 1.23+ that chain also
 	// satisfies errors.Is(err, context.DeadlineExceeded) and the caller-
 	// context check right below would otherwise misclassify them as
-	// non-retryable (the SDK reaches the same outcome by checking its
-	// ErrTimeout sentinel before its context check).
+	// non-retryable. (The SDK reaches the same outcome by the opposite
+	// means: its isRetryable checks the context sentinels BEFORE its
+	// ErrTimeout sentinel, and gets away with it only because callOnce
+	// cuts the underlying chain with %v when wrapping ErrTimeout, so the
+	// context-sentinel check never matches a per-attempt timeout.)
 	if errors.Is(err, errBatchTimeout) {
 		return true
 	}

@@ -44,6 +44,12 @@ type rpcScriptResponse struct {
 	status int           // HTTP status code; 0 means 200
 	body   string        // raw response body, written verbatim
 	delay  time.Duration // optional sleep before responding (in-flight tests)
+
+	// dribble, when non-zero, writes status/headers immediately and then
+	// hands the body out in small flushed chunks with this pause between
+	// them: a node whose headers are fast but whose body is slower than
+	// the client's per-attempt timeout (body-read timeout contract tests).
+	dribble time.Duration
 }
 
 // recordedRPCCall captures one JSON-RPC request received by the harness.
@@ -204,6 +210,30 @@ func (s *scriptedSteemd) handle(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	w.Header().Set("Content-Type", "application/json")
+
+	if resp.dribble > 0 {
+		// Headers now, body later: flush the status line before the first
+		// chunk so the client's Do() returns promptly and the timeout (if
+		// any) fires while READING the body. Bail out as soon as a write
+		// fails — the client has hung up on a timed-out attempt, and the
+		// handler must not keep dribbling into a dead connection.
+		w.WriteHeader(status)
+		for len(resp.body) > 0 {
+			n := min(len(resp.body), 16)
+			if _, err := io.WriteString(w, resp.body[:n]); err != nil {
+				return
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			resp.body = resp.body[n:]
+			if len(resp.body) > 0 {
+				time.Sleep(resp.dribble)
+			}
+		}
+		return
+	}
+
 	w.WriteHeader(status)
 	fmt.Fprint(w, resp.body)
 }
@@ -932,6 +962,51 @@ func TestContractContentBatchPerAttemptTimeoutRetried(t *testing.T) {
 	}
 }
 
+// TestContractContentBatchBodyReadTimeoutRetried pins the PR#403 review-r2
+// fix: http.Client.Timeout also covers READING the response body, so a node
+// that answers headers promptly but dribbles the body out slower than the
+// per-attempt timeout fails the json.Decoder read — not the POST — with a
+// timeout-shaped error (net/http timeoutError: a net.Error with Timeout()
+// true that on Go 1.23+ ALSO satisfies errors.Is(err,
+// context.DeadlineExceeded)) while the caller's context is still live.
+// Before the fix both Decode failures in postBatch were wrapped as
+// "malformed" — non-retryable, with the trailing-data check mislabeling the
+// second one — so a single slow body killed the whole chunk after ONE
+// attempt. The variant pinned here is retry-then-succeed: the first response
+// dribbles (body unfinished well past the timeout), the retry is served
+// whole, and the call succeeds on exactly two POSTs.
+func TestContractContentBatchBodyReadTimeoutRetried(t *testing.T) {
+	// Pad the item result so the dribbled body cannot finish before the
+	// 200ms per-attempt timeout: ~2 KiB / 16 B per 25 ms ≈ 3 s total, so
+	// the timeout lands mid-array with certainty (the harness stops
+	// dribbling as soon as the timed-out client hangs up).
+	alice := map[string]string{"alice/p1": strings.TrimSuffix(batchContentJSON("alice", "p1"), "}") +
+		`,"padding":"` + strings.Repeat("x", 2048) + `"}`}
+	body := batchResponseBody(alice, []string{"alice", "p1"})
+
+	s := newScriptedSteemd(t, seqScript(
+		rpcScriptResponse{dribble: 25 * time.Millisecond, body: body},
+		rpcScriptResponse{body: body},
+	))
+	c := newTestClientCfg(t, &config.SteemConfig{
+		URL:        s.URL(),
+		MaxWorkers: 1,
+		MaxRetries: 3,
+		RPCTimeout: 200 * time.Millisecond,
+	})
+
+	posts, err := c.GetContentBatch(context.Background(), [][]string{{"alice", "p1"}})
+	if err != nil {
+		t.Fatalf("GetContentBatch failed on a transient body-read timeout: %v", err)
+	}
+	if len(posts) != 1 || posts[0]["author"] != "alice" {
+		t.Fatalf("retried batch returned %v, want alice's post", posts)
+	}
+	if got := s.callCount(); got != 2 {
+		t.Fatalf("got %d POSTs, want 2 (one body-read timeout, one success)", got)
+	}
+}
+
 // TestContractContentBatchCallerDeadlineNotRetried pins the other half of the
 // PR#403 fix: a CALLER-side context deadline stays non-retryable on the batch
 // path. With the per-attempt timeout generous and the caller's deadline
@@ -1009,10 +1084,10 @@ func TestContractContentBatchTimeoutExhaustionIsError(t *testing.T) {
 // batch path: a 200 response larger than max_batch × per-item bound (+slack)
 // is rejected as malformed after ONE attempt, never buffered whole — a
 // compromised node or MITM cannot balloon process memory through the batch
-// decoder. MaxBatch=1 caps the response at ~1.06 MiB; the body below is
-// ~2 MiB.
+// decoder. MaxBatch=1 caps the response at ~4.06 MiB (4 MiB per item + 64 KiB
+// envelope slack); the body below is ~6 MiB.
 func TestContractContentBatchResponseBodyCapped(t *testing.T) {
-	huge := strings.Repeat("x", 2<<20)
+	huge := strings.Repeat("x", 6<<20)
 	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
 		body: `[{"jsonrpc":"2.0","id":1,"result":{"author":"alice","permlink":"p1","junk":"` + huge + `"}}]`,
 	}))
@@ -1020,7 +1095,7 @@ func TestContractContentBatchResponseBodyCapped(t *testing.T) {
 		URL:        s.URL(),
 		MaxWorkers: 1,
 		MaxRetries: 1,
-		MaxBatch:   1, // cap = 1*1MiB + 64KiB envelope slack
+		MaxBatch:   1, // cap = 1*4MiB + 64KiB envelope slack
 		RPCTimeout: 5 * time.Second,
 	})
 
