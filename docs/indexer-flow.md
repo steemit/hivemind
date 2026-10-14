@@ -8,19 +8,47 @@ The Hivemind indexer is responsible for synchronizing blockchain data into the d
 
 ### 1. Initial Sync
 
-Runs when the database is empty or `hive_feed_cache` is empty.
+Runs when the persisted `hive_state.is_initial_sync` marker is TRUE. For
+databases that predate the marker (NULL -- e.g. provisioned by the Python
+legacy), the phase derives once from `hive_feed_cache` emptiness (the legacy
+heuristic) and is then materialized; the marker is authoritative from then on.
 
 **Process:**
 1. Load database schema
 2. Disable non-critical indexes for faster sync
 3. Load from checkpoints (if available)
-4. Fast sync from steemd up to last irreversible block
-5. Build initial cache:
+4. Fast sync from steemd up to last irreversible block (bounded retry with
+   poison-block logging: after 10 consecutive failures of the same block the
+   process exits -- fail-fast -- and a restart resumes from `hive_blocks` head)
+5. Build initial cache (tail trio, legacy order):
    - Recover missing posts
    - Rebuild feed cache
    - Force recount follows
+   - (`recount_done` is persisted immediately after the recount succeeds, and
+   is invalidated BEFORE any continuation sync -- so the tail is skipped only
+   when nothing new was synced AND the trio truly completed at this head; an
+   interrupted tail always heals by re-running the missing steps)
 6. Re-enable indexes
-7. Mark initial sync as complete
+7. Flip `hive_state.is_initial_sync` to FALSE -- written only after the whole
+   tail trio succeeded, so every failure path restarts into this routine
+   instead of the normal loop
+8. `HIVE_TEST_MAX_BLOCK` stop point: when set, the tail trio still runs at the
+   cap but the flag deliberately stays TRUE (a subsequent continuation run
+   keeps fast-sync semantics) and the process exits cleanly
+9. A shutdown arriving mid-phase (initial sync or recovery) aborts it cleanly:
+   the process EXITS (`cancelled before completion`) instead of reporting a
+   bogus completion and entering live mode; the next boot resumes the phase
+   from `hive_blocks` head and the persisted markers
+
+Maintenance SQL above (rebuild, recount, missing-post sweeps, cache audits)
+runs with `SET LOCAL statement_timeout = 0` plus `SET LOCAL lock_timeout =
+'60s'`: these statements legitimately run minutes-long on a fully synced
+database and must not be killed by the indexer's default 30s session guard,
+while the lock timeout keeps any of them from queueing forever behind a long
+reader. The temp-table pruner (`CacheSync`) deletes in committed batches of
+10,000 rows instead of one giant `DELETE`, so the first live-mode prune after
+a cold sync cannot be killed half-way and retried forever by the session
+guard, and autovacuum can reclaim space incrementally.
 
 ### 2. Fast Sync
 
@@ -57,6 +85,74 @@ Follows the blockchain in real-time, processing new blocks as they arrive.
    - Every 200 blocks (10 min): Recalculate community pending payouts
    - Every 100 blocks (5 min): Dirty oldest accounts
    - Every 20 blocks (1 min): Update chain state
+
+## Legacy Database Migration Runbook
+
+Bringing a Python-legacy-provisioned database to the Go indexer (first boot
+with `HIVE_DB_MIGRATE_FORCE=1` to stamp the baseline, see `cmd/indexer`):
+the persisted markers (`hive_state.is_initial_sync`, `recount_done`) are
+NULL on such a database, so the first boot derives the phase once from
+`hive_feed_cache` emptiness and materializes it.
+
+### Suspected interrupted tail
+
+The legacy initial sync ended with `feed_cache.Rebuild` followed by
+`force_recount`. A legacy database whose initial sync was interrupted between
+the two shows: feed cache POPULATED, `hive_accounts.followers/following`
+counts at 0 (never recomputed), and no retry ever scheduled. On the first Go
+boot this shape derives `is_initial_sync = false` (feed cache non-empty) and
+`recount_done = true` (presumed healthy) -- which would skip the recount
+forever. For a database you SUSPECT carries this shape, force the recount on
+the first Go boot:
+
+```bash
+HIVE_FORCE_FOLLOW_RECOUNT=true HIVE_DB_MIGRATE_FORCE=1 ./bin/hivemind-indexer
+```
+
+### Marker inspection and repair
+
+```sql
+-- Inspect the phase markers and tail state.
+SELECT block_num, is_initial_sync, recount_done FROM hive_state;
+SELECT COUNT(*) AS feed_cache_rows FROM hive_feed_cache;
+SELECT COUNT(*) AS zero_follower_accounts
+  FROM hive_accounts WHERE followers = 0 AND following = 0;
+```
+
+If the markers disagree with reality (e.g. after manual surgery), repair
+them on the LOWEST `block_num` row -- flag reads and writes always target
+that row, and a legacy database must keep exactly one `hive_state` row:
+
+```sql
+-- Replay the initial-sync tail on the next boot:
+UPDATE hive_state SET recount_done = NULL
+ WHERE block_num = (SELECT MIN(block_num) FROM hive_state);
+
+-- Or mark the tail complete (only after verifying counts are correct):
+UPDATE hive_state SET recount_done = true
+ WHERE block_num = (SELECT MIN(block_num) FROM hive_state);
+
+-- Re-enter the full initial-sync routine (blocks re-check + tail trio):
+UPDATE hive_state SET is_initial_sync = true
+ WHERE block_num = (SELECT MIN(block_num) FROM hive_state);
+```
+
+### Corruption warning at startup
+
+A database that reports `is_initial_sync = true` with a POPULATED feed cache
+and `recount_done` unset is in one of two states: an interrupted tail (this
+boot re-runs the trio and heals -- recount re-runs, counts recover), or a
+corrupted marker set. The indexer logs
+
+```
+WARN feed cache is populated while initial sync is in progress and recount_done is unset: interrupted tail (this boot re-runs the trio and heals) or corrupted state -- verify counts after startup
+```
+
+on that combination; after such a boot, verify the counts (query above)
+before serving traffic. The sanctioned non-empty state -- a
+`HIVE_TEST_MAX_BLOCK` stop point with the trio complete -- carries
+`recount_done = true` and does not warn.
+
 
 ## Block Processing Flow
 

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -262,6 +263,81 @@ func (r *StateRepository) Update(ctx context.Context, state *models.State) error
 	return r.db.WithContext(ctx).Save(state).Error
 }
 
+// SyncFlags holds the persisted initial-sync semantics markers on
+// hive_state (migration 0003). A NULL field means "never written by the Go
+// indexer" -- callers fall back to the legacy feed_cache-emptiness
+// derivation in that case.
+type SyncFlags struct {
+	// IsInitialSync: TRUE = initial sync in progress, FALSE = completed.
+	IsInitialSync sql.NullBool
+	// RecountDone: TRUE = the initial-sync tail trio completed through
+	// ForceRecount at the current head block. Written immediately after
+	// recount succeeds so an interrupted tail keeps a recovery path
+	// (PR#402 audit: without the marker, a crash after Rebuild but before
+	// recount left follow counts at 0 with no retry ever scheduled).
+	RecountDone sql.NullBool
+}
+
+// GetSyncFlags reads the persisted initial-sync flags. It is defensive
+// against a missing hive_state row so callers can treat the row as always
+// present -- but the seed INSERT only fires when the table is EMPTY: a
+// legacy-provisioned database carries exactly one row at its real head
+// (block_num > 0), and an unconditional VALUES (0, ...) insert would
+// silently create a SECOND row next to it, splitting flag reads/writes
+// across two rows (PR#407 review). The ON CONFLICT clause stays as a
+// belt-and-braces guard against a concurrent boot racing the NOT EXISTS
+// check. The read targets the lowest block_num row -- the row the legacy
+// database already had -- deterministically, so reads and writes (see
+// UpdateSyncFlags) always agree.
+func (r *StateRepository) GetSyncFlags(ctx context.Context) (*SyncFlags, error) {
+	if err := r.db.WithContext(ctx).Exec(`INSERT INTO hive_state
+		(block_num, db_version, steem_per_mvest, usd_per_steem, sbd_per_steem, dgpo)
+		SELECT 0, 29, 0, 0, 0, ''
+		WHERE NOT EXISTS (SELECT 1 FROM hive_state)
+		ON CONFLICT (block_num) DO NOTHING`).Error; err != nil {
+		return nil, err
+	}
+	var flags SyncFlags
+	if err := r.db.WithContext(ctx).
+		Model(&models.State{}).
+		Select("is_initial_sync", "recount_done").
+		Order("block_num").
+		Scan(&flags).Error; err != nil {
+		return nil, err
+	}
+	return &flags, nil
+}
+
+// UpdateSyncFlags persists the initial-sync flags. Invalid (NULL) arguments
+// leave the corresponding column unchanged (COALESCE), so callers can write
+// one marker without touching the other. The update targets the lowest
+// block_num row -- the original row of the database (a legacy database's own
+// hive_state entry; a fresh database's seeded row) -- so a database can never
+// grow a second hive_state row carrying divergent flags.
+func (r *StateRepository) UpdateSyncFlags(ctx context.Context, isInitialSync, recountDone sql.NullBool) error {
+	return r.db.WithContext(ctx).Exec(`UPDATE hive_state SET
+		is_initial_sync = COALESCE(?, is_initial_sync),
+		recount_done = COALESCE(?, recount_done)
+		WHERE block_num = (SELECT MIN(block_num) FROM hive_state)`,
+		isInitialSync, recountDone).Error
+}
+
+// ClearRecountDone resets the recount_done marker to NULL ("the tail trio did
+// not complete at the current head"). initialSync calls it BEFORE syncing new
+// blocks: recount_done's claim ("recount completed at the current head") is
+// about to become stale, and a crash anywhere between the first new block and
+// the trio's completion must leave the marker claiming nothing -- otherwise a
+// restart's tail-skip shortcut (recount_done && head unchanged) would skip
+// the trio forever and the freshly synced segment would never reach
+// hive_feed_cache / follow counts (PR#407 review, the 20M-stop -> 30M
+// continuation interrupted mid-trio scenario). UpdateSyncFlags cannot express
+// this: its COALESCE semantics treat a NULL argument as "leave unchanged".
+func (r *StateRepository) ClearRecountDone(ctx context.Context) error {
+	return r.db.WithContext(ctx).Exec(`UPDATE hive_state
+		SET recount_done = NULL
+		WHERE block_num = (SELECT MIN(block_num) FROM hive_state)`).Error
+}
+
 // NotificationRepository provides notification-related database operations
 type NotificationRepository struct {
 	*Repository
@@ -415,48 +491,42 @@ func (r *FeedCacheRepository) Delete(ctx context.Context, postID int64, accountI
 	return query.Delete(&models.FeedCache{}).Error
 }
 
-// Rebuild rebuilds the entire feed cache
+// Rebuild rebuilds the entire feed cache. Runs inside a
+// statement-timeout-exempt transaction: on a fully synced database the
+// INSERT...SELECT statements scan millions of hive_posts/hive_reblogs rows
+// and routinely exceed the indexer's default 30s guard.
 func (r *FeedCacheRepository) Rebuild(ctx context.Context, truncate bool) error {
-	tx := r.db.WithContext(ctx).Begin()
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
+	return WithoutStatementTimeout(ctx, r.db, func(tx *gorm.DB) error {
+		if truncate {
+			if err := tx.Exec("TRUNCATE TABLE hive_feed_cache").Error; err != nil {
+				return err
+			}
 		}
-	}()
 
-	if truncate {
-		if err := tx.Exec("TRUNCATE TABLE hive_feed_cache").Error; err != nil {
-			tx.Rollback()
+		// Insert all root posts (depth=0, not deleted) by their authors
+		if err := tx.Exec(`
+			INSERT INTO hive_feed_cache (account_id, post_id, created_at)
+			SELECT hive_accounts.id, hive_posts.id, hive_posts.created_at
+			FROM hive_posts
+			JOIN hive_accounts ON hive_posts.author = hive_accounts.name
+			WHERE depth = 0 AND is_deleted = false
+			ON CONFLICT (post_id, account_id) DO NOTHING
+		`).Error; err != nil {
 			return err
 		}
-	}
 
-	// Insert all root posts (depth=0, not deleted) by their authors
-	if err := tx.Exec(`
-		INSERT INTO hive_feed_cache (account_id, post_id, created_at)
-		SELECT hive_accounts.id, hive_posts.id, hive_posts.created_at
-		FROM hive_posts
-		JOIN hive_accounts ON hive_posts.author = hive_accounts.name
-		WHERE depth = 0 AND is_deleted = false
-		ON CONFLICT (post_id, account_id) DO NOTHING
-	`).Error; err != nil {
-		tx.Rollback()
-		return err
-	}
-
-	// Insert all reblogs
-	if err := tx.Exec(`
-		INSERT INTO hive_feed_cache (account_id, post_id, created_at)
-		SELECT hive_accounts.id, post_id, hive_reblogs.created_at
-		FROM hive_reblogs
-		JOIN hive_accounts ON hive_reblogs.account = hive_accounts.name
-		ON CONFLICT (post_id, account_id) DO NOTHING
-	`).Error; err != nil {
-		tx.Rollback()
-		return err
-	}
-
-	return tx.Commit().Error
+		// Insert all reblogs
+		if err := tx.Exec(`
+			INSERT INTO hive_feed_cache (account_id, post_id, created_at)
+			SELECT hive_accounts.id, post_id, hive_reblogs.created_at
+			FROM hive_reblogs
+			JOIN hive_accounts ON hive_reblogs.account = hive_accounts.name
+			ON CONFLICT (post_id, account_id) DO NOTHING
+		`).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // ReblogRepository provides reblog-related database operations

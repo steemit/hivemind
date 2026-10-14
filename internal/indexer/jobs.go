@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/logging"
 )
@@ -46,12 +47,15 @@ func AuditCacheMissing(ctx context.Context, database *gorm.DB, cp *CachedPost) e
 			Permlink string
 		}
 		var missing []row
-		if err := j.db.WithContext(ctx).
-			Table("hive_posts hp").
-			Select("hp.id", "hp.author", "hp.permlink").
-			Joins("LEFT JOIN hive_posts_cache hpc ON hp.id = hpc.post_id").
-			Where("hp.is_deleted = false AND hp.id BETWEEN ? AND ? AND hpc.post_id IS NULL", lbound, ubound).
-			Scan(&missing).Error; err != nil {
+		// Full-range LEFT JOIN scan; exempt from the session statement
+		// timeout (maintenance SQL, §2.5).
+		if err := db.WithoutStatementTimeout(ctx, j.db, func(tx *gorm.DB) error {
+			return tx.Table("hive_posts hp").
+				Select("hp.id", "hp.author", "hp.permlink").
+				Joins("LEFT JOIN hive_posts_cache hpc ON hp.id = hpc.post_id").
+				Where("hp.is_deleted = false AND hp.id BETWEEN ? AND ? AND hpc.post_id IS NULL", lbound, ubound).
+				Scan(&missing).Error
+		}); err != nil {
 			return err
 		}
 		for _, r := range missing {
@@ -88,12 +92,15 @@ func AuditCacheDeleted(ctx context.Context, database *gorm.DB, cp *CachedPost) e
 			Permlink string
 		}
 		var extra []row
-		if err := j.db.WithContext(ctx).
-			Table("hive_posts hp").
-			Select("hp.id", "hp.author", "hp.permlink").
-			Joins("JOIN hive_posts_cache hpc ON hp.id = hpc.post_id").
-			Where("hp.is_deleted = true AND hp.id BETWEEN ? AND ?", lbound, ubound).
-			Scan(&extra).Error; err != nil {
+		// Full-range JOIN scan; exempt from the session statement timeout
+		// (maintenance SQL, §2.5).
+		if err := db.WithoutStatementTimeout(ctx, j.db, func(tx *gorm.DB) error {
+			return tx.Table("hive_posts hp").
+				Select("hp.id", "hp.author", "hp.permlink").
+				Joins("JOIN hive_posts_cache hpc ON hp.id = hpc.post_id").
+				Where("hp.is_deleted = true AND hp.id BETWEEN ? AND ?", lbound, ubound).
+				Scan(&extra).Error
+		}); err != nil {
 			return err
 		}
 		for _, r := range extra {
@@ -128,11 +135,14 @@ func AuditCacheUndelete(ctx context.Context, database *gorm.DB, cp *CachedPost, 
 			Permlink string
 		}
 		var rows []row
-		if err := j.db.WithContext(ctx).
-			Table("hive_posts").
-			Select("id", "author", "permlink").
-			Where("is_deleted = true AND id BETWEEN ? AND ?", lbound, ubound).
-			Scan(&rows).Error; err != nil {
+		// Full-range scan; exempt from the session statement timeout
+		// (maintenance SQL, §2.5).
+		if err := db.WithoutStatementTimeout(ctx, j.db, func(tx *gorm.DB) error {
+			return tx.Table("hive_posts").
+				Select("id", "author", "permlink").
+				Where("is_deleted = true AND id BETWEEN ? AND ?", lbound, ubound).
+				Scan(&rows).Error
+		}); err != nil {
 			return err
 		}
 		if len(rows) == 0 {

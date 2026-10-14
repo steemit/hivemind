@@ -315,6 +315,13 @@ func (fi *FollowIndexer) PendingDeltasLen() int {
 // created it). ON COMMIT DROP also drops the tables at commit, so a later
 // call reusing the same pooled connection repopulates them instead of
 // reading stale rows.
+//
+// The whole routine runs with the statement timeout disabled
+// (db.WithoutStatementTimeout): on a 30M-block database the two
+// CREATE TEMP TABLE ... AS scans and the two UPDATEs each aggregate tens of
+// millions of hive_follows rows and exceed the 30s session guard; without
+// the exemption the initial-sync tail dies in the middle and the follow
+// counts stay at 0 (PR#402 audit registration).
 func (fi *FollowIndexer) ForceRecount(ctx context.Context) error {
 	gdb := fi.repo.DB()
 	statements := []string{
@@ -333,7 +340,7 @@ func (fi *FollowIndexer) ForceRecount(ctx context.Context) error {
 		`UPDATE hive_accounts SET following = num FROM following_counts
 		  WHERE id = account_id AND following != num`,
 	}
-	return gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return db.WithoutStatementTimeout(ctx, gdb, func(tx *gorm.DB) error {
 		for _, stmt := range statements {
 			if err := tx.Exec(stmt).Error; err != nil {
 				return fmt.Errorf("force recount: %w", err)
