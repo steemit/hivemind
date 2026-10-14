@@ -71,26 +71,9 @@ func init() {
 	}
 }
 
-// opValidationError marks an assertion-style validation failure of a
-// community custom_json op -- the class legacy CommunityOp.validate turns
-// into an `error` notification for the actor (it only catches
-// AssertionError). ProcessCommunityOp writes the notification and drops the
-// op only for these. Any other error escaping the validation phase is an
-// infrastructure failure (e.g. a DB error) which must propagate to the
-// caller; legacy lets non-assertion exceptions bubble up for block-level
-// retry instead of eating them.
-type opValidationError struct {
-	err error
-}
-
-func (e *opValidationError) Error() string { return e.err.Error() }
-func (e *opValidationError) Unwrap() error { return e.err }
-
-// opValidationErr builds an opValidationError carrying the legacy assertion
-// message (mirrors the `assert cond, 'message'` payloads).
-func opValidationErr(format string, args ...interface{}) error {
-	return &opValidationError{err: fmt.Errorf(format, args...)}
-}
+// opValidationError / opValidationErr / IsInfraError live in op_errors.go:
+// opValidationError was introduced here for community ops (PR#403) and is now
+// the shared data-error marker for all block op processing (P1-1).
 
 // communityAvatarURLValid mirrors legacy _valid_url_proto for the
 // updateProps settings.avatar_url value: when non-empty it must be
@@ -143,14 +126,19 @@ func (ci *CommunityIndexer) Register(ctx context.Context, tx *gorm.DB, accountNa
 
 		// Look the account up through the block transaction: it was just
 		// inserted by AccountIndexer.Register in this same (uncommitted)
-		// transaction, so a pool-side lookup would not see it.
+		// transaction, so a pool-side lookup would not see it. A missing
+		// account row is anomalous (the account register step runs first and
+		// fails the block on error) but harmless to skip; any other lookup
+		// failure is infrastructure and propagates for block-level retry.
 		var account models.Account
 		err := tx.WithContext(ctx).Where("name = ?", name).First(&account).Error
-		if err != nil {
-			ci.logger.Warn("Failed to get account for community registration",
-				zap.String("name", name),
-				zap.Error(err))
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ci.logger.Warn("Account missing for community registration; skipping",
+				zap.String("name", name))
 			continue
+		}
+		if err != nil {
+			return fmt.Errorf("failed to get account for community registration %s: %w", name, err)
 		}
 
 		// Extract type_id from name (5th character)
@@ -165,11 +153,19 @@ func (ci *CommunityIndexer) Register(ctx context.Context, tx *gorm.DB, accountNa
 		}
 
 		if err := tx.WithContext(ctx).Create(community).Error; err != nil {
-			// Community might already exist
-			ci.logger.Debug("Community already exists or creation failed",
-				zap.String("name", name),
-				zap.Error(err))
-			continue
+			// A duplicate row means the community was already registered --
+			// idempotent skip (legacy's plain INSERT would raise here, but the
+			// new-name filter upstream makes this unreachable in practice).
+			// The existence re-check runs on the same transaction, so a real
+			// infrastructure failure leaves the tx aborted, the lookup fails
+			// too, and the original error propagates for block-level retry.
+			var existing models.Community
+			if lookupErr := tx.WithContext(ctx).Where("name = ?", name).First(&existing).Error; lookupErr == nil {
+				ci.logger.Debug("Community already exists",
+					zap.String("name", name))
+				continue
+			}
+			return fmt.Errorf("failed to create community %s: %w", name, err)
 		}
 
 		// Create owner role
@@ -181,17 +177,15 @@ func (ci *CommunityIndexer) Register(ctx context.Context, tx *gorm.DB, accountNa
 		}
 
 		if err := tx.WithContext(ctx).Create(role).Error; err != nil {
-			ci.logger.Warn("Failed to create owner role",
-				zap.String("community", name),
-				zap.Error(err))
+			return fmt.Errorf("failed to create owner role for %s: %w", name, err)
 		}
 
-		// Send new_community notification
+		// Send new_community notification. The write rides the block
+		// transaction (legacy writes it inside process_multi's trx; §2.10):
+		// a block rollback leaves no notification residue.
 		communityID := account.ID
-		if werr := ci.notifyIndexer.Write(ctx, models.NotifyTypeNewCommunity, blockDate, nil, &communityID, &communityID, nil, nil, nil); werr != nil {
-			ci.logger.Warn("Failed to write new-community notification",
-				zap.String("community", name),
-				zap.Error(werr))
+		if werr := ci.notifyIndexer.WithTx(tx).Write(ctx, models.NotifyTypeNewCommunity, blockDate, nil, &communityID, &communityID, nil, nil, nil); werr != nil {
+			return fmt.Errorf("failed to write new-community notification for %s: %w", name, werr)
 		}
 
 		ci.logger.Info("Registered new community",
@@ -250,14 +244,12 @@ func (ci *CommunityIndexer) ProcessCommunityOp(ctx context.Context, tx *gorm.DB,
 	action, payload, ok := parseOpEnvelope(opJSON)
 	if !ok {
 		// legacy _validate_raw_op assertion -> error notif with dst unset
-		ci.writeOpError(ctx, op, opValidationErr("op json must be [action, payload] array"))
-		return nil
+		return ci.writeOpError(ctx, tx, op, opValidationErr("op json must be [action, payload] array"))
 	}
 	op.action = action
 	op.op = payload
 	if _, known := communityOpSchema[action]; !known {
-		ci.writeOpError(ctx, op, opValidationErr("invalid action"))
-		return nil
+		return ci.writeOpError(ctx, tx, op, opValidationErr("invalid action"))
 	}
 
 	if err := ci.validateCommunityOp(ctx, tx, op); err != nil {
@@ -265,8 +257,7 @@ func (ci *CommunityIndexer) ProcessCommunityOp(ctx context.Context, tx *gorm.DB,
 		if errors.As(err, &verr) {
 			// Assertion-class failure: legacy writes the error notif and
 			// drops the op (no retry).
-			ci.writeOpError(ctx, op, err)
-			return nil
+			return ci.writeOpError(ctx, tx, op, err)
 		}
 		// Infrastructure failure: no error notif (nothing user-visible went
 		// wrong); propagate to the caller for block-level handling.
@@ -278,8 +269,10 @@ func (ci *CommunityIndexer) ProcessCommunityOp(ctx context.Context, tx *gorm.DB,
 
 // writeOpError mirrors legacy CommunityOp.validate's except-branch: an
 // `error` notification is written for the actor (dst NULL when the actor
-// account is unknown), then the op is dropped.
-func (ci *CommunityIndexer) writeOpError(ctx context.Context, op *communityOp, err error) {
+// account is unknown), then the op is dropped. The notification rides the
+// block transaction (§2.10); a failed write is an infrastructure error and
+// propagates so the block is retried instead of silently losing the notice.
+func (ci *CommunityIndexer) writeOpError(ctx context.Context, tx *gorm.DB, op *communityOp, err error) error {
 	ci.logger.Debug("Community op rejected",
 		zap.String("actor", op.actor),
 		zap.String("action", op.action),
@@ -290,11 +283,10 @@ func (ci *CommunityIndexer) writeOpError(ctx context.Context, op *communityOp, e
 		dstID = &op.actorID
 	}
 	payload := err.Error()
-	if werr := ci.notifyIndexer.Write(ctx, models.NotifyTypeError, op.date, nil, dstID, nil, nil, &payload, nil); werr != nil {
-		ci.logger.Warn("Failed to write community op error notification",
-			zap.String("actor", op.actor),
-			zap.Error(werr))
+	if werr := ci.notifyIndexer.WithTx(tx).Write(ctx, models.NotifyTypeError, op.date, nil, dstID, nil, nil, &payload, nil); werr != nil {
+		return fmt.Errorf("failed to write community op error notification: %w", werr)
 	}
+	return nil
 }
 
 // validateCommunityOp mirrors legacy CommunityOp._read_schema +
@@ -308,7 +300,7 @@ func (ci *CommunityIndexer) validateCommunityOp(ctx context.Context, tx *gorm.DB
 	// Resolve actor account id (legacy Accounts.get_id asserts existence).
 	var actorAccount models.Account
 	err := tx.WithContext(ctx).Where("name = ?", op.actor).First(&actorAccount).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return opValidationErr("account does not exist: %s", op.actor)
 	}
 	if err != nil {
@@ -491,7 +483,7 @@ func (ci *CommunityIndexer) readAccount(ctx context.Context, tx *gorm.DB, op *co
 	}
 	var account models.Account
 	err = tx.WithContext(ctx).Where("name = ?", name).First(&account).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return opValidationErr("account `%s` not found", name)
 	}
 	if err != nil {
@@ -520,7 +512,7 @@ func (ci *CommunityIndexer) readPermlink(ctx context.Context, tx *gorm.DB, op *c
 	err = tx.WithContext(ctx).
 		Where("author = ? AND permlink = ?", op.account, permlink).
 		First(&post).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return opValidationErr("invalid post: %s/%s", op.account, permlink)
 	}
 	if err != nil {
@@ -959,8 +951,10 @@ func (ci *CommunityIndexer) refreshCachedPost(op *communityOp, isInitialSync boo
 // with score 35 (subscribed) or 15 (not subscribed); post-level actions
 // carry the post id with score 35. The _subscribed lookup failure is
 // propagated (legacy _notify has no exception handling, so the error
-// bubbles up through process() for block-level handling); only the final
-// notif write failure is Warn-and-continue (see NotifyIndexer.Write).
+// bubbles up through process() for block-level handling); the notif write
+// rides the block transaction (§2.10) and its failure also propagates: a
+// state change whose notification write failed must fail the block for
+// retry rather than commit a partial application.
 func (ci *CommunityIndexer) notifyCommunityOp(ctx context.Context, tx *gorm.DB, op *communityOp, typeID int16, payload *string, isInitialSync bool) error {
 	if isInitialSync {
 		return nil
@@ -986,10 +980,8 @@ func (ci *CommunityIndexer) notifyCommunityOp(ctx context.Context, tx *gorm.DB, 
 	if op.post != nil {
 		postID = &op.post.ID
 	}
-	if err := ci.notifyIndexer.Write(ctx, typeID, op.date, srcID, dstID, &communityID, postID, payload, &score); err != nil {
-		ci.logger.Warn("Failed to write community notification",
-			zap.Int16("type", typeID),
-			zap.Error(err))
+	if err := ci.notifyIndexer.WithTx(tx).Write(ctx, typeID, op.date, srcID, dstID, &communityID, postID, payload, &score); err != nil {
+		return fmt.Errorf("failed to write community notification (type %d): %w", typeID, err)
 	}
 	return nil
 }
@@ -1038,7 +1030,7 @@ func (ci *CommunityIndexer) isParentMuted(ctx context.Context, tx *gorm.DB, post
 		Select("is_muted").
 		Where("id = ?", post.ParentID.Int64).
 		First(&parent).Error
-	if err == gorm.ErrRecordNotFound {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
 	}
 	if err != nil {
@@ -1070,7 +1062,7 @@ func (ci *CommunityIndexer) getCommunityID(ctx context.Context, tx *gorm.DB, nam
 		Select("id").
 		First(&community).Error
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return 0, nil
 		}
 		return 0, err

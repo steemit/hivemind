@@ -177,13 +177,20 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 
 			opCount++
 
-			// Process operation
+			// Process operation. Error classification mirrors legacy
+			// blocks.process_multi (P1-1): an infrastructure failure
+			// (DB/RPC/context) fails the whole block so the sync layer
+			// retries it with the transaction rolled back and no op lost;
+			// a data error (deterministically bad chain data) is logged
+			// with the block/op identification and the op is skipped.
 			if err := bp.processOperation(ctx, tx, opType, opValue, blockDate, blockNum, isInitialSync, accountNames, &jsonOps); err != nil {
-				bp.logger.Error("Failed to process operation",
+				if IsInfraError(err) {
+					return fmt.Errorf("block %d: op %s failed (infrastructure): %w", blockNum, opType, err)
+				}
+				bp.logger.Warn("Skipping operation (data error)",
 					zap.String("type", opType),
 					zap.Int64("block", blockNum),
 					zap.Error(err))
-				// Continue processing other operations
 			}
 		}
 	}
@@ -195,14 +202,12 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 		return fmt.Errorf("failed to update block counts: %w", err)
 	}
 
-	// Process custom JSON operations
-	if len(jsonOps) > 0 {
-		if err := bp.customOps.ProcessOps(ctx, tx, jsonOps, blockNum, blockDate, isInitialSync); err != nil {
-			bp.logger.Error("Failed to process custom ops", zap.Error(err))
-		}
-	}
-
-	// Register new accounts
+	// Register new accounts (and any communities among them) BEFORE
+	// processing custom_json operations, mirroring legacy blocks.py
+	// (`Accounts.register(...)` then `CustomOp.process_ops(...)`): a block
+	// can create an account and emit a follow/community op for it in the
+	// same block, and those ops resolve the account through this
+	// transaction's uncommitted rows (P1-3).
 	accountNamesList := make([]string, 0, len(accountNames))
 	for name := range accountNames {
 		accountNamesList = append(accountNamesList, name)
@@ -212,25 +217,40 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 			return fmt.Errorf("failed to register accounts: %w", err)
 		}
 
-		// Check if any new accounts are communities and register them
+		// Check if any new accounts are communities and register them.
+		// Legacy runs this inside Accounts.register (same transaction); a
+		// failure fails the block.
 		if err := bp.communityIndexer.Register(ctx, tx, accountNamesList, blockDate); err != nil {
-			bp.logger.Warn("Failed to register communities", zap.Error(err))
-			// Don't fail block processing for community registration errors
+			return fmt.Errorf("failed to register communities: %w", err)
 		}
 	}
 
-	// Save transaction IDs
+	// Process custom JSON operations (follow/reblog/community/notify) after
+	// registration. Any error escaping ProcessOps is an infrastructure
+	// failure (data errors are classified and skipped inside) and fails the
+	// block for retry (P1-1).
+	if len(jsonOps) > 0 {
+		if err := bp.customOps.ProcessOps(ctx, tx, jsonOps, blockNum, blockDate, isInitialSync); err != nil {
+			return fmt.Errorf("block %d: custom ops failed: %w", blockNum, err)
+		}
+	}
+
+	// Save transaction IDs. hive_trxid_block_num is part of the strict
+	// checksum comparison, so a failure must fail the block (legacy
+	// _save_trxids runs inside the process_multi transaction) rather than
+	// commit the block with missing rows.
 	if len(trxIDs) > 0 {
 		if err := bp.saveTransactionIDs(ctx, tx, trxIDs, blockNum); err != nil {
-			bp.logger.Warn("Failed to save transaction IDs", zap.Error(err))
-			// Don't fail the block processing for this
+			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
 	}
 
 	return nil
 }
 
-// saveTransactionIDs saves transaction IDs to hive_trxid_block_num table
+// saveTransactionIDs saves transaction IDs to hive_trxid_block_num table.
+// Runs inside the block transaction; any failure propagates so the block is
+// retried whole instead of committing with missing trxid rows.
 func (bp *BlockProcessor) saveTransactionIDs(ctx context.Context, tx *gorm.DB, trxIDs []string, blockNum int64) error {
 	if len(trxIDs) == 0 {
 		return nil
@@ -254,7 +274,11 @@ func (bp *BlockProcessor) saveTransactionIDs(ctx context.Context, tx *gorm.DB, t
 
 	// Batch insert with ON CONFLICT DO NOTHING. The legacy v19 schema uses a
 	// PARTIAL unique index (hive_trxid_ix1 ON (trx_id) WHERE trx_id IS NOT
-	// NULL), so the conflict target is that index name.
+	// NULL); the conflict target must repeat the index predicate for
+	// PostgreSQL to infer it -- without the WHERE clause the statement is
+	// rejected outright ("no unique or exclusion constraint matching the
+	// ON CONFLICT specification"), which used to send every block down the
+	// per-row fallback path.
 	values := make([]string, 0, len(records))
 	args := make([]interface{}, 0, len(records)*2)
 	for _, r := range records {
@@ -263,17 +287,18 @@ func (bp *BlockProcessor) saveTransactionIDs(ctx context.Context, tx *gorm.DB, t
 	}
 	if err := tx.WithContext(ctx).
 		Exec("INSERT INTO hive_trxid_block_num (trx_id, block_num) VALUES "+
-			strings.Join(values, ", ")+" ON CONFLICT (trx_id) DO NOTHING",
+			strings.Join(values, ", ")+
+			" ON CONFLICT (trx_id) WHERE trx_id IS NOT NULL DO NOTHING",
 			args...).Error; err != nil {
-		// Fallback to individual inserts if batch fails
+		// Fallback to individual inserts if batch fails. A failure here
+		// leaves the transaction aborted, so the fallback errors too and
+		// the error propagates to fail the block (P1-1: no swallowed
+		// writes on the trxid path).
 		for _, record := range records {
 			if err := tx.WithContext(ctx).
 				Where("trx_id = ?", record.TrxID).
 				FirstOrCreate(&record).Error; err != nil {
-				bp.logger.Warn("Failed to save transaction ID",
-					zap.String("trx_id", record.TrxID.String),
-					zap.Int64("block", blockNum),
-					zap.Error(err))
+				return fmt.Errorf("failed to save transaction ID %s: %w", record.TrxID.String, err)
 			}
 		}
 	}

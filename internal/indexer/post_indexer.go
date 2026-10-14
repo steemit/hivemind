@@ -33,17 +33,26 @@ func NewPostIndexer(repo *db.Repository, cachedPost *CachedPost, logger *zap.Log
 	}
 }
 
-// ProcessComment processes a comment operation (create or update post)
+// ProcessComment processes a comment operation (create or update post).
+// Reads and writes ride the block transaction (P1-15): the existence check,
+// parent lookup, feed-cache insert and post writes must see (and roll back
+// with) the block's own uncommitted rows -- a pool-bound read cannot see a
+// post created earlier in the same block, and a pool-bound feed-cache write
+// would survive the block's rollback as an orphan row.
 func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[string]interface{}, blockDate time.Time, isInitialSync bool) error {
 	author, _ := op["author"].(string)
 	permlink, _ := op["permlink"].(string)
 	parentAuthor, _ := op["parent_author"].(string)
 	parentPermlink, _ := op["parent_permlink"].(string)
-	// title and body will be stored in post cache later
-	_, _ = op["title"].(string), op["body"].(string)
+	// title and body will be stored in post cache later; assert them safely
+	// (comma-ok) so an op missing either field cannot panic the process --
+	// block ops with absent optional fields are skipped as data errors at
+	// worst, never fatal.
+	_, _ = op["title"].(string)
+	_, _ = op["body"].(string)
 	jsonMeta, _ := op["json_metadata"].(string)
 
-	postRepo := db.NewPostRepository(pi.repo)
+	postRepo := db.NewPostRepository(pi.repo.WithTx(tx))
 
 	// Check if post already exists
 	existing, err := postRepo.GetByAuthorPermlink(ctx, author, permlink)
@@ -124,15 +133,15 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 	// Insert into feed cache if root post (depth=0) and not in initial sync
 	// Feed cache is rebuilt after initial sync completes
 	if post.Depth == 0 && !isInitialSync {
-		accountRepo := db.NewAccountRepository(pi.repo)
+		accountRepo := db.NewAccountRepository(pi.repo.WithTx(tx))
 		account, err := accountRepo.GetByName(ctx, author)
-		if err == nil && account != nil {
-			feedCacheRepo := db.NewFeedCacheRepository(pi.repo)
+		if err != nil {
+			return fmt.Errorf("failed to get account %s for feed cache: %w", author, err)
+		}
+		if account != nil {
+			feedCacheRepo := db.NewFeedCacheRepository(pi.repo.WithTx(tx))
 			if err := feedCacheRepo.Insert(ctx, post.ID, account.ID, blockDate); err != nil {
-				pi.logger.Warn("Failed to insert into feed cache",
-					zap.Int64("post_id", post.ID),
-					zap.Int64("account_id", account.ID),
-					zap.Error(err))
+				return fmt.Errorf("failed to insert into feed cache: %w", err)
 			}
 		}
 	}
@@ -149,12 +158,13 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 	return nil
 }
 
-// ProcessDelete processes a delete comment operation
+// ProcessDelete processes a delete comment operation. The post lookup and
+// the feed-cache eviction ride the block transaction (P1-15).
 func (pi *PostIndexer) ProcessDelete(ctx context.Context, tx *gorm.DB, op map[string]interface{}) error {
 	author, _ := op["author"].(string)
 	permlink, _ := op["permlink"].(string)
 
-	postRepo := db.NewPostRepository(pi.repo)
+	postRepo := db.NewPostRepository(pi.repo.WithTx(tx))
 	post, err := postRepo.GetByAuthorPermlink(ctx, author, permlink)
 	if err != nil {
 		return fmt.Errorf("failed to get post: %w", err)
@@ -173,8 +183,10 @@ func (pi *PostIndexer) ProcessDelete(ctx context.Context, tx *gorm.DB, op map[st
 	// (the author's own plus every reblog), mirroring legacy
 	// FeedCache.delete(post_id).
 	if post.Depth == 0 {
-		tx.WithContext(ctx).Where("post_id = ?", post.ID).
-			Delete(&models.FeedCache{})
+		if err := tx.WithContext(ctx).Where("post_id = ?", post.ID).
+			Delete(&models.FeedCache{}).Error; err != nil {
+			return fmt.Errorf("failed to evict feed cache for deleted post: %w", err)
+		}
 	}
 
 	// Evict from both cache tables, tags, and the dirty queue.

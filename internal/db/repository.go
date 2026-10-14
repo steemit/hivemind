@@ -25,6 +25,18 @@ func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
 
+// WithTx derives a Repository view bound to tx: every repository constructed
+// from the result (NewAccountRepository, NewPostRepository, ...) executes its
+// reads and writes on tx's transaction. The block processor uses this so that
+// the read-modify-write sequences inside a block (post/payment/custom-op
+// validation reads and writes) see the block's own uncommitted rows and leave
+// no orphan rows behind a rollback -- a pool-bound read cannot see rows the
+// transaction has not committed yet (P1-15). The receiver itself is not
+// modified: non-block callers keep using the pool-bound view.
+func (r *Repository) WithTx(tx *gorm.DB) *Repository {
+	return &Repository{db: tx}
+}
+
 // AccountRepository provides account-related database operations
 type AccountRepository struct {
 	*Repository

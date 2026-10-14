@@ -28,7 +28,13 @@ func NewPaymentIndexer(repo *db.Repository, logger *zap.Logger) *PaymentIndexer 
 	}
 }
 
-// ProcessTransfer processes a transfer operation
+// ProcessTransfer processes a transfer operation. Reads and writes ride the
+// block transaction (P1-15): the post lookup must see posts created earlier
+// in the same block, and the promoted update / payment row must roll back
+// with the block. Deterministic chain-data failures (unparseable amount,
+// unregistered sender/recipient) are data errors (opValidationError): legacy
+// returns None from _validated and records nothing; infrastructure failures
+// propagate for block-level retry (P1-1).
 func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op map[string]interface{}, blockNum int64, blockDate time.Time) error {
 	from, _ := op["from"].(string)
 	to, _ := op["to"].(string)
@@ -43,7 +49,7 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 	// Parse amount
 	amount, err := parseAmount(amountStr)
 	if err != nil {
-		return fmt.Errorf("failed to parse amount: %w", err)
+		return opValidationErr("failed to parse amount %q: %v", amountStr, err)
 	}
 
 	// Extract token type (should be SBD)
@@ -51,6 +57,8 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 	if strings.Contains(amountStr, "STEEM") {
 		token = "STEEM"
 	}
+
+	postRepo := db.NewPostRepository(pay.repo.WithTx(tx))
 
 	// Parse memo to get post (format: @author/permlink)
 	var postID int64
@@ -60,15 +68,17 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 			author := parts[0]
 			permlink := parts[1]
 
-			postRepo := db.NewPostRepository(pay.repo)
 			post, err := postRepo.GetByAuthorPermlink(ctx, author, permlink)
-			if err == nil && post != nil {
+			if err != nil {
+				return fmt.Errorf("failed to get post %s/%s: %w", author, permlink, err)
+			}
+			if post != nil {
 				postID = post.ID
 
 				// Update post promoted amount
 				post.Promoted += amount
 				if err := tx.WithContext(ctx).Save(post).Error; err != nil {
-					pay.logger.Warn("Failed to update post promoted amount", zap.Error(err))
+					return fmt.Errorf("failed to update post promoted amount: %w", err)
 				}
 			}
 		}
@@ -77,14 +87,20 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 	// Resolve account names to IDs (hive_payments.from_account/to_account are
 	// INTEGER FKs to hive_accounts.id). 'null' and the sender must already be
 	// registered (block_processor registers accounts observed in the block).
-	accountRepo := db.NewAccountRepository(pay.repo)
+	accountRepo := db.NewAccountRepository(pay.repo.WithTx(tx))
 	fromAccount, err := accountRepo.GetByName(ctx, from)
-	if err != nil || fromAccount == nil {
-		return fmt.Errorf("payment sender not registered: %s", from)
+	if err != nil {
+		return fmt.Errorf("failed to look up payment sender %s: %w", from, err)
+	}
+	if fromAccount == nil {
+		return opValidationErr("payment sender not registered: %s", from)
 	}
 	toAccount, err := accountRepo.GetByName(ctx, to)
-	if err != nil || toAccount == nil {
-		return fmt.Errorf("payment recipient not registered: %s", to)
+	if err != nil {
+		return fmt.Errorf("failed to look up payment recipient %s: %w", to, err)
+	}
+	if toAccount == nil {
+		return opValidationErr("payment recipient not registered: %s", to)
 	}
 
 	// Record payment

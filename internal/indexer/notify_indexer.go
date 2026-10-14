@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
@@ -20,6 +21,15 @@ type NotifyIndexer struct {
 // NewNotifyIndexer creates a new notification indexer
 func NewNotifyIndexer(repo *db.Repository) *NotifyIndexer {
 	return &NotifyIndexer{repo: repo}
+}
+
+// WithTx derives a NotifyIndexer whose writes ride tx's transaction (the
+// block-processing path, §2.10 / P1-15): notifications emitted while a block
+// is being processed are part of the block's effect, so a block rollback
+// leaves no notification residue. The receiver keeps its pool-bound view for
+// non-block callers (cache-flush notifs, jobs).
+func (n *NotifyIndexer) WithTx(tx *gorm.DB) *NotifyIndexer {
+	return &NotifyIndexer{repo: n.repo.WithTx(tx)}
 }
 
 // DefaultScore is the default notification score
