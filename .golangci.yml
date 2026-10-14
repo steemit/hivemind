@@ -31,7 +31,9 @@ run:
 
 output:
   # Sort findings by file and line for stable, reviewable output.
-  sort-results: true
+  sort-order:
+    - file
+    - linter
 
 linters:
   # Start from an empty set so every enabled linter is a deliberate choice
