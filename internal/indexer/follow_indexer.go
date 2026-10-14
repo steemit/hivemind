@@ -263,6 +263,43 @@ func (fi *FollowIndexer) Flush(ctx context.Context) error {
 	return nil
 }
 
+// SnapshotDeltas deep-copies both pending delta maps and returns a restore
+// closure that swaps them back in. The count deltas accumulate in memory
+// OUTSIDE the block transaction, so a block rollback does not touch them:
+// without a restore, a failed block leaves its deltas pending, the sync
+// layer's retry of the same block re-accumulates them, and the next Flush
+// applies them twice -- permanently inflating hive_accounts.followers/
+// following (ForceRecount only runs at the end of initial sync and never
+// self-heals live drift; PR#406 audit P1).
+//
+// The snapshot granularity is a single block, not a batch: deltas of blocks
+// that already committed earlier in the batch live on in the snapshot and
+// survive the restore. Replacing both maps wholesale is correct because the
+// sync loop processes blocks single-threaded -- between SnapshotDeltas and
+// restore, the only writers are the ops of the block being snapshotted.
+func (fi *FollowIndexer) SnapshotDeltas() func() {
+	fi.mu.Lock()
+	foll := make(map[int64]int, len(fi.deltaFoll))
+	for id, d := range fi.deltaFoll {
+		foll[id] = d
+	}
+	fing := make(map[int64]int, len(fi.deltaFing))
+	for id, d := range fi.deltaFing {
+		fing[id] = d
+	}
+	fi.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			fi.mu.Lock()
+			fi.deltaFoll = foll
+			fi.deltaFing = fing
+			fi.mu.Unlock()
+		})
+	}
+}
+
 // PendingDeltasLen reports pending delta entries (diagnostics/tests).
 func (fi *FollowIndexer) PendingDeltasLen() int {
 	fi.mu.Lock()

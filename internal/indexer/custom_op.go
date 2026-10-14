@@ -389,35 +389,41 @@ func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, ac
 			zap.String("author", author),
 			zap.String("permlink", permlink))
 	} else {
-		// Create reblog
+		// Create reblog. The insert mirrors legacy
+		// `ON CONFLICT (account, post_id) DO NOTHING`: a duplicate pair is
+		// an idempotent no-op (inserted == 0, no error). Any real failure is
+		// infrastructure and propagates for block-level retry (PR#406 audit
+		// P2: no swallowed DB errors on write paths -- and no SQL-level
+		// duplicate error either, which would abort the transaction).
 		reblog := &models.Reblog{
 			Account:   account,
 			PostID:    post.ID,
 			CreatedAt: blockDate,
 		}
-
-		if err := reblogRepo.Create(ctx, reblog); err != nil {
-			// Ignore duplicate reblog errors (legacy ON CONFLICT DO NOTHING);
-			// any other failure propagates.
-			cop.logger.Debug("Reblog already exists or failed to create",
-				zap.String("account", account),
-				zap.Int64("post_id", post.ID),
-				zap.Error(err))
-		} else {
-			// Add to feed cache (only if not in initial sync)
-			if !isInitialSync {
-				if err := feedCacheRepo.Insert(ctx, post.ID, accountObj.ID, blockDate); err != nil {
-					return fmt.Errorf("failed to insert into feed cache: %w", err)
-				}
-			}
-
-			// Send notification to post author
-			// TODO: Implement notification for reblog (#407)
-			cop.logger.Debug("Created reblog",
-				zap.String("account", account),
-				zap.String("author", author),
-				zap.String("permlink", permlink))
+		inserted, err := reblogRepo.Create(ctx, reblog)
+		if err != nil {
+			return fmt.Errorf("failed to create reblog: %w", err)
 		}
+		if inserted == 0 {
+			cop.logger.Debug("Reblog already exists",
+				zap.String("account", account),
+				zap.Int64("post_id", post.ID))
+			return nil
+		}
+
+		// Add to feed cache (only if not in initial sync)
+		if !isInitialSync {
+			if err := feedCacheRepo.Insert(ctx, post.ID, accountObj.ID, blockDate); err != nil {
+				return fmt.Errorf("failed to insert into feed cache: %w", err)
+			}
+		}
+
+		// Send notification to post author
+		// TODO: Implement notification for reblog (#407)
+		cop.logger.Debug("Created reblog",
+			zap.String("account", account),
+			zap.String("author", author),
+			zap.String("permlink", permlink))
 	}
 
 	return nil

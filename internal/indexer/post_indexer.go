@@ -100,7 +100,15 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 	// Set parent if this is a comment
 	if parentAuthor != "" && parentPermlink != "" {
 		parent, err := postRepo.GetByAuthorPermlink(ctx, parentAuthor, parentPermlink)
-		if err == nil && parent != nil {
+		if err != nil {
+			// A failed parent lookup is an infrastructure error and must
+			// fail the block (PR#406 audit P2): swallowing it here would
+			// silently downgrade a DB failure to the root-post path and
+			// corrupt depth/category/inheritance. A missing parent (nil,
+			// no error) keeps the legacy orphan handling (root path).
+			return fmt.Errorf("failed to look up parent post %s/%s: %w", parentAuthor, parentPermlink, err)
+		}
+		if parent != nil {
 			post.ParentID = sql.NullInt64{Int64: parent.ID, Valid: true}
 			post.Depth = parent.Depth + 1
 			post.Category = parent.Category

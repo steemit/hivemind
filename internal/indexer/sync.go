@@ -159,6 +159,13 @@ func (s *Sync) initialSync(ctx context.Context, feedCacheRepo *db.FeedCacheRepos
 	return nil
 }
 
+// poisonBlockThreshold is the number of consecutive failed sync attempts of
+// the SAME block after which the syncIrreversible loop escalates its log to a
+// marked `poison block` Error (block number + last error). Purely
+// observability (PR#406 audit P2): the loop keeps retrying -- halting or
+// skipping is a separate decision tracked in #405.
+const poisonBlockThreshold = 10
+
 // syncIrreversible implements Strategy B: sync only to irreversible blocks
 func (s *Sync) syncIrreversible(ctx context.Context) error {
 	s.logger.Info("Using fork strategy: irreversible blocks only")
@@ -168,6 +175,15 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 	if syncInterval == 0 {
 		syncInterval = 3 // Default 3 seconds
 	}
+
+	// Poison-block observability: the first block of the next unprocessed
+	// range (currentHead+1) identifies what a failed attempt will retry.
+	// After poisonBlockThreshold consecutive failures of that same block,
+	// every failure logs with the `poison block` marker so a permanently
+	// broken block is visible instead of silently spinning. A success (or
+	// progress to another block) resets the counters.
+	var poisonBlock int64
+	var poisonFails int
 
 	for {
 		select {
@@ -205,11 +221,32 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 					zap.Int64("blocks_to_sync", irreversible-currentHead))
 
 				if err := s.syncBlocks(ctx, currentHead+1, irreversible, false); err != nil {
-					s.logger.Error("Failed to sync blocks", zap.Error(err))
+					if retryBlock := currentHead + 1; retryBlock == poisonBlock {
+						poisonFails++
+					} else {
+						poisonBlock = retryBlock
+						poisonFails = 1
+					}
+					if poisonFails >= poisonBlockThreshold {
+						// Escalated, marked error -- emitted on EVERY failure
+						// at/after the threshold so the spin never goes quiet.
+						s.logger.Error("poison block: repeated failures on the same block; sync is stalled and retrying",
+							zap.Int64("block", poisonBlock),
+							zap.Int("consecutive_failures", poisonFails),
+							zap.Int("threshold", poisonBlockThreshold),
+							zap.Error(err))
+					} else {
+						s.logger.Error("Failed to sync blocks",
+							zap.Int64("block", poisonBlock),
+							zap.Int("attempt", poisonFails),
+							zap.Error(err))
+					}
 					// Retry after a short delay
 					s.wait(ctx, syncInterval)
 					continue
 				}
+
+				poisonBlock, poisonFails = 0, 0
 
 				s.logger.Info("Successfully synced blocks",
 					zap.Int64("from", currentHead+1),

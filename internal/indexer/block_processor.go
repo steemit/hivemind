@@ -93,14 +93,26 @@ func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]int
 		}
 	}()
 
+	// Snapshot the pending follow count deltas before processing: they
+	// accumulate in FollowIndexer memory outside this transaction, so a
+	// block rollback must also discard the deltas this block accumulates --
+	// otherwise the sync layer's retry of the same block re-applies them and
+	// the next Flush doubles the counts (PR#406 audit P1). Deltas of blocks
+	// committed earlier in the batch survive the restore.
+	restoreDeltas := bp.follows.SnapshotDeltas()
+
 	// Process block
 	if err := bp.processBlockInTx(ctx, tx, block, isInitialSync); err != nil {
+		restoreDeltas()
 		tx.Rollback()
 		return err
 	}
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
+		// The block did not land: its follow deltas must not survive either,
+		// or the retry re-accumulates them (same double-count as a rollback).
+		restoreDeltas()
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

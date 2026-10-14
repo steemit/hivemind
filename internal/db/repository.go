@@ -7,6 +7,7 @@ import (
 
 	"github.com/steemit/hivemind/internal/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Repository provides database access methods
@@ -468,9 +469,19 @@ func NewReblogRepository(repo *Repository) *ReblogRepository {
 	return &ReblogRepository{Repository: repo}
 }
 
-// Create creates a new reblog
-func (r *ReblogRepository) Create(ctx context.Context, reblog *models.Reblog) error {
-	return r.db.WithContext(ctx).Create(reblog).Error
+// Create creates a new reblog. Mirrors the legacy insert
+// (`ON CONFLICT (account, post_id) DO NOTHING`): a duplicate pair is a
+// no-op -- RowsAffected 0, no error, and the surrounding block transaction
+// stays usable (a plain INSERT that errors would abort the transaction and
+// turn the duplicate into a block-level retry).
+func (r *ReblogRepository) Create(ctx context.Context, reblog *models.Reblog) (int64, error) {
+	res := r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "account"}, {Name: "post_id"}},
+			DoNothing: true,
+		}).
+		Create(reblog)
+	return res.RowsAffected, res.Error
 }
 
 // Delete deletes a reblog
