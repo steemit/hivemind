@@ -1,4 +1,4 @@
-.PHONY: build build-server build-indexer test test-integration clean run-server run-indexer fmt lint deps check
+.PHONY: build build-server build-indexer test test-integration clean run-server run-indexer fmt fmt-check vet lint deps check
 
 # Integration test database conventions (see .github/workflows/check.yml and
 # the Q4 quality plan): integration tests DROP/recreate schemas and databases,
@@ -93,6 +93,19 @@ clean:
 fmt:
 	go fmt ./...
 
+# Check formatting WITHOUT rewriting files (read-only; same gate as the CI
+# check job's "Check gofmt" step). `gofmt -l` must list zero files.
+fmt-check:
+	@if [ -n "$$(gofmt -l .)" ]; then \
+		echo "gofmt found unformatted files (run 'gofmt -w <file>' or 'make fmt'):"; \
+		gofmt -l .; \
+		exit 1; \
+	fi
+
+# Run go vet (same gate as the CI check job's "go vet" step)
+vet:
+	go vet ./...
+
 # Lint code (requires golangci-lint; same rule set as the CI check job)
 lint:
 	@if ! command -v golangci-lint >/dev/null 2>&1; then \
@@ -111,5 +124,7 @@ deps:
 	go mod download
 	go mod tidy
 
-# Run all checks (same gates as the CI check job: fmt, lint, unit tests)
-check: fmt lint test
+# Run all checks - same gates as the CI check job, in the same order:
+# fmt-check (read-only), vet, lint, tests. DB-backed tests are env-gated on
+# HIVE_TEST_DATABASE_URL and skip here; run `make test-integration` for those.
+check: fmt-check vet lint test

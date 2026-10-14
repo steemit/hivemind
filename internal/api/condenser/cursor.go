@@ -320,8 +320,9 @@ func (c *Cursor) GetPostIDsByRepliesToAccount(ctx context.Context, startAuthor, 
 		// cursor.py pids_by_replies_to_account: legacy rebinds the subquery
 		// param to row.ParentAuthor (the parent's author); here args[0]
 		// keeps startAuthor, so this assignment has no effect yet. Fixing it
-		// is a behavior change tracked for a follow-up P1 PR; kept visible
-		// for the lint gate instead of silently deleting the breadcrumb.
+		// is a behavior change tracked for planned PR#413 (ranked/cursor
+		// pagination fixes); kept visible for the lint gate instead of
+		// silently deleting the breadcrumb.
 		parentAccount = row.ParentAuthor
 		seek = "AND id <= ?"
 		args = append(args, row.ID)
