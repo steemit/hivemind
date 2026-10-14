@@ -60,6 +60,16 @@ type SteemConfig struct {
 	MaxBatch   int
 	MaxWorkers int
 
+	// MaxRetries bounds transport-level retries per RPC after the first
+	// attempt (steemgosdk api/v2 WithMaxRetry; exponential backoff between
+	// attempts, doubled on 429). 0 selects the SDK default (3).
+	MaxRetries int
+
+	// RPCTimeout bounds each HTTP attempt against steemd (steemgosdk api/v2
+	// WithTimeout). 0 selects the SDK default (15s). The worst case for one
+	// logical call is (MaxRetries+1) x RPCTimeout plus backoff.
+	RPCTimeout time.Duration
+
 	// MutedAccountsURL is the irredeemables list endpoint (whitespace-
 	// separated account names), refreshed hourly. Empty disables the list.
 	// Mirrors legacy config key muted_accounts_url.
@@ -162,6 +172,8 @@ func Load() (*Config, error) {
 			URL:              getString("steemd_url", "https://api.steemit.com"),
 			MaxBatch:         getInt("max_batch", 50),
 			MaxWorkers:       getInt("max_workers", 4),
+			MaxRetries:       getInt("steemd_max_retries", 3),
+			RPCTimeout:       getDuration("steemd_rpc_timeout", 15*time.Second),
 			MutedAccountsURL: getString("muted_accounts_url", ""),
 		},
 		Redis: RedisConfig{
@@ -220,6 +232,8 @@ func setDefaults() {
 	viper.SetDefault("db_conn_max_idle_time", 10*time.Minute)
 	viper.SetDefault("db_statement_timeout", 30*time.Second)
 	viper.SetDefault("steemd_url", "https://api.steemit.com")
+	viper.SetDefault("steemd_max_retries", 3)
+	viper.SetDefault("steemd_rpc_timeout", 15*time.Second)
 	viper.SetDefault("muted_accounts_url", "")
 	viper.SetDefault("http_server_port", 8080)
 	viper.SetDefault("http_server_host", "0.0.0.0")
@@ -318,6 +332,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Steem.MaxWorkers <= 0 || c.Steem.MaxWorkers > 64 {
 		return fmt.Errorf("max_workers must be between 1 and 64")
+	}
+	// 0 selects the SDK default for both knobs; negative values are never
+	// meaningful, and absurdly large retry counts would hammer a struggling
+	// node instead of surfacing the failure to the sync loop.
+	if c.Steem.MaxRetries < 0 || c.Steem.MaxRetries > 10 {
+		return fmt.Errorf("steemd_max_retries must be between 0 and 10 (0 = SDK default)")
+	}
+	if c.Steem.RPCTimeout < 0 {
+		return fmt.Errorf("steemd_rpc_timeout must not be negative (0 = SDK default)")
 	}
 	if c.Indexer.TrailBlocks < 0 || c.Indexer.TrailBlocks > 100 {
 		return fmt.Errorf("trail_blocks must be between 0 and 100")

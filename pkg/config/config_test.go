@@ -125,3 +125,71 @@ func TestLoadDatabaseDefaults(t *testing.T) {
 		t.Error("default StatementTimeout should be non-zero")
 	}
 }
+
+func TestValidateSteemRPC(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Database: DatabaseConfig{
+				URL: "postgresql://test@localhost/test", MaxOpenConns: 25,
+				MaxIdleConns: 10, StatementTimeout: 30 * time.Second,
+			},
+			Steem: SteemConfig{URL: "u", MaxBatch: 50, MaxWorkers: 4},
+		}
+	}
+
+	// Zero values are valid: they select the SDK defaults (retry 3, 15s).
+	if err := base().Validate(); err != nil {
+		t.Errorf("zero-value steemd RPC knobs should be valid, got: %v", err)
+	}
+
+	// steemd_max_retries: within bounds valid, out of bounds invalid.
+	c := base()
+	c.Steem.MaxRetries = 10
+	if err := c.Validate(); err != nil {
+		t.Errorf("steemd_max_retries=10 should be valid, got: %v", err)
+	}
+	c = base()
+	c.Steem.MaxRetries = 11
+	if err := c.Validate(); err == nil {
+		t.Error("expected error for steemd_max_retries=11")
+	}
+	c = base()
+	c.Steem.MaxRetries = -1
+	if err := c.Validate(); err == nil {
+		t.Error("expected error for negative steemd_max_retries")
+	}
+
+	// steemd_rpc_timeout: negative invalid.
+	c = base()
+	c.Steem.RPCTimeout = -time.Second
+	if err := c.Validate(); err == nil {
+		t.Error("expected error for negative steemd_rpc_timeout")
+	}
+}
+
+func TestLoadSteemRPCDefaults(t *testing.T) {
+	t.Setenv("HIVE_DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+	if cfg.Steem.MaxRetries != 3 {
+		t.Errorf("default Steem.MaxRetries = %d, want 3", cfg.Steem.MaxRetries)
+	}
+	if cfg.Steem.RPCTimeout != 15*time.Second {
+		t.Errorf("default Steem.RPCTimeout = %v, want 15s", cfg.Steem.RPCTimeout)
+	}
+
+	t.Setenv("HIVE_STEEMD_MAX_RETRIES", "5")
+	t.Setenv("HIVE_STEEMD_RPC_TIMEOUT", "2m")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Failed to load config with overrides: %v", err)
+	}
+	if cfg.Steem.MaxRetries != 5 {
+		t.Errorf("Steem.MaxRetries = %d, want 5 (from HIVE_STEEMD_MAX_RETRIES)", cfg.Steem.MaxRetries)
+	}
+	if cfg.Steem.RPCTimeout != 2*time.Minute {
+		t.Errorf("Steem.RPCTimeout = %v, want 2m (from HIVE_STEEMD_RPC_TIMEOUT)", cfg.Steem.RPCTimeout)
+	}
+}

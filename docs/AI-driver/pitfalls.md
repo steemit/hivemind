@@ -170,8 +170,9 @@ delete or finish them when touched:
 - `-32602/-32663` JSON-RPC codes — defined, never emitted.
 - Prometheus metrics recording — works, but **no endpoint exposes it**.
 - `HIVE_TRAIL_BLOCKS` — validated, never consumed (Strategy B).
-- `SetMaxRetry` in the vendored SDK — dead code upstream (see SDK note in
-  infrastructure.md).
+- `SetMaxRetry` in the vendored SDK — dead code in steemgosdk ≤ v0.0.10;
+  effective again since the v0.0.31 upgrade (PR#400), wired to
+  `HIVE_STEEMD_MAX_RETRIES` (see SDK note in infrastructure.md).
 
 ## 12. Open known gaps (client-visible)
 

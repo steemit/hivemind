@@ -7,22 +7,43 @@ import (
 
 	"go.uber.org/zap"
 
-	sdkapi "github.com/steemit/steemgosdk/api"
-	protocolapi "github.com/steemit/steemutil/protocol/api"
+	v2api "github.com/steemit/steemgosdk/api/v2"
 	"github.com/steemit/steemutil/protocol"
+	protocolapi "github.com/steemit/steemutil/protocol/api"
 
 	"github.com/steemit/hivemind/pkg/config"
 	"github.com/steemit/hivemind/pkg/logging"
 	"github.com/steemit/hivemind/pkg/telemetry"
 )
 
-// Client wraps the Steem RPC client using steemgosdk and steemutil
+// ErrBlockNotFound is re-exported from steemgosdk api/v2 so callers can
+// distinguish "block not produced yet" (e.g. steemd node lagging behind the
+// expected head) from transport/infrastructure failures via errors.Is,
+// without importing the SDK directly.
+var ErrBlockNotFound = v2api.ErrBlockNotFound
+
+// Client wraps the Steem RPC client using steemgosdk's context-aware api/v2.
+//
+// Hardening contract (PR#400, P1-29):
+//   - Every method passes its context through to the SDK, so caller
+//     cancellation aborts in-flight RPCs immediately.
+//   - Retry with exponential backoff and an upper bound lives in the SDK
+//     transport layer (steemgosdk v0.0.31: 100/200/400ms, doubled on 429,
+//     capped by WithMaxRetry). The wrapper deliberately adds no outer retry
+//     loop — stacking retries would multiply attempts (see the SDK's
+//     MIGRATION.md). Persistent failure surfaces as an error and is handled
+//     by the caller's sync loop.
+//   - Malformed responses are errors, never empty results: a bad JSON body
+//     fails json decoding inside the SDK and propagates; a null result for
+//     get_block maps to ErrBlockNotFound; null results for calls that steemd
+//     never legitimately answers with null are rejected here. The indexer
+//     must never advance head on the back of an empty/garbage response.
 type Client struct {
-	api    *sdkapi.API
+	api    *v2api.API
 	logger *zap.Logger
 }
 
-// New creates a new Steem client
+// New creates a new Steem client.
 func New(cfg *config.SteemConfig) (*Client, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("steemd_url is required")
@@ -30,63 +51,87 @@ func New(cfg *config.SteemConfig) (*Client, error) {
 
 	logger := logging.GetLogger().With(zap.String("component", "steem-client"))
 
-	api := sdkapi.NewAPI(cfg.URL)
-	if cfg.MaxWorkers > 0 {
-		// Note: steemgosdk doesn't have a direct maxWorkers setting,
-		// but we can set max retry which affects reliability
-		api.SetMaxRetry(cfg.MaxWorkers)
-	}
+	// MaxWorkers bounds the range-fetch worker pool (GetBlocksRange);
+	// MaxRetries bounds transport-level retries; RPCTimeout bounds each
+	// HTTP attempt. Note: pre-v0.0.31 MaxWorkers was (mis)wired into the
+	// SDK's retry knob; with api/v2 it maps to actual fetch concurrency.
+	api := v2api.NewAPI(cfg.URL,
+		v2api.WithMaxRetry(cfg.MaxRetries),
+		v2api.WithTimeout(cfg.RPCTimeout),
+		v2api.WithConcurrency(cfg.MaxWorkers),
+	)
 
 	client := &Client{
 		api:    api,
 		logger: logger,
 	}
 
-	logger.Info("Steem client initialized", zap.String("url", cfg.URL))
+	logger.Info("Steem client initialized",
+		zap.String("url", cfg.URL),
+		zap.Int("max_retries", cfg.MaxRetries),
+		zap.Duration("rpc_timeout", cfg.RPCTimeout),
+		zap.Int("concurrency", cfg.MaxWorkers),
+	)
 
 	return client, nil
 }
 
-// GetBlock fetches a single block by number
+// GetBlock fetches a single block by number.
+//
+// A block number beyond the chain head returns an error wrapping
+// ErrBlockNotFound (steemd answers `result: null`); it is never converted
+// into an empty block map.
 func (c *Client) GetBlock(ctx context.Context, num int64) (map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_block")
 	defer span.End()
 
-	block, err := c.api.GetBlock(uint(num))
+	if num < 1 {
+		return nil, fmt.Errorf("invalid block number %d: must be >= 1", num)
+	}
+
+	block, err := c.api.GetBlock(ctx, uint(num))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get block %d: %w", num, err)
 	}
 
-	return c.blockToMap(block, num), nil
+	return c.blockToMap(block, num)
 }
 
-// GetBlocksRange fetches multiple blocks in a range
+// GetBlocksRange fetches blocks [from, to] inclusive.
+//
+// All-or-nothing: if any block in the range fails after the SDK's bounded
+// retries, the whole call returns an error and no blocks — the caller must
+// retry the range. Returning partial results would let the indexer skip
+// blocks (steem block numbers are contiguous), which is exactly the
+// "empty/garbage response advances head" hazard this wrapper prevents.
 func (c *Client) GetBlocksRange(ctx context.Context, from, to int64) ([]map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_blocks_range")
 	defer span.End()
 
-	if to < from {
-		return nil, fmt.Errorf("invalid range: to (%d) < from (%d)", to, from)
+	if from < 1 || to < from {
+		return nil, fmt.Errorf("invalid range: from (%d) must be >= 1 and <= to (%d)", from, to)
 	}
 
 	// steemgosdk's GetBlocks uses [from, to) (exclusive end)
 	// We need [from, to] (inclusive end), so we use to+1
-	wrapBlocks, err := c.api.GetBlocks(uint(from), uint(to+1))
+	wrapBlocks, err := c.api.GetBlocks(ctx, uint(from), uint(to+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get blocks range %d-%d: %w", from, to, err)
 	}
 
-	// Convert WrapBlock to map
 	blocks := make([]map[string]interface{}, 0, len(wrapBlocks))
 	for _, wrapBlock := range wrapBlocks {
-		blockMap := c.blockToMap(wrapBlock.Block, int64(wrapBlock.BlockNum))
+		blockMap, err := c.blockToMap(wrapBlock.Block, int64(wrapBlock.BlockNum))
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert block %d: %w", wrapBlock.BlockNum, err)
+		}
 		blocks = append(blocks, blockMap)
 	}
 
 	return blocks, nil
 }
 
-// GetAccounts fetches account data from steemd
+// GetAccounts fetches account data from steemd.
 func (c *Client) GetAccounts(ctx context.Context, names []string) ([]map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_accounts")
 	defer span.End()
@@ -99,29 +144,44 @@ func (c *Client) GetAccounts(ctx context.Context, names []string) ([]map[string]
 	}
 
 	var accounts []map[string]interface{}
-	err := c.api.CallWithResult("condenser_api", "get_accounts", []interface{}{names}, &accounts)
+	err := c.api.CallWithResult(ctx, "condenser_api", "get_accounts", []interface{}{names}, &accounts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get accounts: %w", err)
+	}
+	// steemd answers get_accounts with an array (never null); a null result
+	// means a malformed response and must not become an empty success.
+	if accounts == nil {
+		return nil, fmt.Errorf("failed to get accounts: unexpected null result for %d names", len(names))
 	}
 
 	return accounts, nil
 }
 
-// GetContent fetches post/comment data
+// GetContent fetches post/comment data.
 func (c *Client) GetContent(ctx context.Context, author, permlink string) (map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_content")
 	defer span.End()
 
 	var content map[string]interface{}
-	err := c.api.CallWithResult("condenser_api", "get_content", []interface{}{author, permlink}, &content)
+	err := c.api.CallWithResult(ctx, "condenser_api", "get_content", []interface{}{author, permlink}, &content)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get content: %w", err)
+	}
+	// steemd answers get_content with an object (never null).
+	if content == nil {
+		return nil, fmt.Errorf("failed to get content @%s/%s: unexpected null result", author, permlink)
 	}
 
 	return content, nil
 }
 
-// GetContentBatch fetches multiple posts/comments
+// GetContentBatch fetches multiple posts/comments.
+//
+// NOTE (P0-3, to be fixed in PR#401): this still issues a single
+// condenser_api.get_content call whose params are an array of
+// [author, permlink] pairs, which real steemd rejects. Real batch semantics
+// (batched request objects + per-item validation) ship with PR#401; this PR
+// only carries the minimal adaptation to the v0.0.31 context-aware SDK.
 func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_content_batch")
 	defer span.End()
@@ -139,29 +199,32 @@ func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[s
 	}
 
 	var contents []map[string]interface{}
-	err := c.api.CallWithResult("condenser_api", "get_content", params, &contents)
+	err := c.api.CallWithResult(ctx, "condenser_api", "get_content", params, &contents)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get content batch: %w", err)
+	}
+	if contents == nil {
+		return nil, fmt.Errorf("failed to get content batch: unexpected null result for %d posts", len(params))
 	}
 
 	return contents, nil
 }
 
-// GetDynamicGlobalProperties fetches dynamic global properties
+// GetDynamicGlobalProperties fetches dynamic global properties.
 func (c *Client) GetDynamicGlobalProperties(ctx context.Context) (map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_dynamic_global_properties")
 	defer span.End()
 
-	dgp, err := c.api.GetDynamicGlobalProperties()
+	dgp, err := c.api.GetDynamicGlobalProperties(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get dynamic global properties: %w", err)
 	}
 
 	// Convert to map for compatibility
-	return c.dgpToMap(dgp), nil
+	return dgpToMap(dgp)
 }
 
-// HeadBlock returns the current head block number
+// HeadBlock returns the current head block number.
 func (c *Client) HeadBlock(ctx context.Context) (int64, error) {
 	props, err := c.GetDynamicGlobalProperties(ctx)
 	if err != nil {
@@ -188,7 +251,7 @@ func (c *Client) HeadBlock(ctx context.Context) (int64, error) {
 	}
 }
 
-// LastIrreversible returns the last irreversible block number
+// LastIrreversible returns the last irreversible block number.
 func (c *Client) LastIrreversible(ctx context.Context) (int64, error) {
 	props, err := c.GetDynamicGlobalProperties(ctx)
 	if err != nil {
@@ -223,40 +286,42 @@ func (c *Client) StreamBlocks(ctx context.Context, startFrom int64, trailBlocks 
 	return nil, fmt.Errorf("block streaming not yet implemented")
 }
 
-// blockToMap converts protocolapi.Block to map[string]interface{} for compatibility
-func (c *Client) blockToMap(block *protocolapi.Block, blockNum int64) map[string]interface{} {
+// blockToMap converts protocolapi.Block to map[string]interface{} for compatibility.
+// Conversion failures are returned, never swallowed: a partially-converted
+// block must not be written as if it were valid.
+func (c *Client) blockToMap(block *protocolapi.Block, blockNum int64) (map[string]interface{}, error) {
 	// Convert transactions to []interface{}
 	transactions := make([]interface{}, 0, len(block.Transactions))
 	for _, tx := range block.Transactions {
 		// Convert transaction to map
 		txMap := make(map[string]interface{})
-		
+
 		// Convert operations to []interface{} format: [[type, data], ...]
 		ops := make([]interface{}, 0, len(tx.Operations))
 		for _, op := range tx.Operations {
 			// Convert operation data to map[string]interface{}
 			opData := op.Data()
 			var opDataMap map[string]interface{}
-			
+
 			// Marshal and unmarshal to convert struct to map
 			jsonData, err := json.Marshal(opData)
-			if err == nil {
-				json.Unmarshal(jsonData, &opDataMap)
-			} else {
-				// Fallback: create empty map
-				opDataMap = make(map[string]interface{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal operation %s data in block %d: %w", op.Type(), blockNum, err)
 			}
-			
+			if err := json.Unmarshal(jsonData, &opDataMap); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal operation %s data in block %d: %w", op.Type(), blockNum, err)
+			}
+
 			// Operations are stored as [type, data] tuples
 			// Convert OpType to format expected by block processor (e.g., "pow" -> "pow_operation")
-			opTypeStr := c.opTypeToString(op.Type())
+			opTypeStr := opTypeToString(op.Type())
 			opTuple := []interface{}{
 				opTypeStr,
 				opDataMap,
 			}
 			ops = append(ops, opTuple)
 		}
-		
+
 		txMap["operations"] = ops
 		txMap["ref_block_num"] = uint16(tx.RefBlockNum)
 		txMap["ref_block_prefix"] = uint32(tx.RefBlockPrefix)
@@ -265,7 +330,7 @@ func (c *Client) blockToMap(block *protocolapi.Block, blockNum int64) map[string
 		}
 		txMap["signatures"] = tx.Signatures
 		txMap["extensions"] = tx.Extensions
-		
+
 		transactions = append(transactions, txMap)
 	}
 
@@ -279,63 +344,64 @@ func (c *Client) blockToMap(block *protocolapi.Block, blockNum int64) map[string
 	blockMap["transaction_merkle_root"] = block.TransactionMerkleRoot
 	blockMap["transactions"] = transactions
 	blockMap["transaction_ids"] = block.TransactionIds
-	
+
 	if block.Timestamp != nil && block.Timestamp.Time != nil {
 		blockMap["timestamp"] = block.Timestamp.Time.Format("2006-01-02T15:04:05")
 	} else {
 		blockMap["timestamp"] = ""
 	}
-	
+
 	blockMap["extensions"] = block.Extensions
 	blockMap["signing_key"] = block.SigningKey
 
-	return blockMap
+	return blockMap, nil
 }
 
-// dgpToMap converts DynamicGlobalProperties to map[string]interface{} for compatibility
-func (c *Client) dgpToMap(dgp *protocolapi.DynamicGlobalProperties) map[string]interface{} {
+// dgpToMap converts DynamicGlobalProperties to map[string]interface{} for
+// compatibility. Unlike the pre-PR#400 version, conversion errors are
+// returned rather than logged-and-swallowed: a zero-value properties map
+// must not be mistaken for real chain state (e.g. head_block_number 0).
+func dgpToMap(dgp *protocolapi.DynamicGlobalProperties) (map[string]interface{}, error) {
 	// Marshal to JSON and unmarshal to map for automatic conversion
 	jsonData, err := json.Marshal(dgp)
 	if err != nil {
-		c.logger.Warn("Failed to marshal DGP", zap.Error(err))
-		return make(map[string]interface{})
+		return nil, fmt.Errorf("failed to marshal dynamic global properties: %w", err)
 	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(jsonData, &result); err != nil {
-		c.logger.Warn("Failed to unmarshal DGP", zap.Error(err))
-		return make(map[string]interface{})
+		return nil, fmt.Errorf("failed to unmarshal dynamic global properties: %w", err)
 	}
 
-	return result
+	return result, nil
 }
 
 // opTypeToString converts OpType to the format expected by block processor
 // e.g., "pow" -> "pow_operation", "comment" -> "comment_operation"
-func (c *Client) opTypeToString(opType protocol.OpType) string {
+func opTypeToString(opType protocol.OpType) string {
 	opTypeStr := string(opType)
-	
+
 	// Map of special cases
 	specialCases := map[string]string{
-		"pow":                         "pow_operation",
-		"pow2":                        "pow2_operation",
-		"comment":                     "comment_operation",
-		"delete_comment":              "delete_comment_operation",
-		"vote":                        "vote_operation",
-		"transfer":                    "transfer_operation",
-		"account_create":              "account_create_operation",
+		"pow":                            "pow_operation",
+		"pow2":                           "pow2_operation",
+		"comment":                        "comment_operation",
+		"delete_comment":                 "delete_comment_operation",
+		"vote":                           "vote_operation",
+		"transfer":                       "transfer_operation",
+		"account_create":                 "account_create_operation",
 		"account_create_with_delegation": "account_create_with_delegation_operation",
-		"create_claimed_account":      "create_claimed_account_operation",
-		"account_update":              "account_update_operation",
-		"account_update2":             "account_update2_operation",
-		"custom_json":                "custom_json_operation",
+		"create_claimed_account":         "create_claimed_account_operation",
+		"account_update":                 "account_update_operation",
+		"account_update2":                "account_update2_operation",
+		"custom_json":                    "custom_json_operation",
 	}
-	
+
 	// Check if there's a special case mapping
 	if mapped, ok := specialCases[opTypeStr]; ok {
 		return mapped
 	}
-	
+
 	// Default: append "_operation" suffix
 	return opTypeStr + "_operation"
 }

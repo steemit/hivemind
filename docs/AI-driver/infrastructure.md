@@ -74,20 +74,40 @@ Three layers:
 1. `provider.go` — the `Provider` interface (8 methods) everything depends
    on; `*Client` satisfies it; `internal/indexer/fake_provider_test.go`
    provides the test double. Compile-time assertion pins the interface.
+   The interface doc states the error contract test doubles must mirror.
 2. `client.go` — thin wrapper adding spans and translating SDK types into
    `map[string]interface{}` block shapes (`operations: [[type, value], …]`,
    op types suffixed `_operation`) so downstream code matches legacy JSON
    shapes.
-3. `steemgosdk`/`steemutil` (upstream SDK) — JSON-RPC over HTTP, 30 s
-   hard-coded timeout, per-request goroutines for `GetBlocks`.
+3. `steemgosdk` v0.0.31 `api/v2` / `steemutil` (upstream SDK) —
+   context-aware JSON-RPC over HTTP: 15 s per-attempt timeout
+   (`HIVE_STEEMD_RPC_TIMEOUT`), bounded transport-level retries with
+   exponential backoff (`HIVE_STEEMD_MAX_RETRIES`, 100/200/400 ms, doubled
+   on 429), bounded worker pool for `GetBlocks`
+   (`HIVE_MAX_WORKERS` → SDK concurrency).
 
 Contract facts an agent must know:
 
 - `GetBlocksRange(ctx, from, to)` fetches blocks `[from, to]` inclusive via
-  the SDK; the SDK fires one HTTP request per block (not a JSON-RPC batch),
-  retries indefinitely with **no backoff and no context cancellation** on
-  transport failure (upstream limitation — see pitfalls before relying on
-  retry behavior; upgrade path: newer SDK with context support).
+  the SDK; the SDK fires one HTTP request per block (not a JSON-RPC batch)
+  on a bounded worker pool. Failures are retried with backoff by the SDK
+  transport; the wrapper adds **no outer retry** (stacking retries would
+  multiply attempts) and is **all-or-nothing**: any block still failing
+  after the bounded retries errors the whole range, so callers can never
+  skip a block.
+- Malformed responses are errors, never empty results: bad JSON fails
+  decoding inside the SDK; `result: null` for `get_block` maps to
+  `steem.ErrBlockNotFound`; null results for calls steemd never answers
+  with null are rejected in the wrapper. Conversion failures
+  (`blockToMap` / `dgpToMap`) propagate instead of being swallowed.
+- Contexts are passed through to every RPC: caller cancellation/deadline
+  aborts in-flight requests (`context.Canceled` /
+  `context.DeadlineExceeded` in the error chain).
+- These behaviors are pinned by the scriptable-httptest contract tests in
+  `internal/steem/client_contract_test.go` (bad JSON, null block, 429
+  backoff-retry, range partial failure, ctx cancel). Extend that file —
+  not ad-hoc tests — when pinning new steemd quirks (e.g. PR#401's
+  get_content batch cases).
 - Only `condenser_api.*` calls are used against steemd.
 - `Mutes` (mutes.go): process-wide singleton (`SetSharedMutes` /
   `SharedMutes`, never nil) wrapping the "irredeemables" remote list;
