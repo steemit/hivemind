@@ -27,11 +27,16 @@ var (
 	rankCache   *accountRankCache
 )
 
-// sharedRankCache returns the process-wide cache bound to db.
+// sharedRankCache returns the process-wide cache bound to db. Production
+// callers all pass the same *gorm.DB instance for the process lifetime, so
+// the cache is created once. When a *different* instance is passed (tests
+// re-creating the pool per test via withMigratedDB), the cache rebinds to
+// it: keeping the old binding would query a closed pool and serve ranks for
+// account IDs from a dropped schema.
 func sharedRankCache(db *gorm.DB) *accountRankCache {
 	rankCacheMu.Lock()
 	defer rankCacheMu.Unlock()
-	if rankCache == nil {
+	if rankCache == nil || rankCache.db != db {
 		rankCache = &accountRankCache{
 			db:     db,
 			logger: logging.GetLogger().With(zap.String("component", "account-ranks")),

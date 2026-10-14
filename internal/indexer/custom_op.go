@@ -13,6 +13,14 @@ import (
 	"github.com/steemit/hivemind/internal/models"
 )
 
+// followPluginBarePayloadMaxBlock mirrors the legacy compat cutoff in
+// hive/indexer/custom_op.py (load_json_key): before block 6,000,000 some
+// clients sent the bare follow payload object instead of the
+// ["follow", payload] array; legacy wraps those as ["follow", payload].
+// From block 6,000,000 on, only the array envelope is accepted and bare
+// objects are skipped.
+const followPluginBarePayloadMaxBlock = 6000000
+
 // CustomOpProcessor processes custom JSON operations
 type CustomOpProcessor struct {
 	repo             *db.Repository
@@ -22,15 +30,65 @@ type CustomOpProcessor struct {
 	logger           *zap.Logger
 }
 
-// NewCustomOpProcessor creates a new custom op processor
-func NewCustomOpProcessor(repo *db.Repository, logger *zap.Logger) *CustomOpProcessor {
+// NewCustomOpProcessor creates a new custom op processor. followIndexer must
+// be the same instance the owning BlockProcessor holds and flushes: the
+// follow indexer accumulates count deltas in memory, so a privately-owned
+// instance would never be flushed and its counts would be silently lost
+// (audit P0-4). A nil followIndexer therefore fails fast here -- constructing
+// a fallback instance in its place would resurrect exactly that bug.
+func NewCustomOpProcessor(repo *db.Repository, followIndexer *FollowIndexer, logger *zap.Logger) *CustomOpProcessor {
+	if followIndexer == nil {
+		panic("NewCustomOpProcessor: followIndexer must not be nil; inject the BlockProcessor's shared FollowIndexer (audit P0-4)")
+	}
 	return &CustomOpProcessor{
 		repo:             repo,
 		communityIndexer: NewCommunityIndexer(repo, logger),
 		notifyIndexer:    NewNotifyIndexer(repo),
-		followIndexer:    NewFollowIndexer(repo, logger),
+		followIndexer:    followIndexer,
 		logger:           logger,
 	}
+}
+
+// truncateJSON keeps a bounded prefix of a custom_json payload for logging
+// (full payloads can be large; the prefix is only an observability hint).
+func truncateJSON(s string) string {
+	const max = 200
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
+// parseFollowPluginOp normalizes the `json` payload of a follow-plugin
+// custom_json operation (id == "follow"), mirroring legacy custom_op.py
+// (_process_legacy + load_json_key legacy compat):
+//
+//   - the payload must be a ["follow"|"reblog", payload] array whose second
+//     element is an object; anything else is skipped (ok == false);
+//   - before followPluginBarePayloadMaxBlock a bare payload object is
+//     wrapped as ["follow", payload];
+//   - at or after that block, bare objects are skipped, exactly as legacy
+//     does.
+func parseFollowPluginOp(jsonStr string, blockNum int64) (cmd string, payload map[string]interface{}, ok bool) {
+	var raw interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
+		return "", nil, false
+	}
+	if blockNum < followPluginBarePayloadMaxBlock {
+		if obj, isObj := raw.(map[string]interface{}); isObj {
+			raw = []interface{}{"follow", obj}
+		}
+	}
+	opArray, isArr := raw.([]interface{})
+	if !isArr || len(opArray) != 2 {
+		return "", nil, false
+	}
+	cmd, cmdIsStr := opArray[0].(string)
+	payload, payloadIsObj := opArray[1].(map[string]interface{})
+	if !cmdIsStr || !payloadIsObj {
+		return "", nil, false
+	}
+	return cmd, payload, true
 }
 
 // ProcessOps processes a list of custom JSON operations
@@ -64,51 +122,40 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 		// Process based on operation ID
 		switch opID {
 		case "follow":
-			// Follow operations can be either follow or reblog
-			// Try to parse as array first (legacy format: ["follow", {...}] or ["reblog", {...}])
-			var opArray []interface{}
-			if err := json.Unmarshal([]byte(jsonStr), &opArray); err == nil && len(opArray) == 2 {
-				cmd, _ := opArray[0].(string)
-				payload, _ := opArray[1].(map[string]interface{})
-				if cmd == "reblog" {
-					// Process reblog from legacy format
-					if err := cop.ProcessReblog(ctx, tx, account, payload, blockDate, isInitialSync); err != nil {
-						cop.logger.Warn("Failed to process reblog",
-							zap.String("account", account),
-							zap.Error(err))
-					}
-					continue
-				} else if cmd == "follow" {
-					// Process follow with legacy format
-					// This will be handled by FollowIndexer
-					// For now, we just continue
-					continue
-				}
+			// Follow-plugin ops (id == "follow") cover both follow and
+			// reblog commands, distinguished by the envelope's first
+			// element: ["follow", {...}] or ["reblog", {...}]. Envelope
+			// shapes that are not a [command, payload] pair are skipped,
+			// mirroring legacy custom_op.py._process_legacy.
+			cmd, payload, ok := parseFollowPluginOp(jsonStr, blockNum)
+			if !ok {
+				// Silent drop mirrors legacy, but keep it observable at Debug
+				// level (unknown envelope shapes were previously invisible).
+				cop.logger.Debug("Dropping non-array/invalid follow-plugin envelope",
+					zap.Int64("block", blockNum),
+					zap.String("account", account),
+					zap.String("json", truncateJSON(jsonStr)))
+				continue
 			}
-
-			// Try to parse as object (new format after block 6000000)
-			var opJSON map[string]interface{}
-			if err := json.Unmarshal([]byte(jsonStr), &opJSON); err == nil {
-				// Check if it's a reblog operation (has author and permlink)
-				if _, hasAuthor := opJSON["author"]; hasAuthor {
-					if _, hasPermlink := opJSON["permlink"]; hasPermlink {
-						// This is a reblog operation
-						if err := cop.ProcessReblog(ctx, tx, account, opJSON, blockDate, isInitialSync); err != nil {
-							cop.logger.Warn("Failed to process reblog",
-								zap.String("account", account),
-								zap.Error(err))
-						}
-						continue
-					}
-				}
-
-				// Otherwise, it's a follow operation
-				// Process follow operation
-				if err := cop.followIndexer.ProcessFollow(ctx, tx, account, opJSON, blockDate); err != nil {
+			switch cmd {
+			case "follow":
+				if err := cop.followIndexer.ProcessFollow(ctx, tx, account, payload, blockDate, isInitialSync); err != nil {
 					cop.logger.Warn("Failed to process follow",
 						zap.String("account", account),
 						zap.Error(err))
 				}
+			case "reblog":
+				if err := cop.ProcessReblog(ctx, tx, account, payload, blockDate, isInitialSync); err != nil {
+					cop.logger.Warn("Failed to process reblog",
+						zap.String("account", account),
+						zap.Error(err))
+				}
+			default:
+				cop.logger.Debug("Dropping unknown follow-plugin command",
+					zap.Int64("block", blockNum),
+					zap.String("account", account),
+					zap.String("cmd", cmd),
+					zap.String("json", truncateJSON(jsonStr)))
 			}
 		case "community":
 			// Process community operations only after START_BLOCK
