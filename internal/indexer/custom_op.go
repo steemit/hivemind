@@ -15,21 +15,21 @@ import (
 
 // CustomOpProcessor processes custom JSON operations
 type CustomOpProcessor struct {
-	repo            *db.Repository
+	repo             *db.Repository
 	communityIndexer *CommunityIndexer
-	notifyIndexer   *NotifyIndexer
-	followIndexer   *FollowIndexer
-	logger          *zap.Logger
+	notifyIndexer    *NotifyIndexer
+	followIndexer    *FollowIndexer
+	logger           *zap.Logger
 }
 
 // NewCustomOpProcessor creates a new custom op processor
 func NewCustomOpProcessor(repo *db.Repository, logger *zap.Logger) *CustomOpProcessor {
 	return &CustomOpProcessor{
-		repo:            repo,
+		repo:             repo,
 		communityIndexer: NewCommunityIndexer(repo, logger),
-		notifyIndexer:   NewNotifyIndexer(repo),
-		followIndexer:   NewFollowIndexer(repo, logger),
-		logger:          logger,
+		notifyIndexer:    NewNotifyIndexer(repo),
+		followIndexer:    NewFollowIndexer(repo, logger),
+		logger:           logger,
 	}
 }
 
@@ -92,8 +92,8 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 				// Check if it's a reblog operation (has author and permlink)
 				if _, hasAuthor := opJSON["author"]; hasAuthor {
 					if _, hasPermlink := opJSON["permlink"]; hasPermlink {
-					// This is a reblog operation
-					if err := cop.ProcessReblog(ctx, tx, account, opJSON, blockDate, isInitialSync); err != nil {
+						// This is a reblog operation
+						if err := cop.ProcessReblog(ctx, tx, account, opJSON, blockDate, isInitialSync); err != nil {
 							cop.logger.Warn("Failed to process reblog",
 								zap.String("account", account),
 								zap.Error(err))
@@ -179,7 +179,7 @@ func (cop *CustomOpProcessor) processNotify(ctx context.Context, tx *gorm.DB, ac
 func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, account string, opJSON map[string]interface{}, blockDate time.Time, isInitialSync bool) error {
 	author, _ := opJSON["author"].(string)
 	permlink, _ := opJSON["permlink"].(string)
-	
+
 	if author == "" || permlink == "" {
 		return fmt.Errorf("missing author or permlink in reblog op")
 	}
@@ -273,4 +273,3 @@ func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, ac
 
 	return nil
 }
-

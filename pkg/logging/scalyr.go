@@ -102,4 +102,3 @@ func (e *ScalyrEncoder) Clone() zapcore.Encoder {
 		config:  e.config,
 	}
 }
-

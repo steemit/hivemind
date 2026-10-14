@@ -128,4 +128,3 @@ func getNotifyTypeName(typeID int16) string {
 	}
 	return "unknown"
 }
-

@@ -22,7 +22,7 @@ func TestCommunityIndexer_roleNameToID(t *testing.T) {
 		{"admin", "admin", models.RoleAdmin},
 		{"owner", "owner", models.RoleOwner},
 		{"unknown", "unknown", models.RoleGuest}, // Default
-		{"empty", "", models.RoleGuest},         // Default
+		{"empty", "", models.RoleGuest},          // Default
 	}
 
 	for _, tt := range tests {
@@ -63,4 +63,3 @@ func TestCommunityIndexer_IsCommunityName(t *testing.T) {
 		})
 	}
 }
-

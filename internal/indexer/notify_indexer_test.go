@@ -79,4 +79,3 @@ func int64Ptr(v int64) *int64 {
 func stringPtr(v string) *string {
 	return &v
 }
-

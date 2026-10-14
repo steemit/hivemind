@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/steemit/hivemind/pkg/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"github.com/steemit/hivemind/pkg/config"
 )
 
 func TestScalyrEncoder(t *testing.T) {
@@ -28,14 +28,14 @@ func TestScalyrEncoder(t *testing.T) {
 	defer func() { Logger = oldLogger }()
 
 	encoderConfig := zapcore.EncoderConfig{
-		TimeKey:        "timestamp",
-		LevelKey:       "level",
-		MessageKey:     "message",
-		CallerKey:      "caller",
-		StacktraceKey:  "stacktrace",
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
+		TimeKey:       "timestamp",
+		LevelKey:      "level",
+		MessageKey:    "message",
+		CallerKey:     "caller",
+		StacktraceKey: "stacktrace",
+		EncodeTime:    zapcore.ISO8601TimeEncoder,
+		EncodeLevel:   zapcore.LowercaseLevelEncoder,
+		EncodeCaller:  zapcore.ShortCallerEncoder,
 	}
 
 	encoder := NewScalyrEncoder(encoderConfig)
@@ -62,4 +62,3 @@ func TestScalyrEncoder(t *testing.T) {
 		t.Error("Expected 'timestamp' field in log output")
 	}
 }
-

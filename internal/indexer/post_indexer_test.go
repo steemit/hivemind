@@ -76,4 +76,3 @@ func TestExtractCategory(t *testing.T) {
 		})
 	}
 }
-
