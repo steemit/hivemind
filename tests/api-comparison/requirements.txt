@@ -1,4 +1,7 @@
-# API 比较测试工具依赖
+# Dependencies for the API comparison tool.
+# Run:  pip install -r requirements.txt
 
 requests>=2.31.0
 PyYAML>=6.0.0
+# For the tool's own tests (test_api_comparator.py, selftest/):
+pytest>=8.0.0

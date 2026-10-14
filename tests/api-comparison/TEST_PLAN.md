@@ -239,49 +239,64 @@ volumes:
 
 ### 近似匹配
 
-对于浮点数和时间戳，允许一定误差：
+对于数值、时间戳和金额，允许一定误差（口径见 2026-Q4/04-comparison.md §五）：
 
-- 浮点数: 误差 < 0.001
-- 时间戳: 误差 < 1 秒
+- 数值: `float_epsilon`（默认 0.001）
+- 时间戳: 归一为 epoch 后按 `timestamp_seconds`（默认 2 秒）比较；
+  识别 ISO8601 变体（带/不带 Z、带偏移、无时区、空格分隔、日期-only）
+  与 epoch 秒/毫秒（数值仅在时间语义字段名上生效，如 `created`、`db_head_age`）
+- 金额字符串: `parse_amount` 归一为数值后按 `float_epsilon` 比较
+  （"1.500 SBD" 与 "1.5 SBD" 判等）
 
-### 结构忽略
+### 结构忽略（路径感知）
 
-对于某些字段，可以忽略不比较：
+`ignore_fields` 为路径感知匹配（见 `api_comparator.py` 的 `IgnoreMatcher`）：
 
-- `request_id`
-- 内部 ID
-- 时间戳（有时）
+- 裸字段名（如 `request_id`）匹配任意深度的同名键（保留 legacy 深度语义，慎用）
+- 点分路径（如 `author.id`）只匹配该精确路径，防止全局 `id` 误伤所有层级的业务字段
+- 支持 `*`（任一段）与 `**`（任意层级段）；list 下标归一为 `*`
 
 ### 深度比较
 
-递归比较嵌套对象和数组，直到叶子节点
+递归比较嵌套对象和数组，直到叶子节点；list 默认严格按位置比较，
+per-case 可选 `unordered`（按业务键排序后比）与 `lenient_list`
+（长度 + 集合式一对一匹配），仅用于 legacy 本身无序的场景并在 yaml 注释登记理由。
 
 ## 测试用例配置
 
 测试用例配置文件: `tests/api-comparison/test_cases.yaml`
 
+参数形态以 legacy Python 端协议为准：condenser 用例为**位置数组**
+（讨论类查询为 `[query对象]` 嵌套形态）；bridge/hive_api 用例为对象
+（键名与 legacy 方法签名一致）。
+
 ```yaml
-# 测试用例配置
+# 顶层全局配置（逐层应用到每个用例，per-case 可覆盖）
+config:
+  ignore_fields: []            # 路径感知
+  tolerance:
+    float_epsilon: 0.001
+    timestamp_seconds: 2
+
 test_cases:
-  - name: "获取文章内容"
+  - id: "condenser-get-content"          # 稳定 id，用于结果文件命名
+    name: "condenser_api.get_content steemit/firstpost"
     api: "condenser_api.get_content"
     priority: "P0"
-    params:
-      author: "steemit"
-      permlink: "firstpost"
-    ignore_fields:
-      - "request_id"
-    tolerance: {}
+    params: ["steemit", "firstpost"]     # 位置数组（legacy 协议形态）
+    # ignore_fields: [...]               # per-case 覆盖（整体替换全局）
+    # tolerance: {...}                   # per-case 覆盖（按键合并）
+    # unordered: true                    # 顶层 list 按业务键排序后比
+    # unordered_key: "author"
+    # lenient_list: true                 # 顶层 list 长度 + 集合式匹配
+```
 
-  - name: "获取账户信息"
-    api: "hive_api.get_account"
-    priority: "P0"
-    params:
-      account: "steemit"
-    ignore_fields:
-      - "last_owner_update"
-    tolerance:
-      timestamp_seconds: 2
+工具自测（不依赖真实服务）：
+
+```bash
+cd tests/api-comparison
+python3 -m pytest test_api_comparator.py    # 比较器核心单元测试
+python3 selftest/run_selftest.py            # stub 双端端到端冒烟
 ```
 
 ## 失败处理
