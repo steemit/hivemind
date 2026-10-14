@@ -17,6 +17,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/zap"
 
 	"github.com/steemit/hivemind/pkg/config"
@@ -141,7 +142,7 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 func Tracer() trace.Tracer {
 	if tracer == nil {
 		// Fallback to no-op tracer
-		return trace.NewNoopTracerProvider().Tracer("hivemind")
+		return noop.NewTracerProvider().Tracer("hivemind")
 	}
 	return tracer
 }

@@ -188,7 +188,11 @@ func (ci *CommunityIndexer) Register(ctx context.Context, tx *gorm.DB, accountNa
 
 		// Send new_community notification
 		communityID := account.ID
-		ci.notifyIndexer.Write(ctx, models.NotifyTypeNewCommunity, blockDate, nil, &communityID, &communityID, nil, nil, nil)
+		if werr := ci.notifyIndexer.Write(ctx, models.NotifyTypeNewCommunity, blockDate, nil, &communityID, &communityID, nil, nil, nil); werr != nil {
+			ci.logger.Warn("Failed to write new-community notification",
+				zap.String("community", name),
+				zap.Error(werr))
+		}
 
 		ci.logger.Info("Registered new community",
 			zap.String("name", name),

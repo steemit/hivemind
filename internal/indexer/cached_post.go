@@ -56,11 +56,6 @@ var levelNames = map[int]string{
 	levelRecount: "recount",
 }
 
-var levelByName = map[string]int{
-	"insert": levelInsert, "payout": levelPayout, "update": levelUpdate,
-	"upvote": levelUpvote, "recount": levelRecount,
-}
-
 // batchChunk is the steemd get_content batch size (legacy partition_all(1000)).
 const batchChunk = 1000
 

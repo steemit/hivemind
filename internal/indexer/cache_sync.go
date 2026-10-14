@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -80,6 +79,3 @@ func (c *CacheSync) prune(ctx context.Context) {
 		zap.Int64("deleted", res.RowsAffected),
 		zap.Time("cutoff", cutoff))
 }
-
-// syncMu guards the shared-instance helpers below (tests / manual triggers).
-var syncMu sync.Mutex
