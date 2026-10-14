@@ -59,6 +59,35 @@ func truncateJSON(s string) string {
 	return s[:max] + "..."
 }
 
+// arrayEnvelope validates an already-unmarshalled custom_json payload in the
+// canonical on-chain [action, payload] array envelope, mirroring legacy
+// hive/utils/json.py valid_op_json: exactly two elements, the first a string
+// (the command/action), the second an object. Any other shape (bare object,
+// string, number, wrong arity) is rejected (ok == false).
+func arrayEnvelope(raw interface{}) (action string, payload map[string]interface{}, ok bool) {
+	opArray, isArr := raw.([]interface{})
+	if !isArr || len(opArray) != 2 {
+		return "", nil, false
+	}
+	action, actionIsStr := opArray[0].(string)
+	payload, payloadIsObj := opArray[1].(map[string]interface{})
+	if !actionIsStr || !payloadIsObj {
+		return "", nil, false
+	}
+	return action, payload, true
+}
+
+// parseOpEnvelope parses the `json` field of a custom_json operation and
+// requires the [action, payload] array envelope (legacy valid_op_json).
+// Malformed JSON and any other shape are rejected (ok == false).
+func parseOpEnvelope(jsonStr string) (action string, payload map[string]interface{}, ok bool) {
+	var raw interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
+		return "", nil, false
+	}
+	return arrayEnvelope(raw)
+}
+
 // parseFollowPluginOp normalizes the `json` payload of a follow-plugin
 // custom_json operation (id == "follow"), mirroring legacy custom_op.py
 // (_process_legacy + load_json_key legacy compat):
@@ -79,16 +108,7 @@ func parseFollowPluginOp(jsonStr string, blockNum int64) (cmd string, payload ma
 			raw = []interface{}{"follow", obj}
 		}
 	}
-	opArray, isArr := raw.([]interface{})
-	if !isArr || len(opArray) != 2 {
-		return "", nil, false
-	}
-	cmd, cmdIsStr := opArray[0].(string)
-	payload, payloadIsObj := opArray[1].(map[string]interface{})
-	if !cmdIsStr || !payloadIsObj {
-		return "", nil, false
-	}
-	return cmd, payload, true
+	return arrayEnvelope(raw)
 }
 
 // ProcessOps processes a list of custom JSON operations
@@ -99,6 +119,17 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 
 		// Only process known operation IDs
 		if opID != "follow" && opID != "community" && opID != "notify" {
+			continue
+		}
+
+		// Legacy _get_auth: custom_json ops carrying active auths are
+		// skipped outright (the follow/community/notify plugins only ever
+		// use a single posting auth).
+		activeAuths, _ := op["required_auths"].([]interface{})
+		if len(activeAuths) > 0 {
+			cop.logger.Warn("Unexpected active auths in custom_json; skipping op",
+				zap.Int64("block", blockNum),
+				zap.String("id", opID))
 			continue
 		}
 
@@ -160,7 +191,7 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 		case "community":
 			// Process community operations only after START_BLOCK
 			if blockNum > START_BLOCK {
-				if err := cop.communityIndexer.ProcessCommunityOp(ctx, tx, account, jsonStr, blockDate); err != nil {
+				if err := cop.communityIndexer.ProcessCommunityOp(ctx, tx, account, jsonStr, blockDate, isInitialSync); err != nil {
 					cop.logger.Warn("Failed to process community op",
 						zap.String("account", account),
 						zap.String("json", jsonStr),
@@ -180,45 +211,72 @@ func (cop *CustomOpProcessor) ProcessOps(ctx context.Context, tx *gorm.DB, ops [
 	return nil
 }
 
-// processNotify processes notify operations (e.g., setLastRead)
+// naiveDateTimeLayout mirrors legacy hive/utils/json.py valid_date: Steem
+// timestamps are naive (no timezone designator), formatted
+// YYYY-MM-DDTHH:MM:SS. RFC3339 parsing would reject them.
+const naiveDateTimeLayout = "2006-01-02T15:04:05"
+
+// processNotify processes notify-plugin custom_json operations (id ==
+// "notify"), mirroring legacy custom_op.py _process_notify:
+//
+//   - the payload must be a ["setLastRead", {...}] array envelope; any other
+//     envelope shape is skipped (legacy valid_op_json assertion);
+//   - the payload must carry exactly the `date` key (legacy
+//     valid_keys(required=['date']) with no optional keys);
+//   - the date must be a naive YYYY-MM-DDTHH:MM:SS string (legacy
+//     valid_date regex rejects timezone suffixes) and must not be after the
+//     block date (legacy asserts date <= block_date; future dates are
+//     rejected, not clamped).
+//
+// Validation failures skip the op (legacy logs a warning); only the
+// SetLastRead write error propagates.
 func (cop *CustomOpProcessor) processNotify(ctx context.Context, tx *gorm.DB, account, jsonStr string, blockDate time.Time) error {
-	var opJSON map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &opJSON); err != nil {
-		return fmt.Errorf("failed to parse notify op JSON: %w", err)
-	}
-
-	command, ok := opJSON["type"].(string)
+	command, payload, ok := parseOpEnvelope(jsonStr)
 	if !ok {
-		return nil // Not a valid notify op
-	}
-
-	if command == "setLastRead" {
-		payload, ok := opJSON["date"].(string)
-		if !ok {
-			return fmt.Errorf("missing date in setLastRead")
-		}
-
-		// Parse date
-		readDate, err := time.Parse(time.RFC3339, payload)
-		if err != nil {
-			return fmt.Errorf("invalid date format: %w", err)
-		}
-
-		// Ensure read date is not in the future
-		if readDate.After(blockDate) {
-			readDate = blockDate
-		}
-
-		// Update notification last read time
-		if err := cop.notifyIndexer.SetLastRead(ctx, account, readDate); err != nil {
-			return fmt.Errorf("failed to set last read: %w", err)
-		}
-
-		cop.logger.Debug("Set last read",
+		cop.logger.Debug("Dropping non-array/invalid notify envelope",
 			zap.String("account", account),
-			zap.Time("date", readDate))
+			zap.String("json", truncateJSON(jsonStr)))
+		return nil
+	}
+	if command != "setLastRead" {
+		cop.logger.Warn("notify op fail: invalid command",
+			zap.String("account", account),
+			zap.String("command", command))
+		return nil
+	}
+	if len(payload) != 1 {
+		cop.logger.Warn("notify op fail: payload keys must be exactly ['date']",
+			zap.String("account", account))
+		return nil
+	}
+	dateStr, isStr := payload["date"].(string)
+	if !isStr {
+		cop.logger.Warn("notify op fail: missing date in setLastRead",
+			zap.String("account", account))
+		return nil
+	}
+	readDate, err := time.Parse(naiveDateTimeLayout, dateStr)
+	if err != nil {
+		cop.logger.Warn("notify op fail: invalid date format",
+			zap.String("account", account),
+			zap.String("date", dateStr))
+		return nil
+	}
+	if readDate.After(blockDate) {
+		cop.logger.Warn("notify op fail: date is after block date",
+			zap.String("account", account),
+			zap.String("date", dateStr))
+		return nil
 	}
 
+	// Update notification last read time
+	if err := cop.notifyIndexer.SetLastRead(ctx, account, readDate); err != nil {
+		return fmt.Errorf("failed to set last read: %w", err)
+	}
+
+	cop.logger.Debug("Set last read",
+		zap.String("account", account),
+		zap.Time("date", readDate))
 	return nil
 }
 

@@ -8,8 +8,6 @@ import (
 )
 
 func TestCommunityIndexer_roleNameToID(t *testing.T) {
-	ci := &CommunityIndexer{}
-
 	tests := []struct {
 		name     string
 		roleName string
@@ -27,7 +25,7 @@ func TestCommunityIndexer_roleNameToID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ci.roleNameToID(tt.roleName)
+			result := roleNameToID(tt.roleName)
 			if result != tt.expected {
 				t.Errorf("roleNameToID(%q) = %v, want %v", tt.roleName, result, tt.expected)
 			}
