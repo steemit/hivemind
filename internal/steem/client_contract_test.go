@@ -916,7 +916,7 @@ func TestContractContentBatchTransientFailures(t *testing.T) {
 	})
 }
 
-// TestContractContentBatchPerAttemptTimeoutRetried pins the PR#403 review
+// TestContractContentBatchPerAttemptTimeoutRetried pins the PR#401 review
 // fix: a per-attempt transport timeout (http.Client.Timeout expiring while
 // the caller's context is still live) is TRANSIENT on the batch path — one
 // slow steemd response must not kill the whole batch. The failure is retried
@@ -962,7 +962,7 @@ func TestContractContentBatchPerAttemptTimeoutRetried(t *testing.T) {
 	}
 }
 
-// TestContractContentBatchBodyReadTimeoutRetried pins the PR#403 review-r2
+// TestContractContentBatchBodyReadTimeoutRetried pins the PR#401 review-r2
 // fix: http.Client.Timeout also covers READING the response body, so a node
 // that answers headers promptly but dribbles the body out slower than the
 // per-attempt timeout fails the json.Decoder read — not the POST — with a
@@ -1008,7 +1008,7 @@ func TestContractContentBatchBodyReadTimeoutRetried(t *testing.T) {
 }
 
 // TestContractContentBatchCallerDeadlineNotRetried pins the other half of the
-// PR#403 fix: a CALLER-side context deadline stays non-retryable on the batch
+// PR#401 fix: a CALLER-side context deadline stays non-retryable on the batch
 // path. With the per-attempt timeout generous and the caller's deadline
 // short, exactly one request goes out and the error wraps
 // context.DeadlineExceeded — the caller gave up, so no retry storm.
