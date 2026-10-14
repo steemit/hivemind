@@ -703,7 +703,7 @@ class APIClient:
             # endpoints (e12 probe) while message=None produced an
             # ApiCallError(message=None) rescued only further upstream.
             if not (isinstance(error, dict)
-                    and isinstance(error.get("code"), int)
+                    and type(error.get("code")) is int
                     and isinstance(error.get("message"), str)):
                 raise ApiCallError(
                     f"malformed JSON-RPC response: error object must carry "
