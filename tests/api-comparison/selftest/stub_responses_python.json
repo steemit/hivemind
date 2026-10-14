@@ -1,0 +1,98 @@
+{
+  "condenser_api.get_content": {
+    "validate": "array",
+    "result": {
+      "id": 33,
+      "author": "steemit",
+      "permlink": "firstpost",
+      "title": "Welcome to Steem!",
+      "category": "meta",
+      "created": "2024-05-01T10:00:00",
+      "payout": "1.500 SBD",
+      "body": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown"
+    }
+  },
+  "condenser_api.get_discussions_by_trending": {
+    "validate": "array",
+    "result": [
+      {
+        "author": "alice",
+        "n": 1
+      },
+      {
+        "author": "bob",
+        "n": 2
+      }
+    ]
+  },
+  "condenser_api.get_followers": {
+    "validate": "array",
+    "result": [
+      {
+        "follower": "alice",
+        "what": [
+          "blog"
+        ]
+      },
+      {
+        "follower": "bob",
+        "what": [
+          "blog"
+        ]
+      }
+    ]
+  },
+  "condenser_api.get_account_votes": {
+    "validate": "array",
+    "error": {
+      "code": 10,
+      "message": "get_account_votes is no longer supported"
+    }
+  },
+  "stub.both_transport_500": {
+    "validate": "any",
+    "http_status": 500
+  },
+  "stub.non_envelope_200": {
+    "validate": "any",
+    "raw_json": {"status": "ok"}
+  },
+  "stub.result_and_error": {
+    "validate": "any",
+    "raw_json": {"jsonrpc": "2.0", "id": 1, "result": {"author": "alice"},
+                 "error": {"code": 10, "message": "partial failure"}}
+  },
+  "stub.redirect_302": {
+    "validate": "any",
+    "redirect": "/health"
+  },
+  "condenser_api.get_blog": {
+    "validate": "array",
+    "result": [
+      {
+        "blog": "steemit",
+        "entry_id": 0,
+        "comment": {
+          "title": "original title"
+        }
+      }
+    ]
+  },
+  "bridge.get_profile": {
+    "validate": "object",
+    "result": {
+      "name": "steemit",
+      "author": {
+        "internal_id": 11
+      }
+    }
+  },
+  "hive.db_head_state": {
+    "validate": "any",
+    "result": {
+      "db_head_block": 80000000,
+      "db_head_time": "2024-05-01 10:00:00",
+      "db_head_age": 1000
+    }
+  }
+}

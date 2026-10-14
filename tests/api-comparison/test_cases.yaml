@@ -1,370 +1,434 @@
-# API 一致性测试用例配置
-# 用于测试 Go 版本和 Python 版本 API 的响应一致性
+# Hivemind API consistency test cases.
+#
+# Parameter shapes follow the LEGACY Python server's wire protocol (the
+# authoritative reference), in forms the Go server also accepts:
+#   * condenser_api.* -- positional arrays. Discussion-style queries use the
+#     steemd/jussi nested-query form: a one-element array holding the query
+#     object (legacy `nested_query_compat`, Go params.go shape 2).
+#   * bridge.* / hive_api.* -- single object (kwargs) with keys matching the
+#     legacy method signatures exactly.
+#   * Go-only methods (hive_api.*, bridge.list_top_communities) use the Go
+#     handler's object keys; they are P2 and expected to fail against legacy
+#     (method not found) -- cross-service comparison for them is impossible
+#     (decision D4); the full matrix restructure lands with #421.
+#
+# Priorities follow the 2026-Q4 API comparison matrix (P0 = core read
+# paths exercised by every frontend, P1 = secondary paths, P2 =
+# peripheral / Go-only endpoints).
+#
+# Comparison tuning (ignore_fields / tolerance / unordered / lenient_list)
+# is intentionally left empty for now: both servers read the same database,
+# so the W4 smoke run establishes the real noise baseline before any field
+# is ignored. See api_comparator.py docstring for the option semantics.
 
-# 测试配置
 config:
-  # 全局忽略的字段 (会在所有测试中应用)
-  ignore_fields:
-    - "request_id"
-    - "id"  # 内部 ID 可能不同
-
-  # 全局容差配置
+  # Path-aware ignore patterns (see api_comparator.IgnoreMatcher). A bare
+  # name matches at any depth; a dotted pattern matches one exact path.
+  # Nothing is ignored globally: on a shared database business ids must
+  # match, so the former global `id` ignore (which masked every level's id
+  # fields) has been dropped.
+  ignore_fields: []
   tolerance:
-    float_epsilon: 0.001      # 浮点数误差
-    timestamp_seconds: 2      # 时间戳误差(秒)
+    float_epsilon: 0.001      # numeric epsilon; also used for amount strings
+    timestamp_seconds: 2      # tolerance for timestamp-aware comparison
 
-# 测试用例列表
 test_cases:
-  # ==================== Hive Core API ====================
-  - name: "获取数据库头部状态"
+  # ==================== Hive core ====================
+  - id: db-head-state
+    name: "hive.db_head_state (head block/age; age compared with time tolerance)"
     api: "hive.db_head_state"
     priority: "P0"
-    params: null
+    params: []                # no arguments; positional empty array
 
-  # ==================== Condenser API - Follow ====================
-  - name: "获取关注数"
+  # ==================== Condenser API - Follow (positional) ====================
+  - id: condenser-get-follow-count
+    name: "condenser_api.get_follow_count steemit"
     api: "condenser_api.get_follow_count"
     priority: "P0"
-    params:
-      account: "steemit"
+    params: ["steemit"]
 
-  - name: "获取关注者列表"
+  - id: condenser-get-followers
+    name: "condenser_api.get_followers steemit (start='', type='blog', limit 10)"
     api: "condenser_api.get_followers"
     priority: "P0"
-    params:
-      follower: "steemit"
-      following: "steemit"
-      limit: 10
+    # legacy signature: (account, start, type, limit)
+    params: ["steemit", "", "blog", 10]
 
-  - name: "获取关注列表"
+  - id: condenser-get-following
+    name: "condenser_api.get_following steemit (start='', type='blog', limit 10)"
     api: "condenser_api.get_following"
     priority: "P0"
-    params:
-      follower: "steemit"
-      following: "steemit"
-      limit: 10
+    params: ["steemit", "", "blog", 10]
 
-  - name: "获取转发信息"
+  - id: condenser-get-reblogged-by
+    name: "condenser_api.get_reblogged_by steemit/firstpost"
     api: "condenser_api.get_reblogged_by"
-    priority: "P1"
-    params:
-      author: "steemit"
-      permlink: "firstpost"
+    priority: "P0"
+    params: ["steemit", "firstpost"]
 
-  # ==================== Condenser API - Content ====================
-  - name: "获取文章内容"
+  # ==================== Condenser API - Content (positional) ====================
+  - id: condenser-get-content
+    name: "condenser_api.get_content steemit/firstpost"
     api: "condenser_api.get_content"
     priority: "P0"
-    params:
-      author: "steemit"
-      permlink: "firstpost"
-    ignore_fields:
-      - "request_id"
-      - "last_update"
+    params: ["steemit", "firstpost"]
 
-  - name: "获取文章回复"
+  - id: condenser-get-content-replies
+    name: "condenser_api.get_content_replies steemit/firstpost"
     api: "condenser_api.get_content_replies"
-    priority: "P0"
-    params:
-      author: "steemit"
-      permlink: "firstpost"
-    ignore_fields:
-      - "request_id"
+    priority: "P1"
+    params: ["steemit", "firstpost"]
 
-  # ==================== Condenser API - Discussions ====================
-  - name: "获取热门讨论"
+  # ==================== Condenser API - Discussions (nested query array) ========
+  - id: condenser-discussions-trending
+    name: "condenser_api.get_discussions_by_trending (all tags, limit 5)"
     api: "condenser_api.get_discussions_by_trending"
     priority: "P0"
     params:
-      tag: ""
-      limit: 5
-      truncate_body: 1024
+      - tag: ""
+        limit: 5
+        truncate_body: 1024
 
-  - name: "获取热点讨论"
+  - id: condenser-discussions-hot
+    name: "condenser_api.get_discussions_by_hot (all tags, limit 5)"
     api: "condenser_api.get_discussions_by_hot"
     priority: "P0"
     params:
-      tag: ""
-      limit: 5
-      truncate_body: 1024
+      - tag: ""
+        limit: 5
+        truncate_body: 1024
 
-  - name: "获取最新讨论"
+  - id: condenser-discussions-created
+    name: "condenser_api.get_discussions_by_created (all tags, limit 5)"
     api: "condenser_api.get_discussions_by_created"
     priority: "P0"
     params:
-      tag: ""
-      limit: 5
-      truncate_body: 1024
+      - tag: ""
+        limit: 5
+        truncate_body: 1024
 
-  - name: "获取推广讨论"
+  - id: condenser-discussions-promoted
+    name: "condenser_api.get_discussions_by_promoted (all tags, limit 5)"
     api: "condenser_api.get_discussions_by_promoted"
-    priority: "P1"
-    params:
-      tag: ""
-      limit: 5
-      truncate_body: 1024
-
-  - name: "获取博客讨论"
-    api: "condenser_api.get_discussions_by_blog"
     priority: "P0"
     params:
-      tag: "steemit"
-      limit: 5
-      truncate_body: 1024
+      - tag: ""
+        limit: 5
+        truncate_body: 1024
 
-  - name: "获取动态讨论"
+  - id: condenser-discussions-blog
+    name: "condenser_api.get_discussions_by_blog @steemit (limit 5)"
+    api: "condenser_api.get_discussions_by_blog"
+    priority: "P0"
+    # legacy requires non-blank tag (the account whose blog is queried)
+    params:
+      - tag: "steemit"
+        limit: 5
+        truncate_body: 1024
+
+  - id: condenser-discussions-feed
+    name: "condenser_api.get_discussions_by_feed @steemit (limit 5)"
     api: "condenser_api.get_discussions_by_feed"
     priority: "P0"
     params:
-      tag: "steemit"
-      limit: 5
-      truncate_body: 1024
+      - tag: "steemit"
+        limit: 5
+        truncate_body: 1024
 
-  # ==================== Condenser API - Blog ====================
-  - name: "获取博客"
+  # ==================== Condenser API - Blog (positional) ====================
+  - id: condenser-get-blog
+    name: "condenser_api.get_blog steemit (start_entry_id 0, limit 5)"
     api: "condenser_api.get_blog"
     priority: "P0"
-    params:
-      account: "steemit"
-      limit: 5
-    ignore_fields:
-      - "request_id"
+    # legacy signature: (account, start_entry_id, limit)
+    params: ["steemit", 0, 5]
 
-  - name: "获取博客条目"
+  - id: condenser-get-blog-entries
+    name: "condenser_api.get_blog_entries steemit (start_entry_id 0, limit 5)"
     api: "condenser_api.get_blog_entries"
     priority: "P1"
-    params:
-      account: "steemit"
-      limit: 5
+    params: ["steemit", 0, 5]
 
-  # ==================== Condenser API - Tags ====================
-  - name: "获取热门标签"
+  # ==================== Condenser API - Tags (positional) ====================
+  - id: condenser-get-trending-tags
+    name: "condenser_api.get_trending_tags (start_tag '', limit 10)"
     api: "condenser_api.get_trending_tags"
     priority: "P1"
-    params:
-      startTag: ""
-      limit: 10
+    # legacy signature: (start_tag, limit)
+    params: ["", 10]
 
-  - name: "获取账户声望"
+  - id: condenser-get-account-reputations
+    name: "condenser_api.get_account_reputations (lower bound '', limit 10)"
     api: "condenser_api.get_account_reputations"
     priority: "P1"
-    params:
-      accountLowerBound: ""
-      limit: 10
+    # legacy signature: (account_lower_bound, limit)
+    params: ["", 10]
 
   # ==================== Condenser API - Misc ====================
-  - name: "获取评论讨论"
+  - id: condenser-discussions-by-comments
+    name: "condenser_api.get_discussions_by_comments @steemit (limit 5)"
     api: "condenser_api.get_discussions_by_comments"
     priority: "P1"
+    # legacy requires non-blank start_author (the previous object-form case
+    # used tag:'' which both sides reject)
     params:
-      tag: ""
-      limit: 5
-      truncate_body: 1024
+      - start_author: "steemit"
+        limit: 5
+        truncate_body: 1024
 
-  - name: "获取最新回复"
+  - id: condenser-replies-by-last-update
+    name: "condenser_api.get_replies_by_last_update @steemit (limit 5)"
     api: "condenser_api.get_replies_by_last_update"
     priority: "P1"
-    params:
-      startAuthor: ""
-      startPermlink: ""
-      limit: 5
+    # legacy signature: (start_author, start_permlink, limit); start_author
+    # must be non-blank (the previous startAuthor:'' form was rejected)
+    params: ["steemit", "", 5]
 
-  - name: "获取交易"
+  - id: condenser-get-transaction
+    name: "condenser_api.get_transaction all-zero trx id (env-gated: needs steemd)"
     api: "condenser_api.get_transaction"
-    priority: "P1"
-    params:
-      trx_id: "0000000000000000000000000000000000000000"
+    priority: "P2"
+    params: ["0000000000000000000000000000000000000000"]
 
-  - name: "获取账户投票"
+  - id: condenser-get-account-votes
+    name: "condenser_api.get_account_votes steemit (dummy on both sides; EXPECTED RED: error texts differ)"
     api: "condenser_api.get_account_votes"
-    priority: "P1"
-    params:
-      account: "steemit"
+    priority: "P2"
+    # Both sides are dummies that error, so the case compares error TEXT.
+    # Currently expected red: legacy appends a URL suffix ("get_account_votes
+    # is no longer supported, for details see https://steemit.com/...")
+    # while Go returns only "get_account_votes is no longer supported".
+    # Registered as expected-red until the texts are aligned (tracked with
+    # the other Go-only / text-alignment stragglers in #421).
+    params: ["steemit"]
 
-  # ==================== Bridge API - Post ====================
-  - name: "获取文章"
+  # ==================== Bridge API - Post (object params) ====================
+  - id: bridge-get-post
+    name: "bridge.get_post steemit/firstpost"
     api: "bridge.get_post"
     priority: "P0"
     params:
       author: "steemit"
       permlink: "firstpost"
-    ignore_fields:
-      - "request_id"
 
-  - name: "标准化文章"
+  - id: bridge-normalize-post
+    name: "bridge.normalize_post steemit/firstpost (EXPECTED RED: Go reads the post object at top level while legacy binds the `post` kwarg; baseline issue #23)"
     api: "bridge.normalize_post"
     priority: "P1"
+    # legacy signature: normalize_post(context, post) -- the payload must be
+    # a full steemd-format post object (the previous {author, permlink} form
+    # failed legacy kwarg binding). Go currently expects the post object at
+    # the top level (known divergence, baseline issue #23) so this case is
+    # expected red until the Go side is fixed.
     params:
-      author: "steemit"
-      permlink: "firstpost"
+      post:
+        id: 33
+        author: "steemit"
+        permlink: "firstpost"
+        category: "meta"
+        parent_author: ""
+        parent_permlink: "meta"
+        title: "Welcome to Steem!"
+        body: "steemit.com is a social media platform where everyone gets paid for creating and curating content."
+        json_metadata: '{"tags":["meta","steemit","intro","hello","blog"],"app":"steemit/0.1"}'
+        created: "2016-03-24T17:59:24"
+        last_update: "2016-03-30T17:59:24"
+        depth: 0
+        children: 89
+        net_rshares: 0
+        abs_rshares: 0
+        vote_rshares: 0
+        net_votes: 2671
+        active_votes: []
+        author_reputation: 36342543411
+        promoted: "0.000 STEEM"
+        cashout_time: "1969-12-31T23:59:59"
+        last_payout: "2016-04-01T17:59:24"
+        max_accepted_payout: "1000000.000 SBD"
+        percent_steem_dollars: 10000
+        total_payout_value: "942.560 SBD"
+        curator_payout_value: "731.617 SBD"
+        pending_payout_value: "0.000 SBD"
+        url: "/meta/@steemit/firstpost"
+        root_comment: 33
+        root_author: "steemit"
+        root_permlink: "firstpost"
+        root_title: "Welcome to Steem!"
+        allow_replies: true
+        allow_votes: true
+        allow_curation_rewards: true
+        beneficiaries: []
 
-  - name: "获取讨论"
+  - id: bridge-get-discussion
+    name: "bridge.get_discussion steemit/firstpost"
     api: "bridge.get_discussion"
     priority: "P0"
     params:
       author: "steemit"
       permlink: "firstpost"
-    ignore_fields:
-      - "request_id"
 
   # ==================== Bridge API - Profile ====================
-  - name: "获取用户资料"
+  - id: bridge-get-profile
+    name: "bridge.get_profile steemit"
     api: "bridge.get_profile"
     priority: "P0"
     params:
       account: "steemit"
-    ignore_fields:
-      - "last_update"
 
   # ==================== Bridge API - Ranked ====================
-  - name: "获取排名文章"
+  - id: bridge-get-ranked-posts
+    name: "bridge.get_ranked_posts trending (all tags, limit 5)"
     api: "bridge.get_ranked_posts"
     priority: "P0"
     params:
       sort: "trending"
       tag: ""
-      observer: ""
       limit: 5
 
-  - name: "获取账户文章"
+  - id: bridge-get-account-posts
+    name: "bridge.get_account_posts posts @steemit (limit 5)"
     api: "bridge.get_account_posts"
     priority: "P0"
     params:
-      account: "steemit"
       sort: "posts"
-      observer: ""
+      account: "steemit"
       limit: 5
 
-  - name: "获取热门话题"
+  - id: bridge-get-trending-topics
+    name: "bridge.get_trending_topics (limit 10)"
     api: "bridge.get_trending_topics"
     priority: "P1"
     params:
       limit: 10
 
   # ==================== Bridge API - Stats ====================
-  - name: "获取收益统计"
+  - id: bridge-get-payout-stats
+    name: "bridge.get_payout_stats (limit 10)"
     api: "bridge.get_payout_stats"
     priority: "P1"
+    # legacy signature is (limit) -- the previous start_date/end_date form
+    # failed legacy kwarg binding
     params:
-      start_date: "2024-01-01"
-      end_date: "2024-01-31"
+      limit: 10
 
   # ==================== Bridge API - Community ====================
-  - name: "获取社区信息"
+  - id: bridge-get-community
+    name: "bridge.get_community hive-139531"
     api: "bridge.get_community"
-    priority: "P1"
+    priority: "P0"
     params:
       name: "hive-139531"
       observer: ""
 
-  - name: "列出社区"
+  - id: bridge-list-communities
+    name: "bridge.list_communities (from start, limit 10)"
     api: "bridge.list_communities"
-    priority: "P1"
+    priority: "P0"
     params:
       last: ""
       limit: 10
 
-  - name: "列出顶级社区"
+  - id: bridge-list-top-communities
+    name: "bridge.list_top_communities (Go-only; legacy: method not found)"
     api: "bridge.list_top_communities"
-    priority: "P1"
+    priority: "P2"
+    # Go-only endpoint (legacy never registers bridge.list_top_communities);
+    # expected red against legacy, see decision D4
     params:
-      observer: ""
       limit: 10
 
-  - name: "列出热门社区"
+  - id: bridge-list-pop-communities
+    name: "bridge.list_pop_communities (limit 10)"
     api: "bridge.list_pop_communities"
     priority: "P1"
+    # legacy signature is (limit) -- the previous observer kwarg failed
+    # legacy kwarg binding
     params:
-      observer: ""
       limit: 10
 
   # ==================== Bridge API - Notification ====================
-  - name: "获取未读通知"
+  - id: bridge-unread-notifications
+    name: "bridge.unread_notifications steemit"
     api: "bridge.unread_notifications"
-    priority: "P1"
+    priority: "P0"
     params:
       account: "steemit"
 
-  - name: "获取账户通知"
+  - id: bridge-account-notifications
+    name: "bridge.account_notifications steemit (limit 10)"
     api: "bridge.account_notifications"
-    priority: "P1"
+    priority: "P0"
+    # legacy signature is (account, min_score, last_id, limit) -- the
+    # previous offset kwarg failed legacy kwarg binding
     params:
       account: "steemit"
+      min_score: 25
       limit: 10
-      offset: 0
 
-  # ==================== Hive API - Public ====================
-  - name: "获取账户信息"
+  # ==================== Hive API (Go-only; see D4) ====================
+  # legacy never registers hive_api.*; these cases always see "method not
+  # found" on the python side. Kept (P2) for Go-side regression bookkeeping
+  # until #421 moves them to a Go-vs-Go self-check track.
+  - id: hive-api-get-account
+    name: "hive_api.get_account steemit (Go-only)"
     api: "hive_api.get_account"
-    priority: "P0"
+    priority: "P2"
+    # Go handler reads the `name` key (the previous `account` key was ignored)
     params:
-      account: "steemit"
-    ignore_fields:
-      - "last_owner_update"
-      - "last_account_update"
+      name: "steemit"
 
-  - name: "批量获取账户"
+  - id: hive-api-get-accounts
+    name: "hive_api.get_accounts [steemit, alice] (Go-only)"
     api: "hive_api.get_accounts"
-    priority: "P0"
+    priority: "P2"
     params:
-      names:
-        - "steemit"
-        - "alice"
-    ignore_fields:
-      - "last_owner_update"
-      - "last_account_update"
+      names: ["steemit", "alice"]
 
-  - name: "列出关注者"
+  - id: hive-api-list-followers
+    name: "hive_api.list_followers steemit (limit 10) (Go-only)"
     api: "hive_api.list_followers"
-    priority: "P0"
+    priority: "P2"
     params:
       account: "steemit"
       start: ""
       limit: 10
-      type: "blog"
 
-  - name: "列出关注"
+  - id: hive-api-list-following
+    name: "hive_api.list_following steemit (limit 10) (Go-only)"
     api: "hive_api.list_following"
-    priority: "P0"
+    priority: "P2"
     params:
       account: "steemit"
       start: ""
       limit: 10
-      type: "blog"
 
-  - name: "列出所有屏蔽"
+  - id: hive-api-list-all-muted
+    name: "hive_api.list_all_muted steemit (Go-only)"
     api: "hive_api.list_all_muted"
     priority: "P2"
     params:
       account: "steemit"
 
-  - name: "列出账户博客"
+  - id: hive-api-list-account-blog
+    name: "hive_api.list_account_blog steemit (limit 10) (Go-only)"
     api: "hive_api.list_account_blog"
-    priority: "P1"
+    priority: "P2"
     params:
       account: "steemit"
-      start: ""
       limit: 10
-      observer: ""
 
-  - name: "列出账户文章"
+  - id: hive-api-list-account-posts
+    name: "hive_api.list_account_posts steemit (limit 10) (Go-only)"
     api: "hive_api.list_account_posts"
-    priority: "P1"
+    priority: "P2"
     params:
       account: "steemit"
-      start: ""
       limit: 10
-      observer: ""
 
-  - name: "列出账户动态"
+  - id: hive-api-list-account-feed
+    name: "hive_api.list_account_feed steemit (limit 10) (Go-only)"
     api: "hive_api.list_account_feed"
-    priority: "P1"
+    priority: "P2"
     params:
       account: "steemit"
-      start: ""
       limit: 10
-      observer: ""
-
-# ==================== 优先级过滤器 ====================
-# 使用命令行参数控制运行哪些优先级的测试
-# 例如: python api_comparator.py --priority P0

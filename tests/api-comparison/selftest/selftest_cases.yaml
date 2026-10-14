@@ -1,0 +1,138 @@
+# Selftest (smoke) case set for the api comparison tool.
+#
+# NOT a production comparison suite: these cases run against the local stub
+# servers (stub_server.py + stub_responses_{python,go}.json) to prove the
+# planned-PR#420 comparator fixes end-to-end without real services or a
+# database. See run_selftest.py for the expected outcomes.
+
+config:
+  # Exercises the global config block (fix 1.2): applied to every case.
+  ignore_fields:
+    - "author.internal_id"    # path-aware (fix 1.3): only this exact path
+  tolerance:
+    float_epsilon: 0.001
+    timestamp_seconds: 2
+
+test_cases:
+  - id: selftest-positional-params
+    name: "positional (array) params accepted by strict legacy-style dispatch"
+    api: "condenser_api.get_content"
+    priority: "P0"
+    # Array form (legacy condenser wire protocol, fix 1.1). The python stub
+    # rejects non-list params for this method, the go stub accepts anything;
+    # includes timestamp/amount/long-body drift judged by tolerance and
+    # truncated in the report (fixes 1.4/1.7).
+    params: ["steemit", "firstpost"]
+
+  - id: selftest-positional-negative-control
+    name: "legacy object-form params still fail (negative control for 1.1)"
+    api: "condenser_api.get_content"
+    priority: "P2"
+    # The pre-#420 case shape: object params. The strict stub errors while
+    # the lenient one answers, i.e. the exact all-red failure mode the real
+    # 43-case suite had with object-form params. Expected FAIL.
+    params:
+      author: "steemit"
+      permlink: "firstpost"
+
+  - id: selftest-global-ignore
+    name: "global config ignore_fields masks only the matching path"
+    api: "bridge.get_profile"
+    priority: "P1"
+    # author.internal_id differs between the stubs (11 vs 99) and is only
+    # tolerated because the GLOBAL config ignore matches that exact path.
+    params:
+      account: "steemit"
+
+  - id: selftest-time-and-amount-tolerance
+    name: "timestamp (ISO variants + numeric age) and amount tolerance"
+    api: "hive.db_head_state"
+    priority: "P1"
+    # db_head_time: naive "2024-05-01 10:00:00" vs "2024-05-01T10:00:02Z"
+    # (fix 1.4 ISO normalization); db_head_age: 1000 vs 1001 (numeric time
+    # field tolerance).
+    params: []
+
+  - id: selftest-unordered-list
+    name: "unordered top-level list compared after business-key sort"
+    api: "condenser_api.get_discussions_by_trending"
+    priority: "P1"
+    # unordered justification (fix 1.6): stub scenarios return the same
+    # result set in different orders; ordering is not part of the contract.
+    # Real cases must never enable this without a documented reason.
+    unordered: true
+    unordered_key: "author"
+    params:
+      - tag: ""
+        limit: 2
+
+  - id: selftest-lenient-list
+    name: "lenient top-level list matched order-insensitively"
+    api: "condenser_api.get_followers"
+    priority: "P1"
+    # lenient_list justification (fix 1.6): same as above; stub follower
+    # lists arrive in different orders.
+    lenient_list: true
+    params: ["stub-account", "", "blog", 2]
+
+  - id: selftest-error-text
+    name: "both sides error: identical application error text judged green"
+    api: "condenser_api.get_account_votes"
+    priority: "P1"
+    # Dummy method on both ends; both errors are JSON-RPC application
+    # errors (code 10), so the interesting comparison is the error text
+    # (04-comparison.md section 2, get_account_votes).
+    params: ["stub-account"]
+
+  - id: selftest-both-transport-500
+    name: "both sides HTTP 500: transport errors never judged green (negative control)"
+    api: "stub.both_transport_500"
+    priority: "P2"
+    # Both stubs answer this method with a bare HTTP 500 (no JSON-RPC
+    # envelope), i.e. identical transport-level failure texts. The old
+    # comparator judged identical error texts green; transport failures
+    # must fail red with zero evidence read as consistency. Expected FAIL.
+    params: []
+
+  - id: selftest-non-envelope-200
+    name: "both sides 200 with non-envelope body never judged green (negative control)"
+    api: "stub.non_envelope_200"
+    priority: "P2"
+    # PR#420-review-r2 negative control: both stubs answer HTTP 200 with
+    # {"status": "ok"} -- the health-endpoint shape. Simulates
+    # --python-url/--go-url mispointed at a health service: the old
+    # comparator returned the whole body as the "result" on both sides and
+    # judged the run green with zero evidence. Must be red as a malformed
+    # (non-envelope) JSON-RPC response. Expected FAIL.
+    params: []
+
+  - id: selftest-result-and-error-envelope
+    name: "result and error coexisting in the envelope never judged green (negative control)"
+    api: "stub.result_and_error"
+    priority: "P2"
+    # PR#420-review-r3 negative control: both stubs answer 200 with a body
+    # carrying BOTH "result" and "error" (identical error, divergent
+    # results: alice vs bob). The old client inspected only the error
+    # branch, so the identical application-error text masked the divergent
+    # results and the case judged green. "result" and "error" are
+    # mutually exclusive per JSON-RPC 2.0; both sides must fail red as a
+    # malformed envelope. Expected FAIL.
+    params: []
+
+  - id: selftest-redirect-302
+    name: "both sides 302 redirect: never followed, judged red (negative control)"
+    api: "stub.redirect_302"
+    priority: "P2"
+    # PR#420-review-r2 negative control: both stubs answer 302 with a
+    # Location header. requests rewrites POST 301/302 to GET while
+    # following; the comparator must disable following and fail closed
+    # (a followed redirect would silently compare whatever the target
+    # serves). Expected FAIL with a redirect transport error.
+    params: []
+
+  - id: selftest-real-diff-control
+    name: "a genuine data difference is still caught (negative control)"
+    api: "condenser_api.get_blog"
+    priority: "P2"
+    # Titles differ between the stubs; nothing masks it. Expected FAIL.
+    params: ["stub-account", 0, 1]
