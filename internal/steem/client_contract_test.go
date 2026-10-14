@@ -302,12 +302,19 @@ const blockOneResult = `{
 // default is deliberately what is under test.
 func newTestClient(t *testing.T, url string, maxRetries int) *Client {
 	t.Helper()
-	cfg := &config.SteemConfig{
+	return newTestClientCfg(t, &config.SteemConfig{
 		URL:        url,
 		MaxWorkers: 4,
 		MaxRetries: maxRetries,
 		RPCTimeout: 5 * time.Second,
-	}
+	})
+}
+
+// newTestClientCfg builds a real Client from a full SteemConfig for tests
+// that need non-default knobs (a small per-attempt RPCTimeout, a custom
+// MaxBatch), such as the per-attempt timeout contract tests below.
+func newTestClientCfg(t *testing.T, cfg *config.SteemConfig) *Client {
+	t.Helper()
 	client, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
@@ -549,6 +556,18 @@ func contentResult(fixtures map[string]string, author, permlink string) string {
 		return body
 	}
 	return blankContentResult
+}
+
+// batchResponseBody renders a JSON-RPC batch response body for the given
+// tuples from the fixtures (the same shape contentServerScript serves):
+// one response object per tuple, 1-based ids, results in request order.
+func batchResponseBody(fixtures map[string]string, tuples ...[]string) string {
+	parts := make([]string, 0, len(tuples))
+	for i, tuple := range tuples {
+		parts = append(parts, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":%s}`,
+			i+1, contentResult(fixtures, tuple[0], tuple[1])))
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 // contentServerScript impersonates the get_content surface of a real
@@ -867,6 +886,156 @@ func TestContractContentBatchTransientFailures(t *testing.T) {
 	})
 }
 
+// TestContractContentBatchPerAttemptTimeoutRetried pins the PR#403 review
+// fix: a per-attempt transport timeout (http.Client.Timeout expiring while
+// the caller's context is still live) is TRANSIENT on the batch path — one
+// slow steemd response must not kill the whole batch. The failure is retried
+// after backoff and succeeds once the node answers promptly, matching the
+// SDK path's treatment of the same condition (ErrTimeout → retryable).
+//
+// On Go 1.23+ the raw http.Client.Timeout error also satisfies
+// errors.Is(err, context.DeadlineExceeded), which the pre-fix isBatchRetryable
+// trusted to mean "caller deadline" — with that misclassification the call
+// below failed after ONE request instead of retrying.
+func TestContractContentBatchPerAttemptTimeoutRetried(t *testing.T) {
+	alice := map[string]string{"alice/p1": batchContentJSON("alice", "p1")}
+	body := batchResponseBody(alice, []string{"alice", "p1"})
+	// First request stalls past the 200ms per-attempt timeout; the retry is
+	// served immediately.
+	s := newScriptedSteemd(t, seqScript(
+		rpcScriptResponse{delay: 500 * time.Millisecond, body: body},
+		rpcScriptResponse{body: body},
+	))
+	c := newTestClientCfg(t, &config.SteemConfig{
+		URL:        s.URL(),
+		MaxWorkers: 1,
+		MaxRetries: 3,
+		RPCTimeout: 200 * time.Millisecond,
+	})
+
+	start := time.Now()
+	posts, err := c.GetContentBatch(context.Background(), [][]string{{"alice", "p1"}})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("GetContentBatch failed on a transient per-attempt timeout: %v", err)
+	}
+	if len(posts) != 1 || posts[0]["author"] != "alice" {
+		t.Fatalf("retried batch returned %v, want alice's post", posts)
+	}
+	if got := s.callCount(); got != 2 {
+		t.Fatalf("got %d POSTs, want 2 (one timed-out attempt, one success)", got)
+	}
+	// ~200ms timeout + 100ms base backoff before the retry; a lower bound
+	// under that proves both the in-flight cutoff AND the backoff happened.
+	if elapsed < 250*time.Millisecond {
+		t.Fatalf("retry came back too fast (%v); timeout cutoff + backoff not applied", elapsed)
+	}
+}
+
+// TestContractContentBatchCallerDeadlineNotRetried pins the other half of the
+// PR#403 fix: a CALLER-side context deadline stays non-retryable on the batch
+// path. With the per-attempt timeout generous and the caller's deadline
+// short, exactly one request goes out and the error wraps
+// context.DeadlineExceeded — the caller gave up, so no retry storm.
+func TestContractContentBatchCallerDeadlineNotRetried(t *testing.T) {
+	alice := map[string]string{"alice/p1": batchContentJSON("alice", "p1")}
+	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
+		delay: 800 * time.Millisecond,
+		body:  batchResponseBody(alice, []string{"alice", "p1"}),
+	}))
+	c := newTestClientCfg(t, &config.SteemConfig{
+		URL:        s.URL(),
+		MaxWorkers: 1,
+		MaxRetries: 3,
+		RPCTimeout: 5 * time.Second, // per-attempt timeout never fires here
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	posts, err := c.GetContentBatch(ctx, [][]string{{"alice", "p1"}})
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("GetContentBatch succeeded despite caller deadline; want context error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("GetContentBatch error = %v; want context.DeadlineExceeded in the chain", err)
+	}
+	if posts != nil {
+		t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
+	}
+	if got := s.callCount(); got != 1 {
+		t.Fatalf("caller cancellation must not be retried; got %d POSTs, want 1", got)
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("cancellation did not abort the in-flight batch (%v); ctx is not passed through", elapsed)
+	}
+}
+
+// TestContractContentBatchTimeoutExhaustionIsError pins the failure twin of
+// the recovery case: when the node stalls past the per-attempt timeout on
+// every attempt, the batch errors after exactly maxRetries+1 attempts, the
+// final error carrying the errBatchTimeout sentinel.
+func TestContractContentBatchTimeoutExhaustionIsError(t *testing.T) {
+	alice := map[string]string{"alice/p1": batchContentJSON("alice", "p1")}
+	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
+		delay: 500 * time.Millisecond,
+		body:  batchResponseBody(alice, []string{"alice", "p1"}),
+	}))
+	c := newTestClientCfg(t, &config.SteemConfig{
+		URL:        s.URL(),
+		MaxWorkers: 1,
+		MaxRetries: 1, // initial attempt + 1 retry
+		RPCTimeout: 200 * time.Millisecond,
+	})
+
+	posts, err := c.GetContentBatch(context.Background(), [][]string{{"alice", "p1"}})
+	if err == nil {
+		t.Fatal("GetContentBatch succeeded while every attempt timed out; want error")
+	}
+	if !errors.Is(err, errBatchTimeout) {
+		t.Fatalf("GetContentBatch error = %v; want errBatchTimeout in the chain", err)
+	}
+	if posts != nil {
+		t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
+	}
+	if got := s.callCount(); got != 2 {
+		t.Fatalf("got %d POSTs, want 2 (initial attempt + 1 retry)", got)
+	}
+}
+
+// TestContractContentBatchResponseBodyCapped pins the memory guard on the
+// batch path: a 200 response larger than max_batch × per-item bound (+slack)
+// is rejected as malformed after ONE attempt, never buffered whole — a
+// compromised node or MITM cannot balloon process memory through the batch
+// decoder. MaxBatch=1 caps the response at ~1.06 MiB; the body below is
+// ~2 MiB.
+func TestContractContentBatchResponseBodyCapped(t *testing.T) {
+	huge := strings.Repeat("x", 2<<20)
+	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
+		body: `[{"jsonrpc":"2.0","id":1,"result":{"author":"alice","permlink":"p1","junk":"` + huge + `"}}]`,
+	}))
+	c := newTestClientCfg(t, &config.SteemConfig{
+		URL:        s.URL(),
+		MaxWorkers: 1,
+		MaxRetries: 1,
+		MaxBatch:   1, // cap = 1*1MiB + 64KiB envelope slack
+		RPCTimeout: 5 * time.Second,
+	})
+
+	posts, err := c.GetContentBatch(context.Background(), [][]string{{"alice", "p1"}})
+	if err == nil {
+		t.Fatal("GetContentBatch succeeded on an over-cap response body; want malformed error")
+	}
+	if posts != nil {
+		t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
+	}
+	if got := s.callCount(); got != 1 {
+		t.Fatalf("an over-cap body must not be retried; got %d POSTs, want 1", got)
+	}
+}
+
 // TestContractContentBatchItemValidationFailsWholeBatch pins the
 // all-or-nothing per-item validation (legacy _validated_batch_result): any
 // single malformed or failing item — a JSON-RPC error object, a null or
@@ -922,6 +1091,29 @@ func TestContractContentBatchItemValidationFailsWholeBatch(t *testing.T) {
 				return rpcScriptResponse{body: `null`}
 			},
 		},
+		// Trailing data after the response array is rejected, aligning the
+		// batch path with legacy's json.loads whole-body parse (json.Decoder
+		// alone would happily ignore everything after the first value).
+		{
+			name: "trailing_garbage",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: `[{"jsonrpc":"2.0","id":1,"result":{"author":"alice","permlink":"p1"}},{"jsonrpc":"2.0","id":2,"result":{"author":"bob","permlink":"p2"}}]xx`}
+			},
+		},
+		{
+			name: "trailing_second_value",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: `[{"jsonrpc":"2.0","id":1,"result":{"author":"alice","permlink":"p1"}}] {"extra":true}`}
+			},
+		},
+		{
+			name: "trailing_close_bracket",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				// A stray ']' is invisible to Decoder.More but still
+				// "Extra data" to a whole-body parse (json.loads).
+				return rpcScriptResponse{body: `[{"jsonrpc":"2.0","id":1,"result":{"author":"alice","permlink":"p1"}}]]`}
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -937,6 +1129,10 @@ func TestContractContentBatchItemValidationFailsWholeBatch(t *testing.T) {
 			}
 			if posts != nil {
 				t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
+			}
+			// Malformed responses are deterministic: never retried.
+			if got := s.callCount(); got != 1 {
+				t.Fatalf("malformed response must not be retried; got %d POSTs, want 1", got)
 			}
 		})
 	}

@@ -82,6 +82,19 @@ const (
 	batchDefaultMaxRetries = 3
 	batchDefaultTimeout    = 15 * time.Second
 	batchBaseBackoff       = 100 * time.Millisecond
+
+	// batchResponseItemLimit bounds one get_content result object on the
+	// batch path (1 MiB). Real results are post metadata plus the
+	// active_votes array; even heavily-voted whale posts stay well below
+	// this, so the cap never clips a legitimate answer. Bodies beyond
+	// max_batch × this limit (+ slack) are rejected as malformed.
+	batchResponseItemLimit int64 = 1 << 20
+	// batchResponseEnvelopeSlack covers the JSON-RPC envelopes (jsonrpc/id
+	// keys) around the capped results.
+	batchResponseEnvelopeSlack int64 = 64 * 1024
+	// batchErrorDrainLimit bounds how much of a non-200 body is drained for
+	// connection reuse after the first 1 KiB kept for the error message.
+	batchErrorDrainLimit int64 = 64 * 1024
 )
 
 // New creates a new Steem client.
@@ -274,10 +287,14 @@ func (c *Client) GetContent(ctx context.Context, author, permlink string) (map[s
 //     array length must match the request count, each item's id must equal
 //     the paired request's id (order-based, as steemd/legacy return in
 //     order), any single item carrying a JSON-RPC error fails the WHOLE
-//     call (legacy raises RPCError on the first item error; callers retry
-//     or abort the whole batch), and a null/missing per-item result or a
-//     result without an "author" field (legacy `assert 'author' in post`)
-//     is rejected as malformed.
+//     call, and a null/missing per-item result or a result without an
+//     "author" field (legacy `assert 'author' in post`) is rejected as
+//     malformed. Legacy nuance: exec() retries an item RPCError in place up
+//     to 100 tries (rotating nodes) before aborting the whole batch; this
+//     implementation does not retry protocol-level failures at all — a
+//     deterministic error/malformed response from the same node will not
+//     heal — so the terminal state is identical: the whole batch errors and
+//     the caller (sync/jobs layer) decides what to retry.
 //
 // Length guard (PR#400 review, kept): callers index the response by the
 // request's position (cached_post.go updateBatchTuples, jobs.go
@@ -419,13 +436,43 @@ func (e *batchHTTPError) Error() string {
 	return fmt.Sprintf("http %d: %s", e.Status, e.Body)
 }
 
+// errBatchTimeout is the batch path's sentinel for a per-attempt transport
+// timeout (http.Client.Timeout expiry) as opposed to a CALLER-side context
+// deadline. Since Go 1.23, http.Client.Timeout errors satisfy
+// errors.Is(err, context.DeadlineExceeded), so the two can no longer be told
+// apart from the error chain alone: postBatch classifies the Do failure
+// while it still holds the request context (a live ctx means the expiry was
+// the client's own per-attempt timeout) and wraps it in this sentinel with
+// the underlying chain cut — exactly how steemgosdk api/v2's callOnce wraps
+// its ErrTimeout before its retryable check. isBatchRetryable treats this
+// sentinel as transient, so a slow steemd node gets the same bounded
+// retry-and-backoff the SDK path gives single calls.
+var errBatchTimeout = errors.New("steem batch: per-attempt timeout")
+
+// isHTTPTimeout reports whether err is a per-attempt transport timeout
+// (net.Error / url.Error with Timeout() true, e.g. http.Client.Timeout);
+// mirrors the SDK's asTimeoutError.
+func isHTTPTimeout(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) && urlErr.Timeout() {
+		return true
+	}
+	return false
+}
+
 // fetchContentChunk POSTs one JSON-RPC batch array for a chunk of posts and
-// returns its contents in request order. Transport failures are retried with
-// bounded exponential backoff (doubled on 429) — the ONLY retry layer for
-// the batch path, since it bypasses the SDK transport (whose retry it
-// mirrors; see the Client doc comment). Protocol-level failures (bad JSON,
-// id/length mismatch, per-item JSON-RPC errors, null results) are not
-// retried: a deterministic malformed response will not heal.
+// returns its contents in request order. Transport failures — network
+// errors, per-attempt timeouts, HTTP 429/5xx — are retried with bounded
+// exponential backoff (doubled on 429) — the ONLY retry layer for the batch
+// path, since it bypasses the SDK transport (whose retry it mirrors; see the
+// Client doc comment). Caller-side context cancellation and protocol-level
+// failures (bad JSON, trailing data, id/length mismatch, per-item JSON-RPC
+// errors, null results) are not retried: a deterministic malformed response
+// will not heal, and a caller who gave up must not be kept waiting.
 func (c *Client) fetchContentChunk(ctx context.Context, chunk [][]string) ([]map[string]interface{}, error) {
 	reqs := make([]batchRequest, len(chunk))
 	for i, tuple := range chunk {
@@ -457,7 +504,17 @@ func (c *Client) fetchContentChunk(ctx context.Context, chunk [][]string) ([]map
 		if attempt == c.maxRetries {
 			break
 		}
-		timer := time.NewTimer(batchBackoffFor(attempt, err))
+		backoff := batchBackoffFor(attempt, err)
+		// Ops visibility for retry storms (e.g. sustained 429 from steemd):
+		// without this, batches silently grind through backoffs.
+		c.logger.Warn("get_content batch attempt failed; retrying",
+			zap.Int("attempt", attempt+1),
+			zap.Int("max_attempts", c.maxRetries+1),
+			zap.Int("chunk_posts", len(chunk)),
+			zap.Duration("backoff", backoff),
+			zap.Error(err),
+		)
+		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -479,18 +536,51 @@ func (c *Client) postBatch(ctx context.Context, payload []byte) ([]batchResponse
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err // *url.Error; classified by isBatchRetryable
+		// Classify the failure while the request context is still at hand.
+		// A live ctx plus a timeout-shaped error means http.Client.Timeout
+		// expired on THIS attempt (slow node, transient): wrap it in the
+		// errBatchTimeout sentinel with the underlying chain deliberately
+		// cut (%v) — on Go 1.23+ the raw chain also satisfies errors.Is(err,
+		// context.DeadlineExceeded), which would make isBatchRetryable
+		// misclassify the per-attempt timeout as a caller deadline and kill
+		// the whole batch after one slow response. Caller-side cancellation
+		// (ctx already done) falls through unchanged and stays
+		// non-retryable, as do all other *url.Error failures, which
+		// isBatchRetryable classifies.
+		if ctx.Err() == nil && isHTTPTimeout(err) {
+			return nil, fmt.Errorf("%w: %v", errBatchTimeout, err)
+		}
+		return nil, err
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 1024))
+		// Drain the remainder (bounded) so the keep-alive connection returns
+		// to the pool for the next attempt instead of being torn down.
+		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, batchErrorDrainLimit))
 		return nil, &batchHTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 
+	// Response size cap: max_batch items × a generous per-item bound plus
+	// envelope slack. A real get_content result (post metadata plus
+	// active_votes) stays far below 1 MiB per item, so the cap never clips a
+	// legitimate answer, while a compromised node or MITM cannot use the
+	// batch path to balloon process memory. Reading cap+1 bytes makes any
+	// body beyond the cap surface below as trailing data (or above, as a
+	// decode error on the truncated array).
+	cap := int64(c.maxBatch)*batchResponseItemLimit + batchResponseEnvelopeSlack
+	dec := json.NewDecoder(io.LimitReader(res.Body, cap+1))
 	var resps []batchResponse
-	if err := json.NewDecoder(res.Body).Decode(&resps); err != nil {
+	if err := dec.Decode(&resps); err != nil {
 		return nil, fmt.Errorf("malformed get_content batch response: %w", err)
+	}
+	// Legacy parses the whole body (json.loads), rejecting trailing data.
+	// json.Decoder stops after the first value, so demand EOF on a second
+	// read: any byte beyond the array — including a stray ']' that
+	// Decoder.More would miss — fails loud here as malformed.
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		return nil, fmt.Errorf("malformed get_content batch response: trailing data after response array")
 	}
 	return resps, nil
 }
@@ -543,6 +633,15 @@ func validateBatchResponses(reqs []batchRequest, resps []batchResponse) ([]map[s
 func isBatchRetryable(err error) bool {
 	if err == nil {
 		return false
+	}
+	// Per-attempt timeouts first: postBatch wraps them in errBatchTimeout
+	// with the underlying chain cut, because on Go 1.23+ that chain also
+	// satisfies errors.Is(err, context.DeadlineExceeded) and the caller-
+	// context check right below would otherwise misclassify them as
+	// non-retryable (the SDK reaches the same outcome by checking its
+	// ErrTimeout sentinel before its context check).
+	if errors.Is(err, errBatchTimeout) {
+		return true
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
