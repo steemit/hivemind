@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/steemit/hivemind/internal/db"
-	"github.com/steemit/hivemind/internal/models"
 	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/config"
 	"github.com/steemit/hivemind/pkg/logging"
@@ -60,6 +59,15 @@ func (s *Sync) Run(ctx context.Context) error {
 	if flags.IsInitialSync.Bool {
 		s.logger.Info("Initial sync detected, starting initial sync process")
 		if err := runPhase(s.initialSync(ctx, flags)); err != nil {
+			if errors.Is(err, errPhaseCancelled) {
+				// A shutdown arrived mid-phase: the phase aborted cleanly
+				// (nothing half-committed) and is resumable from the
+				// persisted markers on the next boot. Returning nil makes
+				// the process exit instead of "completing" a sync that did
+				// not finish and entering live mode with wrong data.
+				s.logger.Info("Initial sync cancelled before completion; exiting (restart resumes from persisted markers)")
+				return nil
+			}
 			return fmt.Errorf("initial sync failed: %w", err)
 		}
 		if s.testMaxBlock() > 0 {
@@ -78,6 +86,10 @@ func (s *Sync) Run(ctx context.Context) error {
 	} else {
 		s.logger.Info("Database already initialized; running light startup recovery")
 		if err := runPhase(s.recoverFromRestart(ctx, flags)); err != nil {
+			if errors.Is(err, errPhaseCancelled) {
+				s.logger.Info("Startup recovery cancelled before completion; exiting (restart resumes)")
+				return nil
+			}
 			return fmt.Errorf("startup recovery failed: %w", err)
 		}
 		if s.testMaxBlock() > 0 {
@@ -122,14 +134,26 @@ func (s *Sync) Run(ctx context.Context) error {
 	return nil
 }
 
+// errPhaseCancelled is runPhase's distinguishable return for "the startup
+// phase aborted because the run context was cancelled (SIGTERM)". Mapping
+// the cancellation to plain nil (the previous behavior) let Run continue as
+// if the phase had SUCCEEDED -- logging "Initial sync completed", starting
+// the background goroutines and entering live-mode processing on a database
+// whose tail maintenance never finished. Run detects the sentinel and
+// returns nil immediately so the process exits and the next boot resumes
+// the phase (PR#407 review).
+var errPhaseCancelled = errors.New("startup phase cancelled before completion")
+
 // runPhase executes a startup phase (initial sync / recovery), mapping a
-// context cancellation to a clean nil return: a shutdown arriving mid-phase
-// aborts the (idempotent, resumable) work -- in-flight block batches have
-// already completed and flushed inside syncBlocks -- and the next boot
-// resumes the phase from hive_blocks head and the persisted markers.
+// context cancellation to the errPhaseCancelled sentinel: a shutdown
+// arriving mid-phase aborts the (idempotent, resumable) work -- in-flight
+// block batches have already completed and flushed inside syncBlocks -- and
+// the next boot resumes the phase from hive_blocks head and the persisted
+// markers. Callers must check for the sentinel and treat it as "exit for
+// restart", never as success.
 func runPhase(err error) error {
 	if errors.Is(err, context.Canceled) {
-		return nil
+		return errPhaseCancelled
 	}
 	return err
 }
@@ -173,31 +197,67 @@ func (s *Sync) resolveInitialSyncState(ctx context.Context) (*db.SyncFlags, erro
 		s.logger.Info("Initial sync state read from persisted marker",
 			zap.Bool("is_initial_sync", flags.IsInitialSync.Bool),
 			zap.Bool("recount_done", flags.RecountDone.Bool))
+		// Operator warning (PR#407 review): during a genuine initial sync
+		// the feed cache stays EMPTY until the tail trio's Rebuild -- a
+		// database marked "initial sync in progress" with a POPULATED feed
+		// cache and no completed recount either healed from an interrupted
+		// tail on this very boot (recount_done unset -> the trio re-runs
+		// below) or is corrupted (see the legacy-migration runbook in
+		// docs/indexer-flow.md). The TEST_MAX_BLOCK stop point is the
+		// sanctioned non-empty state and is excluded via recount_done.
+		recountComplete := flags.RecountDone.Valid && flags.RecountDone.Bool
+		if flags.IsInitialSync.Bool && !recountComplete {
+			empty, err := s.feedCacheEmpty(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if !empty {
+				s.logger.Warn("feed cache is populated while initial sync is in progress and recount_done is unset: " +
+					"interrupted tail (this boot re-runs the trio and heals) or corrupted state -- verify counts after startup")
+			}
+		}
 		return flags, nil
 	}
 
-	// Fallback: legacy feed_cache derivation.
-	var count int64
-	if err := s.db.DB.WithContext(ctx).
-		Model(&models.FeedCache{}).
-		Count(&count).Error; err != nil {
+	// Fallback: legacy feed_cache derivation. EXISTS instead of COUNT: the
+	// answer is only "empty or not", and a full-table count on a populated
+	// 30M-row feed cache wastes seconds for a boolean.
+	empty, err := s.feedCacheEmpty(ctx)
+	if err != nil {
 		return nil, err
 	}
 	derived := db.SyncFlags{
-		IsInitialSync: sql.NullBool{Bool: count == 0, Valid: true},
-		RecountDone:   sql.NullBool{Bool: count != 0, Valid: true},
+		IsInitialSync: sql.NullBool{Bool: empty, Valid: true},
+		RecountDone:   sql.NullBool{Bool: !empty, Valid: true},
 	}
 	if err := s.stateRepo.UpdateSyncFlags(ctx, derived.IsInitialSync, derived.RecountDone); err != nil {
 		return nil, err
 	}
 	s.logger.Info("Initial sync state derived from feed cache (legacy heuristic) and persisted",
 		zap.Bool("is_initial_sync", derived.IsInitialSync.Bool),
-		zap.Int64("feed_cache_rows", count))
+		zap.Bool("feed_cache_empty", empty))
 	return &derived, nil
 }
 
-// headBlockNum reads the current head block from hive_blocks; returns 0 on
-// error (diagnostics-only callers).
+// feedCacheEmpty reports whether hive_feed_cache has no rows (EXISTS probe,
+// no full scan).
+func (s *Sync) feedCacheEmpty(ctx context.Context) (bool, error) {
+	var empty bool
+	if err := s.db.DB.WithContext(ctx).
+		Raw("SELECT NOT EXISTS (SELECT 1 FROM hive_feed_cache)").
+		Scan(&empty).Error; err != nil {
+		return false, err
+	}
+	return empty, nil
+}
+
+// headBlockNum reads the current head block from hive_blocks for
+// DIAGNOSTICS ONLY (logging). It swallows errors and returns 0 -- a value
+// that must never feed a control-flow decision (PR#407 review: the
+// tail-skip check once consumed this 0, so a transient GetHead failure
+// looked like "no blocks synced" and wrongly skipped the tail trio; the
+// same class of bug could replay blocks from 1). Control-flow call sites
+// read BlockRepository.GetHead directly and propagate the error.
 func (s *Sync) headBlockNum(ctx context.Context) int64 {
 	head, err := db.NewBlockRepository(s.blockProcessor.repo).GetHead(ctx)
 	if err != nil || head == nil {
@@ -266,6 +326,20 @@ func (s *Sync) initialSync(ctx context.Context, flags *db.SyncFlags) error {
 			zap.Int64("from", headBefore+1),
 			zap.Int64("to", ubound))
 
+		// Invalidate the tail marker BEFORE the first new block commits
+		// (PR#407 review, P0): recount_done claims "the tail trio completed
+		// at the current head". Syncing past that head makes the claim
+		// stale, so it is cleared up front -- a crash anywhere between the
+		// first new block and the trio's completion then leaves the marker
+		// claiming nothing, and the restart re-runs the trio instead of
+		// skipping it forever (the 20M-stop -> 30M continuation interrupted
+		// mid-trio scenario). Clearing at trio ENTRY alone would leave the
+		// blocks-synced -> trio-entry window unprotected.
+		if err := s.stateRepo.ClearRecountDone(ctx); err != nil {
+			return fmt.Errorf("failed to invalidate recount_done before syncing: %w", err)
+		}
+		flags.RecountDone = sql.NullBool{}
+
 		// Bounded-retry variant with poison-block observability: keeps the
 		// initial-sync fail-fast semantic (the process exits after
 		// poisonBlockThreshold consecutive failures of the same block)
@@ -281,7 +355,18 @@ func (s *Sync) initialSync(ctx context.Context, flags *db.SyncFlags) error {
 	// interrupted-tail case). Skipping it keeps a restart at an already
 	// processed stop point (e.g. restart with the same TEST_MAX_BLOCK) a
 	// short path instead of re-running multi-day maintenance in place.
-	headAfter := s.headBlockNum(ctx)
+	// Fail-closed head read (PR#407 review): headBlockNum swallows errors
+	// and returns 0, which here would look like "head went backwards" and
+	// wrongly trigger the skip. Read GetHead directly; a transient failure
+	// returns an error and the (idempotent) restart tries again.
+	headAfterBlock, err := blockRepo.GetHead(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get head block after sync: %w", err)
+	}
+	headAfter := int64(0)
+	if headAfterBlock != nil {
+		headAfter = headAfterBlock.Num
+	}
 	tailAlreadyDone := flags.RecountDone.Valid && flags.RecountDone.Bool && headAfter <= headBefore
 	if tailAlreadyDone {
 		s.logger.Info("Initial-sync tail maintenance already completed at this head; skipping",
@@ -374,7 +459,18 @@ func (s *Sync) recoverFromRestart(ctx context.Context, flags *db.SyncFlags) erro
 // `if test_max_block: return self.from_steemd()`).
 func (s *Sync) syncToCapAndExit(ctx context.Context) error {
 	stopAt := s.testMaxBlock()
-	head := s.headBlockNum(ctx)
+	// Fail-closed head read (PR#407 review): the old headBlockNum() helper
+	// swallows errors and returns 0, which here would look like "0 blocks
+	// synced" and replay the chain from block 1. Propagate the error; the
+	// restart is idempotent.
+	headBlock, err := db.NewBlockRepository(s.blockProcessor.repo).GetHead(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get head block: %w", err)
+	}
+	head := int64(0)
+	if headBlock != nil {
+		head = headBlock.Num
+	}
 	if head >= stopAt {
 		s.logger.Info("TEST_MAX_BLOCK already reached; exiting cleanly",
 			zap.Int64("head_block", head), zap.Int64("test_max_block", stopAt))
@@ -482,6 +578,13 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 
 			// TEST_MAX_BLOCK (§2.6): stop cleanly once the cap is reached
 			// instead of entering the steady-state runloop.
+			//
+			// NOTE: with the current Run() flow this branch is unreachable
+			// -- both the initial-sync and the already-initialized paths
+			// return at the stop point BEFORE starting this loop. It stays
+			// as defense-in-depth so a future Run() refactor that lets a
+			// capped indexer reach the runloop still stops at the cap
+			// instead of processing beyond it.
 			ubound := irreversible
 			if stop := s.testMaxBlock(); stop > 0 {
 				if currentHead >= stop {

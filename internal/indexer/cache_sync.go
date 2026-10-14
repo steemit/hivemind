@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/pkg/logging"
 )
 
@@ -41,6 +42,9 @@ type CacheSync struct {
 	// loop reports).
 	behind atomic.Int64
 
+	// batch is the prune batch size (rows per DELETE statement).
+	batch int
+
 	syncing atomic.Bool
 	logger  *zap.Logger
 }
@@ -53,6 +57,9 @@ const (
 	// (blocks). Legacy live mode trails the head by at most 100 blocks
 	// (stream max_gap), so anything farther is catch-up.
 	CacheSyncCatchupBlocks = 100
+	// CacheSyncPruneBatch is the default prune batch size (rows per DELETE
+	// statement).
+	CacheSyncPruneBatch = 10000
 )
 
 // NewCacheSync creates the temp-table pruner. The catch-up gate starts in
@@ -63,11 +70,21 @@ func NewCacheSync(database *gorm.DB) *CacheSync {
 		db:     database,
 		window: CacheSyncWindow,
 		hotDay: CacheSyncHotDays,
+		batch:  CacheSyncPruneBatch,
 		logger: logging.GetLogger().With(zap.String("component", "cache-sync")),
 	}
 	c.catchupBlocks = CacheSyncCatchupBlocks
 	c.behind.Store(-1)
 	return c
+}
+
+// SetPruneBatch overrides the prune batch size (rows per DELETE statement).
+// Tests use it to drive the batched path with a handful of rows.
+func (c *CacheSync) SetPruneBatch(n int) {
+	if n <= 0 {
+		n = CacheSyncPruneBatch
+	}
+	c.batch = n
 }
 
 // SetCatchupThreshold configures the trailing-distance gate (blocks).
@@ -117,15 +134,52 @@ func (c *CacheSync) Sync(ctx context.Context) {
 	c.prune(ctx)
 }
 
-func (c *CacheSync) prune(ctx context.Context) {
+// prune deletes out-of-window rows in fixed-size batches and returns the
+// total number of rows removed.
+//
+// Batching (PR#407 review): after a 0->30M initial sync the temp table
+// holds tens of millions of cold rows and the FIRST live-mode prune must
+// remove essentially all of them. A single giant DELETE would be killed by
+// the DSN's 30s statement_timeout -- and having been killed, it would retry
+// forever on the next ticks without ever shrinking the tail, while the one
+// huge rolled-back transaction bloats the table with dead tuples. Deleting
+// in slices of `batch` rows (via ctid, using the created_at index) keeps
+// every statement short, and COMMITTING each slice lets autovacuum reclaim
+// space incrementally instead of after one monolithic transaction. Each
+// batch runs inside WithoutStatementTimeout so the session guard can never
+// kill even an unlucky batch; the 60s lock_timeout it installs bounds any
+// queue behind a concurrent reader.
+func (c *CacheSync) prune(ctx context.Context) int64 {
 	cutoff := time.Now().UTC().AddDate(0, 0, -c.hotDay)
-	res := c.db.WithContext(ctx).
-		Exec("DELETE FROM hive_posts_cache_temp WHERE created_at < ?", cutoff)
-	if res.Error != nil {
-		c.logger.Error("prune failed", zap.Error(res.Error))
-		return
+	// Shutdown between batches (loop condition) keeps what already
+	// committed; the next boot's first live tick resumes from the remainder.
+	var total int64
+	for ctx.Err() == nil {
+		var deleted int64
+		err := db.WithoutStatementTimeout(ctx, c.db, func(tx *gorm.DB) error {
+			res := tx.Exec(`DELETE FROM hive_posts_cache_temp WHERE ctid IN (
+				SELECT ctid FROM hive_posts_cache_temp
+				WHERE created_at < ?
+				LIMIT ?)`, cutoff, c.batch)
+			if res.Error != nil {
+				return res.Error
+			}
+			deleted = res.RowsAffected
+			return nil
+		})
+		if err != nil {
+			c.logger.Error("prune batch failed (resuming on next tick)",
+				zap.Error(err), zap.Int64("deleted_so_far", total))
+			break
+		}
+		total += deleted
+		if deleted < int64(c.batch) {
+			break // window exhausted
+		}
 	}
 	c.logger.Info("pruned temp rows outside hot window",
-		zap.Int64("deleted", res.RowsAffected),
+		zap.Int64("deleted", total),
+		zap.Int("batch", c.batch),
 		zap.Time("cutoff", cutoff))
+	return total
 }

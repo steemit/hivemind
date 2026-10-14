@@ -106,7 +106,7 @@ func main() {
 
 	logger.Info("Indexer initialized, waiting for interrupt...")
 
-	// Wait for interrupt signal or sync error
+	// Wait for interrupt signal, sync error, or clean completion.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -121,19 +121,46 @@ func main() {
 		// Closing the DB pool before Run returns would abort exactly those
 		// final transactions.
 		logger.Info("Shutdown signal received; waiting for in-flight block batch to complete...")
+		// A SECOND signal force-exits (128+SIGINT convention): graceful
+		// shutdown legitimately waits minutes for the in-flight batch or a
+		// maintenance transaction (Rebuild/ForceRecount run unbounded by
+		// design); an operator who repeats the signal means "exit now",
+		// and this way they never have to reach for SIGKILL, which would
+		// skip even this log line. What committed stays committed -- the
+		// persisted markers make the next boot resume cleanly.
+		go func() {
+			<-quit
+			logger.Warn("Second shutdown signal received; forcing immediate exit")
+			os.Exit(130)
+		}()
 		cancel()
 		<-syncDone
 		select {
 		case err := <-syncErr:
 			// A real error during the final batch (context cancellation is
-			// mapped to nil inside Run). Not Fatal: Fatal would skip the
-			// deferred DB/telemetry teardown, and the committed prefix is
-			// resumable -- the error is recorded for the operator.
+			// mapped to a clean nil inside Run). Not Fatal: Fatal would
+			// skip the deferred DB/telemetry teardown, and the committed
+			// prefix is resumable -- the error is recorded for the operator.
 			logger.Error("Indexer sync returned an error during shutdown", zap.Error(err))
 		default:
 		}
 	case err := <-syncErr:
 		logger.Fatal("Indexer sync failed", zap.Error(err))
+	case <-syncDone:
+		// Run returned on its own without reporting an error on syncErr --
+		// the TEST_MAX_BLOCK stop point (or, after a shutdown-signal race,
+		// a cancellation mapped to nil inside Run). Without this branch the
+		// process kept waiting for a signal forever: nothing writes to
+		// syncErr when Run succeeds, so the original select spun idle
+		// (PR#407 review). Check syncErr anyway (Run may have returned an
+		// error, in which case both channels are ready) and exit non-zero
+		// on it, zero otherwise.
+		select {
+		case err := <-syncErr:
+			logger.Error("Indexer sync exited with an error", zap.Error(err))
+			os.Exit(1)
+		default:
+		}
 	}
 
 	logger.Info("Indexer exited")

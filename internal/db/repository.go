@@ -279,13 +279,21 @@ type SyncFlags struct {
 }
 
 // GetSyncFlags reads the persisted initial-sync flags. It is defensive
-// against a missing hive_state row (the baseline migration seeds one; a
-// dropped row is recreated with the same seed values) so callers can treat
-// the row as always present.
+// against a missing hive_state row so callers can treat the row as always
+// present -- but the seed INSERT only fires when the table is EMPTY: a
+// legacy-provisioned database carries exactly one row at its real head
+// (block_num > 0), and an unconditional VALUES (0, ...) insert would
+// silently create a SECOND row next to it, splitting flag reads/writes
+// across two rows (PR#407 review). The ON CONFLICT clause stays as a
+// belt-and-braces guard against a concurrent boot racing the NOT EXISTS
+// check. The read targets the lowest block_num row -- the row the legacy
+// database already had -- deterministically, so reads and writes (see
+// UpdateSyncFlags) always agree.
 func (r *StateRepository) GetSyncFlags(ctx context.Context) (*SyncFlags, error) {
 	if err := r.db.WithContext(ctx).Exec(`INSERT INTO hive_state
 		(block_num, db_version, steem_per_mvest, usd_per_steem, sbd_per_steem, dgpo)
-		VALUES (0, 29, 0, 0, 0, '')
+		SELECT 0, 29, 0, 0, 0, ''
+		WHERE NOT EXISTS (SELECT 1 FROM hive_state)
 		ON CONFLICT (block_num) DO NOTHING`).Error; err != nil {
 		return nil, err
 	}
@@ -293,6 +301,7 @@ func (r *StateRepository) GetSyncFlags(ctx context.Context) (*SyncFlags, error) 
 	if err := r.db.WithContext(ctx).
 		Model(&models.State{}).
 		Select("is_initial_sync", "recount_done").
+		Order("block_num").
 		Scan(&flags).Error; err != nil {
 		return nil, err
 	}
@@ -301,12 +310,32 @@ func (r *StateRepository) GetSyncFlags(ctx context.Context) (*SyncFlags, error) 
 
 // UpdateSyncFlags persists the initial-sync flags. Invalid (NULL) arguments
 // leave the corresponding column unchanged (COALESCE), so callers can write
-// one marker without touching the other.
+// one marker without touching the other. The update targets the lowest
+// block_num row -- the original row of the database (a legacy database's own
+// hive_state entry; a fresh database's seeded row) -- so a database can never
+// grow a second hive_state row carrying divergent flags.
 func (r *StateRepository) UpdateSyncFlags(ctx context.Context, isInitialSync, recountDone sql.NullBool) error {
 	return r.db.WithContext(ctx).Exec(`UPDATE hive_state SET
 		is_initial_sync = COALESCE(?, is_initial_sync),
-		recount_done = COALESCE(?, recount_done)`,
+		recount_done = COALESCE(?, recount_done)
+		WHERE block_num = (SELECT MIN(block_num) FROM hive_state)`,
 		isInitialSync, recountDone).Error
+}
+
+// ClearRecountDone resets the recount_done marker to NULL ("the tail trio did
+// not complete at the current head"). initialSync calls it BEFORE syncing new
+// blocks: recount_done's claim ("recount completed at the current head") is
+// about to become stale, and a crash anywhere between the first new block and
+// the trio's completion must leave the marker claiming nothing -- otherwise a
+// restart's tail-skip shortcut (recount_done && head unchanged) would skip
+// the trio forever and the freshly synced segment would never reach
+// hive_feed_cache / follow counts (PR#407 review, the 20M-stop -> 30M
+// continuation interrupted mid-trio scenario). UpdateSyncFlags cannot express
+// this: its COALESCE semantics treat a NULL argument as "leave unchanged".
+func (r *StateRepository) ClearRecountDone(ctx context.Context) error {
+	return r.db.WithContext(ctx).Exec(`UPDATE hive_state
+		SET recount_done = NULL
+		WHERE block_num = (SELECT MIN(block_num) FROM hive_state)`).Error
 }
 
 // NotificationRepository provides notification-related database operations

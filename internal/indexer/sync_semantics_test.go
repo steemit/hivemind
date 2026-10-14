@@ -18,7 +18,11 @@ package indexer
 //           batch completes and flushes, no dirty queue lost;
 //   - §2.1b poison observability (PR#404 registration for #405): fetch vs
 //           process classification, block numbers in errors, bounded
-//           fail-fast retry in the initial-sync path.
+//           fail-fast retry in the initial-sync path;
+//   - PR#407 review round: recount_done invalidation before continuation
+//           sync, proven with a REAL mid-trio interruption; batched
+//           CacheSync prune; recovery-phase recount rerun; recovery-phase
+//           cancellation mapping to a clean exit.
 
 import (
 	"context"
@@ -630,6 +634,52 @@ func TestMaintenanceStatementTimeoutExemption(t *testing.T) {
 
 // ---- §2.7 CacheSync gating -------------------------------------------------
 
+// TestCacheSyncPruneBatched drives the batched prune path (PR#407 review):
+// with a batch size of 10 and 23 cold rows, the loop must issue multiple
+// DELETE statements (10+10+3) until the window is exhausted -- a single
+// LIMIT-less DELETE is exactly what the 30s statement_timeout killed on the
+// first live prune after a 0->30M sync -- while fresh rows survive.
+func TestCacheSyncPruneBatched(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	old := time.Now().UTC().AddDate(0, 0, -100)
+	fresh := time.Now().UTC().AddDate(0, 0, -1)
+	if err := database.DB.WithContext(ctx).Exec(`INSERT INTO hive_posts_cache_temp
+		(post_id, author, permlink, created_at)
+		SELECT g, 'a', 'p' || g, $1 FROM generate_series(1, 23) g`, old).Error; err != nil {
+		t.Fatalf("seed cold rows: %v", err)
+	}
+	if err := database.DB.WithContext(ctx).Exec(`INSERT INTO hive_posts_cache_temp
+		(post_id, author, permlink, created_at)
+		SELECT g, 'a', 'hot' || g, $1 FROM generate_series(101, 102) g`, fresh).Error; err != nil {
+		t.Fatalf("seed hot rows: %v", err)
+	}
+
+	countBy := func(prefix string) int64 {
+		var n int64
+		database.DB.WithContext(ctx).
+			Table("hive_posts_cache_temp").
+			Where("permlink LIKE ?", prefix+"%").Count(&n)
+		return n
+	}
+
+	cs := NewCacheSync(database.DB)
+	cs.SetPruneBatch(10)
+	cs.SetBehind(0) // live: prune may run
+	deleted := cs.prune(ctx)
+	if deleted != 23 {
+		t.Errorf("prune deleted %d rows, want 23", deleted)
+	}
+	if n := countBy("p"); n != 0 {
+		t.Errorf("cold rows left after batched prune = %d, want 0 (loop must run to exhaustion: 10+10+3)", n)
+	}
+	if n := countBy("hot"); n != 2 {
+		t.Errorf("hot rows after prune = %d, want 2 (inside the 90-day window)", n)
+	}
+}
+
 func TestCacheSyncGating(t *testing.T) {
 	database, _, cleanup := withMigratedDB(t)
 	defer cleanup()
@@ -760,6 +810,296 @@ func TestGracefulShutdownFlushesInFlightBatch(t *testing.T) {
 		Table("hive_posts_cache").Where("author = ?", "alice").Count(&cached)
 	if cached != 4 {
 		t.Errorf("cached posts after shutdown = %d, want 4 (flush completed post-cancel)", cached)
+	}
+}
+
+// ---- PR#407 review: interrupted-tail invalidation ---------------------------
+
+// interruptingProvider wraps syncTestProvider's content batch with a hook
+// that cancels the run context and fails the call -- the "SIGTERM lands
+// mid-trio" injection. recoverOnCall is the 1-based GetContentBatch call
+// count on which to interrupt (the trio's RecoverMissingPosts fetch).
+func interruptingProvider(blocks map[int64]map[string]interface{}, lib int64, runCtx context.Context, cancel context.CancelFunc, recoverOnCall int) *fakeSteemProvider {
+	provider := syncTestProvider(blocks, lib)
+	calls := 0
+	inner := provider.getContentBatch
+	provider.getContentBatch = func(ctx context.Context, posts [][]string) ([]map[string]interface{}, error) {
+		calls++
+		if calls == recoverOnCall {
+			cancel()
+			return nil, runCtx.Err()
+		}
+		return inner(ctx, posts)
+	}
+	return provider
+}
+
+// TestInitialSyncTailInterruptedMidTrio reproduces the PR#407 P0 review
+// finding with a REAL interruption (no manual marker surgery):
+//
+//	run A: cap=2 stop point -- trio completes (recount_done=true at head 2)
+//	run B: cap raised to 3 -- continuation syncs block 3, the trio re-run is
+//	       interrupted by a cancellation landing inside RecoverMissingPosts
+//	       (Rebuild never runs)
+//	run C: restart at cap=3 -- must re-run the trio; it must NOT take the
+//	       same-head short-circuit skip on the stale recount_done marker.
+//
+// Without the pre-sync recount_done invalidation, run B leaves the marker
+// TRUE from run A, run C computes headAfter<=headBefore && recount_done and
+// skips the trio forever: the 2->3 segment's feed cache (and any count
+// drift) never heals.
+func TestInitialSyncTailInterruptedMidTrio(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedAccounts(t, database, "alice", "bob")
+
+	followTuple := []interface{}{"custom_json_operation", customJSONOp("alice",
+		`["follow",{"follower":"alice","following":"bob","what":["blog"]}]`)}
+	blocks := map[int64]map[string]interface{}{
+		1: syncBlockFixture(1, "2026-01-01T00:00:00", commentOp("alice", "p1")),
+		2: syncBlockFixture(2, "2026-01-01T00:00:03", commentOp("alice", "p2"), followTuple),
+		// Block 3 is empty: no posts, so its batch flush issues no
+		// GetContentBatch call and the FIRST content call of run B belongs
+		// to the trio's RecoverMissingPosts (deterministic injection).
+		3: syncBlockFixture(3, "2026-01-01T00:00:06"),
+	}
+
+	// Run A: stop point at 2 with the tail trio complete.
+	cfg2 := &config.Config{Indexer: config.IndexerConfig{MaxBatch: 50, TestMaxBlock: 2}}
+	sA, err := NewSync(cfg2, database, syncTestProvider(blocks, 2))
+	if err != nil {
+		t.Fatalf("NewSync (A): %v", err)
+	}
+	if err := sA.Run(ctx); err != nil {
+		t.Fatalf("Run (A): %v", err)
+	}
+	isInitial, recount := readFlags(t, database, ctx)
+	if !recount.Valid || !recount.Bool {
+		t.Fatalf("recount_done after run A = %+v, want true (trio completed at head 2)", recount)
+	}
+
+	// Between A and B: a post row beyond the cache cursor (lost flush /
+	// interrupted fast-sync shape). It gives RecoverMissingPosts real work
+	// so the interruption can land inside the trio.
+	gapPost := &models.Post{Author: "alice", Permlink: "gap", Category: "life",
+		CreatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), Depth: 0, IsValid: true}
+	if err := database.DB.WithContext(ctx).Create(gapPost).Error; err != nil {
+		t.Fatalf("seed gap post: %v", err)
+	}
+
+	// Run B: continuation to cap 3; the trio's RecoverMissingPosts fetch is
+	// cancelled (call 1 -- see the empty-block note above).
+	cfg3 := &config.Config{Indexer: config.IndexerConfig{MaxBatch: 50, TestMaxBlock: 3}}
+	runCtx, cancel := context.WithCancel(ctx)
+	sB, err := NewSync(cfg3, database, interruptingProvider(blocks, 3, runCtx, cancel, 1))
+	if err != nil {
+		cancel()
+		t.Fatalf("NewSync (B): %v", err)
+	}
+	errB := sB.Run(runCtx)
+	cancel()
+	if errB != nil {
+		t.Fatalf("Run (B) returned %v, want nil (mid-trio cancellation is a clean exit)", errB)
+	}
+
+	// Post-interruption state: blocks synced to 3, the marker invalidated
+	// (NOT the stale true from run A), and Rebuild never ran.
+	if head := sB.headBlockNum(ctx); head != 3 {
+		t.Errorf("head after interrupted run B = %d, want 3", head)
+	}
+	isInitial, recount = readFlags(t, database, ctx)
+	if !isInitial.Valid || !isInitial.Bool {
+		t.Errorf("is_initial_sync after interrupted run B = %+v, want still true", isInitial)
+	}
+	if recount.Valid && recount.Bool {
+		t.Fatalf("recount_done after interrupted run B = %+v, want unset/false (marker must be invalidated before the interrupted trio re-runs)", recount)
+	}
+	var feedB int64
+	database.DB.WithContext(ctx).Table("hive_feed_cache").Count(&feedB)
+	if feedB != 2 {
+		t.Errorf("feed_cache rows after interrupted run B = %d, want 2 (Rebuild never ran)", feedB)
+	}
+
+	// Run C: restart at the same cap. The stale-marker skip would leave
+	// feed_cache at 2 and the gap post uncached forever; the fix re-runs
+	// the trio.
+	sC, err := NewSync(cfg3, database, syncTestProvider(blocks, 3))
+	if err != nil {
+		t.Fatalf("NewSync (C): %v", err)
+	}
+	if err := sC.Run(ctx); err != nil {
+		t.Fatalf("Run (C): %v", err)
+	}
+
+	_, recount = readFlags(t, database, ctx)
+	if !recount.Valid || !recount.Bool {
+		t.Errorf("recount_done after run C = %+v, want true (trio re-ran to completion)", recount)
+	}
+	var feedC int64
+	database.DB.WithContext(ctx).Table("hive_feed_cache").Count(&feedC)
+	if feedC != 3 { // p1, p2 and the recovered gap post (block 3 had none)
+		t.Errorf("feed_cache rows after run C = %d, want 3 (trio re-ran at the new head)", feedC)
+	}
+	var gapCached int64
+	database.DB.WithContext(ctx).
+		Table("hive_posts_cache").Where("post_id = ?", gapPost.ID).Count(&gapCached)
+	if gapCached != 1 {
+		t.Errorf("gap post cached after run C = %d, want 1 (RecoverMissingPosts re-ran)", gapCached)
+	}
+	if bob := getAccount(t, database, ctx, "bob"); bob.Followers != 1 {
+		t.Errorf("bob.followers after run C = %d, want 1 (recount re-ran)", bob.Followers)
+	}
+}
+
+// TestRestartRecoveryRerunsRecount covers the recoverFromRestart recount
+// branch: an already-initialized database (is_initial_sync=false) whose
+// recount_done marker was never set (legacy interrupted-tail shape) must
+// re-run ForceRecount at startup instead of entering the runloop with the
+// counts stuck at their zeroed/wrong values.
+func TestRestartRecoveryRerunsRecount(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedAccounts(t, database, "alice", "bob")
+
+	blocks := map[int64]map[string]interface{}{
+		1: syncBlockFixture(1, "2026-01-01T00:00:00", commentOp("alice", "p1")),
+		2: followPluginBlock(2, "2026-01-01T00:00:03",
+			customJSONOp("alice", `["follow",{"follower":"alice","following":"bob","what":["blog"]}]`)),
+	}
+	provider := syncTestProvider(blocks, 2)
+
+	// Complete the initial sync normally (is_initial_sync flips false).
+	cfg := &config.Config{Indexer: config.IndexerConfig{MaxBatch: 50, SyncInterval: 1}}
+	s, err := NewSync(cfg, database, provider)
+	if err != nil {
+		t.Fatalf("NewSync: %v", err)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	done := runSyncInBackground(s, runCtx)
+	waitFor(t, "initial sync completion", func() bool {
+		isInitial, _ := readFlags(t, database, ctx)
+		return isInitial.Valid && !isInitial.Bool
+	})
+	cancel()
+	if err := waitRunReturn(t, done); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Reshape into the recovery-branch input state: marker never written
+	// (NULL), counts lost. (This state cannot be produced by the fixed
+	// code path itself -- the flag ordering writes recount_done before
+	// is_initial_sync flips -- so the branch is exercised by shaping it.)
+	if err := database.DB.WithContext(ctx).Exec(
+		"UPDATE hive_state SET recount_done = NULL").Error; err != nil {
+		t.Fatalf("unset recount_done: %v", err)
+	}
+	if err := database.DB.WithContext(ctx).Exec(
+		"UPDATE hive_accounts SET followers = 0, following = 0").Error; err != nil {
+		t.Fatalf("zero counts: %v", err)
+	}
+
+	// Restart: recovery must re-run the recount and persist the marker.
+	s2, err := NewSync(cfg, database, provider)
+	if err != nil {
+		t.Fatalf("NewSync (restart): %v", err)
+	}
+	runCtx2, cancel2 := context.WithCancel(ctx)
+	done2 := runSyncInBackground(s2, runCtx2)
+	waitFor(t, "recount rerun by restart recovery", func() bool {
+		_, recount := readFlags(t, database, ctx)
+		return recount.Valid && recount.Bool
+	})
+	if bob := getAccount(t, database, ctx, "bob"); bob.Followers != 1 {
+		t.Errorf("bob.followers after recovery recount = %d, want 1", bob.Followers)
+	}
+	if alice := getAccount(t, database, ctx, "alice"); alice.Following != 1 {
+		t.Errorf("alice.following after recovery recount = %d, want 1", alice.Following)
+	}
+	cancel2()
+	if err := waitRunReturn(t, done2); err != nil {
+		t.Fatalf("Run (restart): %v", err)
+	}
+}
+
+// TestRecoveryPhaseCancelledCleanly covers a cancellation landing in the
+// STARTUP RECOVERY phase (RecoverMissingPosts' steemd fetch): Run must map
+// it to a clean nil return -- not log a bogus completion and enter the live
+// runloop -- and a restart must resume the recovery where it aborted.
+func TestRecoveryPhaseCancelledCleanly(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedAccounts(t, database, "alice")
+
+	blocks := map[int64]map[string]interface{}{
+		1: syncBlockFixture(1, "2026-01-01T00:00:00", commentOp("alice", "p1")),
+	}
+	provider := syncTestProvider(blocks, 1)
+
+	// Complete the initial sync (flag flips false, trio done).
+	cfg := &config.Config{Indexer: config.IndexerConfig{MaxBatch: 50, SyncInterval: 1}}
+	s, err := NewSync(cfg, database, provider)
+	if err != nil {
+		t.Fatalf("NewSync: %v", err)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	done := runSyncInBackground(s, runCtx)
+	waitFor(t, "initial sync completion", func() bool {
+		isInitial, _ := readFlags(t, database, ctx)
+		return isInitial.Valid && !isInitial.Bool
+	})
+	cancel()
+	if err := waitRunReturn(t, done); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Give the recovery's RecoverMissingPosts real work: a post beyond the
+	// cache cursor.
+	gapPost := &models.Post{Author: "alice", Permlink: "gap", Category: "life",
+		CreatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), Depth: 0, IsValid: true}
+	if err := database.DB.WithContext(ctx).Create(gapPost).Error; err != nil {
+		t.Fatalf("seed gap post: %v", err)
+	}
+
+	// Restart with the interruption hooked into the FIRST content fetch:
+	// the startup recovery aborts mid-RecoverMissingPosts.
+	runCtx2, cancel2 := context.WithCancel(ctx)
+	s2, err := NewSync(cfg, database, interruptingProvider(blocks, 1, runCtx2, cancel2, 1))
+	if err != nil {
+		cancel2()
+		t.Fatalf("NewSync (restart): %v", err)
+	}
+	done2 := runSyncInBackground(s2, runCtx2)
+	if err := waitRunReturn(t, done2); err != nil {
+		t.Fatalf("Run after recovery-phase cancellation returned %v, want nil (clean exit for restart)", err)
+	}
+	// The aborted recovery left the gap uncached.
+	var gapCached int64
+	database.DB.WithContext(ctx).
+		Table("hive_posts_cache").Where("post_id = ?", gapPost.ID).Count(&gapCached)
+	if gapCached != 0 {
+		t.Errorf("gap post cached after cancelled recovery = %d, want 0 (recovery aborted)", gapCached)
+	}
+
+	// A further restart completes the recovery where it aborted.
+	runCtx3, cancel3 := context.WithCancel(ctx)
+	s3, err := NewSync(cfg, database, provider)
+	if err != nil {
+		cancel3()
+		t.Fatalf("NewSync (resume): %v", err)
+	}
+	done3 := runSyncInBackground(s3, runCtx3)
+	waitFor(t, "gap healed by resumed recovery", func() bool {
+		var n int64
+		database.DB.WithContext(ctx).
+			Table("hive_posts_cache").Where("post_id = ?", gapPost.ID).Count(&n)
+		return n == 1
+	})
+	cancel3()
+	if err := waitRunReturn(t, done3); err != nil {
+		t.Fatalf("Run (resume): %v", err)
 	}
 }
 
