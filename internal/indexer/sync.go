@@ -304,17 +304,3 @@ func (s *Sync) wait(ctx context.Context, seconds int) {
 		return
 	}
 }
-
-// syncLatest implements Strategy A: follow latest blocks with fork handling
-// This is more complex and will be implemented later if needed
-func (s *Sync) syncLatest(ctx context.Context) error {
-	s.logger.Info("Using fork strategy: latest blocks with rollback")
-
-	// TODO: Implement Strategy A
-	// 1. Create block queue
-	// 2. Stream blocks with trail
-	// 3. Detect forks
-	// 4. Handle rollback if needed
-
-	return fmt.Errorf("latest block sync strategy not yet implemented")
-}

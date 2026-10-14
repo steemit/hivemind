@@ -1,0 +1,257 @@
+# CI gates for the Go rewrite (planned PR#433, KR6; see
+# agent-share/notes/hivemind/2026-Q4/06-quality.md section 2).
+#
+# Three jobs, all required-green on PRs to / pushes of next:
+#   check       - gofmt, go vet, golangci-lint, unit tests (DB tests are
+#                 env-gated and skip here)
+#   integration - PostgreSQL 15 service + `go test -race -p 1 ./...` with an
+#                 anti-skip guard (fails if HIVE_TEST_DATABASE_URL breaks and
+#                 DB tests silently skip green)
+#   coverage    - internal/indexer coverage measurement (warn below 60%,
+#                 report artifacts; blocks only after Q4 W9 - see TODO),
+#                 also anti-skip guarded
+#
+# The docker image job (master pushes) stays in build.yml and is owned by
+# planned PR#432. build.yml is intentionally untouched by this workflow.
+#
+# NOTE on `-p 1`: integration tests issue `DROP SCHEMA public CASCADE` and the
+# internal/db + internal/indexer packages both use the database pointed to by
+# HIVE_TEST_DATABASE_URL directly (same schema). Package-parallel execution
+# would clobber each other's schema (known Q3 pitfall). Per-package dedicated
+# databases (hive_condenser_test, hive_hive_test, ...) are the second safety
+# net. Never raise -p for these tests against a shared database.
+
+name: check
+
+on:
+  push:
+    branches:
+      - next
+  pull_request:
+    branches:
+      - next
+
+# Least privilege: this workflow only checks out code (contents: read) and
+# uploads artifacts (no extra token permissions required). No deploys, no
+# releases, no comments - nothing needs write.
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (fmt, vet, lint, unit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check gofmt
+        run: |
+          # `gofmt -l` must list zero files; any output fails the gate.
+          # Single-quoted: the message contains backticks that a double-quoted
+          # shell string would treat as command substitution.
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo '::error::gofmt found unformatted files (run `gofmt -w <file>`):'
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "gofmt: clean"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        # v7 of the action serves golangci-lint v2; version pinned to the
+        # release the .golangci.yml schema was validated against.
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.14.0
+
+      - name: Unit tests (no DB; DB tests are env-gated and skip here)
+        # No -short: nothing in this repo consumes testing.Short. DB-backed
+        # tests gate on HIVE_TEST_DATABASE_URL and skip without it, so this
+        # step exercises the pure unit surface. The integration job runs the
+        # DB-backed tests and guards against silent skips.
+        run: go test -count=1 ./...
+
+  integration:
+    name: integration (pg15, race, serial)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      HIVE_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The service health options above already gate step execution on
+      # readiness; the probe is defense-in-depth against slow first starts.
+      - name: Probe Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1; then
+              echo "Postgres is accepting connections"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Postgres did not accept connections in time"
+          exit 1
+
+      # -p 1 is REQUIRED, see workflow header note.
+      #
+      # Anti-skip guard (2026-10 audit): if the HIVE_TEST_DATABASE_URL env
+      # plumbing breaks, every DB test hits its `t.Skip("HIVE_TEST_DATABASE_URL
+      # not set...")` branch and the job passes green with the unit surface
+      # only (observed: 55 DB tests silently gone, coverage 15.3% still
+      # green). pipefail + tee + grep makes that a hard failure instead.
+      # Every env-gated skip message in the repo starts with
+      # "HIVE_TEST_DATABASE_URL not set" (see internal/db/*_test.go,
+      # internal/indexer/block_processor_test.go, internal/api/**), so one
+      # grep pattern covers all variants.
+      - name: Integration tests (race detector, package-serial)
+        run: |
+          set -eo pipefail
+          go test -race -p 1 -count=1 -v ./... 2>&1 | tee integration-test.log
+          skips="$(grep -c 'HIVE_TEST_DATABASE_URL not set' integration-test.log || true)"
+          if [ "$skips" -ne 0 ]; then
+            echo "::error::${skips} env-gated skip(s) found: HIVE_TEST_DATABASE_URL did not reach go test; DB-backed tests did NOT run"
+            grep -n 'HIVE_TEST_DATABASE_URL not set' integration-test.log || true
+            exit 1
+          fi
+          echo "anti-skip guard: 0 env-gated skips"
+
+      # -v output is verbose but that is acceptable CI noise; the log is
+      # uploaded only when the step fails to keep artifacts lean.
+      - name: Upload integration test log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-log
+          path: integration-test.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  coverage:
+    name: coverage (internal/indexer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      HIVE_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Measurement command per 06-quality.md section 1 (same on CI and
+      # locally; -coverpkg=./internal/indexer over ./internal/indexer/...).
+      # Anti-skip guard (2026-10 audit): same as the integration job - if
+      # HIVE_TEST_DATABASE_URL breaks, indexer DB tests skip and coverage
+      # collapses (observed 15.3% reported green); grep makes it fatal.
+      - name: Measure internal/indexer coverage
+        run: |
+          set -eo pipefail
+          go test -p 1 -count=1 -v -coverpkg=./internal/indexer ./internal/indexer/... -coverprofile=cover.out 2>&1 | tee coverage-test.log
+          skips="$(grep -c 'HIVE_TEST_DATABASE_URL not set' coverage-test.log || true)"
+          if [ "$skips" -ne 0 ]; then
+            echo "::error::${skips} env-gated skip(s) found: HIVE_TEST_DATABASE_URL did not reach go test; coverage was measured over skipped DB tests"
+            grep -n 'HIVE_TEST_DATABASE_URL not set' coverage-test.log || true
+            exit 1
+          fi
+          echo "anti-skip guard: 0 env-gated skips"
+          go tool cover -func=cover.out | tee coverage.txt
+
+      - name: Upload coverage test log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-test-log
+          path: coverage-test.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Extract total coverage
+        run: |
+          total="$(go tool cover -func=cover.out | awk '/^total:/ {sub(/%$/, "", $3); print $3}')"
+          if [ -z "$total" ]; then
+            echo "::error::could not extract total coverage from cover.out"
+            exit 1
+          fi
+          echo "INDEXER_COVERAGE=${total}" >> "$GITHUB_ENV"
+          echo "internal/indexer total coverage: ${total}%"
+
+      - name: Cobertura conversion
+        run: |
+          go install github.com/boumenot/gocover-cobertura@v1.5.0
+          "$(go env GOPATH)/bin/gocover-cobertura" < cover.out > coverage.cobertura.xml
+
+      # TODO(Q4 W9 follow-up): flip to blocking (exit 1) once
+      # internal/indexer reliably reaches 60%; until then warn only, per
+      # 06-quality.md section 2 (transition period).
+      - name: Threshold check (warn below 60%)
+        run: |
+          cov="${INDEXER_COVERAGE}"
+          if awk -v c="$cov" 'BEGIN { exit !(c < 60) }'; then
+            echo "::warning::internal/indexer coverage ${cov}% is BELOW the 60% target (transition period: warn only; will block after Q4 W9)"
+          else
+            echo "internal/indexer coverage ${cov}% meets the 60% target"
+          fi
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            cover.out
+            coverage.txt
+            coverage.cobertura.xml
+          retention-days: 14
+          if-no-files-found: error

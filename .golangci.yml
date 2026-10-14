@@ -1,0 +1,92 @@
+# golangci-lint configuration for the hivemind Go rewrite.
+#
+# Policy (planned PR#433, KR6): conservative, low-false-positive rule set so
+# the lint gate stays green and trustworthy. The enabled set is the golangci
+# default set (errcheck/govet/ineffassign/staticcheck/unused; gosimple and
+# stylecheck are folded into staticcheck since golangci-lint v2) plus a
+# handful of widely-used linters that rarely misfire.
+#
+# Keep this list small on purpose: every linter added here must first be run
+# against the full codebase and only lands if it produces actionable findings.
+# Do not enable aggressive linters (gocritic, revive with all rules, funlen,
+# etc.) without that vetting step.
+#
+# Deliberately NOT enabled (revisit after cleanup PRs):
+#   - unparam: 6 findings on current code, all "param always receives X" on
+#     forward-compat helpers (e.g. limitFromQuery ubound, paramString idx)
+#     plus dead params worth a dedicated cleanup PR (processNotify tx,
+#     checkInitialSync feedCacheRepo, saveTransactionIDs error).
+#   - QF1003/QF1008 staticcheck checks: pure style (tagged switch, embedded
+#     field selector); disabled below to keep findings actionable.
+#
+# Requires golangci-lint >= v2.0 (config schema version below).
+
+version: "2"
+
+run:
+  # Go version must match go.mod (go 1.23.0).
+  go: "1.23"
+  # Match the overall CI budget; golangci-lint should finish well under this.
+  timeout: 10m
+
+output:
+  # Sort findings by file and line for stable, reviewable output.
+  sort-order:
+    - file
+    - linter
+
+linters:
+  # Start from an empty set so every enabled linter is a deliberate choice
+  # recorded in this file.
+  default: none
+  enable:
+    # Bug-catching core (equivalent to the golangci-lint default set):
+    - errcheck      # unchecked errors
+    - govet         # go vet, superset of the separate `go vet` CI step
+    - ineffassign   # ineffective assignments
+    - staticcheck   # staticcheck rules (bugs, simplifications, deprecated API)
+    - unused        # unused code (vars, funcs, types)
+
+    # Additional low-noise linters:
+    - copyloopvar   # loop-variable copies that shadow Go 1.22+ semantics
+    - misspell      # common misspellings in comments/strings
+    - nolintlint    # keep //nolint directives honest (explained + specific)
+    - unconvert     # unnecessary type conversions
+
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        # Stylecheck (ST*) naming/comment rules: legacy of the codebase's
+        # existing ALL_CAPS constants; adopting CamelCase naming is churn
+        # without bug-catching value. Mirrors golangci-lint's own default
+        # ST exclusions.
+        - "-ST1000" # package comment form
+        - "-ST1003" # ALL_CAPS vs CamelCase names
+        - "-ST1016" # consistent receiver names
+        - "-ST1020" # comment on exported function
+        - "-ST1021" # comment on exported type
+        - "-ST1022" # comment on exported var
+        # Quickfix class style suggestions that churn without catching bugs
+        # (not part of golangci-lint's default exclusion list, hence listed
+        # explicitly here).
+        - "-QF1003" # could use tagged switch
+        - "-QF1008" # could remove embedded field from selector
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+  exclusions:
+    # Keep golangci-lint's curated exclusion presets so comments/#nosec style
+    # boilerplate does not fail the gate.
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Tests: errcheck noise on fixture setup (t.Fatalf is the failure
+      # signal) is accepted.
+      - path: _test\.go
+        linters:
+          - errcheck

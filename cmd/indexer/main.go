@@ -30,7 +30,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer logging.GetLogger().Sync()
+	// Sync() returns an error (e.g. EINVAL on non-tty stderr) that has no
+	// recovery path at process exit; discard it explicitly for errcheck.
+	defer func() { _ = logging.GetLogger().Sync() }()
 
 	logger := logging.GetLogger()
 	logger.Info("Starting Hivemind Indexer")

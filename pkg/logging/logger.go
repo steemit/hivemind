@@ -42,7 +42,7 @@ func InitLogger(cfg *config.LoggingConfig) error {
 				zapcore.NewCore(
 					NewScalyrEncoder(encoderConfig),
 					zapcore.AddSync(os.Stdout),
-					zapcore.Level(level),
+					level,
 				),
 				zap.AddCaller(),
 				zap.AddStacktrace(zapcore.ErrorLevel),
