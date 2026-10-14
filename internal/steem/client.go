@@ -1,9 +1,17 @@
 package steem
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -40,10 +48,41 @@ var ErrBlockNotFound = v2api.ErrBlockNotFound
 //     (get_accounts/get_content null, zero-value DGP, response/request
 //     length mismatches). The indexer must never advance head on the back
 //     of an empty/garbage response.
+//
+// Batch contract (PR#401, P0-3): GetContentBatch does NOT go through the SDK
+// — steemgosdk v0.0.31 has no JSON-RPC batch capability (its jsonrpc2 layer
+// builds and decodes exactly one request/response object), so the batch path
+// POSTs a raw request-object array with this client's own http.Client. That
+// also means the SDK transport retry does not apply there; the batch path
+// carries its own bounded retry with the same backoff shape (base 100ms
+// << attempt, doubled on 429), making it the single retry layer for batches —
+// no stacking with the SDK.
 type Client struct {
 	api    *v2api.API
 	logger *zap.Logger
+
+	// url and httpClient serve the JSON-RPC batch path (GetContentBatch),
+	// which bypasses the SDK; knobs mirror the SDK transport so both paths
+	// share the same retry/timeout semantics.
+	url        string
+	httpClient *http.Client
+	maxBatch   int
+	maxWorkers int
+	maxRetries int
+	rpcTimeout time.Duration
 }
+
+// Defaults for the batch path when the config leaves a knob unset (tests
+// construct configs with zero values). They mirror the SDK transport
+// defaults and the legacy hivemind client (max_batch=50, max_workers=4,
+// max_retries=3, 15s per attempt).
+const (
+	batchDefaultMaxBatch   = 50
+	batchDefaultMaxWorkers = 4
+	batchDefaultMaxRetries = 3
+	batchDefaultTimeout    = 15 * time.Second
+	batchBaseBackoff       = 100 * time.Millisecond
+)
 
 // New creates a new Steem client.
 func New(cfg *config.SteemConfig) (*Client, error) {
@@ -53,26 +92,59 @@ func New(cfg *config.SteemConfig) (*Client, error) {
 
 	logger := logging.GetLogger().With(zap.String("component", "steem-client"))
 
-	// MaxWorkers bounds the range-fetch worker pool (GetBlocksRange);
-	// MaxRetries bounds transport-level retries; RPCTimeout bounds each
-	// HTTP attempt. Note: pre-v0.0.31 MaxWorkers was (mis)wired into the
-	// SDK's retry knob; with api/v2 it maps to actual fetch concurrency.
+	// MaxWorkers bounds the range-fetch worker pool (GetBlocksRange) and the
+	// batch chunk pool (GetContentBatch); MaxRetries bounds transport-level
+	// retries; RPCTimeout bounds each HTTP attempt. Note: pre-v0.0.31
+	// MaxWorkers was (mis)wired into the SDK's retry knob; with api/v2 it
+	// maps to actual fetch concurrency.
 	api := v2api.NewAPI(cfg.URL,
 		v2api.WithMaxRetry(cfg.MaxRetries),
 		v2api.WithTimeout(cfg.RPCTimeout),
 		v2api.WithConcurrency(cfg.MaxWorkers),
 	)
 
+	// Batch-path knobs: sanitize the same way the SDK does (n <= 0 selects
+	// the default; retries cannot be fully disabled) and build a pooled
+	// http.Client mirroring the SDK's NewAPI transport.
+	maxBatch := cfg.MaxBatch
+	if maxBatch <= 0 {
+		maxBatch = batchDefaultMaxBatch
+	}
+	maxWorkers := cfg.MaxWorkers
+	if maxWorkers <= 0 {
+		maxWorkers = batchDefaultMaxWorkers
+	}
+	maxRetries := cfg.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = batchDefaultMaxRetries
+	}
+	rpcTimeout := cfg.RPCTimeout
+	if rpcTimeout <= 0 {
+		rpcTimeout = batchDefaultTimeout
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.MaxIdleConnsPerHost = maxWorkers
+	if tr.MaxIdleConns < 100 {
+		tr.MaxIdleConns = 100
+	}
+
 	client := &Client{
-		api:    api,
-		logger: logger,
+		api:        api,
+		logger:     logger,
+		url:        cfg.URL,
+		httpClient: &http.Client{Timeout: rpcTimeout, Transport: tr},
+		maxBatch:   maxBatch,
+		maxWorkers: maxWorkers,
+		maxRetries: maxRetries,
+		rpcTimeout: rpcTimeout,
 	}
 
 	logger.Info("Steem client initialized",
 		zap.String("url", cfg.URL),
-		zap.Int("max_retries", cfg.MaxRetries),
-		zap.Duration("rpc_timeout", cfg.RPCTimeout),
-		zap.Int("concurrency", cfg.MaxWorkers),
+		zap.Int("max_retries", maxRetries),
+		zap.Duration("rpc_timeout", rpcTimeout),
+		zap.Int("concurrency", maxWorkers),
+		zap.Int("max_batch", maxBatch),
 	)
 
 	return client, nil
@@ -184,18 +256,35 @@ func (c *Client) GetContent(ctx context.Context, author, permlink string) (map[s
 
 // GetContentBatch fetches multiple posts/comments.
 //
-// NOTE (P0-3, to be fixed in PR#401): this still issues a single
-// condenser_api.get_content call whose params are an array of
-// [author, permlink] pairs, which real steemd rejects. Real batch semantics
-// (batched request objects + per-item validation) ship with PR#401; this PR
-// only carries the minimal adaptation to the v0.0.31 context-aware SDK.
+// Real JSON-RPC batch semantics (PR#401, P0-3), mirroring legacy
+// hive/steem/http_client.py (__exec_batch + _validated_batch_result):
 //
-// Length guard (PR#400 review): callers index the response by the request's
-// position (cached_post.go updateBatchTuples, jobs.go audit_cache_undelete),
-// so a response whose length differs from the number of requested posts is
-// an explicit error, never a short/long slice that would panic or silently
-// shift entries. An explicitly empty request is not a failure: it returns
-// an empty slice and a nil error.
+//   - The wire shape is a POST body of a JSON-RPC request-object array —
+//     [{"jsonrpc":"2.0","id":N,"method":"condenser_api.get_content",
+//     "params":["author","permlink"]}, ...] — with per-chunk 1-based ids.
+//     steemd rejects the pre-#401 shape (a single request whose params are
+//     an array of [author, permlink] pairs) with a JSON-RPC error; that
+//     quirk is pinned in client_contract_test.go.
+//   - Requests are chunked by max_batch (HIVE_MAX_BATCH, default 50) and
+//     the chunks are fetched concurrently on a max_workers-bounded pool
+//     (HIVE_MAX_WORKERS) — the same concurrency model as GetBlocksRange.
+//     Results are reassembled in request order regardless of chunk
+//     completion order, so callers may keep indexing by request position.
+//   - Response validation is fail-loud and all-or-nothing: the response
+//     array length must match the request count, each item's id must equal
+//     the paired request's id (order-based, as steemd/legacy return in
+//     order), any single item carrying a JSON-RPC error fails the WHOLE
+//     call (legacy raises RPCError on the first item error; callers retry
+//     or abort the whole batch), and a null/missing per-item result or a
+//     result without an "author" field (legacy `assert 'author' in post`)
+//     is rejected as malformed.
+//
+// Length guard (PR#400 review, kept): callers index the response by the
+// request's position (cached_post.go updateBatchTuples, jobs.go
+// audit_cache_undelete), so the returned slice always has exactly one entry
+// per requested post or the call errors. An explicitly empty request is not
+// a failure: it returns an empty slice and a nil error without any wire
+// traffic.
 func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_content_batch")
 	defer span.End()
@@ -204,30 +293,287 @@ func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[s
 		return []map[string]interface{}{}, nil
 	}
 
-	// Build batch request. Malformed tuples are rejected up front instead
-	// of silently dropped: dropping would desynchronize the response from
-	// the caller's request slice.
-	params := make([]interface{}, 0, len(posts))
+	// Validate tuples before any wire traffic. Malformed tuples are rejected
+	// up front instead of silently dropped: dropping would desynchronize the
+	// response from the caller's request slice.
 	for i, post := range posts {
 		if len(post) < 2 {
 			return nil, fmt.Errorf("invalid post tuple at index %d: want [author, permlink], got %d element(s)", i, len(post))
 		}
-		params = append(params, []interface{}{post[0], post[1]})
 	}
 
-	var contents []map[string]interface{}
-	err := c.api.CallWithResult(ctx, "condenser_api", "get_content", params, &contents)
+	// Chunk by max_batch (legacy chunkify).
+	chunks := make([][][]string, 0, (len(posts)+c.maxBatch-1)/c.maxBatch)
+	for start := 0; start < len(posts); start += c.maxBatch {
+		end := start + c.maxBatch
+		if end > len(posts) {
+			end = len(posts)
+		}
+		chunks = append(chunks, posts[start:end])
+	}
+
+	// Fan the chunks out to a bounded worker pool (legacy exec_multi uses a
+	// ThreadPoolExecutor with map(), which preserves order; the order here is
+	// restored by assembling per-chunk results by chunk index).
+	results := make([][]map[string]interface{}, len(chunks))
+	errs := make([]error, len(chunks))
+
+	workers := c.maxWorkers
+	if workers > len(chunks) {
+		workers = len(chunks)
+	}
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				if err := ctx.Err(); err != nil {
+					// Canceled while queued: fail fast without a request.
+					errs[idx] = err
+					continue
+				}
+				contents, err := c.fetchContentChunk(ctx, chunks[idx])
+				if err != nil {
+					errs[idx] = err
+					continue
+				}
+				results[idx] = contents
+			}
+		}()
+	}
+	// Dispatch strictly in order on an unbuffered channel; on ctx
+	// cancellation stop dispatching and (after the workers drained) mark the
+	// never-sent tail with the context error, so every chunk is accounted
+	// for. (Do not buffer jobs: in-flight workers must not race the sender
+	// over tail ownership — same reasoning as the SDK's runRange.)
+	sending := true
+	unsentFrom := len(chunks)
+	for idx := 0; idx < len(chunks) && sending; idx++ {
+		select {
+		case jobs <- idx:
+		case <-ctx.Done():
+			unsentFrom = idx
+			sending = false
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	for i := unsentFrom; i < len(chunks); i++ {
+		errs[i] = ctx.Err()
+	}
+
+	// All-or-nothing: report the lowest-index chunk failure deterministically.
+	for i, err := range errs {
+		if err != nil {
+			start := i*c.maxBatch + 1
+			return nil, fmt.Errorf("failed to get content batch (chunk %d/%d, posts %d-%d): %w",
+				i+1, len(chunks), start, i*c.maxBatch+len(chunks[i]), err)
+		}
+	}
+
+	out := make([]map[string]interface{}, 0, len(posts))
+	for _, res := range results {
+		out = append(out, res...)
+	}
+	return out, nil
+}
+
+// batchRequest is one JSON-RPC request object inside a batch POST body.
+type batchRequest struct {
+	JSONRPC string    `json:"jsonrpc"`
+	ID      int64     `json:"id"`
+	Method  string    `json:"method"`
+	Params  [2]string `json:"params"`
+}
+
+// batchResponse is one JSON-RPC response object inside a batch response body.
+// ID decodes strictly as a number: steemd/legacy echo the integer ids we
+// send; anything else is a malformed response and fails loud at decode time.
+type batchResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int64           `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *batchRPCError  `json:"error"`
+}
+
+// batchRPCError is a JSON-RPC error object carried by one batch item.
+type batchRPCError struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
+}
+
+func (e *batchRPCError) Error() string {
+	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
+}
+
+// batchHTTPError is a non-200 transport response on the batch path.
+type batchHTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *batchHTTPError) Error() string {
+	return fmt.Sprintf("http %d: %s", e.Status, e.Body)
+}
+
+// fetchContentChunk POSTs one JSON-RPC batch array for a chunk of posts and
+// returns its contents in request order. Transport failures are retried with
+// bounded exponential backoff (doubled on 429) — the ONLY retry layer for
+// the batch path, since it bypasses the SDK transport (whose retry it
+// mirrors; see the Client doc comment). Protocol-level failures (bad JSON,
+// id/length mismatch, per-item JSON-RPC errors, null results) are not
+// retried: a deterministic malformed response will not heal.
+func (c *Client) fetchContentChunk(ctx context.Context, chunk [][]string) ([]map[string]interface{}, error) {
+	reqs := make([]batchRequest, len(chunk))
+	for i, tuple := range chunk {
+		reqs[i] = batchRequest{
+			JSONRPC: "2.0",
+			ID:      int64(i + 1), // legacy: per-chunk 1-based request ids
+			Method:  "condenser_api.get_content",
+			Params:  [2]string{tuple[0], tuple[1]},
+		}
+	}
+	payload, err := json.Marshal(reqs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get content batch: %w", err)
-	}
-	if contents == nil {
-		return nil, fmt.Errorf("failed to get content batch: unexpected null result for %d posts", len(params))
-	}
-	if len(contents) != len(posts) {
-		return nil, fmt.Errorf("malformed content batch response: got %d results for %d requested posts", len(contents), len(posts))
+		return nil, fmt.Errorf("failed to marshal get_content batch: %w", err)
 	}
 
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		resps, err := c.postBatch(ctx, payload)
+		if err == nil {
+			return validateBatchResponses(reqs, resps)
+		}
+		if !isBatchRetryable(err) {
+			return nil, err
+		}
+		lastErr = err
+		if attempt == c.maxRetries {
+			break
+		}
+		timer := time.NewTimer(batchBackoffFor(attempt, err))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, fmt.Errorf("get_content batch of %d posts failed after %d attempts: %w", len(chunk), c.maxRetries+1, lastErr)
+}
+
+// postBatch performs one transport attempt: POST the raw request-object
+// array and decode the response-object array.
+func (c *Client) postBatch(ctx context.Context, payload []byte) ([]batchResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("failed to build get_content batch request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err // *url.Error; classified by isBatchRetryable
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 1024))
+		return nil, &batchHTTPError{Status: res.StatusCode, Body: string(body)}
+	}
+
+	var resps []batchResponse
+	if err := json.NewDecoder(res.Body).Decode(&resps); err != nil {
+		return nil, fmt.Errorf("malformed get_content batch response: %w", err)
+	}
+	return resps, nil
+}
+
+// validateBatchResponses enforces the legacy batch contract on one decoded
+// chunk response: length alignment, pairwise (order-based) id alignment, no
+// per-item JSON-RPC error (one failing item fails the whole call), no
+// null/missing result, and an "author" field on every post (legacy
+// `assert 'author' in post`).
+func validateBatchResponses(reqs []batchRequest, resps []batchResponse) ([]map[string]interface{}, error) {
+	// A `null` body decodes to a nil slice without error; treat it as the
+	// length mismatch it is.
+	if len(resps) != len(reqs) {
+		return nil, fmt.Errorf("malformed content batch response: got %d results for %d requested posts", len(resps), len(reqs))
+	}
+
+	contents := make([]map[string]interface{}, len(reqs))
+	for i, resp := range resps {
+		author, permlink := reqs[i].Params[0], reqs[i].Params[1]
+		if resp.ID != reqs[i].ID {
+			return nil, fmt.Errorf("malformed content batch response: item %d id mismatch (request %d, response %d)", i, reqs[i].ID, resp.ID)
+		}
+		if resp.Error != nil {
+			return nil, fmt.Errorf("get_content batch item %d (@%s/%s) failed: %w", i, author, permlink, resp.Error)
+		}
+		var content map[string]interface{}
+		if len(resp.Result) == 0 {
+			return nil, fmt.Errorf("get_content batch item %d (@%s/%s): missing result", i, author, permlink)
+		}
+		if err := json.Unmarshal(resp.Result, &content); err != nil {
+			return nil, fmt.Errorf("malformed get_content batch response item %d (@%s/%s): %w", i, author, permlink, err)
+		}
+		// `"result":null` unmarshals into a nil map WITHOUT an error; steemd
+		// never legitimately answers get_content with null.
+		if content == nil {
+			return nil, fmt.Errorf("get_content batch item %d (@%s/%s): null result", i, author, permlink)
+		}
+		if _, ok := content["author"]; !ok {
+			return nil, fmt.Errorf("get_content batch item %d (@%s/%s): invalid post: no author field", i, author, permlink)
+		}
+		contents[i] = content
+	}
 	return contents, nil
+}
+
+// isBatchRetryable mirrors the SDK transport's error classification for the
+// batch path: transient failures (network errors, per-attempt timeouts,
+// HTTP 429/5xx) are retried; caller-side context errors and protocol-level
+// failures (malformed bodies, per-item JSON-RPC errors) are not.
+func isBatchRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var httpErr *batchHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Status == http.StatusTooManyRequests || httpErr.Status >= 500
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		// client.Do failures (DNS, connection refused, TLS, resets) surface
+		// as *url.Error; treat as transient network trouble.
+		return true
+	}
+	return false
+}
+
+// batchBackoffFor returns the sleep before the next batch attempt: base <<
+// attempt, doubled when the failure was rate limiting — the same shape as
+// the SDK transport's backoffFor.
+func batchBackoffFor(attempt int, err error) time.Duration {
+	d := batchBaseBackoff << attempt
+	var httpErr *batchHTTPError
+	if errors.As(err, &httpErr) && httpErr.Status == http.StatusTooManyRequests {
+		d *= 2
+	}
+	return d
 }
 
 // GetDynamicGlobalProperties fetches dynamic global properties.

@@ -1,6 +1,7 @@
 package steem
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +20,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Scriptable steemd harness (fake↔real contract-test skeleton, 06-quality §3.2)
+// Scriptable steemd harness (fake↔real contract tests, 06-quality §3.2)
 //
 // This harness impersonates a steemd JSON-RPC endpoint behind an
 // httptest.Server so the REAL *Client can be tested against scripted
@@ -26,12 +28,15 @@ import (
 // pinned here are the contract that test doubles (FakeProvider in this
 // package and fakeSteemProvider in internal/indexer) must mirror.
 //
-// Extension points for follow-up PRs:
-//   - PR#401: get_content quirks (single request rejecting a params array of
-//     pairs, batch response id/length alignment) — script responses per
-//     method/params via a custom respond closure and assert on recorded calls.
-//   - Any future case: add a TestContract* function; the harness needs no
-//     changes for sequence-, params-, or delay-driven scenarios.
+// PR#401 delivered the get_content quirks: single requests whose params are
+// an array of [author, permlink] pairs are rejected (the pre-#401 wire
+// shape, which real steemd refuses), while request-object arrays are served
+// per item. The harness records batch bodies with IsBatch=true and the
+// per-item calls in Batch (method/params/id each), so tests can assert id
+// alignment and chunk sizing on the wire.
+//
+// Any future case: add a TestContract* function; the harness needs no
+// changes for sequence-, params-, or delay-driven scenarios.
 // ---------------------------------------------------------------------------
 
 // rpcScriptResponse is one scripted HTTP response.
@@ -42,9 +47,15 @@ type rpcScriptResponse struct {
 }
 
 // recordedRPCCall captures one JSON-RPC request received by the harness.
+// For a batch POST body (a JSON array of request objects), IsBatch is true
+// and Batch holds the per-item calls; ID is the raw wire id of the request
+// (single) or item (batch), preserved for id-alignment assertions.
 type recordedRPCCall struct {
-	Method string
-	Params json.RawMessage
+	Method  string
+	Params  json.RawMessage
+	ID      json.RawMessage
+	IsBatch bool
+	Batch   []recordedRPCCall
 }
 
 // ParamInt returns the i-th positional param coerced to int64, and whether
@@ -67,6 +78,58 @@ func (c recordedRPCCall) ParamInt(i int) (int64, bool) {
 		return 0, false
 	}
 	return int64(num), true
+}
+
+// ParamStr returns the i-th positional param as a string, and whether the
+// param exists and is a string. Same no-*testing.T rule as ParamInt.
+func (c recordedRPCCall) ParamStr(i int) (string, bool) {
+	var params []interface{}
+	if err := json.Unmarshal(c.Params, &params); err != nil {
+		return "", false
+	}
+	if i >= len(params) {
+		return "", false
+	}
+	s, ok := params[i].(string)
+	return s, ok
+}
+
+// ParamStrings returns the i-th positional param as a []string, and whether
+// it exists and is an array of strings. Same no-*testing.T rule as ParamInt.
+func (c recordedRPCCall) ParamStrings(i int) ([]string, bool) {
+	var params []interface{}
+	if err := json.Unmarshal(c.Params, &params); err != nil {
+		return nil, false
+	}
+	if i >= len(params) {
+		return nil, false
+	}
+	items, ok := params[i].([]interface{})
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, s)
+	}
+	return out, true
+}
+
+// pairArrayParams reports whether params is [[a,p],[a,p],...] — the
+// pre-#401 GetContentBatch wire shape (a single request whose params are an
+// array of pairs) that real steemd rejects with a JSON-RPC error. Same
+// no-*testing.T rule as ParamInt.
+func (c recordedRPCCall) pairArrayParams() bool {
+	var params []interface{}
+	if err := json.Unmarshal(c.Params, &params); err != nil || len(params) == 0 {
+		return false
+	}
+	_, ok := params[0].([]interface{})
+	return ok
 }
 
 // scriptedSteemd is an httptest server impersonating a steemd JSON-RPC
@@ -98,17 +161,40 @@ func (s *scriptedSteemd) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "harness: failed to read request body", http.StatusBadRequest)
 		return
 	}
-	var req struct {
-		JsonRpc string          `json:"jsonrpc"`
-		ID      int             `json:"id"`
-		Method  string          `json:"method"`
-		Params  json.RawMessage `json:"params"`
-	}
-	if err := json.Unmarshal(body, &req); err != nil {
-		s.t.Logf("harness: unparsable request body: %v", err)
+
+	trimmed := bytes.TrimSpace(body)
+	var call recordedRPCCall
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		// JSON-RPC batch: a POST body that is an array of request objects.
+		var items []struct {
+			JsonRpc string          `json:"jsonrpc"`
+			ID      json.RawMessage `json:"id"`
+			Method  string          `json:"method"`
+			Params  json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(trimmed, &items); err != nil {
+			s.t.Logf("harness: unparsable batch request body: %v", err)
+		}
+		call = recordedRPCCall{IsBatch: true}
+		for _, item := range items {
+			call.Batch = append(call.Batch, recordedRPCCall{
+				Method: item.Method, Params: item.Params, ID: item.ID,
+			})
+		}
+	} else {
+		var req struct {
+			JsonRpc string          `json:"jsonrpc"`
+			ID      json.RawMessage `json:"id"`
+			Method  string          `json:"method"`
+			Params  json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			s.t.Logf("harness: unparsable request body: %v", err)
+		}
+		call = recordedRPCCall{Method: req.Method, Params: req.Params, ID: req.ID}
 	}
 
-	resp := s.record(recordedRPCCall{Method: req.Method, Params: req.Params})
+	resp := s.record(call)
 
 	if resp.delay > 0 {
 		time.Sleep(resp.delay)
@@ -446,37 +532,413 @@ func TestContractContextCancelAbortsInFlight(t *testing.T) {
 	}
 }
 
-// TestContractGetContentBatchShapeRecordsCurrentBehavior documents (does not
-// endorse) the pre-PR#401 wire shape: GetContentBatch still sends ONE
-// condenser_api.get_content request whose params are an array of
-// [author, permlink] pairs. Real steemd rejects that shape; real batch
-// semantics plus the quirk contract cases land in PR#401, which extends
-// this harness.
-func TestContractGetContentBatchShapeRecordsCurrentBehavior(t *testing.T) {
-	// One result per requested post: since the PR#400-review length guard,
-	// a short/empty response is an error, so the shape-recording script must
-	// answer with a length-matching array.
-	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
-		body: rpcOK(`[{"author":"alice"},{"author":"bob"}]`),
-	}))
-	// Explicit 1, not 0: WithMaxRetry(0) would silently fall back to the
-	// SDK default (3) — see newTestClient.
+// batchContentJSON builds a minimal get_content result object for author/
+// permlink (steemd's shape for a real post).
+func batchContentJSON(author, permlink string) string {
+	return fmt.Sprintf(`{"id":7,"author":%q,"permlink":%q,"depth":0}`, author, permlink)
+}
+
+// blankContentResult is steemd's blank-post shape for a get_content of a
+// non-existent post: a valid object with an empty author (never null).
+const blankContentResult = `{"id":0,"author":"","permlink":""}`
+
+// contentResult returns the scripted get_content result for a tuple: the
+// fixture body when known, steemd's blank post otherwise.
+func contentResult(fixtures map[string]string, author, permlink string) string {
+	if body, ok := fixtures[author+"/"+permlink]; ok {
+		return body
+	}
+	return blankContentResult
+}
+
+// contentServerScript impersonates the get_content surface of a real
+// steemd/jussi endpoint:
+//
+//   - a JSON-RPC batch array (the PR#401 wire shape) is answered per item,
+//     echoing each request's id, with results in request order;
+//   - a single request whose params are [author, permlink] is answered with
+//     one content object (the GetContent shape);
+//   - a single request whose params are an ARRAY of pairs — the pre-#401
+//     GetContentBatch wire shape — is REJECTED with a JSON-RPC error, as
+//     real steemd does. This is the quirk that makes real batching
+//     mandatory (02-indexer §1.1 P0-3).
+//
+// The closure runs on the HTTP handler goroutine: it must not fail the
+// test, so marshaling failures answer 500.
+func contentServerScript(fixtures map[string]string) func(call recordedRPCCall, seq int) rpcScriptResponse {
+	return func(call recordedRPCCall, seq int) rpcScriptResponse {
+		// A batch POST body carries its method per item (the outer call has
+		// none); every item must be a get_content request.
+		if call.IsBatch {
+			for _, item := range call.Batch {
+				if item.Method != "condenser_api.get_content" {
+					return rpcScriptResponse{status: http.StatusInternalServerError, body: "harness: unexpected batch method " + item.Method}
+				}
+			}
+		} else if call.Method != "condenser_api.get_content" {
+			return rpcScriptResponse{status: http.StatusInternalServerError, body: "harness: unexpected method " + call.Method}
+		}
+		if !call.IsBatch {
+			if call.pairArrayParams() {
+				// Quirk: steemd cannot parse a params array of pairs.
+				return rpcScriptResponse{body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Invalid parameters: expected [author, permlink]"}}`}
+			}
+			author, _ := call.ParamStr(0)
+			permlink, _ := call.ParamStr(1)
+			return rpcScriptResponse{body: rpcOK(contentResult(fixtures, author, permlink))}
+		}
+		type respItem struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      json.RawMessage `json:"id"`
+			Result  json.RawMessage `json:"result"`
+		}
+		out := make([]respItem, 0, len(call.Batch))
+		for _, item := range call.Batch {
+			author, _ := item.ParamStr(0)
+			permlink, _ := item.ParamStr(1)
+			out = append(out, respItem{
+				JSONRPC: "2.0",
+				ID:      item.ID,
+				Result:  json.RawMessage(contentResult(fixtures, author, permlink)),
+			})
+		}
+		payload, err := json.Marshal(out)
+		if err != nil {
+			return rpcScriptResponse{status: http.StatusInternalServerError, body: "harness: failed to marshal batch response"}
+		}
+		return rpcScriptResponse{body: string(payload)}
+	}
+}
+
+// TestContractContentBatchWireShapeAndIDAlignment pins the PR#401 batch wire
+// shape: ONE POST per chunk carrying a JSON-RPC request-object array —
+// jsonrpc 2.0 envelope, condenser_api.get_content, per-item [author,
+// permlink] params, 1-based per-chunk ids — with results returned in
+// request order. This is what real steemd accepts (and the pre-#401 single
+// request with pair-array params cannot do; see the quirk test below).
+func TestContractContentBatchWireShapeAndIDAlignment(t *testing.T) {
+	fixtures := map[string]string{
+		"alice/p1": batchContentJSON("alice", "p1"),
+		"bob/p2":   batchContentJSON("bob", "p2"),
+		"carol/p3": batchContentJSON("carol", "p3"),
+	}
+	s := newScriptedSteemd(t, contentServerScript(fixtures))
 	c := newTestClient(t, s.URL(), 1)
 
 	posts, err := c.GetContentBatch(context.Background(), [][]string{
-		{"alice", "p1"}, {"bob", "p2"},
+		{"alice", "p1"}, {"bob", "p2"}, {"carol", "p3"},
 	})
 	if err != nil {
-		t.Fatalf("GetContentBatch failed against permissive harness: %v", err)
+		t.Fatalf("GetContentBatch failed against a well-behaved batch server: %v", err)
 	}
-	if len(posts) != 2 {
-		t.Fatalf("got %d posts, want 2", len(posts))
-	}
+
 	if got := s.callCount(); got != 1 {
-		t.Fatalf("got %d requests, want 1 (single non-batch request until PR#401)", got)
+		t.Fatalf("got %d POSTs, want 1 (3 posts fit one max_batch chunk)", got)
 	}
-	if got := s.call(0).Method; got != "condenser_api.get_content" {
-		t.Fatalf("method = %q, want condenser_api.get_content", got)
+	call := s.call(0)
+	if !call.IsBatch {
+		t.Fatalf("request was not a JSON-RPC batch array (params: %s)", call.Params)
+	}
+	if len(call.Batch) != 3 {
+		t.Fatalf("batch carried %d request objects, want 3", len(call.Batch))
+	}
+	wantPairs := [][2]string{{"alice", "p1"}, {"bob", "p2"}, {"carol", "p3"}}
+	for i, item := range call.Batch {
+		if item.Method != "condenser_api.get_content" {
+			t.Fatalf("batch item %d method = %q, want condenser_api.get_content", i, item.Method)
+		}
+		author, aok := item.ParamStr(0)
+		permlink, pok := item.ParamStr(1)
+		if !aok || !pok || author != wantPairs[i][0] || permlink != wantPairs[i][1] {
+			t.Fatalf("batch item %d params = (%q,%q) (ok=%v,%v), want (%q,%q)",
+				i, author, permlink, aok, pok, wantPairs[i][0], wantPairs[i][1])
+		}
+		// Legacy http_client.rpc_body assigns per-chunk 1-based ids.
+		if got, want := string(item.ID), fmt.Sprintf("%d", i+1); got != want {
+			t.Fatalf("batch item %d wire id = %s, want %s", i, got, want)
+		}
+	}
+
+	// Results come back in request order, one per request.
+	if len(posts) != 3 {
+		t.Fatalf("got %d results, want 3", len(posts))
+	}
+	for i, want := range wantPairs {
+		if got := posts[i]["author"]; got != want[0] {
+			t.Fatalf("result %d author = %v, want %q (request order not preserved)", i, got, want[0])
+		}
+	}
+}
+
+// TestContractContentBatchPairArrayQuirkRejected pins WHY real batching is
+// mandatory (02-indexer §1.1 P0-3): steemd rejects a single
+// condenser_api.get_content request whose params are an array of
+// [author, permlink] pairs — the exact call the pre-#401 GetContentBatch
+// made through the SDK. The script answers that shape with steemd's
+// JSON-RPC error, and the replay through the same SDK machinery the old
+// code used must surface it as an error; the current client, against the
+// same server, succeeds because it sends a request-object array.
+func TestContractContentBatchPairArrayQuirkRejected(t *testing.T) {
+	fixtures := map[string]string{
+		"alice/p1": batchContentJSON("alice", "p1"),
+		"bob/p2":   batchContentJSON("bob", "p2"),
+	}
+	s := newScriptedSteemd(t, contentServerScript(fixtures))
+	c := newTestClient(t, s.URL(), 1)
+
+	t.Run("old_shape_single_request_is_rejected", func(t *testing.T) {
+		// Replay the pre-#401 call verbatim: one request whose params are
+		// the pair array. The scripted server (like real steemd) answers a
+		// JSON-RPC error, which the SDK must surface.
+		var out []map[string]interface{}
+		err := c.api.CallWithResult(context.Background(), "condenser_api", "get_content",
+			[]interface{}{[]interface{}{"alice", "p1"}, []interface{}{"bob", "p2"}}, &out)
+		if err == nil {
+			t.Fatal("pair-array params were accepted by the scripted steemd; want the quirk rejection (JSON-RPC error)")
+		}
+		if out != nil {
+			t.Fatalf("old-shape call returned results alongside the error; want nil, got %v", out)
+		}
+		if got := s.call(0).Method; got != "condenser_api.get_content" {
+			t.Fatalf("method = %q, want condenser_api.get_content", got)
+		}
+		if !s.call(0).pairArrayParams() {
+			t.Fatal("replayed request did not carry the pair-array params; the replay no longer pins the quirk")
+		}
+	})
+
+	t.Run("batch_array_shape_is_served", func(t *testing.T) {
+		// The same server serves the batch array shape without retry: the
+		// success itself proves the client sends the accepted shape (the
+		// script rejects the old shape on sight).
+		posts, err := c.GetContentBatch(context.Background(), [][]string{
+			{"alice", "p1"}, {"bob", "p2"},
+		})
+		if err != nil {
+			t.Fatalf("GetContentBatch failed against the same server that rejects the old shape: %v", err)
+		}
+		if len(posts) != 2 || posts[0]["author"] != "alice" || posts[1]["author"] != "bob" {
+			t.Fatalf("results = %v, want [alice, bob] in request order", posts)
+		}
+		if !s.call(1).IsBatch {
+			t.Fatal("successful request was not a batch array; the client regressed to the rejected shape")
+		}
+	})
+}
+
+// TestContractContentBatchChunksAtMaxBatch pins the legacy chunking and
+// concurrency model: requests are split into max_batch-sized chunks
+// (HIVE_MAX_BATCH, default 50), the chunks are fetched concurrently on the
+// max_workers-bounded pool, and results are reassembled in REQUEST order
+// regardless of chunk completion order.
+func TestContractContentBatchChunksAtMaxBatch(t *testing.T) {
+	const total = 101 // 50 + 50 + 1
+	fixtures := make(map[string]string, total)
+	tuples := make([][]string, total)
+	for i := range tuples {
+		author := fmt.Sprintf("auth%03d", i)
+		tuples[i] = []string{author, "p"}
+		fixtures[author+"/p"] = batchContentJSON(author, "p")
+	}
+	s := newScriptedSteemd(t, contentServerScript(fixtures))
+	c := newTestClient(t, s.URL(), 1) // MaxBatch unset -> sanitized default 50
+
+	posts, err := c.GetContentBatch(context.Background(), tuples)
+	if err != nil {
+		t.Fatalf("GetContentBatch failed across chunk boundaries: %v", err)
+	}
+
+	if got := s.callCount(); got != 3 {
+		t.Fatalf("got %d batch POSTs, want 3 (101 posts / max_batch 50)", got)
+	}
+	seen := make(map[string]int)
+	for i := 0; i < s.callCount(); i++ {
+		call := s.call(i)
+		if !call.IsBatch {
+			t.Fatalf("POST %d was not a batch array", i)
+		}
+		if len(call.Batch) > 50 {
+			t.Fatalf("POST %d carried %d items, want <= max_batch (50)", i, len(call.Batch))
+		}
+		for j, item := range call.Batch {
+			author, ok := item.ParamStr(0)
+			if !ok {
+				t.Fatalf("POST %d item %d has no string author param", i, j)
+			}
+			seen[author]++
+			// Per-chunk ids restart at 1 (legacy rpc_body semantics).
+			if got, want := string(item.ID), fmt.Sprintf("%d", j+1); got != want {
+				t.Fatalf("POST %d item %d wire id = %s, want %s (per-chunk 1-based)", i, j, got, want)
+			}
+		}
+	}
+	if len(seen) != total {
+		t.Fatalf("distinct authors across chunks = %d, want %d", len(seen), total)
+	}
+	for author, n := range seen {
+		if n != 1 {
+			t.Fatalf("author %s requested %d times, want exactly once", author, n)
+		}
+	}
+
+	// Request-order reassembly: result i is exactly the i-th request's post,
+	// even though the chunks were fetched concurrently.
+	if len(posts) != total {
+		t.Fatalf("got %d results, want %d", len(posts), total)
+	}
+	for i, post := range posts {
+		if got := post["author"]; got != fmt.Sprintf("auth%03d", i) {
+			t.Fatalf("result %d author = %v, want auth%03d (request order not preserved)", i, got, i)
+		}
+	}
+}
+
+// TestContractContentBatchTransientFailures pins 429/bad-JSON behavior on
+// the batch path: a 429 is retried after a doubled exponential backoff (the
+// wrapper-level retry is the ONLY retry layer there, mirroring the SDK
+// transport used by single calls), a persistent 429 exhausts into an error
+// after exactly maxRetries+1 attempts, and a malformed 200 body is an
+// immediate error — never retried, never an empty success.
+func TestContractContentBatchTransientFailures(t *testing.T) {
+	t.Run("429_backs_off_then_succeeds", func(t *testing.T) {
+		alice := map[string]string{"alice/p1": batchContentJSON("alice", "p1")}
+		s := newScriptedSteemd(t, func(call recordedRPCCall, seq int) rpcScriptResponse {
+			if seq == 0 {
+				return rpcScriptResponse{status: http.StatusTooManyRequests, body: `{"error":"rate limited"}`}
+			}
+			return contentServerScript(alice)(call, seq)
+		})
+		c := newTestClient(t, s.URL(), 3)
+
+		start := time.Now()
+		posts, err := c.GetContentBatch(context.Background(), [][]string{{"alice", "p1"}})
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatalf("GetContentBatch failed on a transient 429: %v", err)
+		}
+		if got := s.callCount(); got != 2 {
+			t.Fatalf("got %d POSTs, want 2 (one 429, one success)", got)
+		}
+		// Batch backoff mirrors the SDK: 100ms base << 0, doubled on 429
+		// = 200ms. Assert a lower bound below that for timer robustness.
+		if elapsed < 150*time.Millisecond {
+			t.Fatalf("batch retry came back too fast (%v); 429 backoff not applied", elapsed)
+		}
+		if len(posts) != 1 || posts[0]["author"] != "alice" {
+			t.Fatalf("retried batch returned %v, want alice's post", posts)
+		}
+	})
+
+	t.Run("429_exhaustion_is_error", func(t *testing.T) {
+		s := newScriptedSteemd(t, func(call recordedRPCCall, seq int) rpcScriptResponse {
+			return rpcScriptResponse{status: http.StatusTooManyRequests, body: `{"error":"rate limited"}`}
+		})
+		c := newTestClient(t, s.URL(), 1) // initial attempt + 1 retry
+
+		posts, err := c.GetContentBatch(context.Background(), [][]string{{"alice", "p1"}})
+		if err == nil {
+			t.Fatal("GetContentBatch succeeded after retries were exhausted; want error")
+		}
+		if posts != nil {
+			t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
+		}
+		if got := s.callCount(); got != 2 {
+			t.Fatalf("got %d POSTs, want 2 (initial attempt + 1 retry)", got)
+		}
+	})
+
+	t.Run("bad_json_body_is_error_not_retried", func(t *testing.T) {
+		s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
+			// Truncated batch array: valid prefix, broken payload.
+			body: `[{"jsonrpc":"2.0","id":1,"result":{"author":"ali`,
+		}))
+		c := newTestClient(t, s.URL(), 3)
+
+		posts, err := c.GetContentBatch(context.Background(), [][]string{{"alice", "p1"}, {"bob", "p2"}})
+		if err == nil {
+			t.Fatal("GetContentBatch succeeded on a bad JSON batch response; want error")
+		}
+		if posts != nil {
+			t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
+		}
+		if got := s.callCount(); got != 1 {
+			t.Fatalf("bad JSON must not be retried (non-transient); got %d POSTs, want 1", got)
+		}
+	})
+}
+
+// TestContractContentBatchItemValidationFailsWholeBatch pins the
+// all-or-nothing per-item validation (legacy _validated_batch_result): any
+// single malformed or failing item — a JSON-RPC error object, a null or
+// missing result, a result without an author field, a response/request
+// length mismatch, or an id misalignment — fails the WHOLE call with no
+// results. The error semantics decision (a per-item error fails the batch
+// rather than erroring just that item) mirrors legacy and lets callers
+// retry or abort the whole batch, exactly like GetBlocksRange.
+func TestContractContentBatchItemValidationFailsWholeBatch(t *testing.T) {
+	cases := []struct {
+		name   string
+		script func(call recordedRPCCall, seq int) rpcScriptResponse
+	}{
+		{
+			name: "item_jsonrpc_error",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: `[{"jsonrpc":"2.0","id":1,"result":{"author":"alice","permlink":"p1"}},{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"boom"}}]`}
+			},
+		},
+		{
+			name: "item_null_result",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: `[{"jsonrpc":"2.0","id":1,"result":null},{"jsonrpc":"2.0","id":2,"result":{"author":"bob","permlink":"p2"}}]`}
+			},
+		},
+		{
+			name: "item_result_without_author",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: `[{"jsonrpc":"2.0","id":1,"result":{"permlink":"p1"}}]`}
+			},
+		},
+		{
+			name: "length_mismatch",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: `[{"jsonrpc":"2.0","id":1,"result":{"author":"alice","permlink":"p1"}}]`}
+			},
+		},
+		{
+			name: "id_misalignment",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: `[{"jsonrpc":"2.0","id":2,"result":{"author":"alice","permlink":"p1"}},{"jsonrpc":"2.0","id":1,"result":{"author":"bob","permlink":"p2"}}]`}
+			},
+		},
+		{
+			name: "single_object_body_instead_of_array",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: rpcOK(`[{"author":"alice"},{"author":"bob"}]`)}
+			},
+		},
+		{
+			name: "null_body",
+			script: func(call recordedRPCCall, seq int) rpcScriptResponse {
+				return rpcScriptResponse{body: `null`}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newScriptedSteemd(t, tc.script)
+			c := newTestClient(t, s.URL(), 1)
+
+			posts, err := c.GetContentBatch(context.Background(), [][]string{
+				{"alice", "p1"}, {"bob", "p2"},
+			})
+			if err == nil {
+				t.Fatal("GetContentBatch succeeded on a malformed batch response; want error")
+			}
+			if posts != nil {
+				t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
+			}
+		})
 	}
 }
 
@@ -548,39 +1010,342 @@ func TestContractRateLimitExhaustionIsError(t *testing.T) {
 	}
 }
 
-// TestContractContentBatchLengthMismatchIsError pins the PR#400-review
-// length guard: callers index the batch response by request position
-// (cached_post.go updateBatchTuples, jobs.go audit_cache_undelete do
-// posts[i]), so a response whose length differs from the number of
-// requested posts must be an explicit error — never a short/long slice
-// that would panic with index-out-of-range or silently shift entries.
-func TestContractContentBatchLengthMismatchIsError(t *testing.T) {
-	s := newScriptedSteemd(t, seqScript(rpcScriptResponse{
-		body: rpcOK(`[{"author":"alice"}]`), // 1 result for 2 requested posts
-	}))
+// TestContractContentBatchEmptyAndInputGuards pins the defensive input
+// paths carried over from the PR#400 review plus the #402-registered items:
+// the empty-request fast path (no wire traffic, empty non-nil slice, nil
+// error), malformed tuples rejected before any request, and the GetBlock /
+// GetBlocksRange argument guards (block numbers are 1-based and ranges are
+// ordered — steemd block numbers are contiguous, so an invalid fetch window
+// must never reach the wire).
+func TestContractContentBatchEmptyAndInputGuards(t *testing.T) {
+	s := newScriptedSteemd(t, contentServerScript(nil))
 	c := newTestClient(t, s.URL(), 1)
 
-	posts, err := c.GetContentBatch(context.Background(), [][]string{
-		{"alice", "p1"}, {"bob", "p2"},
+	t.Run("empty_request_fast_path", func(t *testing.T) {
+		posts, err := c.GetContentBatch(context.Background(), nil)
+		if err != nil {
+			t.Fatalf("GetContentBatch(nil) errored: %v; want the empty fast path", err)
+		}
+		if posts == nil {
+			t.Fatal("GetContentBatch(nil) returned a nil slice; want an empty non-nil slice")
+		}
+		if len(posts) != 0 {
+			t.Fatalf("GetContentBatch(nil) returned %d posts, want 0", len(posts))
+		}
+		posts, err = c.GetContentBatch(context.Background(), [][]string{})
+		if err != nil || len(posts) != 0 || posts == nil {
+			t.Fatalf("GetContentBatch(empty) = (%v, %v); want (empty, nil)", posts, err)
+		}
+		if got := s.callCount(); got != 0 {
+			t.Fatalf("empty request must not hit the wire; got %d POSTs", got)
+		}
 	})
-	if err == nil {
-		t.Fatal("GetContentBatch succeeded on a length-mismatched response; want error")
-	}
-	if posts != nil {
-		t.Fatalf("GetContentBatch returned results alongside the error; want nil, got %d", len(posts))
-	}
 
 	t.Run("malformed_tuple_rejected_before_request", func(t *testing.T) {
-		s := newScriptedSteemd(t, seqScript(rpcScriptResponse{body: rpcOK(`[]`)}))
-		c := newTestClient(t, s.URL(), 1)
-
 		if _, err := c.GetContentBatch(context.Background(), [][]string{{"authorless"}}); err == nil {
 			t.Fatal("GetContentBatch accepted a malformed [author] tuple; want input validation error")
 		}
 		if got := s.callCount(); got != 0 {
-			t.Fatalf("malformed tuples must fail before any request is sent; got %d requests", got)
+			t.Fatalf("malformed tuples must fail before any request is sent; got %d POSTs", got)
 		}
 	})
+
+	t.Run("get_block_num_guard", func(t *testing.T) {
+		for _, num := range []int64{0, -1, -12345} {
+			if _, err := c.GetBlock(context.Background(), num); err == nil {
+				t.Fatalf("GetBlock(%d) succeeded; want invalid-block-number error", num)
+			}
+		}
+		if got := s.callCount(); got != 0 {
+			t.Fatalf("invalid block numbers must fail before any request is sent; got %d POSTs", got)
+		}
+	})
+
+	t.Run("get_blocks_range_bounds_guard", func(t *testing.T) {
+		// from must be >= 1 and <= to ([from,to] is inclusive, so {5,5}
+		// is a valid single-block range and deliberately absent here).
+		for _, tc := range [][2]int64{{0, 5}, {-3, 5}, {5, 4}} {
+			from, to := tc[0], tc[1]
+			blocks, err := c.GetBlocksRange(context.Background(), from, to)
+			if err == nil {
+				t.Fatalf("GetBlocksRange(%d, %d) succeeded; want range validation error", from, to)
+			}
+			if blocks != nil {
+				t.Fatalf("GetBlocksRange(%d, %d) returned blocks alongside the error; want nil", from, to)
+			}
+		}
+		if got := s.callCount(); got != 0 {
+			t.Fatalf("invalid ranges must fail before any request is sent; got %d POSTs", got)
+		}
+	})
+}
+
+// TestContractGetContentAndGetAccountsNullAreErrors pins the null-result
+// branches for the single-object calls (#402-registered item): steemd never
+// legitimately answers get_content or get_accounts with null, so a null is
+// a malformed response and must surface as an error — never a nil/empty
+// result with a nil error that callers would treat as "post/account gone".
+func TestContractGetContentAndGetAccountsNullAreErrors(t *testing.T) {
+	t.Run("get_content_null", func(t *testing.T) {
+		s := newScriptedSteemd(t, seqScript(rpcScriptResponse{body: rpcOK(`null`)}))
+		c := newTestClient(t, s.URL(), 1)
+
+		content, err := c.GetContent(context.Background(), "alice", "p1")
+		if err == nil {
+			t.Fatal("GetContent succeeded on a null result; want malformed-response error")
+		}
+		if content != nil {
+			t.Fatalf("GetContent returned content alongside the error; want nil, got %v", content)
+		}
+	})
+
+	t.Run("get_accounts_null", func(t *testing.T) {
+		s := newScriptedSteemd(t, seqScript(rpcScriptResponse{body: rpcOK(`null`)}))
+		c := newTestClient(t, s.URL(), 1)
+
+		accounts, err := c.GetAccounts(context.Background(), []string{"alice"})
+		if err == nil {
+			t.Fatal("GetAccounts succeeded on a null result; want malformed-response error")
+		}
+		if accounts != nil {
+			t.Fatalf("GetAccounts returned accounts alongside the error; want nil, got %d", len(accounts))
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// fake ↔ real equivalence (06-quality §三-3.2)
+// ---------------------------------------------------------------------------
+
+// contentFixturesPR401 is the shared wire dataset: fixture bodies served by
+// the scripted server AND consumed by the model FakeProvider, so both sides
+// of the equivalence test decode byte-identical JSON.
+var contentFixturesPR401 = map[string]string{
+	"alice/p1": `{"id":11,"author":"alice","permlink":"p1","depth":0,"category":"life"}`,
+	"bob/p2":   `{"id":22,"author":"bob","permlink":"p2","depth":1,"category":"test"}`,
+}
+
+// accountFixture builds the scripted get_accounts entry for a name.
+func accountFixture(name string) string {
+	return fmt.Sprintf(`{"name":%q,"post_count":7}`, name)
+}
+
+// newModelFakeProvider builds a FakeProvider whose Fns implement the
+// Provider contract exactly as documented in provider.go: input validation
+// and the empty fast path behave like the real client, results come from
+// the same fixture dataset the scripted server serves, and failures carry
+// errors. This is the model every test double should imitate.
+func newModelFakeProvider(fixtures map[string]string, batchErr error) *FakeProvider {
+	fake := &FakeProvider{}
+	fake.GetContentBatchFn = func(ctx context.Context, posts [][]string) ([]map[string]interface{}, error) {
+		if batchErr != nil {
+			return nil, batchErr
+		}
+		if len(posts) == 0 {
+			return []map[string]interface{}{}, nil
+		}
+		out := make([]map[string]interface{}, 0, len(posts))
+		for i, p := range posts {
+			if len(p) < 2 {
+				return nil, fmt.Errorf("invalid post tuple at index %d: want [author, permlink], got %d element(s)", i, len(p))
+			}
+			var m map[string]interface{}
+			if err := json.Unmarshal([]byte(contentResult(fixtures, p[0], p[1])), &m); err != nil {
+				return nil, err
+			}
+			if _, ok := m["author"]; !ok {
+				return nil, fmt.Errorf("invalid post: no author field")
+			}
+			out = append(out, m)
+		}
+		return out, nil
+	}
+	fake.GetContentFn = func(ctx context.Context, author, permlink string) (map[string]interface{}, error) {
+		var m map[string]interface{}
+		if err := json.Unmarshal([]byte(contentResult(fixtures, author, permlink)), &m); err != nil {
+			return nil, err
+		}
+		if m == nil {
+			return nil, fmt.Errorf("unexpected null result")
+		}
+		return m, nil
+	}
+	fake.GetAccountsFn = func(ctx context.Context, names []string) ([]map[string]interface{}, error) {
+		if len(names) == 0 {
+			return nil, fmt.Errorf("no account names provided")
+		}
+		out := make([]map[string]interface{}, 0, len(names))
+		for _, n := range names {
+			var m map[string]interface{}
+			if err := json.Unmarshal([]byte(accountFixture(n)), &m); err != nil {
+				return nil, err
+			}
+			out = append(out, m)
+		}
+		return out, nil
+	}
+	return fake
+}
+
+// TestContractFakeProviderMatchesRealClient is the 06-quality §三-3.2
+// equivalence assertion: against the same scripted steemd, the real *Client
+// and a contract-faithful FakeProvider must return equivalent results (or
+// equivalent errors) for the same inputs. If the real client's semantics
+// drift from what test doubles imitate, this test fails — that is the
+// moment to update the fakes, not after indexer tests quietly pass with a
+// stale double.
+func TestContractFakeProviderMatchesRealClient(t *testing.T) {
+	// The server speaks the full get_content/get_accounts surface.
+	s := newScriptedSteemd(t, func(call recordedRPCCall, seq int) rpcScriptResponse {
+		if call.Method == "condenser_api.get_accounts" {
+			names, ok := call.ParamStrings(0)
+			if !ok {
+				return rpcScriptResponse{status: http.StatusInternalServerError, body: "harness: missing names param"}
+			}
+			out := make([]string, 0, len(names))
+			for _, n := range names {
+				out = append(out, accountFixture(n))
+			}
+			return rpcScriptResponse{body: rpcOK("[" + strings.Join(out, ",") + "]")}
+		}
+		return contentServerScript(contentFixturesPR401)(call, seq)
+	})
+	real := newTestClient(t, s.URL(), 1)
+
+	t.Run("get_content_batch", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			input [][]string
+		}{
+			{name: "nil_request", input: nil},
+			{name: "empty_request", input: [][]string{}},
+			{name: "single", input: [][]string{{"alice", "p1"}}},
+			{name: "mixed_known_and_blank", input: [][]string{{"alice", "p1"}, {"ghost", "nope"}, {"bob", "p2"}}},
+			{name: "malformed_tuple", input: [][]string{{"alice", "p1"}, {"authorless"}}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				fake := newModelFakeProvider(contentFixturesPR401, nil)
+
+				realRes, realErr := real.GetContentBatch(context.Background(), tc.input)
+				fakeRes, fakeErr := fake.GetContentBatch(context.Background(), tc.input)
+
+				if (realErr == nil) != (fakeErr == nil) {
+					t.Fatalf("error presence differs: real err=%v, fake err=%v", realErr, fakeErr)
+				}
+				if realErr != nil {
+					if realRes != nil || fakeRes != nil {
+						t.Fatalf("failed calls must return nil results: real=%v fake=%v", realRes, fakeRes)
+					}
+					return
+				}
+				if !reflect.DeepEqual(realRes, fakeRes) {
+					t.Fatalf("results differ:\nreal: %#v\nfake: %#v", realRes, fakeRes)
+				}
+			})
+		}
+	})
+
+	t.Run("get_content_batch_failure_equivalence", func(t *testing.T) {
+		// A persistently failing server vs a fake scripted to fail: both
+		// must surface (nil, error) — the contract shape indexer callers
+		// rely on to retry or abort.
+		failing := newScriptedSteemd(t, func(call recordedRPCCall, seq int) rpcScriptResponse {
+			return rpcScriptResponse{status: http.StatusTooManyRequests, body: `{"error":"rate limited"}`}
+		})
+		realFailing := newTestClient(t, failing.URL(), 1)
+		fakeFailing := newModelFakeProvider(contentFixturesPR401, fmt.Errorf("scripted batch failure"))
+
+		input := [][]string{{"alice", "p1"}, {"bob", "p2"}}
+		realRes, realErr := realFailing.GetContentBatch(context.Background(), input)
+		fakeRes, fakeErr := fakeFailing.GetContentBatch(context.Background(), input)
+
+		if realErr == nil || fakeErr == nil {
+			t.Fatalf("both must fail: real err=%v, fake err=%v", realErr, fakeErr)
+		}
+		if realRes != nil || fakeRes != nil {
+			t.Fatalf("failed calls must return nil results: real=%v fake=%v", realRes, fakeRes)
+		}
+	})
+
+	t.Run("get_content_single", func(t *testing.T) {
+		fake := newModelFakeProvider(contentFixturesPR401, nil)
+		for _, tuple := range [][]string{{"alice", "p1"}, {"ghost", "nope"}} {
+			realRes, realErr := real.GetContent(context.Background(), tuple[0], tuple[1])
+			fakeRes, fakeErr := fake.GetContent(context.Background(), tuple[0], tuple[1])
+			if (realErr == nil) != (fakeErr == nil) {
+				t.Fatalf("@%s/%s: error presence differs: real=%v fake=%v", tuple[0], tuple[1], realErr, fakeErr)
+			}
+			if realErr == nil && !reflect.DeepEqual(realRes, fakeRes) {
+				t.Fatalf("@%s/%s results differ:\nreal: %#v\nfake: %#v", tuple[0], tuple[1], realRes, fakeRes)
+			}
+		}
+	})
+
+	t.Run("get_accounts", func(t *testing.T) {
+		fake := newModelFakeProvider(contentFixturesPR401, nil)
+
+		realRes, realErr := real.GetAccounts(context.Background(), []string{"alice", "bob"})
+		fakeRes, fakeErr := fake.GetAccounts(context.Background(), []string{"alice", "bob"})
+		if realErr != nil || fakeErr != nil {
+			t.Fatalf("unexpected errors: real=%v fake=%v", realErr, fakeErr)
+		}
+		if !reflect.DeepEqual(realRes, fakeRes) {
+			t.Fatalf("accounts differ:\nreal: %#v\nfake: %#v", realRes, fakeRes)
+		}
+
+		// Empty-name list: both reject (never an empty success that would
+		// mask a caller bug).
+		if _, realErr := real.GetAccounts(context.Background(), nil); realErr == nil {
+			t.Fatal("real GetAccounts(nil) succeeded; want error")
+		}
+		if _, fakeErr := fake.GetAccounts(context.Background(), nil); fakeErr == nil {
+			t.Fatal("fake GetAccounts(nil) succeeded; want error")
+		}
+	})
+}
+
+// TestFakeProviderUnsetFnFailsLoud pins the #402-registered fix: a
+// FakeProvider method invoked without its Fn set must return an explicit
+// error — never (nil, nil), which the Provider contract forbids on failure
+// paths and which would let production bugs pass in tests that forgot to
+// script a response. The sole sanctioned exception is GetContentBatch's
+// empty-request fast path, which mirrors the real client and succeeds
+// without consulting the Fn.
+func TestFakeProviderUnsetFnFailsLoud(t *testing.T) {
+	fake := &FakeProvider{}
+	ctx := context.Background()
+
+	if res, err := fake.GetBlock(ctx, 1); err == nil || res != nil {
+		t.Fatalf("GetBlock (Fn unset) = (%v, %v); want (nil, error)", res, err)
+	}
+	if res, err := fake.GetBlocksRange(ctx, 1, 2); err == nil || res != nil {
+		t.Fatalf("GetBlocksRange (Fn unset) = (%v, %v); want (nil, error)", res, err)
+	}
+	if res, err := fake.GetAccounts(ctx, []string{"a"}); err == nil || res != nil {
+		t.Fatalf("GetAccounts (Fn unset) = (%v, %v); want (nil, error)", res, err)
+	}
+	if res, err := fake.GetContent(ctx, "a", "p"); err == nil || res != nil {
+		t.Fatalf("GetContent (Fn unset) = (%v, %v); want (nil, error)", res, err)
+	}
+	if res, err := fake.GetContentBatch(ctx, [][]string{{"a", "p"}}); err == nil || res != nil {
+		t.Fatalf("GetContentBatch (Fn unset) = (%v, %v); want (nil, error)", res, err)
+	}
+	if res, err := fake.GetDynamicGlobalProperties(ctx); err == nil || res != nil {
+		t.Fatalf("GetDynamicGlobalProperties (Fn unset) = (%v, %v); want (nil, error)", res, err)
+	}
+	if res, err := fake.HeadBlock(ctx); err == nil || res != 0 {
+		t.Fatalf("HeadBlock (Fn unset) = (%v, %v); want (0, error)", res, err)
+	}
+	if res, err := fake.LastIrreversible(ctx); err == nil || res != 0 {
+		t.Fatalf("LastIrreversible (Fn unset) = (%v, %v); want (0, error)", res, err)
+	}
+
+	// Empty-request fast path: mirrors the real client even without an Fn.
+	res, err := fake.GetContentBatch(ctx, nil)
+	if err != nil || res == nil || len(res) != 0 {
+		t.Fatalf("GetContentBatch(nil) (Fn unset) = (%v, %v); want (empty non-nil slice, nil)", res, err)
+	}
 }
 
 // TestContractAccountsLengthMismatchIsError mirrors legacy client.py's

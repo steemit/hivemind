@@ -64,6 +64,9 @@ steem/client.go` has zero tests.
 strictness. Wrappers around external protocols get contract tests (even
 one that replays a captured real response). When you add a fake method,
 write down where its behavior was verified against the real peer.
+(Fixed in planned PR#401: real JSON-RPC batch in `GetContentBatch`, the
+pair-array rejection pinned as a scripted quirk case, and a fake↔real
+equivalence test in `client_contract_test.go`.)
 
 ## 4. Stateful components constructed twice
 

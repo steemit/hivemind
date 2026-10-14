@@ -242,8 +242,10 @@ Key configuration options:
 - `STEEMD_URL`: Steemd node URL
 - `REDIS_URL`: Redis connection (optional, for caching)
 - `TRAIL_BLOCKS`: Blocks to trail behind head (fork protection)
-- `MAX_BATCH`: Batch size for block processing
-- `MAX_WORKERS`: Number of worker threads
+- `MAX_BATCH`: Batch size for block processing and JSON-RPC batching
+  (`GetContentBatch` chunks get_content request arrays at this size)
+- `MAX_WORKERS`: Number of worker threads (block-range and batch-chunk fetch
+  concurrency)
 
 ## Deployment
 
