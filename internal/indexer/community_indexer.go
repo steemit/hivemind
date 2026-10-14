@@ -674,9 +674,17 @@ func (ci *CommunityIndexer) readProps(op *communityOp) error {
 
 // validatePermissions mirrors legacy _validate_permissions (the role
 // matrix), including the idempotency guards (already muted/pinned/
-// subscribed/flagged, role-would-not-change).
+// subscribed/flagged, role-would-not-change). Predicate query failures are
+// returned as infrastructure errors (wrapped with %w, NOT opValidationErr):
+// legacy validate() only catches AssertionError, so a DB failure in
+// get_user_role/_subscribed/_parent_muted/_flagged bubbles up for
+// block-level handling instead of failing an assertion (which would
+// wrongly reject a legitimate owner/admin as a guest).
 func (ci *CommunityIndexer) validatePermissions(ctx context.Context, tx *gorm.DB, op *communityOp) error {
-	actorRole := ci.getUserRoleID(ctx, tx, op.communityID, op.actorID)
+	actorRole, err := ci.getUserRoleID(ctx, tx, op.communityID, op.actorID)
+	if err != nil {
+		return err
+	}
 
 	switch op.action {
 	case "setRole":
@@ -687,7 +695,10 @@ func (ci *CommunityIndexer) validatePermissions(ctx context.Context, tx *gorm.DB
 			return opValidationErr("cannot promote to or above own rank")
 		}
 		if op.actor != op.account {
-			accountRole := ci.getUserRoleID(ctx, tx, op.communityID, op.accountID)
+			accountRole, err := ci.getUserRoleID(ctx, tx, op.communityID, op.accountID)
+			if err != nil {
+				return err
+			}
 			if accountRole >= actorRole {
 				return opValidationErr("cant modify higher-role user")
 			}
@@ -714,7 +725,11 @@ func (ci *CommunityIndexer) validatePermissions(ctx context.Context, tx *gorm.DB
 		if !op.post.IsMuted {
 			return opValidationErr("post is already not muted")
 		}
-		if ci.isParentMuted(ctx, tx, op.post) {
+		parentMuted, err := ci.isParentMuted(ctx, tx, op.post)
+		if err != nil {
+			return err
+		}
+		if parentMuted {
 			return opValidationErr("parent post is muted")
 		}
 		if actorRole < models.RoleMod {
@@ -738,15 +753,27 @@ func (ci *CommunityIndexer) validatePermissions(ctx context.Context, tx *gorm.DB
 		if actorRole <= models.RoleMuted {
 			return opValidationErr("muted users cannot flag posts")
 		}
-		if ci.isFlagged(ctx, tx, op) {
+		flagged, err := ci.isFlagged(ctx, tx, op)
+		if err != nil {
+			return err
+		}
+		if flagged {
 			return opValidationErr("user already flagged this post")
 		}
 	case "subscribe":
-		if ci.isSubscribed(ctx, tx, op.communityID, op.actorID) {
+		subscribed, err := ci.isSubscribed(ctx, tx, op.communityID, op.actorID)
+		if err != nil {
+			return err
+		}
+		if subscribed {
 			return opValidationErr("already subscribed")
 		}
 	case "unsubscribe":
-		if !ci.isSubscribed(ctx, tx, op.communityID, op.actorID) {
+		subscribed, err := ci.isSubscribed(ctx, tx, op.communityID, op.actorID)
+		if err != nil {
+			return err
+		}
+		if !subscribed {
 			return opValidationErr("already unsubscribed")
 		}
 	}
@@ -770,7 +797,9 @@ func (ci *CommunityIndexer) applyCommunityOp(ctx context.Context, tx *gorm.DB, o
 			return fmt.Errorf("failed to serialize props payload: %w", err)
 		}
 		payload := string(propsJSON)
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeSetProps, &payload, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeSetProps, &payload, isInitialSync); err != nil {
+			return err
+		}
 
 	case "subscribe":
 		subscription := &models.Subscription{
@@ -792,7 +821,9 @@ func (ci *CommunityIndexer) applyCommunityOp(ctx context.Context, tx *gorm.DB, o
 				return fmt.Errorf("failed to update subscriber count: %w", err)
 			}
 		}
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeSubscribe, nil, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeSubscribe, nil, isInitialSync); err != nil {
+			return err
+		}
 
 	case "unsubscribe":
 		if err := tx.WithContext(ctx).
@@ -826,7 +857,9 @@ func (ci *CommunityIndexer) applyCommunityOp(ctx context.Context, tx *gorm.DB, o
 			return fmt.Errorf("failed to set role: %w", err)
 		}
 		payload := op.role
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeSetRole, &payload, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeSetRole, &payload, isInitialSync); err != nil {
+			return err
+		}
 
 	case "setUserTitle":
 		role := &models.Role{
@@ -845,14 +878,18 @@ func (ci *CommunityIndexer) applyCommunityOp(ctx context.Context, tx *gorm.DB, o
 			return fmt.Errorf("failed to set user title: %w", err)
 		}
 		payload := op.title
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeSetLabel, &payload, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeSetLabel, &payload, isInitialSync); err != nil {
+			return err
+		}
 
 	case "mutePost":
 		if err := ci.updatePostFlag(ctx, tx, op, "is_muted", true); err != nil {
 			return err
 		}
 		notes := op.notes
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeMutePost, &notes, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeMutePost, &notes, isInitialSync); err != nil {
+			return err
+		}
 		ci.refreshCachedPost(op, isInitialSync)
 
 	case "unmutePost":
@@ -860,24 +897,32 @@ func (ci *CommunityIndexer) applyCommunityOp(ctx context.Context, tx *gorm.DB, o
 			return err
 		}
 		notes := op.notes
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeUnmutePost, &notes, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeUnmutePost, &notes, isInitialSync); err != nil {
+			return err
+		}
 		ci.refreshCachedPost(op, isInitialSync)
 
 	case "pinPost":
 		if err := ci.updatePostFlag(ctx, tx, op, "is_pinned", true); err != nil {
 			return err
 		}
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypePinPost, nil, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypePinPost, nil, isInitialSync); err != nil {
+			return err
+		}
 
 	case "unpinPost":
 		if err := ci.updatePostFlag(ctx, tx, op, "is_pinned", false); err != nil {
 			return err
 		}
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeUnpinPost, nil, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeUnpinPost, nil, isInitialSync); err != nil {
+			return err
+		}
 
 	case "flagPost":
 		notes := op.notes
-		ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeFlagPost, &notes, isInitialSync)
+		if err := ci.notifyCommunityOp(ctx, tx, op, models.NotifyTypeFlagPost, &notes, isInitialSync); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -908,16 +953,23 @@ func (ci *CommunityIndexer) refreshCachedPost(op *communityOp, isInitialSync boo
 // notifyCommunityOp mirrors legacy CommunityOp._notify: notifications are
 // suppressed during initial sync; account-level actions target the account
 // with score 35 (subscribed) or 15 (not subscribed); post-level actions
-// carry the post id with score 35.
-func (ci *CommunityIndexer) notifyCommunityOp(ctx context.Context, tx *gorm.DB, op *communityOp, typeID int16, payload *string, isInitialSync bool) {
+// carry the post id with score 35. The _subscribed lookup failure is
+// propagated (legacy _notify has no exception handling, so the error
+// bubbles up through process() for block-level handling); only the final
+// notif write failure is Warn-and-continue (see NotifyIndexer.Write).
+func (ci *CommunityIndexer) notifyCommunityOp(ctx context.Context, tx *gorm.DB, op *communityOp, typeID int16, payload *string, isInitialSync bool) error {
 	if isInitialSync {
-		return
+		return nil
 	}
 	score := int16(35)
 	var dstID *int64
 	if op.accountID != 0 && op.post == nil {
 		dstID = &op.accountID
-		if !ci.isSubscribed(ctx, tx, op.communityID, op.accountID) {
+		subscribed, err := ci.isSubscribed(ctx, tx, op.communityID, op.accountID)
+		if err != nil {
+			return err
+		}
+		if !subscribed {
 			score = 15
 		}
 	}
@@ -935,12 +987,16 @@ func (ci *CommunityIndexer) notifyCommunityOp(ctx context.Context, tx *gorm.DB, 
 			zap.Int16("type", typeID),
 			zap.Error(err))
 	}
+	return nil
 }
 
 // getUserRoleID mirrors legacy Community.get_user_role: the hive_roles
 // role_id, defaulting to guest (0) when no row exists (legacy query_one
-// returns None -> Role.guest).
-func (ci *CommunityIndexer) getUserRoleID(ctx context.Context, tx *gorm.DB, communityID, accountID int64) int16 {
+// returns None -> Role.guest). DB failures are returned to the caller:
+// legacy lets them bubble out of validate() (which only catches
+// AssertionError) for block-level handling, so a broken lookup must never
+// silently demote an owner/admin to guest.
+func (ci *CommunityIndexer) getUserRoleID(ctx context.Context, tx *gorm.DB, communityID, accountID int64) (int16, error) {
 	var roleID int16
 	if err := tx.WithContext(ctx).
 		Model(&models.Role{}).
@@ -948,52 +1004,58 @@ func (ci *CommunityIndexer) getUserRoleID(ctx context.Context, tx *gorm.DB, comm
 		Where("community_id = ? AND account_id = ?", communityID, accountID).
 		Limit(1).
 		Scan(&roleID).Error; err != nil {
-		return models.RoleGuest
+		return models.RoleGuest, fmt.Errorf("failed to get user role: %w", err)
 	}
-	return roleID
+	return roleID, nil
 }
 
-// isSubscribed mirrors legacy CommunityOp._subscribed.
-func (ci *CommunityIndexer) isSubscribed(ctx context.Context, tx *gorm.DB, communityID, accountID int64) bool {
+// isSubscribed mirrors legacy CommunityOp._subscribed. DB failures are
+// returned to the caller (legacy lets the exception propagate).
+func (ci *CommunityIndexer) isSubscribed(ctx context.Context, tx *gorm.DB, communityID, accountID int64) (bool, error) {
 	var count int64
 	if err := tx.WithContext(ctx).
 		Model(&models.Subscription{}).
 		Where("community_id = ? AND account_id = ?", communityID, accountID).
 		Count(&count).Error; err != nil {
-		return false
+		return false, fmt.Errorf("failed to check subscription: %w", err)
 	}
-	return count > 0
+	return count > 0, nil
 }
 
-// isParentMuted mirrors legacy CommunityOp._parent_muted.
-func (ci *CommunityIndexer) isParentMuted(ctx context.Context, tx *gorm.DB, post *models.Post) bool {
+// isParentMuted mirrors legacy CommunityOp._parent_muted. A missing parent
+// row is not muted (legacy query_one returns None -> bool(None) == False);
+// any other DB failure is returned to the caller.
+func (ci *CommunityIndexer) isParentMuted(ctx context.Context, tx *gorm.DB, post *models.Post) (bool, error) {
 	if !post.ParentID.Valid {
-		return false
+		return false, nil
 	}
 	var parent models.Post
 	err := tx.WithContext(ctx).
 		Select("is_muted").
 		Where("id = ?", post.ParentID.Int64).
 		First(&parent).Error
-	if err != nil {
-		return false
+	if err == gorm.ErrRecordNotFound {
+		return false, nil
 	}
-	return parent.IsMuted
+	if err != nil {
+		return false, fmt.Errorf("failed to get parent post: %w", err)
+	}
+	return parent.IsMuted, nil
 }
 
 // isFlagged mirrors legacy CommunityOp._flagged: an existing flag_post
 // notification from this actor for this post/community means already
-// flagged.
-func (ci *CommunityIndexer) isFlagged(ctx context.Context, tx *gorm.DB, op *communityOp) bool {
+// flagged. DB failures are returned to the caller.
+func (ci *CommunityIndexer) isFlagged(ctx context.Context, tx *gorm.DB, op *communityOp) (bool, error) {
 	var count int64
 	if err := tx.WithContext(ctx).
 		Model(&models.Notification{}).
 		Where("community_id = ? AND post_id = ? AND type_id = ? AND src_id = ?",
 			op.communityID, op.post.ID, models.NotifyTypeFlagPost, op.actorID).
 		Count(&count).Error; err != nil {
-		return false
+		return false, fmt.Errorf("failed to check flag status: %w", err)
 	}
-	return count > 0
+	return count > 0, nil
 }
 
 // getCommunityID gets community ID by name

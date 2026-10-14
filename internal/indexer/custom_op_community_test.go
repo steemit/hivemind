@@ -3,10 +3,12 @@ package indexer
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
@@ -124,6 +126,40 @@ func TestParseOpEnvelope(t *testing.T) {
 				t.Errorf("payload[%s] = %q, want %q", c.wantField, got, c.wantVal)
 			}
 		})
+	}
+}
+
+// TestTruncateJSON pins the rune-safe log truncation: the 200-unit budget
+// counts codepoints, and a multi-byte character at the cut point is never
+// split into an invalid UTF-8 sequence.
+func TestTruncateJSON(t *testing.T) {
+	short := `["subscribe",{"community":"hive-101587"}]`
+	if got := truncateJSON(short); got != short {
+		t.Errorf("truncateJSON(short) = %q, want unchanged", got)
+	}
+
+	// ASCII payload longer than the budget: byte and rune cuts coincide.
+	longASCII := strings.Repeat("x", 250)
+	if got := truncateJSON(longASCII); got != strings.Repeat("x", 200)+"..." {
+		t.Error("truncateJSON(ascii) did not keep a 200-char prefix")
+	}
+
+	// Multibyte payload: the prefix must be valid UTF-8 and exactly 200
+	// runes; a byte-based cut would land mid-character.
+	runes := strings.Repeat("日", 250) // 3 bytes each -> 750 bytes total
+	got := truncateJSON(runes)
+	if !strings.HasSuffix(got, "...") {
+		t.Fatal("truncateJSON(multibyte) missing ellipsis suffix")
+	}
+	if !utf8.ValidString(got) {
+		t.Error("truncateJSON(multibyte) produced invalid UTF-8 (split rune)")
+	}
+	prefix := strings.TrimSuffix(got, "...")
+	if n := utf8.RuneCountInString(prefix); n != 200 {
+		t.Errorf("truncated prefix rune count = %d, want 200", n)
+	}
+	if n := len(prefix); n != 600 {
+		t.Errorf("truncated prefix byte length = %d, want 600 (whole runes only)", n)
 	}
 }
 
@@ -1127,6 +1163,58 @@ func TestCommunityOpInfraErrorPropagates(t *testing.T) {
 	}
 	if n := countNotifs(t, database, models.NotifyTypeError, "community `hive-999999`"); n != 1 {
 		t.Errorf("'does not exist' error notifs = %d, want 1", n)
+	}
+
+	// Infrastructure failure at the apply-phase notif lookup: setRole by
+	// the owner passes validation, then notifyCommunityOp's _subscribed
+	// score lookup fails; legacy _notify has no exception handling, so the
+	// error must propagate instead of silently defaulting the score.
+	var verr *opValidationError
+	communityID := seedCommunity(t, database, "hive-151876", time.Date(2019, 11, 1, 0, 0, 0, 0, time.UTC))
+	alice := getAccount(t, database, ctx, "alice")
+	seedRole(t, database, communityID, alice.ID, models.RoleOwner)
+	seedAccounts(t, database, "ashlank")
+	if err := database.DB.WithContext(ctx).Exec("DROP TABLE hive_subscriptions").Error; err != nil {
+		t.Fatalf("drop hive_subscriptions: %v", err)
+	}
+	err = ci.ProcessCommunityOp(ctx, database.DB, "alice", goldenSetRoleModJSON, blockDate, false)
+	if err == nil {
+		t.Fatal("ProcessCommunityOp with failing subscription lookup = nil error, want infra error propagated")
+	}
+	if errors.As(err, &verr) {
+		t.Fatalf("subscription lookup failure classified as opValidationError (%v), want infra error", err)
+	}
+	if !strings.Contains(err.Error(), "failed to check subscription") {
+		t.Errorf("propagated error = %q, want it to identify the subscription lookup", err.Error())
+	}
+	if n := countNotifs(t, database, models.NotifyTypeError, ""); n != 1 {
+		t.Errorf("total error notifs after subscription-query failure = %d, want 1 (no error notif)", n)
+	}
+
+	// Infrastructure failure at the role query: the owner's role lookup
+	// fails, which must propagate as an infra error -- NOT demote the owner
+	// to guest and reject the op with an assertion ("only admins can
+	// update props") that would write a user-visible error notif.
+	if err := database.DB.WithContext(ctx).Exec("DROP TABLE hive_roles").Error; err != nil {
+		t.Fatalf("drop hive_roles: %v", err)
+	}
+	err = ci.ProcessCommunityOp(ctx, database.DB, "alice", goldenUpdatePropsJSON, blockDate, false)
+	if err == nil {
+		t.Fatal("ProcessCommunityOp with failing role query = nil error, want infra error propagated")
+	}
+	if errors.As(err, &verr) {
+		t.Fatalf("role query failure classified as opValidationError (%v), want infra error", err)
+	}
+	if !strings.Contains(err.Error(), "failed to get user role") {
+		t.Errorf("propagated error = %q, want it to identify the role lookup", err.Error())
+	}
+	// No error notif beyond the unknown-community one above: the owner was
+	// not rejected as a guest.
+	if n := countNotifs(t, database, models.NotifyTypeError, ""); n != 1 {
+		t.Errorf("total error notifs after role-query failure = %d, want 1 (owner not demoted to guest)", n)
+	}
+	if c := getCommunity(t, database, "hive-151876"); c.Title == "La Hermandad Kyteler" {
+		t.Error("community title applied despite role-query infra failure, want op not applied")
 	}
 }
 

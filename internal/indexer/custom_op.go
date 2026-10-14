@@ -54,12 +54,15 @@ func NewCustomOpProcessor(repo *db.Repository, followIndexer *FollowIndexer, cac
 
 // truncateJSON keeps a bounded prefix of a custom_json payload for logging
 // (full payloads can be large; the prefix is only an observability hint).
+// Truncation counts runes, not bytes, so a multi-byte character is never
+// cut in half (a split rune would render as mojibake in the log line).
 func truncateJSON(s string) string {
 	const max = 200
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max] + "..."
+	return string(runes[:max]) + "..."
 }
 
 // arrayEnvelope validates an already-unmarshalled custom_json payload in the
