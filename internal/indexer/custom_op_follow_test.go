@@ -908,5 +908,5 @@ func TestNewCustomOpProcessorNilFollowIndexer(t *testing.T) {
 			t.Errorf("panic message %q does not mention followIndexer", msg)
 		}
 	}()
-	NewCustomOpProcessor(db.NewRepository(nil), nil, testLogger())
+	NewCustomOpProcessor(db.NewRepository(nil), nil, nil, testLogger())
 }

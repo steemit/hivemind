@@ -57,8 +57,8 @@ func NewBlockProcessor(database *db.DB, repo *db.Repository, steemProvider steem
 		posts:            NewPostIndexer(repo, cachedPost, logger),
 		follows:          follows,
 		payments:         NewPaymentIndexer(repo, logger),
-		customOps:        NewCustomOpProcessor(repo, follows, logger),
-		communityIndexer: NewCommunityIndexer(repo, logger),
+		customOps:        NewCustomOpProcessor(repo, follows, cachedPost, logger),
+		communityIndexer: NewCommunityIndexer(repo, cachedPost, logger),
 		logger:           logger,
 	}
 }
