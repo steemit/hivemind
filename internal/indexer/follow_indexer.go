@@ -53,22 +53,68 @@ func (fi *FollowIndexer) applyDelta(account int64, m *map[int64]int, dir int) {
 	fi.mu.Unlock()
 }
 
-// ProcessFollow processes a follow operation
-func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account string, opJSON map[string]interface{}, blockDate time.Time) error {
-	follower, _ := opJSON["follower"].(string)
-	following, _ := opJSON["following"].(string)
-	what, _ := opJSON["what"].([]interface{})
+// followStateFromWhat computes the follow state bitfield positionally: only
+// what[0] is considered for "blog" and only what[1] for "ignore", exactly
+// mirroring legacy follow.py _validated_op (first()/second() checks).
+// Notable consequences of the positional check: ["ignore"] alone yields
+// state 0 (no ignore bit set), as does ["ignore","blog"].
+func followStateFromWhat(what []interface{}) int16 {
+	state := int16(0) // 0 = none
+	if len(what) > 0 {
+		if w, ok := what[0].(string); ok && w == "blog" {
+			state += models.FollowStateBlog
+		}
+	}
+	if len(what) > 1 {
+		if w, ok := what[1].(string); ok && w == "ignore" {
+			state += models.FollowStateIgnore
+		}
+	}
+	return state
+}
 
-	if follower == "" || following == "" {
-		return fmt.Errorf("invalid follow operation: missing follower or following")
+// ProcessFollow processes a follow operation, mirroring legacy
+// hive/indexer/follow.py (Follow.follow_op + Follow._validated_op):
+//
+//   - the payload must carry string follower/following and a `what` list;
+//     a missing or non-list `what` skips the op entirely -- it is NOT an
+//     unfollow (legacy requires `'what' in op and isinstance(op['what'], list)`);
+//   - state is computed positionally: only what[0] can set the blog bit and
+//     only what[1] the ignore bit (legacy checks first()/second()), so
+//     e.g. ["ignore"] alone yields state 0;
+//   - self-follows and follower/signer mismatches are rejected;
+//   - a computed state equal to the stored state is an idempotent no-op:
+//     no row write and no count deltas (legacy
+//     `if new_state == (old_state or 0): return`), which also means a
+//     state-0 op for a pair with no existing row inserts nothing;
+//   - count deltas and the follow notification are only tracked outside
+//     initial sync (legacy gates on `not DbState.is_initial_sync()`).
+func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account string, opJSON map[string]interface{}, blockDate time.Time, isInitialSync bool) error {
+	follower, followerIsStr := opJSON["follower"].(string)
+	following, followingIsStr := opJSON["following"].(string)
+	what, whatIsList := opJSON["what"].([]interface{})
+
+	// Legacy _validated_op: `what` must be present and a list, and both
+	// accounts present; anything else is skipped entirely. Notably a
+	// missing `what` must NOT be treated as an unfollow.
+	if !whatIsList || !followerIsStr || !followingIsStr {
+		fi.logger.Debug("Skipping malformed follow op",
+			zap.String("account", account))
+		return nil
 	}
 
-	// Validate account matches operation signer
+	// Legacy rejects self-follows and follower/signer mismatches.
+	if follower == following {
+		return fmt.Errorf("invalid follow operation: cannot follow self")
+	}
 	if follower != account {
 		return fmt.Errorf("follower account mismatch")
 	}
 
-	// Get account IDs
+	// Get account IDs. A missing account rejects the op (legacy
+	// Accounts.exists check). Note: legacy registers same-block new
+	// accounts before processing custom ops; Go's registration ordering is
+	// tracked separately as audit P1-3 and intentionally not changed here.
 	accountRepo := db.NewAccountRepository(fi.repo)
 	followerAcc, err := accountRepo.GetByName(ctx, follower)
 	if err != nil || followerAcc == nil {
@@ -80,18 +126,8 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 		return fmt.Errorf("following account not found: %s", following)
 	}
 
-	// Calculate state
-	state := int16(0) // 0 = none
-	for _, w := range what {
-		if wStr, ok := w.(string); ok {
-			switch wStr {
-			case "blog":
-				state |= models.FollowStateBlog
-			case "ignore":
-				state |= models.FollowStateIgnore
-			}
-		}
-	}
+	// Calculate state.
+	state := followStateFromWhat(what)
 
 	// Get existing follow relationship
 	var existing models.Follow
@@ -102,6 +138,11 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 	// Determine old state (0 when creating).
 	oldState := int16(0)
 	if err == gorm.ErrRecordNotFound {
+		// Idempotent short-circuit for pairs with no row: legacy never
+		// inserts a state-0 row for a pair that was not followed.
+		if state == 0 {
+			return nil
+		}
 		follow := &models.Follow{
 			FollowerID:  followerAcc.ID,
 			FollowingID: followingAcc.ID,
@@ -115,6 +156,11 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 		return fmt.Errorf("failed to check existing follow: %w", err)
 	} else {
 		oldState = existing.State
+		// Idempotent short-circuit: a repeated identical follow neither
+		// rewrites the row nor re-applies count deltas.
+		if state == oldState {
+			return nil
+		}
 		existing.State = state
 		if err := tx.WithContext(ctx).Save(&existing).Error; err != nil {
 			return fmt.Errorf("failed to update follow: %w", err)
@@ -122,24 +168,28 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 	}
 
 	// Count deltas + follow notification, mirroring legacy follow_op:
+	//  - skipped entirely during initial sync (counts come from the
+	//    terminal ForceRecount instead)
 	//  - ignore-only toggles (0<->2) change nothing
 	//  - blog set -> follow; blog cleared -> unfollow
 	//  - notify on 0 -> 1 transitions, scored by follower rank
-	if state^oldState == 2 {
-		// ignore-only jump
-	} else if state == models.FollowStateBlog {
-		fi.follow(followerAcc.ID, followingAcc.ID)
-		if oldState == 0 {
-			score := defaultScoreForAccount(ctx, fi.repo.DB(), followerAcc.ID)
-			followerID := followerAcc.ID
-			followingID := followingAcc.ID
-			if err := fi.notifyIndexer.Write(ctx, models.NotifyTypeFollow, blockDate,
-				&followerID, &followingID, nil, nil, nil, &score); err != nil {
-				fi.logger.Warn("follow notif write failed", zap.Error(err))
+	if !isInitialSync {
+		if state^oldState == 2 {
+			// ignore-only jump
+		} else if state == models.FollowStateBlog {
+			fi.follow(followerAcc.ID, followingAcc.ID)
+			if oldState == 0 {
+				score := defaultScoreForAccount(ctx, fi.repo.DB(), followerAcc.ID)
+				followerID := followerAcc.ID
+				followingID := followingAcc.ID
+				if err := fi.notifyIndexer.Write(ctx, models.NotifyTypeFollow, blockDate,
+					&followerID, &followingID, nil, nil, nil, &score); err != nil {
+					fi.logger.Warn("follow notif write failed", zap.Error(err))
+				}
 			}
+		} else if oldState&models.FollowStateBlog == models.FollowStateBlog {
+			fi.unfollow(followerAcc.ID, followingAcc.ID)
 		}
-	} else if oldState&models.FollowStateBlog == models.FollowStateBlog {
-		fi.unfollow(followerAcc.ID, followingAcc.ID)
 	}
 
 	fi.logger.Debug("Processed follow operation",

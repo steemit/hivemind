@@ -42,6 +42,12 @@ func NewBlockProcessor(database *db.DB, repo *db.Repository, steemProvider steem
 	// Reply/mention/vote notifications ride along the cache flush.
 	NewPostNotifs(database.DB, cachedPost, NewNotifyIndexer(repo)).Install()
 
+	// One FollowIndexer shared by the block processor (which flushes count
+	// deltas after each batch) and the custom-op processor (which feeds it
+	// from follow ops). A second instance would silently lose every delta
+	// accumulated through it (audit P0-4).
+	follows := NewFollowIndexer(repo, logger)
+
 	return &BlockProcessor{
 		db:               database,
 		repo:             repo,
@@ -49,9 +55,9 @@ func NewBlockProcessor(database *db.DB, repo *db.Repository, steemProvider steem
 		cachedPost:       cachedPost,
 		accounts:         NewAccountIndexer(repo, logger, steemProvider),
 		posts:            NewPostIndexer(repo, cachedPost, logger),
-		follows:          NewFollowIndexer(repo, logger),
+		follows:          follows,
 		payments:         NewPaymentIndexer(repo, logger),
-		customOps:        NewCustomOpProcessor(repo, logger),
+		customOps:        NewCustomOpProcessor(repo, follows, logger),
 		communityIndexer: NewCommunityIndexer(repo, logger),
 		logger:           logger,
 	}
