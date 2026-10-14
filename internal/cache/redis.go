@@ -81,7 +81,7 @@ func (c *Cache) Set(key string, value interface{}, ttl time.Duration) error {
 		return ErrCacheDisabled
 	}
 	fullKey := c.namespaceKey(key)
-	
+
 	// Convert value to string if needed
 	var val string
 	switch v := value.(type) {
@@ -94,7 +94,7 @@ func (c *Cache) Set(key string, value interface{}, ttl time.Duration) error {
 		}
 		val = string(jsonBytes)
 	}
-	
+
 	return c.client.Set(c.ctx, fullKey, val, ttl).Err()
 }
 
@@ -117,7 +117,7 @@ func HashKey(parts ...string) string {
 		}
 		keyStr += part
 	}
-	
+
 	hash := md5.Sum([]byte(keyStr))
 	return hex.EncodeToString(hash[:])
 }
@@ -159,4 +159,3 @@ var (
 	// ErrCacheDisabled is returned when cache operations are attempted but cache is disabled
 	ErrCacheDisabled = fmt.Errorf("cache is disabled")
 )
-

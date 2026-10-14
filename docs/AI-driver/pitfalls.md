@@ -170,8 +170,12 @@ delete or finish them when touched:
 - `-32602/-32663` JSON-RPC codes — defined, never emitted.
 - Prometheus metrics recording — works, but **no endpoint exposes it**.
 - `HIVE_TRAIL_BLOCKS` — validated, never consumed (Strategy B).
-- `SetMaxRetry` in the vendored SDK — dead code upstream (see SDK note in
-  infrastructure.md).
+- `SetMaxRetry` in the vendored SDK — still never called by our wrapper.
+  Do not confuse it with the actual wiring: since the v0.0.31 upgrade
+  (PR#400), `HIVE_STEEMD_MAX_RETRIES` is passed via the `WithMaxRetry`
+  option at `NewAPI` time (`internal/steem/client.go`), not through
+  `SetMaxRetry` (see SDK note in infrastructure.md). The method remains
+  dead code as far as hivemind is concerned.
 
 ## 12. Open known gaps (client-visible)
 

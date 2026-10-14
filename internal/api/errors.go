@@ -20,4 +20,3 @@ func NewError(code int, message string) *Error {
 func (e *Error) Error() string {
 	return fmt.Sprintf("API error %d: %s", e.Code, e.Message)
 }
-

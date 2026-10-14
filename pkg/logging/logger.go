@@ -3,9 +3,9 @@ package logging
 import (
 	"os"
 
+	"github.com/steemit/hivemind/pkg/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"github.com/steemit/hivemind/pkg/config"
 )
 
 // Logger is the application logger
@@ -30,14 +30,14 @@ func InitLogger(cfg *config.LoggingConfig) error {
 		// Production config for JSON format
 		zapConfig = zap.NewProductionConfig()
 		zapConfig.Level = zap.NewAtomicLevelAt(level)
-		
+
 		// Use Scalyr encoder if enabled
 		if cfg.ScalyrFormat {
 			encoderConfig := zapConfig.EncoderConfig
 			encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 			encoderConfig.EncodeLevel = zapcore.LowercaseLevelEncoder
 			encoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
-			
+
 			Logger = zap.New(
 				zapcore.NewCore(
 					NewScalyrEncoder(encoderConfig),
@@ -97,4 +97,3 @@ func WithService(service string) *zap.Logger {
 func WithComponent(component string) *zap.Logger {
 	return GetLogger().With(zap.String("component", component))
 }
-

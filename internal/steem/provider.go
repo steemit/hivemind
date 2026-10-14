@@ -11,6 +11,27 @@ import "context"
 // and the condenser get_transaction handler (KR6) be unit-tested, and keeps
 // the dependency direction one-way (indexer/api -> interface <- steem impl).
 //
+// # Error contract (fake ↔ real alignment)
+//
+// The real *Client (steemgosdk api/v2, PR#400) obeys the following contract;
+// test doubles used by indexer/API tests must mirror it so that behavior
+// verified against fakes matches production:
+//
+//   - On failure paths, a malformed/bad JSON response, a null result where
+//     steemd never legitimately returns null (get_accounts, get_content),
+//     a zero-value dynamic-global-properties payload, a response whose
+//     length does not match the request (get_accounts, get_content batch),
+//     or an exhausted bounded retry are ALL errors — a failed call never
+//     returns a nil/empty result alongside a nil error. Explicitly empty
+//     requests are not failures: GetContentBatch with zero posts returns
+//     an empty slice and a nil error.
+//   - GetBlock for a block beyond the chain head fails with an error wrapping
+//     ErrBlockNotFound (see client.go), not an empty block.
+//   - GetBlocksRange is all-or-nothing: any per-block failure after retries
+//     fails the whole range so the caller can never skip a block.
+//   - ctx cancellation aborts in-flight RPCs and surfaces as an error
+//     (context.Canceled / context.DeadlineExceeded).
+//
 // Only the methods actually consumed by callers are listed. Add methods here
 // when a new consumer needs them, so the interface stays intentionally small.
 type Provider interface {
