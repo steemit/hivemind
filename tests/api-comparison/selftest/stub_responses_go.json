@@ -49,6 +49,10 @@
       "message": "get_account_votes is no longer supported"
     }
   },
+  "stub.both_transport_500": {
+    "validate": "any",
+    "http_status": 500
+  },
   "condenser_api.get_blog": {
     "validate": "any",
     "result": [

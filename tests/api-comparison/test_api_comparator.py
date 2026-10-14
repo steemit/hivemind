@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Unit tests for the api_comparator.py comparison core (pure functions).
 
-Covers the Q4 planned-PR#420 fixes:
+Covers the Q4 planned-PR#420 fixes and the PR#420-review hardening:
   * 1.2 global config block merging (ignore replace, tolerance merge)
   * 1.3 path-aware ignore matching (same name, different path: not masked)
   * 1.4 timestamp-aware and amount-aware comparison
   * 1.5 priority filtering
   * 1.6 unordered / lenient_list list comparison modes
   * 1.7 report truncation
+  * PR#420-review: transport vs application error classification
+    (identical transport failures never judge green)
+  * PR#420-review: currency-aware amounts (unit mismatch is red; no
+    amount-string-to-bare-number bridging; tightened amount regex)
+  * PR#420-review: cross-type bridge TypeError guard
+  * PR#420-review: timestamp field naming (suffix/whole-name, compound
+    counters excluded) + epoch magnitude gate
 
 Run:  python3 -m pytest test_api_comparator.py  (from tests/api-comparison/)
 """
@@ -15,13 +22,17 @@ Run:  python3 -m pytest test_api_comparator.py  (from tests/api-comparison/)
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from api_comparator import (  # noqa: E402
+    ApiCallError,
     CompareOptions,
     IgnoreMatcher,
     compare_error_texts,
     compare_values,
+    evaluate_error_pair,
     filter_cases_by_priority,
     is_timestamp_field,
     normalize_timestamp,
@@ -208,15 +219,98 @@ class TestTimestampComparison:
         assert ok
 
 
+class TestTimestampFieldNaming:
+    """PR#420-review: compound counters must not inherit the time
+    tolerance just because a time token appears inside the field name."""
+
+    def test_compound_counters_are_not_timestamp_fields(self):
+        assert not is_timestamp_field(("created_block",))
+        assert not is_timestamp_field(("read_count",))
+        assert not is_timestamp_field(("update_count",))
+        assert not is_timestamp_field(("posts", "created_block"))
+
+    def test_whole_name_and_suffix_tokens_match(self):
+        assert is_timestamp_field(("created",))
+        assert is_timestamp_field(("db_head_age",))
+        assert is_timestamp_field(("cashout_time",))
+        assert is_timestamp_field(("last_read_at",))
+        assert is_timestamp_field(("last_update",))
+        assert is_timestamp_field(("time",))
+
+    def test_suffix_requires_underscore_boundary(self):
+        # "coverage"/"somepage" end with the letters of age/page but must
+        # not match: the token must be the whole name or follow a "_".
+        assert not is_timestamp_field(("coverage",))
+        assert not is_timestamp_field(("somepage",))
+        assert not is_timestamp_field(("datetime",))
+
+    def test_created_block_drift_is_red(self):
+        """The audited false-green: 1000 vs 1002 at created_block hid in
+        the 2s time tolerance; it must now be a plain number mismatch."""
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        ok, diff = compare_values(1000, 1002, opts, ("created_block",))
+        assert not ok and "number mismatch" in diff
+
+    def test_read_count_drift_is_red(self):
+        opts = make_opts(timestamp_seconds=2)
+        ok, _ = compare_values(5, 7, opts, ("read_count",))
+        assert not ok
+
+
+class TestEpochMagnitudeGate:
+    """PR#420-review: only plausibly-epoch numbers (>= 1e8) get the time
+    tolerance; *_age fields are durations and compare by absolute diff."""
+
+    def test_small_numbers_at_timeish_field_are_not_epochs(self):
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        # Same field NAME that is time-ish, but small values: fall back to
+        # the epsilon comparison (delta 2 > 0.001 -> red).
+        ok, diff = compare_values(1000, 1002, opts, ("created",))
+        assert not ok and "number mismatch" in diff
+
+    def test_epoch_seconds_use_time_tolerance(self):
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        ok, _ = compare_values(1720000000, 1720000002, opts, ("created",))
+        assert ok
+        ok, _ = compare_values(1720000000, 1720000030, opts, ("created",))
+        assert not ok
+
+    def test_epoch_ms_vs_s_still_normalizes(self):
+        opts = make_opts(timestamp_seconds=2)
+        ok, _ = compare_values(1720000000000, 1720000001, opts, ("created",))
+        assert ok
+
+    def test_age_fields_use_absolute_difference(self):
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        ok, _ = compare_values(1000, 1001, opts, ("db_head_age",))
+        assert ok
+        ok, _ = compare_values(1000, 1005, opts, ("db_head_age",))
+        assert not ok
+
+    def test_epoch_vs_small_number_is_red(self):
+        opts = make_opts(timestamp_seconds=2)
+        # One epoch, one counter-sized value: no normalization bridges them.
+        ok, _ = compare_values(1720000000, 1000, opts, ("created",))
+        assert not ok
+
+
 class TestAmountComparison:
-    def test_parse_amount(self):
-        assert parse_amount("1.500 SBD") == 1.5
-        assert parse_amount("$0.99") == 0.99
-        assert parse_amount("-2.000 STEEM") == -2.0
-        assert parse_amount("0.000000 VESTS") == 0.0
+    def test_parse_amount_returns_value_and_unit(self):
+        assert parse_amount("1.500 SBD") == (1.5, "SBD")
+        assert parse_amount("$0.99") == (0.99, "$")
+        assert parse_amount("-2.000 STEEM") == (-2.0, "STEEM")
+        assert parse_amount("0.000000 VESTS") == (0.0, "VESTS")
+        assert parse_amount("1.5 sbd") == (1.5, "SBD")  # unit case-insensitive
 
     def test_non_amounts_return_none(self):
         for value in ["steemit", "123", "12", 12, 1.5, None, True]:
+            assert parse_amount(value) is None, value
+
+    def test_format_traps_do_not_parse(self):
+        """PR#420-review: "<number> <word>" strings and glued forms must
+        never be misread as currency amounts."""
+        for value in ["123abc", "1 to", "24 hours", "1.500SBD", "$ 1.5x",
+                      "1.5 USD", "3 items"]:
             assert parse_amount(value) is None, value
 
     def test_amount_format_drift_passes(self):
@@ -224,15 +318,39 @@ class TestAmountComparison:
         ok, _ = compare_values("1.500 SBD", "1.5 SBD", opts, ("payout",))
         assert ok
 
+    def test_amount_unit_case_insensitive_passes(self):
+        opts = make_opts(float_epsilon=0.001)
+        ok, _ = compare_values("1.500 sbd", "1.5 SBD", opts, ("payout",))
+        assert ok
+
     def test_amount_beyond_epsilon_fails(self):
         opts = make_opts(float_epsilon=0.001)
         ok, diff = compare_values("1.500 SBD", "1.6 SBD", opts, ("payout",))
-        assert not ok and "amount" in diff
+        assert not ok and "amount mismatch" in diff
 
-    def test_amount_string_vs_number_bridges(self):
+    def test_currency_mismatch_is_red(self):
+        """PR#420-review: the audited false-green -- parse_amount dropped
+        the unit, so SBD vs STEEM with equal values judged green."""
         opts = make_opts(float_epsilon=0.001)
-        ok, _ = compare_values("0.750 SBD", 0.75, opts, ("pending_payout",))
+        ok, diff = compare_values("1.500 SBD", "1.500 STEEM", opts,
+                                  ("payout",))
+        assert not ok and "unit mismatch" in diff
+
+    def test_dollar_form_only_matches_dollar_form(self):
+        opts = make_opts(float_epsilon=0.001)
+        ok, _ = compare_values("$1.23", "$1.230", opts, ("payout",))
         assert ok
+        ok, diff = compare_values("$1.23", "1.23 SBD", opts, ("payout",))
+        assert not ok and "unit mismatch" in diff
+
+    def test_amount_string_vs_number_not_bridged(self):
+        """PR#420-review: a bare number carries no currency, so an amount
+        string vs number is a type divergence, not a green bridge."""
+        opts = make_opts(float_epsilon=0.001)
+        ok, diff = compare_values("0.750 SBD", 0.75, opts, ("pending_payout",))
+        assert not ok and "type mismatch" in diff
+        ok, _ = compare_values(0.75, "0.750 SBD", opts, ("pending_payout",))
+        assert not ok
 
     def test_plain_strings_stay_exact(self):
         opts = make_opts()
@@ -375,6 +493,20 @@ class TestComparisonGuards:
         ok, diff = compare_values("abc", 3, opts, ("n",))
         assert not ok and "type mismatch" in diff
 
+    def test_cross_type_list_vs_amount_string_no_typeerror(self):
+        """PR#420-review regression: ["x"] vs "1.5 SBD" used to raise
+        TypeError (list subtraction in the amount bridge); it must land
+        on the type-mismatch branch instead."""
+        opts = make_opts()
+        try:
+            ok, diff = compare_values(["x"], "1.5 SBD", opts, ("n",))
+        except TypeError:
+            pytest.fail("compare_values raised TypeError on cross-type pair")
+        assert not ok and "type mismatch" in diff
+
+        ok, diff = compare_values("1.5 SBD", ["x"], opts, ("n",))
+        assert not ok and "type mismatch" in diff
+
     def test_null_handling(self):
         opts = make_opts()
         ok, _ = compare_values(None, None, opts, ("n",))
@@ -392,3 +524,70 @@ class TestComparisonGuards:
         assert ok
         ok, _ = compare_error_texts("not supported", "unsupported")
         assert not ok
+
+
+# ---------------------------------------------------------------------------
+# PR#420-review: transport vs application error classification
+# ---------------------------------------------------------------------------
+
+class TestErrorLayerClassification:
+    def test_both_transport_errors_fail_even_with_identical_text(self):
+        """The audited false-green: both endpoints refusing connections or
+        returning 500 produce identical error texts, which the old
+        both-error branch judged green."""
+        ok, diff = evaluate_error_pair(
+            ApiCallError("request failed: 500", transport=True),
+            ApiCallError("request failed: 500", transport=True))
+        assert not ok and "transport" in diff
+
+    def test_one_transport_one_application_fails(self):
+        ok, diff = evaluate_error_pair(
+            ApiCallError("unsupported", code=10),
+            ApiCallError("request failed: timeout", transport=True))
+        assert not ok and "transport" in diff
+        ok, _ = evaluate_error_pair(
+            ApiCallError("request failed: refused", transport=True),
+            ApiCallError("unsupported", code=10))
+        assert not ok
+
+    def test_codeless_error_is_treated_as_transport(self):
+        """Fail-closed: an application error only counts as comparable
+        when it explicitly carries a JSON-RPC code."""
+        assert ApiCallError("boom").is_transport
+        assert not ApiCallError("boom", code=10).is_transport
+        assert ApiCallError("boom", code=10, transport=True).is_transport
+        ok, diff = evaluate_error_pair(ApiCallError("boom"),
+                                       ApiCallError("boom"))
+        assert not ok and "transport" in diff
+
+    def test_both_application_errors_compare_by_text(self):
+        ok, _ = evaluate_error_pair(
+            ApiCallError("get_account_votes is no longer supported", code=10),
+            ApiCallError("get_account_votes is no longer supported ", code=10))
+        assert ok
+        ok, diff = evaluate_error_pair(
+            ApiCallError("msg A", code=10), ApiCallError("msg B", code=10))
+        assert not ok and "error text mismatch" in diff
+
+
+# ---------------------------------------------------------------------------
+# PR#420-review: diff lines stay bounded in reports
+# ---------------------------------------------------------------------------
+
+class TestDiffTruncation:
+    def test_long_string_mismatch_diff_is_bounded(self):
+        """A 5000-char body must not produce a 10KB diff line: embedded
+        values are truncated via truncate_for_report."""
+        opts = make_opts()
+        _, diff = compare_values("x" * 5000, "y" * 5000, opts, ("body",))
+        assert len(diff) < 600
+        assert "truncated" in diff
+
+    def test_error_text_mismatch_diff_is_bounded(self):
+        _, diff = compare_error_texts("e" * 5000, "f" * 5000)
+        assert len(diff) < 600
+
+    def test_long_null_mismatch_diff_is_bounded(self):
+        opts = make_opts()
+        _, diff = compare_values("x" * 5000, None, opts, ("body",))
+        assert len(diff) < 600

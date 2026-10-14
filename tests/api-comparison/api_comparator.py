@@ -31,14 +31,31 @@ Comparison semantics:
   * Strings that both parse as ISO8601 timestamps (with/without Z, with
     offset, naive, space separator, fractional seconds) compare within
     timestamp_seconds after normalization to epoch seconds.
-  * Numbers at timestamp-ish field paths (e.g. created_at, db_head_age)
-    compare within timestamp_seconds (epoch seconds; values > 1e12 are
-    treated as epoch milliseconds).
-  * Amount strings ("0.000 SBD", "$1.23") compare numerically within
-    float_epsilon after parse_amount normalization.
+  * Numbers at timestamp-ish field paths compare within timestamp_seconds.
+    A field is timestamp-ish when its name is exactly a time token
+    (`created`, `time`, ...) or ends with `_<token>` (`db_head_age`,
+    `cashout_time`, `last_read_at`); compound counters such as
+    `created_block` or `read_count` are NOT timestamps. Epoch comparison
+    additionally requires both values >= 1e8 (plausible epoch seconds);
+    `*_age` fields hold small second durations and compare by absolute
+    difference instead. Values > 1e12 are treated as epoch milliseconds.
+  * Amount strings ("0.000 SBD", "$1.23") parse to (value, unit) and
+    compare numerically within float_epsilon ONLY when the currency units
+    match (case-insensitive; "$" matches only "$"). An amount string never
+    bridges to a bare number: the number side carries no unit to verify,
+    so that pair is reported as a type mismatch.
+  * When both endpoints return JSON-RPC application-layer errors, the
+    error texts are compared. Transport-level failures (connection
+    refused, timeout, HTTP status error, malformed response) are NEVER
+    judged green, even when both sides fail identically -- identical
+    transport errors carry no consistency evidence.
   * ignore_fields patterns are path-aware; a bare name matches that dict key
     at any depth, a dotted pattern matches only the exact path. This keeps a
     global ignore such as `author.id` from also masking a top-level `id`.
+
+Exit codes: 0 = every executed case passed, 1 = at least one failure,
+2 = no cases executed (e.g. a --priority filter that matched nothing) --
+zero evidence must never read as "all green" in CI.
 
 `requests` is imported lazily so the pure comparison functions can be unit
 tested (test_api_comparator.py) without the HTTP dependency installed.
@@ -52,6 +69,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from html import escape as html_escape
 from typing import Any, Optional
 
 import yaml
@@ -61,12 +79,20 @@ DEFAULT_TIMESTAMP_SECONDS = 2.0
 REPORT_FIELD_LIMIT = 200
 
 # Field-name tokens that mark a numeric field as a timestamp. A field is
-# time-ish when one of its underscore-separated path tokens is in this set
-# (or in tolerance.timestamp_fields).
+# time-ish when its name EQUALS one of these tokens or ENDS with
+# "_<token>" (created, db_head_age, cashout_time, last_read_at). The
+# previous any-token-substring match also caught compound counters
+# (created_block, read_count, update_count) and hid small numeric drift
+# inside the time tolerance; suffix/whole-name matching excludes them.
 DEFAULT_TIMESTAMP_TOKENS = frozenset({
     "time", "created", "updated", "update", "cashout", "age", "date",
-    "expires", "expiration", "reblogged", "read",
+    "expires", "expiration", "reblogged", "read", "at",
 })
+
+# Numbers below this are never treated as epoch seconds at timestamp-ish
+# fields (1e8 ~= Mar 1973): block numbers, counters and ids fall back to
+# the plain float_epsilon comparison instead of the time tolerance.
+EPOCH_MIN = 1e8
 
 # ISO8601-ish: date-only, or date + [T or space] time (+ optional seconds,
 # fraction, Z or numeric offset).
@@ -75,19 +101,41 @@ _ISO_TS_RE = re.compile(
     r"([T ]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?$"
 )
 
-# Amount string: optional $, number, mandatory currency (3-8 letters) so that
-# ordinary strings are never misread as amounts.
-_AMOUNT_RE = re.compile(r"^(-?\d+(?:\.\d+)?)\s*([A-Za-z$]{2,8})$")
+# Amount string: number, mandatory whitespace, and a currency from the
+# known Steem/Hive asset set (case-insensitive, see KNOWN_AMOUNT_UNITS).
+# The whitespace boundary and the whitelist keep "<number> <word>"
+# strings ("24 hours", "1 to") and glued forms ("123abc") from parsing
+# as amounts.
+_AMOUNT_RE = re.compile(r"^(-?\d+(?:\.\d+)?)\s+([A-Za-z]{3,8})$")
 _DOLLAR_AMOUNT_RE = re.compile(r"^\$\s*(-?\d+(?:\.\d+)?)$")
+
+# Currency units recognized after the numeric part of an amount string.
+KNOWN_AMOUNT_UNITS = frozenset({"STEEM", "SBD", "VESTS", "HIVE", "HBD"})
 
 
 class ApiCallError(Exception):
-    """Raised when an endpoint returns a JSON-RPC error response."""
+    """Raised when a call fails, at one of two layers:
 
-    def __init__(self, message: str, code: Optional[int] = None):
+    * application layer (transport=False): the endpoint answered with a
+      JSON-RPC error object -- a deliberate, comparable API behavior;
+    * transport layer (transport=True): connection refused/timeout, HTTP
+      status error (raise_for_status), or a malformed/non-JSON response.
+      Such failures carry no consistency evidence and are never judged
+      green, even when both endpoints fail identically.
+    """
+
+    def __init__(self, message: str, code: Optional[int] = None,
+                 transport: bool = False):
         super().__init__(message)
         self.message = message
         self.code = code
+        self.transport = transport
+
+    @property
+    def is_transport(self) -> bool:
+        """Fail-closed classification: an error is comparable only when it
+        is explicitly application-layer AND carries a JSON-RPC code."""
+        return self.transport or self.code is None
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +179,10 @@ def _epoch_to_seconds(epoch: float) -> float:
     return epoch / 1000.0 if epoch > 1e12 else epoch
 
 
-def parse_amount(value: Any) -> Optional[float]:
-    """Parse "123.456 SBD" / "$1.23" style amount strings into a float.
+def parse_amount(value: Any) -> Optional[tuple]:
+    """Parse "123.456 SBD" / "$1.23" style amount strings into an
+    (amount, unit) tuple; the unit is uppercased ("SBD", "STEEM", ...) or
+    "$" for the dollar display form.
 
     Returns None for anything that is not a currency-marked amount string
     (a bare numeric string stays a string; use numbers to express numbers).
@@ -142,20 +192,51 @@ def parse_amount(value: Any) -> Optional[float]:
     text = value.strip()
     match = _DOLLAR_AMOUNT_RE.match(text)
     if match:
-        return float(match.group(1))
+        return float(match.group(1)), "$"
     match = _AMOUNT_RE.match(text)
-    if match:
-        return float(match.group(1))
+    if match and match.group(2).upper() in KNOWN_AMOUNT_UNITS:
+        return float(match.group(1)), match.group(2).upper()
     return None
 
 
+def units_compatible(unit_a: Optional[str], unit_b: Optional[str]) -> bool:
+    """Amount units match case-insensitively ("sbd" == "SBD"); the "$"
+    display form matches only "$". A missing unit (None, e.g. the bare
+    number side of a cross-type pair) is compatible with nothing: the
+    asset cannot be verified, so such pairs stay red instead of bridging
+    to green."""
+    if unit_a is None or unit_b is None:
+        return False
+    return unit_a.upper() == unit_b.upper()
+
+
 def is_timestamp_field(path: tuple, extra_fields=()) -> bool:
-    """True when the path's field name marks a numeric value as a timestamp."""
+    """True when the path's field name marks a numeric value as a timestamp.
+
+    Matching is whole-name or underscore-suffix: the name equals a known
+    time token (`created`, `time`, ...) or ends with `_` + token
+    (`db_head_age`, `cashout_time`, `last_read_at`). Compound counters
+    (`created_block`, `read_count`) do not match. Config extras
+    (tolerance.timestamp_fields) compare against the full field name.
+    """
     if not path:
         return False
-    name = str(path[-1])
-    tokens = set(name.replace("-", "_").split("_"))
-    return bool(tokens & DEFAULT_TIMESTAMP_TOKENS) or name in set(extra_fields)
+    name = str(path[-1]).lower().replace("-", "_")
+    if name in DEFAULT_TIMESTAMP_TOKENS:
+        return True
+    if any(name.endswith("_" + token) for token in DEFAULT_TIMESTAMP_TOKENS):
+        return True
+    return name in {str(field).lower() for field in extra_fields}
+
+
+def is_duration_field(path: tuple) -> bool:
+    """True for `age`-like fields: they hold small second durations (e.g.
+    hive.db_head_state db_head_age), not epoch values, so they compare by
+    absolute difference without epoch/millisecond normalization."""
+    if not path:
+        return False
+    name = str(path[-1]).lower().replace("-", "_")
+    return name == "age" or name.endswith("_age")
 
 
 # ---------------------------------------------------------------------------
@@ -237,11 +318,33 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
+def _short(value: Any, limit: int = REPORT_FIELD_LIMIT) -> str:
+    """Bounded repr for values embedded in difference messages (reuses
+    truncate_for_report), so a multi-KB response body cannot blow a diff
+    line up to twice its size in the console/JSON/HTML reports."""
+    return truncate_for_report(repr(value), limit)
+
+
 def _fmt_path(path: tuple) -> str:
     rendered = ""
     for seg in path:
         rendered += f"[{seg}]" if seg == "*" else (f".{seg}" if rendered else str(seg))
     return rendered or "<root>"
+
+
+def _amount_pair(a: Any, b: Any) -> Optional[tuple]:
+    """((value, unit), (value, unit)) when exactly one side is a currency
+    amount string and the other is a plain number; else None. Guards the
+    cross-type comparison against non-numeric mismatches (e.g. a list vs
+    an amount string), which previously raised TypeError inside the
+    numeric subtraction."""
+    if isinstance(a, str) and isinstance(b, (int, float)):
+        parsed = parse_amount(a)
+        return (parsed, (float(b), None)) if parsed is not None else None
+    if isinstance(b, str) and isinstance(a, (int, float)):
+        parsed = parse_amount(b)
+        return ((float(a), None), parsed) if parsed is not None else None
+    return None
 
 
 def compare_values(a: Any, b: Any, opts: CompareOptions,
@@ -252,14 +355,15 @@ def compare_values(a: Any, b: Any, opts: CompareOptions,
     if a is None and b is None:
         return True, None
     if a is None or b is None:
-        return False, f"{where}: one side is null (python={a!r}, go={b!r})"
+        return False, (f"{where}: one side is null "
+                       f"(python={_short(a)}, go={_short(b)})")
 
     # Booleans first: bool is an int subclass in Python, so True must never
     # compare equal to 1.
     if isinstance(a, bool) or isinstance(b, bool):
         if isinstance(a, bool) and isinstance(b, bool) and a == b:
             return True, None
-        return False, f"{where}: bool mismatch (python={a!r}, go={b!r})"
+        return False, f"{where}: bool mismatch (python={_short(a)}, go={_short(b)})"
 
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         return _compare_numbers(a, b, opts, path, where)
@@ -267,17 +371,24 @@ def compare_values(a: Any, b: Any, opts: CompareOptions,
     if isinstance(a, str) and isinstance(b, str):
         return _compare_strings(a, b, opts, path, where)
 
-    # Cross-type: allow amount string vs number ("1.5 SBD" vs 1.5).
+    # Cross-type: exactly one side is a string. Amount strings used to
+    # bridge to bare numbers here, silently dropping the currency unit
+    # ("1.500 SBD" == 1.5 == "1.500 STEEM" judged green). Bridging now
+    # requires both sides to carry compatible units (units_compatible); a
+    # bare JSON number has no unit, so an amount string vs a number is a
+    # genuine type divergence and stays red. The isinstance-numeric guard
+    # inside _amount_pair keeps non-numeric pairs (["x"] vs "1.5 SBD") on
+    # this type-mismatch path instead of raising TypeError.
     if isinstance(a, str) != isinstance(b, str):
-        num_a = parse_amount(a) if isinstance(a, str) else a
-        num_b = parse_amount(b) if isinstance(b, str) else b
-        if num_a is not None and num_b is not None:
-            ok, _ = _compare_numbers(num_a, num_b, opts, path, where)
+        pair = _amount_pair(a, b)
+        if pair is not None and units_compatible(pair[0][1], pair[1][1]):
+            ok, _ = _compare_numbers(pair[0][0], pair[1][0], opts, path, where)
             if ok:
                 return True, None
         return False, (
             f"{where}: type mismatch "
-            f"(python={type(a).__name__} {a!r}, go={type(b).__name__} {b!r})"
+            f"(python={type(a).__name__} {_short(a)}, "
+            f"go={type(b).__name__} {_short(b)})"
         )
 
     if isinstance(a, list) and isinstance(b, list):
@@ -292,15 +403,30 @@ def compare_values(a: Any, b: Any, opts: CompareOptions,
 def _compare_numbers(a: float, b: float, opts: CompareOptions,
                      path: tuple, where: str) -> tuple[bool, Optional[str]]:
     if is_timestamp_field(path, opts.timestamp_fields):
-        ts_a = normalize_timestamp(a, numeric=True)
-        ts_b = normalize_timestamp(b, numeric=True)
-        diff = abs(ts_a - ts_b)
-        if diff <= opts.timestamp_seconds:
-            return True, None
-        return False, (
-            f"{where}: timestamp mismatch: python={a}, go={b}, "
-            f"delta={diff}s > tolerance={opts.timestamp_seconds}s"
-        )
+        if is_duration_field(path):
+            # age-like fields hold small second durations: plain absolute
+            # difference, no epoch/millisecond normalization.
+            diff = abs(a - b)
+            if diff <= opts.timestamp_seconds:
+                return True, None
+            return False, (
+                f"{where}: duration mismatch: python={a}, go={b}, "
+                f"delta={diff}s > tolerance={opts.timestamp_seconds}s"
+            )
+        if abs(a) >= EPOCH_MIN and abs(b) >= EPOCH_MIN:
+            # Both plausibly epoch seconds (or milliseconds): normalize
+            # and compare within the time tolerance.
+            ts_a = normalize_timestamp(a, numeric=True)
+            ts_b = normalize_timestamp(b, numeric=True)
+            diff = abs(ts_a - ts_b)
+            if diff <= opts.timestamp_seconds:
+                return True, None
+            return False, (
+                f"{where}: timestamp mismatch: python={a}, go={b}, "
+                f"delta={diff}s > tolerance={opts.timestamp_seconds}s"
+            )
+        # Small numbers at a time-ish field name are NOT epochs (block
+        # counters, ids); fall through to the plain numeric comparison.
     diff = abs(a - b)
     if diff <= opts.float_epsilon:
         return True, None
@@ -321,26 +447,36 @@ def _compare_strings(a: str, b: str, opts: CompareOptions,
         if diff <= opts.timestamp_seconds:
             return True, None
         return False, (
-            f"{where}: timestamp mismatch: python={a!r} ({ts_a}), "
-            f"go={b!r} ({ts_b}), delta={diff:.3f}s > "
+            f"{where}: timestamp mismatch: python={_short(a)} ({ts_a}), "
+            f"go={_short(b)} ({ts_b}), delta={diff:.3f}s > "
             f"tolerance={opts.timestamp_seconds}s"
         )
 
-    # Amount-aware: "1.500 SBD" vs "1.5 SBD" compares numerically.
+    # Amount-aware and currency-aware: "1.500 SBD" vs "1.5 SBD" compares
+    # numerically, but ONLY when the units match ("$1.23" never equals
+    # "1.23 SBD", and "1.500 SBD" never equals "1.500 STEEM").
     amount_a = parse_amount(a)
     amount_b = parse_amount(b)
     if amount_a is not None and amount_b is not None:
-        diff = abs(amount_a - amount_b)
+        value_a, unit_a = amount_a
+        value_b, unit_b = amount_b
+        if not units_compatible(unit_a, unit_b):
+            return False, (
+                f"{where}: amount unit mismatch: python={_short(a)}, "
+                f"go={_short(b)} ({unit_a} vs {unit_b}); the currency must "
+                f"match on both sides"
+            )
+        diff = abs(value_a - value_b)
         if diff <= opts.float_epsilon:
             return True, None
         return False, (
-            f"{where}: amount mismatch: python={a!r}, go={b!r}, "
+            f"{where}: amount mismatch: python={_short(a)}, go={_short(b)}, "
             f"delta={diff} > epsilon={opts.float_epsilon}"
         )
 
     if a == b:
         return True, None
-    return False, f"{where}: string mismatch: python={a!r}, go={b!r}"
+    return False, f"{where}: string mismatch: python={_short(a)}, go={_short(b)}"
 
 
 def _extract_sort_key(element: Any, key_path: Optional[str]) -> str:
@@ -428,7 +564,38 @@ def compare_error_texts(err_python: str, err_go: str) -> tuple[bool, Optional[st
     """Compare JSON-RPC error texts (both-sides-error dummy methods)."""
     if err_python.strip() == err_go.strip():
         return True, None
-    return False, f"error text mismatch: python={err_python!r}, go={err_go!r}"
+    return False, (f"error text mismatch: python={_short(err_python)}, "
+                   f"go={_short(err_go)}")
+
+
+def evaluate_error_pair(python_exc: ApiCallError,
+                        go_exc: ApiCallError) -> tuple[bool, Optional[str]]:
+    """Judge a both-sides-errored case.
+
+    Only JSON-RPC application-layer errors on BOTH sides are comparable
+    (via error text comparison). If either side failed at the transport
+    layer (connection refused, timeout, HTTP 5xx, malformed response) the
+    case fails outright: identical transport error texts (e.g. both
+    endpoints down, or both returning 500) must never certify consistency
+    -- that was the "both errored, texts match, so green" false-green
+    path this function closes.
+    """
+    if python_exc.is_transport or go_exc.is_transport:
+        sides = []
+        if python_exc.is_transport:
+            sides.append("python")
+        if go_exc.is_transport:
+            sides.append("go")
+        return False, (
+            f"transport-level error on {' and '.join(sides)} side "
+            f"(python={_short(python_exc.message)}, "
+            f"go={_short(go_exc.message)}); both-error comparison requires "
+            "JSON-RPC application errors on both endpoints"
+        )
+    passed, difference = compare_error_texts(python_exc.message, go_exc.message)
+    if passed:
+        return True, None
+    return passed, difference
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +646,10 @@ class APIClient:
             response.raise_for_status()
             data = response.json()
         except Exception as exc:  # requests errors + JSON decode errors
-            raise ApiCallError(f"request failed: {exc}") from exc
+            # Transport layer: connection refused/timeout, HTTP status
+            # error, malformed body. Never comparable, always fail-closed.
+            raise ApiCallError(f"request failed: {exc}",
+                               transport=True) from exc
 
         if isinstance(data, dict) and "error" in data and data["error"]:
             error = data["error"]
@@ -518,10 +688,10 @@ class CaseResult:
             "api": self.api,
             "priority": self.priority,
             "passed": self.passed,
-            "difference": self.difference,
-            "error": self.error,
-            "python_error": self.python_error,
-            "go_error": self.go_error,
+            "difference": truncate_for_report(self.difference),
+            "error": truncate_for_report(self.error),
+            "python_error": truncate_for_report(self.python_error),
+            "go_error": truncate_for_report(self.go_error),
             "python_response": truncate_for_report(self.python_response),
             "go_response": truncate_for_report(self.go_response),
             "duration_ms": self.duration_ms,
@@ -585,29 +755,35 @@ class APITestRunner:
         started = datetime.now()
         python_response = go_response = None
         python_error = go_error = difference = error = None
+        python_exc: Optional[ApiCallError] = None
+        go_exc: Optional[ApiCallError] = None
         passed = False
 
         try:
             try:
                 python_response = self.python_client.call(api_method, params)
             except ApiCallError as exc:
+                python_exc = exc
                 python_error = exc.message
 
             try:
                 go_response = self.go_client.call(api_method, params)
             except ApiCallError as exc:
+                go_exc = exc
                 go_error = exc.message
 
-            if python_error is not None and go_error is not None:
-                # Both endpoints errored: for dummy methods the interesting
-                # comparison is the error text itself.
-                passed, difference = compare_error_texts(python_error, go_error)
+            if python_exc is not None and go_exc is not None:
+                # Both endpoints errored: comparable only when both are
+                # application-level JSON-RPC errors; a transport failure on
+                # either side fails the case (see evaluate_error_pair).
+                passed, difference = evaluate_error_pair(python_exc, go_exc)
                 if passed:
                     difference = None
-            elif python_error is not None or go_error is not None:
+            elif python_exc is not None or go_exc is not None:
                 passed = False
                 difference = (f"one side errored "
-                              f"(python={python_error!r}, go={go_error!r})")
+                              f"(python={_short(python_error)}, "
+                              f"go={_short(go_error)})")
             else:
                 passed, difference = compare_values(python_response, go_response, opts)
                 if passed:
@@ -722,6 +898,11 @@ class ReportGenerator:
             lines.append(
                 f"  {name}: {bucket['passed']}/{bucket['total']} passed"
             )
+        if self.summary["total"] == 0:
+            lines.append(
+                "  WARNING: no cases executed (empty run); nothing was "
+                "verified -- check the --priority filter."
+            )
         lines.append("")
         if self.summary["failed"] == 0:
             lines.append("All cases passed.")
@@ -754,19 +935,23 @@ class ReportGenerator:
         for result in self.results:
             status = "PASS" if result.passed else "FAIL"
             css = "result-passed" if result.passed else "result-failed"
-            diff = result.difference or result.error or "-"
-            detail = result.detail_file or "-"
+            # Escape everything attacker- or payload-controlled (case ids,
+            # api names, diff text) so response bodies cannot inject
+            # markup into the report.
+            diff = html_escape(result.difference or result.error or "-")
+            detail = html_escape(str(result.detail_file or "-"))
             rows.append(
                 "<tr class='{css}'><td>{priority}</td><td>{api}</td>"
                 "<td>{case_id}</td><td>{status}</td><td>{duration} ms</td>"
                 "<td class='diff'>{diff}</td><td>{detail}</td></tr>".format(
-                    css=css, priority=result.priority, api=result.api,
-                    case_id=result.case_id, status=status,
+                    css=css, priority=html_escape(result.priority),
+                    api=html_escape(result.api),
+                    case_id=html_escape(result.case_id), status=status,
                     duration=result.duration_ms, diff=diff, detail=detail,
                 )
             )
         priority_rows = "".join(
-            f"<p>{name}: {bucket['passed']}/{bucket['total']} passed</p>"
+            f"<p>{html_escape(name)}: {bucket['passed']}/{bucket['total']} passed</p>"
             for name, bucket in sorted(self.summary.get("by_priority", {}).items())
         )
         html = f"""<!DOCTYPE html>
@@ -858,6 +1043,17 @@ def main(argv=None):
         html_file = os.path.join(args.output, f"report-{stamp}.html")
         generator.generate_html_report(html_file)
         print(f"HTML report saved: {html_file}")
+
+    if summary["total"] == 0:
+        # Empty run: a --priority filter that matches nothing must not exit
+        # 0 -- zero evidence must never read as "all green" in CI (e.g. a
+        # typoed priority would otherwise produce a flawless-looking run).
+        print(
+            f"WARNING: no test cases executed (priority filter "
+            f"{args.priority!r} matched nothing); nothing was verified.",
+            file=sys.stderr,
+        )
+        return 2
 
     return 0 if summary["failed"] == 0 else 1
 

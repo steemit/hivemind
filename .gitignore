@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+__pycache__/
 # Root-level build artifacts only (anchored paths); bare `indexer`/`server`
 # patterns would also ignore internal/indexer/ and internal/server/ sources.
 /indexer

@@ -40,12 +40,20 @@ Both servers must run against the **same database**:
 ```bash
 # Python legacy (port 8081)
 cd /path/to/hivemind_legacy
-python -m hive.server.http_server
+pip install -e .        # installs the `hive` console script (setup.py)
+hive server \
+    --database-url=postgresql://user:pass@localhost:5432/hivemind \
+    --http-server-port=8081
+# (equivalently: DATABASE_URL=... HTTP_SERVER_PORT=8081 hive server)
 
 # Go (port 8082)
 cd /path/to/hivemind
 make run-server
 ```
+
+Note: the legacy package has no `python -m hive.server.http_server`
+module. Its entry point is the `hive` console script (`hive.cli`, modes:
+`server` / `sync` / `status`) installed by the legacy `setup.py`.
 
 ### 3. Run the comparison
 
@@ -55,7 +63,10 @@ make run-server
 python3 api_comparator.py --priority P0,P1 --output results
 ```
 
-Exit code is `0` when every executed case passed, `1` otherwise.
+Exit code is `0` when every executed case passed, `1` when at least one
+case failed, and `2` when no case executed at all (e.g. a `--priority`
+filter that matched nothing -- zero evidence must never read as "all
+green" in CI).
 
 ## Tool selftest (no services or database needed)
 
@@ -67,7 +78,10 @@ python3 selftest/run_selftest.py           # end-to-end smoke against stubs
 The selftest boots two loopback stub servers (one strict like the legacy
 dispatcher, one lenient like the Go server) and proves the core behaviors:
 positional params, global config application, timestamp/amount tolerance,
-list modes, report slimming, and priority filtering.
+list modes, report slimming, priority filtering, plus the negative
+controls: transport-level failures (both sides 500 / unreachable) stay
+red, the object-form rejection is locked to the python side, and an empty
+run exits 2 with an explicit warning.
 
 ## Command line options
 
@@ -132,15 +146,26 @@ global list; per-case `tolerance` merges key-wise over the global one.
 * Strings that both parse as ISO8601 (with/without `Z`, with offset, naive,
   space separator, fractional seconds) compare within `timestamp_seconds`
   after normalization to epoch seconds.
-* Numbers at timestamp-ish field names (`created`, `updated`, `*_time`,
-  `cashout*`, `*_age`, ...) compare within `timestamp_seconds` (values above
-  1e12 count as epoch milliseconds). Plain numeric fields are never treated
-  as timestamps.
-* Amount strings (`"1.500 SBD"`, `"$0.99"`) compare numerically within
-  `float_epsilon` after `parse_amount` normalization; a string amount also
-  bridges to a bare number.
-* When both endpoints return JSON-RPC errors, the error texts are compared
-  (used by dummy methods such as `get_account_votes`).
+* Numbers at timestamp-ish field names compare within `timestamp_seconds`.
+  A field is timestamp-ish when its name is exactly a time token
+  (`created`, `time`, ...) or ends with `_<token>` (`db_head_age`,
+  `cashout_time`, `last_read_at`); compound counters such as
+  `created_block` or `read_count` are NOT timestamps and compare with the
+  plain epsilon. Epoch comparison additionally requires both values
+  >= 1e8 (plausible epoch seconds; values above 1e12 count as epoch
+  milliseconds). `*_age` fields hold small second durations and compare
+  by absolute difference. Plain numeric fields are never treated as
+  timestamps.
+* Amount strings (`"1.500 SBD"`, `"$0.99"`) parse to (value, unit) and
+  compare numerically within `float_epsilon` only when the currency units
+  match (case-insensitive; `"$"` matches only `"$"`). An amount string
+  never bridges to a bare number: the number side carries no unit to
+  verify, so that pair is reported as a type mismatch.
+* When both endpoints return JSON-RPC **application** errors, the error
+  texts are compared (used by dummy methods such as `get_account_votes`).
+  Transport-level failures (connection refused, timeout, HTTP 5xx,
+  malformed response) are never judged green, even when both sides fail
+  identically -- identical transport errors carry no consistency evidence.
 
 ### List modes
 

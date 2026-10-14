@@ -167,9 +167,14 @@ EXIT_CODE=$?
 set -e
 
 # Print the outcome
+# Exit-code contract: 0 = all executed cases passed, 1 = at least one
+# failure, 2 = no cases executed (empty run, e.g. a --priority filter that
+# matched nothing -- zero evidence must not read as "all green" in CI).
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
     echo -e "${GREEN}All tests passed!${NC}"
+elif [ $EXIT_CODE -eq 2 ]; then
+    echo -e "${RED}No test cases executed (empty run) -- check the priority filter '${PRIORITY}'.${NC}"
 else
     echo -e "${RED}Some tests failed; see the reports in $OUTPUT_DIR${NC}"
 fi

@@ -14,13 +14,19 @@ Script file format (one entry per method):
       },
       "some.failing_method": {
         "error": {"code": 10, "message": "boom"}
+      },
+      "some.transport_failure": {
+        "http_status": 500            # bare HTTP error, no JSON-RPC envelope
       }
     }
 
-`validate` emulates the legacy dispatchers' parameter-shape strictness:
-"array" rejects non-list params (like legacy condenser `_strict_list`),
-"object" rejects non-dict params, "any" accepts everything (like the Go
-server's three-form params.go parsing).
+`validate` is a shape-level simulation of the legacy dispatchers'
+parameter strictness (it checks only the params shape, not legacy
+semantics): "array" rejects non-list params (like legacy condenser
+`_strict_list`), "object" rejects non-dict params, "any" accepts
+everything (like the Go server's three-form params.go parsing).
+`http_status` responds with a bare HTTP error status to exercise the
+comparator's transport-level failure handling.
 """
 
 import argparse
@@ -53,6 +59,12 @@ class StubHandler(BaseHTTPRequestHandler):
         method = request.get("method")
         params = request.get("params", [])
         entry = SCRIPT.get(method)
+        if entry is not None and "http_status" in entry:
+            # Transport-level failure simulation: bare HTTP error status
+            # with no JSON-RPC envelope (exercises the comparator's
+            # fail-closed transport handling).
+            self._respond_status(int(entry["http_status"]))
+            return
         response = self._handle(method, params, entry, request.get("id"))
         self._respond(response)
 
@@ -82,6 +94,14 @@ class StubHandler(BaseHTTPRequestHandler):
         payload = json.dumps(response).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _respond_status(self, status: int):
+        payload = b"stub transport failure"
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)

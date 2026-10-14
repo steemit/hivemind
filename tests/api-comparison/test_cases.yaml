@@ -12,8 +12,9 @@
 #     (method not found) -- cross-service comparison for them is impossible
 #     (decision D4); the full matrix restructure lands with #421.
 #
-# Priorities follow the authoritative matrix in
-# agent-share/notes/hivemind/2026-Q4/04-comparison.md section 2.
+# Priorities follow the 2026-Q4 API comparison matrix (P0 = core read
+# paths exercised by every frontend, P1 = secondary paths, P2 =
+# peripheral / Go-only endpoints).
 #
 # Comparison tuning (ignore_fields / tolerance / unordered / lenient_list)
 # is intentionally left empty for now: both servers read the same database,
@@ -190,9 +191,15 @@ test_cases:
     params: ["0000000000000000000000000000000000000000"]
 
   - id: condenser-get-account-votes
-    name: "condenser_api.get_account_votes steemit (dummy on both sides; error text compared)"
+    name: "condenser_api.get_account_votes steemit (dummy on both sides; EXPECTED RED: error texts differ)"
     api: "condenser_api.get_account_votes"
     priority: "P2"
+    # Both sides are dummies that error, so the case compares error TEXT.
+    # Currently expected red: legacy appends a URL suffix ("get_account_votes
+    # is no longer supported, for details see https://steemit.com/...")
+    # while Go returns only "get_account_votes is no longer supported".
+    # Registered as expected-red until the texts are aligned (tracked with
+    # the other Go-only / text-alignment stragglers in #421).
     params: ["steemit"]
 
   # ==================== Bridge API - Post (object params) ====================

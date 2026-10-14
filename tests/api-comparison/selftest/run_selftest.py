@@ -8,14 +8,20 @@ asserts the expected outcomes. Proves, without any real service, database
 or network access beyond loopback:
 
   1.1 positional (array) param cases pass instead of erroring on both ends,
-      while the legacy object form still fails (negative control);
+      while the legacy object form still fails on exactly the python side
+      (negative control with direction lock);
   1.2 the top-level `config:` block (global ignore/tolerance) is applied;
   1.4 timestamp (ISO variants + numeric epoch fields) and amount-string
       tolerances judge formatting drift green;
   1.6 unordered / lenient_list top-level comparison modes work;
   1.7 reports embed truncated responses while full payloads land in
       per-case detail files under the output directory;
-  1.5 --priority filtering runs only the requested priorities.
+  1.5 --priority filtering runs only the requested priorities;
+  PR#420-review: transport-level failures (identical HTTP 500 on both
+      sides; both endpoints unreachable) are judged RED, never green, and
+      only application-level JSON-RPC errors compare by text;
+  PR#420-review: an empty run (--priority matching nothing) exits 2 with
+      an explicit warning instead of a green-looking exit 0.
 
 Run from tests/api-comparison/:  python3 selftest/run_selftest.py
 """
@@ -46,6 +52,7 @@ EXPECTED = {
     "selftest-unordered-list": True,
     "selftest-lenient-list": True,
     "selftest-error-text": True,
+    "selftest-both-transport-500": False,           # transport errors stay red
     "selftest-real-diff-control": False,            # genuine diff stays red
 }
 
@@ -70,7 +77,11 @@ def wait_for_server(port: int, process: subprocess.Popen, timeout: float = 10.0)
 
 
 def run_comparator(python_url: str, go_url: str, out_dir: str,
-                   priority=None) -> tuple[int, dict]:
+                   priority=None, expect_rc=(0, 1)) -> tuple[int, dict, str]:
+    """Run the comparator; assert it exited with one of the expected codes.
+
+    Exit-code contract: 0 = all executed cases passed, 1 = at least one
+    failure, 2 = no cases executed (empty run)."""
     cmd = [
         sys.executable, COMPARATOR,
         "--config", CASES,
@@ -82,16 +93,17 @@ def run_comparator(python_url: str, go_url: str, out_dir: str,
     if priority:
         cmd += ["--priority", priority]
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=TOOL_DIR)
-    if proc.returncode not in (0, 1):
+    if proc.returncode not in expect_rc:
         raise RuntimeError(
-            f"comparator crashed (rc={proc.returncode}):\n{proc.stderr}")
+            f"comparator exited rc={proc.returncode} "
+            f"(expected one of {expect_rc}):\n{proc.stderr}")
     reports = sorted(
         name for name in os.listdir(out_dir) if name.startswith("report-")
     )
     if not reports:
         raise RuntimeError("comparator produced no report file")
     with open(os.path.join(out_dir, reports[-1])) as handle:
-        return proc.returncode, json.load(handle)
+        return proc.returncode, json.load(handle), proc.stdout + proc.stderr
 
 
 def check(condition: bool, message: str, failures: list):
@@ -124,7 +136,7 @@ def main() -> int:
         go_url = f"http://127.0.0.1:{go_port}"
 
         print("Run 1: full selftest case set")
-        rc, report = run_comparator(python_url, go_url, out_dir)
+        rc, report, _ = run_comparator(python_url, go_url, out_dir)
 
         results = {entry["id"]: entry for entry in report["results"]}
         print(f"  comparator rc={rc} (1 expected: negative controls are red)")
@@ -143,7 +155,8 @@ def main() -> int:
 
         # 1.1 evidence: the array-form case passed with real results on both
         # sides (no error entries), the object-form control failed because
-        # exactly one side rejected the params.
+        # exactly the python side rejected the params (direction locked so
+        # even a stub-script mix-up cannot silently pass).
         entry = results["selftest-positional-params"]
         check(entry["python_error"] is None and entry["go_error"] is None,
               "positional case: both sides returned results, no errors",
@@ -151,6 +164,18 @@ def main() -> int:
         entry = results["selftest-positional-negative-control"]
         check(entry["difference"] and "one side errored" in entry["difference"],
               "object-form control: exactly one side rejected the params",
+              failures)
+        check(entry["python_error"] is not None and entry["go_error"] is None,
+              "object-form control: the PYTHON (strict) side is the one "
+              "that errored (direction locked)",
+              failures)
+
+        # PR#420-review evidence: identical transport-level failures on both
+        # sides (bare HTTP 500) are judged red, never green.
+        entry = results["selftest-both-transport-500"]
+        check(not entry["passed"]
+              and entry["difference"] and "transport" in entry["difference"],
+              "both-500 control: transport-level errors fail red",
               failures)
 
         # 1.7 evidence: report responses are truncated, detail files are full.
@@ -171,11 +196,41 @@ def main() -> int:
         # 1.5 evidence: --priority P0 runs only the P0 case.
         print("Run 2: --priority P0")
         out_dir2 = tempfile.mkdtemp(prefix="hivemind-selftest-")
-        _, report2 = run_comparator(python_url, go_url, out_dir2, priority="P0")
+        _, report2, _ = run_comparator(python_url, go_url, out_dir2,
+                                       priority="P0")
         ids2 = [entry["id"] for entry in report2["results"]]
         check(ids2 == ["selftest-positional-params"],
               f"--priority P0 ran exactly the P0 case (ran: {ids2})", failures)
         shutil.rmtree(out_dir2, ignore_errors=True)
+
+        # PR#420-review evidence: both endpoints unreachable (connection
+        # refused on both sides) is RED, not "identical error text" green.
+        print("Run 3: both endpoints unreachable (connection refused)")
+        dead_port = free_port()  # bound+closed: nothing listens here
+        dead_url = f"http://127.0.0.1:{dead_port}"
+        out_dir3 = tempfile.mkdtemp(prefix="hivemind-selftest-")
+        rc3, report3, _ = run_comparator(dead_url, dead_url, out_dir3,
+                                         priority="P0")
+        entry3 = report3["results"][0]
+        check(rc3 == 1 and not entry3["passed"]
+              and entry3["difference"] and "transport" in entry3["difference"],
+              "connection-refused on both sides: judged red as transport "
+              "failure, not green",
+              failures)
+        shutil.rmtree(out_dir3, ignore_errors=True)
+
+        # PR#420-review evidence: a priority filter matching nothing exits 2
+        # with an explicit warning (zero evidence is not "all green").
+        print("Run 4: --priority P9 (matches nothing; expect rc=2)")
+        out_dir4 = tempfile.mkdtemp(prefix="hivemind-selftest-")
+        rc4, report4, output4 = run_comparator(python_url, go_url, out_dir4,
+                                               priority="P9", expect_rc=(2,))
+        check(rc4 == 2 and report4["summary"]["total"] == 0,
+              "empty run: exit code 2 and zero executed cases", failures)
+        check("no test cases executed" in output4.lower()
+              or "no cases executed" in output4.lower(),
+              "empty run: explicit warning printed", failures)
+        shutil.rmtree(out_dir4, ignore_errors=True)
 
         # 1.2 evidence: the global-ignore case passed with the differing
         # field present in both payloads (only the global config masks it).

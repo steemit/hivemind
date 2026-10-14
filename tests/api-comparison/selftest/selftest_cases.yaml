@@ -76,12 +76,23 @@ test_cases:
     params: ["stub-account", "", "blog", 2]
 
   - id: selftest-error-text
-    name: "both sides error: identical error text judged green"
+    name: "both sides error: identical application error text judged green"
     api: "condenser_api.get_account_votes"
     priority: "P1"
-    # Dummy method on both ends; the interesting comparison is the error
-    # text (04-comparison.md section 2, get_account_votes).
+    # Dummy method on both ends; both errors are JSON-RPC application
+    # errors (code 10), so the interesting comparison is the error text
+    # (04-comparison.md section 2, get_account_votes).
     params: ["stub-account"]
+
+  - id: selftest-both-transport-500
+    name: "both sides HTTP 500: transport errors never judged green (negative control)"
+    api: "stub.both_transport_500"
+    priority: "P2"
+    # Both stubs answer this method with a bare HTTP 500 (no JSON-RPC
+    # envelope), i.e. identical transport-level failure texts. The old
+    # comparator judged identical error texts green; transport failures
+    # must fail red with zero evidence read as consistency. Expected FAIL.
+    params: []
 
   - id: selftest-real-diff-control
     name: "a genuine data difference is still caught (negative control)"
