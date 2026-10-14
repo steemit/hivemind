@@ -212,7 +212,7 @@ test_cases:
       permlink: "firstpost"
 
   - id: bridge-normalize-post
-    name: "bridge.normalize_post (steemd post payload for steemit/firstpost)"
+    name: "bridge.normalize_post steemit/firstpost (EXPECTED RED: Go reads the post object at top level while legacy binds the `post` kwarg; baseline issue #23)"
     api: "bridge.normalize_post"
     priority: "P1"
     # legacy signature: normalize_post(context, post) -- the payload must be

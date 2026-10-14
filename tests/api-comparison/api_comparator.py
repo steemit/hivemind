@@ -226,7 +226,9 @@ def is_timestamp_field(path: tuple, extra_fields=()) -> bool:
         return True
     if any(name.endswith("_" + token) for token in DEFAULT_TIMESTAMP_TOKENS):
         return True
-    return name in {str(field).lower() for field in extra_fields}
+    # NB: comprehension-local names must not shadow the dataclasses `field`
+    # import used by CompareOptions below.
+    return name in {str(extra).lower() for extra in extra_fields}
 
 
 def is_duration_field(path: tuple) -> bool:
@@ -332,21 +334,6 @@ def _fmt_path(path: tuple) -> str:
     return rendered or "<root>"
 
 
-def _amount_pair(a: Any, b: Any) -> Optional[tuple]:
-    """((value, unit), (value, unit)) when exactly one side is a currency
-    amount string and the other is a plain number; else None. Guards the
-    cross-type comparison against non-numeric mismatches (e.g. a list vs
-    an amount string), which previously raised TypeError inside the
-    numeric subtraction."""
-    if isinstance(a, str) and isinstance(b, (int, float)):
-        parsed = parse_amount(a)
-        return (parsed, (float(b), None)) if parsed is not None else None
-    if isinstance(b, str) and isinstance(a, (int, float)):
-        parsed = parse_amount(b)
-        return ((float(a), None), parsed) if parsed is not None else None
-    return None
-
-
 def compare_values(a: Any, b: Any, opts: CompareOptions,
                    path: tuple = ()) -> tuple[bool, Optional[str]]:
     """Compare two decoded JSON values. Returns (matched, difference)."""
@@ -371,20 +358,16 @@ def compare_values(a: Any, b: Any, opts: CompareOptions,
     if isinstance(a, str) and isinstance(b, str):
         return _compare_strings(a, b, opts, path, where)
 
-    # Cross-type: exactly one side is a string. Amount strings used to
-    # bridge to bare numbers here, silently dropping the currency unit
-    # ("1.500 SBD" == 1.5 == "1.500 STEEM" judged green). Bridging now
-    # requires both sides to carry compatible units (units_compatible); a
-    # bare JSON number has no unit, so an amount string vs a number is a
-    # genuine type divergence and stays red. The isinstance-numeric guard
-    # inside _amount_pair keeps non-numeric pairs (["x"] vs "1.5 SBD") on
-    # this type-mismatch path instead of raising TypeError.
+    # Cross-type: exactly one side is a string. Amount strings never
+    # bridge to bare numbers: the number side carries no currency unit to
+    # verify, so "1.500 SBD" vs 1.5 (or 1.5 of ANY asset) is a genuine
+    # type divergence and stays red. (An earlier revision kept a
+    # units_compatible-gated bridge here, but that green path was
+    # structurally unreachable -- the bare-number side always had unit
+    # None, and units_compatible is False for None by contract -- so the
+    # dead bridge was removed outright rather than left as a
+    # plausible-looking "lenient mode" hook.)
     if isinstance(a, str) != isinstance(b, str):
-        pair = _amount_pair(a, b)
-        if pair is not None and units_compatible(pair[0][1], pair[1][1]):
-            ok, _ = _compare_numbers(pair[0][0], pair[1][0], opts, path, where)
-            if ok:
-                return True, None
         return False, (
             f"{where}: type mismatch "
             f"(python={type(a).__name__} {_short(a)}, "
@@ -641,23 +624,56 @@ class APIClient:
             "params": params if params is not None else [],
         }
         try:
+            # allow_redirects=False: a JSON-RPC endpoint must never redirect.
+            # requests rewrites POST 301/302 to GET while following, which
+            # would silently compare whatever the redirect target serves
+            # (e.g. a health page) -- so a 3xx is surfaced as a transport
+            # error instead of being followed.
             response = self.session.post(self.base_url, json=payload,
-                                         timeout=self.timeout)
+                                         timeout=self.timeout,
+                                         allow_redirects=False)
+            if 300 <= response.status_code < 400:
+                raise ApiCallError(
+                    f"unexpected redirect ({response.status_code} -> "
+                    f"{response.headers.get('Location', '?')}); JSON-RPC "
+                    f"endpoints must not redirect",
+                    transport=True)
             response.raise_for_status()
             data = response.json()
+        except ApiCallError:
+            raise
         except Exception as exc:  # requests errors + JSON decode errors
             # Transport layer: connection refused/timeout, HTTP status
             # error, malformed body. Never comparable, always fail-closed.
             raise ApiCallError(f"request failed: {exc}",
                                transport=True) from exc
 
-        if isinstance(data, dict) and "error" in data and data["error"]:
+        # Envelope validation: a JSON-RPC 2.0 response MUST be an object
+        # carrying a "result" or an "error" key. Anything else -- a bare
+        # scalar/array body, or a dict like {"status": "ok"} from a health
+        # endpoint -- is a malformed response, not a comparable result:
+        # when --python-url/--go-url are (mis)pointed at such a service,
+        # both sides would return the same body and the old code judged
+        # that green with zero evidence. Note key EXISTENCE matters:
+        # {"result": null} is a legal empty result.
+        if not (isinstance(data, dict) and ("result" in data or "error" in data)):
+            raise ApiCallError(
+                f"malformed JSON-RPC response: no 'result'/'error' envelope "
+                f"(body: {_short(data)})",
+                transport=True)
+
+        if data.get("error"):
             error = data["error"]
             message = error.get("message", str(error)) if isinstance(error, dict) else str(error)
             raise ApiCallError(message, code=error.get("code") if isinstance(error, dict) else None)
-        if isinstance(data, dict):
-            return data.get("result", data)
-        return data
+        if "result" not in data:
+            # e.g. {"error": null}: envelope-shaped but neither a result
+            # nor a usable error -- fail closed.
+            raise ApiCallError(
+                f"malformed JSON-RPC response: no 'result' key "
+                f"(body: {_short(data)})",
+                transport=True)
+        return data["result"]
 
 
 # ---------------------------------------------------------------------------

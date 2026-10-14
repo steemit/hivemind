@@ -15,6 +15,13 @@ Covers the Q4 planned-PR#420 fixes and the PR#420-review hardening:
   * PR#420-review: cross-type bridge TypeError guard
   * PR#420-review: timestamp field naming (suffix/whole-name, compound
     counters excluded) + epoch magnitude gate
+  * PR#420-review-r2 (P1): non-envelope 200 bodies (scalars, arrays,
+    health-check dicts) are transport errors, never a green result;
+    {"result": null} stays legal via key-existence checking
+  * PR#420-review-r2: redirects (3xx) are not followed and fail closed
+  * PR#420-review-r2: units_compatible None contract (no silent
+    amount-to-number bridging), epoch boundaries (1e8 / 1e12), negative
+    epochs, is_duration_field exact naming
 
 Run:  python3 -m pytest test_api_comparator.py  (from tests/api-comparison/)
 """
@@ -28,17 +35,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from api_comparator import (  # noqa: E402
     ApiCallError,
+    APIClient,
     CompareOptions,
     IgnoreMatcher,
     compare_error_texts,
     compare_values,
     evaluate_error_pair,
     filter_cases_by_priority,
+    is_duration_field,
     is_timestamp_field,
     normalize_timestamp,
     options_for_case,
     parse_amount,
     truncate_for_report,
+    units_compatible,
 )
 
 
@@ -294,6 +304,107 @@ class TestEpochMagnitudeGate:
         assert not ok
 
 
+class TestEpochBoundaries:
+    """PR#420-review-r2: exact EPOCH_MIN (1e8) and millisecond-threshold
+    (1e12) boundary semantics, and negative-epoch behavior."""
+
+    def test_epoch_min_inclusive_uses_time_tolerance(self):
+        # Exactly 1e8 on both sides: the >= gate includes the boundary, so
+        # a 2s drift is green under a 2s tolerance.
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        ok, diff = compare_values(100000000, 100000002, opts, ("created",))
+        assert ok, diff
+
+    def test_just_below_epoch_min_falls_back_to_epsilon(self):
+        # 99999999 is below the gate on one side, so the SAME 2-unit drift
+        # that was green at the boundary must be a plain number mismatch.
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        ok, diff = compare_values(99999999, 100000001, opts, ("created",))
+        assert not ok and "number mismatch" in diff
+
+    def test_boundary_is_sharp_not_gradual(self):
+        # Same 3-unit drift on both sides of the boundary: above it, the
+        # time tolerance applies (red only beyond 2s); below it, epsilon.
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        ok, diff = compare_values(100000000, 100000003, opts, ("created",))
+        assert not ok and "timestamp mismatch" in diff
+        ok, diff = compare_values(99999998, 100000001, opts, ("created",))
+        assert not ok and "number mismatch" in diff
+
+    def test_ms_threshold_is_exclusive(self):
+        # The "> 1e12" gate: exactly 1e12 stays SECONDS...
+        assert normalize_timestamp(1e12, numeric=True) == 1e12
+        # ... and 1e12 + 1 is already epoch MILLISECONDS.
+        assert normalize_timestamp(1e12 + 1, numeric=True) == (1e12 + 1) / 1000.0
+
+    def test_ms_threshold_boundary_through_compare(self):
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        # Exactly 1e12 on both sides: seconds semantics, equal -> green.
+        ok, diff = compare_values(1e12, 1e12, opts, ("created",))
+        assert ok, diff
+        # Crossing the threshold switches UNITS: 1e12 stays seconds while
+        # 1e12+2 normalizes as milliseconds (~1e9), so this pair is a
+        # mismatch. The exclusive gate makes the boundary itself a unit
+        # switch -- pinned here rather than silently bridged.
+        ok, diff = compare_values(1e12, 1e12 + 2, opts, ("created",))
+        assert not ok and "timestamp mismatch" in diff
+        # Both above the threshold: milliseconds normalize together; a 2s
+        # (2000ms) drift is green...
+        ok, _ = compare_values(1e12 + 1, 1e12 + 2001, opts, ("created",))
+        assert ok
+        # ... a 5s drift is red.
+        ok, _ = compare_values(1e12 + 1, 1e12 + 5001, opts, ("created",))
+        assert not ok
+
+    def test_negative_epoch_magnitude_semantics(self):
+        """Large-magnitude negative epochs (abs >= 1e8) compare by the time
+        tolerance; the SMALL numeric form of pre-1970 sentinels (e.g. -1,
+        the numeric equivalent of the cashout sentinel
+        "1969-12-31T23:59:59" that real Steem payloads carry) stays below
+        the gate and compares by plain epsilon -- fail closed: a numeric
+        -1 vs -3 drift must not hide inside the time tolerance."""
+        opts = make_opts(timestamp_seconds=2, float_epsilon=0.001)
+        ok, _ = compare_values(-1720000000, -1720000002, opts, ("cashout_time",))
+        assert ok
+        ok, diff = compare_values(-1720000000, -1720000030, opts,
+                                  ("cashout_time",))
+        assert not ok and "timestamp mismatch" in diff
+        # small negative numeric sentinel: plain epsilon (delta 2 > 0.001)
+        ok, diff = compare_values(-1, -3, opts, ("cashout_time",))
+        assert not ok and "number mismatch" in diff
+        # ... while ISO STRING sentinels compare by normalized time (the
+        # string path is unambiguous and carries no magnitude gate).
+        ok, _ = compare_values("1969-12-31T23:59:59", "1969-12-31T23:59:57",
+                               opts, ("cashout_time",))
+        assert ok
+
+
+class TestDurationFieldNaming:
+    """PR#420-review-r2: is_duration_field exact-name contract (whole
+    `age` or `_<something>_age`/`_age` suffix; letter-lookalikes excluded)."""
+
+    def test_exact_names_match(self):
+        assert is_duration_field(("age",))
+        assert is_duration_field(("db_head_age",))
+        assert is_duration_field(("head", "age"))
+        assert is_duration_field(("cache_age",))
+
+    def test_lookalikes_do_not_match(self):
+        # ends with the letters of "age" but not with "_age"
+        assert not is_duration_field(("coverage",))
+        assert not is_duration_field(("average",))
+        assert not is_duration_field(("page",))
+        assert not is_duration_field(("db_page",))
+        assert not is_duration_field(("gauge",))
+
+    def test_case_and_hyphen_normalized(self):
+        assert is_duration_field(("DB_HEAD_AGE",))
+        assert is_duration_field(("db-head-age",))
+
+    def test_empty_path_is_not_a_duration_field(self):
+        assert not is_duration_field(())
+
+
 class TestAmountComparison:
     def test_parse_amount_returns_value_and_unit(self):
         assert parse_amount("1.500 SBD") == (1.5, "SBD")
@@ -358,6 +469,37 @@ class TestAmountComparison:
         assert ok
         ok, _ = compare_values("abc", "abd", opts, ("body",))
         assert not ok
+
+
+class TestUnitsCompatible:
+    """PR#420-review-r2: direct contract tests for units_compatible. The
+    None clause is what makes the removed cross-type amount bridge
+    structurally unreachable -- a bare number side has unit None, and
+    None is compatible with nothing. Pinning it directly prevents a
+    future 'lenient mode' change from silently re-enabling the false
+    green (amount string == bare number of any asset)."""
+
+    def test_none_unit_is_compatible_with_nothing(self):
+        assert not units_compatible(None, "SBD")
+        assert not units_compatible("SBD", None)
+        assert not units_compatible(None, None)
+        assert not units_compatible(None, "$")
+
+    def test_units_match_case_insensitively(self):
+        assert units_compatible("SBD", "SBD")
+        assert units_compatible("sbd", "SBD")
+        assert units_compatible("Steem", "STEEM")
+
+    def test_dollar_form_matches_only_dollar(self):
+        assert units_compatible("$", "$")
+        assert not units_compatible("$", "SBD")
+        assert not units_compatible("SBD", "$")
+        assert not units_compatible("$", "HBD")
+
+    def test_distinct_currencies_are_incompatible(self):
+        assert not units_compatible("STEEM", "SBD")
+        assert not units_compatible("HIVE", "HBD")
+        assert not units_compatible("VESTS", "STEEM")
 
 
 # ---------------------------------------------------------------------------
@@ -568,6 +710,178 @@ class TestErrorLayerClassification:
         ok, diff = evaluate_error_pair(
             ApiCallError("msg A", code=10), ApiCallError("msg B", code=10))
         assert not ok and "error text mismatch" in diff
+
+
+# ---------------------------------------------------------------------------
+# PR#420-review-r2 (P1): APIClient envelope validation
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    """Minimal requests.Response stand-in (status, headers, JSON body)."""
+
+    def __init__(self, status_code=200, json_data=None, headers=None,
+                 json_error=None):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._json_data = json_data
+        self._json_error = json_error
+
+    def raise_for_status(self):
+        if 400 <= self.status_code < 600:
+            raise RuntimeError(f"HTTP {self.status_code} error")
+
+    def json(self):
+        if self._json_error is not None:
+            raise self._json_error
+        return self._json_data
+
+
+class _FakeSession:
+    """Records post() kwargs; returns a canned response."""
+
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def post(self, _url, **kwargs):
+        self.calls.append(kwargs)
+        return self.response
+
+
+def make_client(response) -> tuple:
+    pytest.importorskip("requests")  # APIClient.__init__ imports it lazily
+    client = APIClient("http://stub.example")
+    client.session = _FakeSession(response)
+    return client, client.session
+
+
+class TestAPIClientEnvelopeValidation:
+    """PR#420-review-r2 (P1): the audited false-green -- a 200 response
+    whose body is NOT a JSON-RPC envelope (scalar, array, or a dict like
+    {"status": "ok"}) was returned whole as the "result"; when both
+    --python-url and --go-url were (mis)pointed at such a service (e.g. a
+    health endpoint, which run_tests.sh's /health probe happily passes),
+    both sides matched and the entire run judged green with zero
+    evidence. Now any non-envelope body raises a transport ApiCallError."""
+
+    def test_scalar_body_is_transport_error(self):
+        client, _ = make_client(_FakeResponse(json_data="ok"))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", ["a", "b"])
+        assert excinfo.value.is_transport
+        assert "malformed JSON-RPC" in excinfo.value.message
+
+    def test_array_body_is_transport_error(self):
+        client, _ = make_client(_FakeResponse(json_data=[1, 2, 3]))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_followers", [])
+        assert excinfo.value.is_transport
+        assert "malformed JSON-RPC" in excinfo.value.message
+
+    def test_health_check_dict_is_transport_error(self):
+        """The exact probe scenario: {"status": "ok"} from a health
+        service must not be treated as a comparable result."""
+        client, _ = make_client(_FakeResponse(json_data={"status": "ok"}))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", ["steemit", "firstpost"])
+        assert excinfo.value.is_transport
+        assert "malformed JSON-RPC" in excinfo.value.message
+
+    def test_null_result_is_legal(self):
+        """{"result": null} is a valid empty result: validity is decided by
+        KEY EXISTENCE, never by truthiness (an `if data.get("result")`
+        check would reject legal null results)."""
+        client, _ = make_client(
+            _FakeResponse(json_data={"jsonrpc": "2.0", "id": 1, "result": None}))
+        assert client.call("condenser_api.get_content", ["a", "b"]) is None
+
+    def test_falsy_results_are_legal(self):
+        client, _ = make_client(
+            _FakeResponse(json_data={"jsonrpc": "2.0", "id": 1, "result": []}))
+        assert client.call("condenser_api.get_followers", []) == []
+        client, _ = make_client(
+            _FakeResponse(json_data={"jsonrpc": "2.0", "id": 1, "result": 0}))
+        assert client.call("hive.db_head_state", []) == 0
+
+    def test_result_dict_returned(self):
+        body = {"jsonrpc": "2.0", "id": 1, "result": {"author": "steemit"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        assert client.call("bridge.get_profile", {"account": "steemit"}) == {
+            "author": "steemit"}
+
+    def test_error_envelope_is_application_error(self):
+        body = {"jsonrpc": "2.0", "id": 1,
+                "error": {"code": 10, "message": "unsupported"}}
+        client, _ = make_client(_FakeResponse(json_data=body))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_account_votes", ["steemit"])
+        assert not excinfo.value.is_transport
+        assert excinfo.value.code == 10
+        assert excinfo.value.message == "unsupported"
+
+    def test_error_null_is_malformed(self):
+        """{"error": null} is envelope-shaped but carries neither a usable
+        error nor a result: fail closed as malformed."""
+        client, _ = make_client(
+            _FakeResponse(json_data={"jsonrpc": "2.0", "id": 1, "error": None}))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "malformed JSON-RPC" in excinfo.value.message
+
+    def test_http_error_wrapped_as_transport(self):
+        client, _ = make_client(_FakeResponse(status_code=503))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "request failed" in excinfo.value.message
+
+    def test_non_json_body_wrapped_as_transport(self):
+        client, _ = make_client(
+            _FakeResponse(json_error=ValueError("expecting value")))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+
+
+class TestAPIClientRedirects:
+    """PR#420-review-r2: POST redirects must never be followed. requests
+    rewrites POST 301/302 to GET while following, so a followed redirect
+    would silently compare whatever the target serves (e.g. a health
+    page). The client sends allow_redirects=False and surfaces any 3xx
+    as a transport error."""
+
+    def test_post_disables_redirect_following(self):
+        client, session = make_client(
+            _FakeResponse(json_data={"result": None}))
+        client.call("condenser_api.get_content", [])
+        assert session.calls, "fake session saw no request"
+        assert session.calls[0].get("allow_redirects") is False
+
+    def test_302_is_transport_error(self):
+        client, _ = make_client(_FakeResponse(
+            status_code=302, headers={"Location": "/health"}))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "redirect" in excinfo.value.message
+        assert "302" in excinfo.value.message
+        assert "/health" in excinfo.value.message
+
+    def test_301_is_transport_error(self):
+        client, _ = make_client(_FakeResponse(
+            status_code=301, headers={"Location": "https://other.example"}))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "redirect" in excinfo.value.message
+
+    def test_302_without_location_still_fails(self):
+        client, _ = make_client(_FakeResponse(status_code=302))
+        with pytest.raises(ApiCallError) as excinfo:
+            client.call("condenser_api.get_content", [])
+        assert excinfo.value.is_transport
+        assert "redirect" in excinfo.value.message
 
 
 # ---------------------------------------------------------------------------

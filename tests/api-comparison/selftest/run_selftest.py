@@ -21,7 +21,12 @@ or network access beyond loopback:
       sides; both endpoints unreachable) are judged RED, never green, and
       only application-level JSON-RPC errors compare by text;
   PR#420-review: an empty run (--priority matching nothing) exits 2 with
-      an explicit warning instead of a green-looking exit 0.
+      an explicit warning instead of a green-looking exit 0;
+  PR#420-review-r2: a 200 response without a JSON-RPC envelope (e.g. a
+      health-check body like {"status": "ok"} on BOTH sides -- the
+      mispointed-URL scenario) is judged RED as a malformed response;
+  PR#420-review-r2: a 3xx redirect is not followed (POST 301/302 would be
+      rewritten to GET by requests) and fails red as a transport error.
 
 Run from tests/api-comparison/:  python3 selftest/run_selftest.py
 """
@@ -53,6 +58,8 @@ EXPECTED = {
     "selftest-lenient-list": True,
     "selftest-error-text": True,
     "selftest-both-transport-500": False,           # transport errors stay red
+    "selftest-non-envelope-200": False,             # non-envelope 200 stays red
+    "selftest-redirect-302": False,                 # redirects not followed
     "selftest-real-diff-control": False,            # genuine diff stays red
 }
 
@@ -176,6 +183,32 @@ def main() -> int:
         check(not entry["passed"]
               and entry["difference"] and "transport" in entry["difference"],
               "both-500 control: transport-level errors fail red",
+              failures)
+
+        # PR#420-review-r2 evidence: 200 + non-envelope body on BOTH sides
+        # (the mispointed-at-a-health-service scenario) is red. Both sides
+        # returning the identical {"status": "ok"} body must not read as a
+        # passing comparison -- that was the whole-body-as-result false
+        # green.
+        entry = results["selftest-non-envelope-200"]
+        check(not entry["passed"]
+              and entry["python_error"] and "malformed JSON-RPC" in entry["python_error"]
+              and entry["go_error"] and "malformed JSON-RPC" in entry["go_error"],
+              "non-envelope-200 control: malformed response fails red on "
+              "both sides (health-body scenario)",
+              failures)
+
+        # PR#420-review-r2 evidence: a 302 is not followed. requests would
+        # rewrite the POST to GET while following; the comparator must
+        # surface the redirect itself as a transport error (the error text
+        # must name the redirect, proving the redirect was NOT followed to
+        # whatever it serves).
+        entry = results["selftest-redirect-302"]
+        check(not entry["passed"]
+              and entry["python_error"] and "redirect" in entry["python_error"]
+              and entry["go_error"] and "redirect" in entry["go_error"],
+              "redirect-302 control: redirect not followed, judged red as "
+              "transport error",
               failures)
 
         # 1.7 evidence: report responses are truncated, detail files are full.

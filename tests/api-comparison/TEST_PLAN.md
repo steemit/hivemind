@@ -43,22 +43,22 @@
 |---------|------|--------|
 | `hive.db_head_state` | 获取数据库头部状态 | P0 |
 
-### Condenser API (23 个)
+### Condenser API (26 个)
 
 | API 方法 | 功能 | 优先级 |
 |---------|------|--------|
 | `condenser_api.get_followers` | 获取关注者列表 | P0 |
 | `condenser_api.get_following` | 获取关注列表 | P0 |
 | `condenser_api.get_follow_count` | 获取关注数 | P0 |
-| `condenser_api.get_reblogged_by` | 获取转发信息 | P1 |
+| `condenser_api.get_reblogged_by` | 获取转发信息 | P0 |
 | `condenser_api.get_followers_by_page` | 分页获取关注者 | P1 |
 | `condenser_api.get_following_by_page` | 分页获取关注 | P1 |
 | `condenser_api.get_content` | 获取文章内容 | P0 |
-| `condenser_api.get_content_replies` | 获取文章回复 | P0 |
+| `condenser_api.get_content_replies` | 获取文章回复 | P1 |
 | `condenser_api.get_discussions_by_trending` | 热门讨论 | P0 |
 | `condenser_api.get_discussions_by_hot` | 热点讨论 | P0 |
 | `condenser_api.get_discussions_by_created` | 最新讨论 | P0 |
-| `condenser_api.get_discussions_by_promoted` | 推广讨论 | P1 |
+| `condenser_api.get_discussions_by_promoted` | 推广讨论 | P0 |
 | `condenser_api.get_discussions_by_blog` | 博客讨论 | P0 |
 | `condenser_api.get_discussions_by_feed` | 动态讨论 | P0 |
 | `condenser_api.get_blog` | 获取博客 | P0 |
@@ -70,11 +70,11 @@
 | `condenser_api.get_discussions_by_author_before_date` | 作者历史讨论 | P1 |
 | `condenser_api.get_post_discussions_by_payout` | 按收益排序文章 | P1 |
 | `condenser_api.get_comment_discussions_by_payout` | 按收益排序评论 | P2 |
-| `condenser_api.get_transaction` | 获取交易 | P1 |
+| `condenser_api.get_transaction` | 获取交易 | P2 |
 | `condenser_api.get_state` | 获取状态 | P1 |
-| `condenser_api.get_account_votes` | 获取账户投票 | P1 |
+| `condenser_api.get_account_votes` | 获取账户投票 | P2 |
 
-### Bridge API (19 个)
+### Bridge API (20 个)
 
 | API 方法 | 功能 | 优先级 |
 |---------|------|--------|
@@ -87,30 +87,35 @@
 | `bridge.get_account_posts` | 账户文章 | P0 |
 | `bridge.get_trending_topics` | 热门话题 | P1 |
 | `bridge.get_payout_stats` | 收益统计 | P1 |
-| `bridge.get_community` | 获取社区 | P1 |
+| `bridge.get_community` | 获取社区 | P0 |
 | `bridge.get_community_context` | 社区上下文 | P1 |
-| `bridge.list_communities` | 社区列表 | P1 |
-| `bridge.list_top_communities` | 顶级社区 | P1 |
+| `bridge.list_communities` | 社区列表 | P0 |
+| `bridge.list_top_communities` | 顶级社区 | P2 |
 | `bridge.list_pop_communities` | 热门社区 | P1 |
 | `bridge.list_community_roles` | 社区角色 | P1 |
 | `bridge.list_subscribers` | 订阅者列表 | P1 |
 | `bridge.list_all_subscriptions` | 所有订阅 | P2 |
 | `bridge.post_notifications` | 文章通知 | P1 |
-| `bridge.account_notifications` | 账户通知 | P1 |
-| `bridge.unread_notifications` | 未读通知 | P1 |
+| `bridge.account_notifications` | 账户通知 | P0 |
+| `bridge.unread_notifications` | 未读通知 | P0 |
 
-### Hive API (9 个)
+### Hive API (8 个)
 
 | API 方法 | 功能 | 优先级 |
 |---------|------|--------|
-| `hive_api.get_account` | 获取账户 | P0 |
-| `hive_api.get_accounts` | 批量获取账户 | P0 |
-| `hive_api.list_followers` | 列出关注者 | P0 |
-| `hive_api.list_following` | 列出关注 | P0 |
+| `hive_api.get_account` | 获取账户 | P2 |
+| `hive_api.get_accounts` | 批量获取账户 | P2 |
+| `hive_api.list_followers` | 列出关注者 | P2 |
+| `hive_api.list_following` | 列出关注 | P2 |
 | `hive_api.list_all_muted` | 列出所有屏蔽 | P2 |
-| `hive_api.list_account_blog` | 列出账户博客 | P1 |
-| `hive_api.list_account_posts` | 列出账户文章 | P1 |
-| `hive_api.list_account_feed` | 列出账户动态 | P1 |
+| `hive_api.list_account_blog` | 列出账户博客 | P2 |
+| `hive_api.list_account_posts` | 列出账户文章 | P2 |
+| `hive_api.list_account_feed` | 列出账户动态 | P2 |
+
+> 优先级与 `test_cases.yaml` 对齐（2026-Q4 矩阵口径）：P0=22 / P1=10 /
+> P2=11。Go-only 方法（`hive_api.*`、`bridge.list_top_communities`）在
+> cross-service 对比中必然红（legacy 无此方法，决策 D4），统一标 P2，
+> 待 #421 重构矩阵后移入 Go-vs-Go 自检轨道。
 
 ## 测试环境配置
 
@@ -246,7 +251,9 @@ volumes:
   识别 ISO8601 变体（带/不带 Z、带偏移、无时区、空格分隔、日期-only）
   与 epoch 秒/毫秒（数值仅在时间语义字段名上生效，如 `created`、`db_head_age`）
 - 金额字符串: `parse_amount` 归一为数值后按 `float_epsilon` 比较
-  （"1.500 SBD" 与 "1.5 SBD" 判等）
+  （"1.500 SBD" 与 "1.5 SBD" 判等）；**币种必须匹配**（大小写不敏感；
+  "$" 只匹配 "$"；SBD vs STEEM 判红）；**金额串不与裸数字桥接**
+  （"0.750 SBD" vs 0.75 判 type mismatch——数字侧无币种可校验）
 
 ### 结构忽略（路径感知）
 
@@ -298,6 +305,15 @@ cd tests/api-comparison
 python3 -m pytest test_api_comparator.py    # 比较器核心单元测试
 python3 selftest/run_selftest.py            # stub 双端端到端冒烟
 ```
+
+### 退出码约定
+
+`api_comparator.py` 与 `run_tests.sh` 退出码一致：
+
+- `0` = 所有执行的用例全部通过
+- `1` = 至少一个用例失败
+- `2` = 没有用例被执行（如 `--priority` 过滤后为空——零证据不得
+  视为"全绿"，CI 中必须与 0 区分）
 
 ## 失败处理
 

@@ -79,9 +79,11 @@ The selftest boots two loopback stub servers (one strict like the legacy
 dispatcher, one lenient like the Go server) and proves the core behaviors:
 positional params, global config application, timestamp/amount tolerance,
 list modes, report slimming, priority filtering, plus the negative
-controls: transport-level failures (both sides 500 / unreachable) stay
-red, the object-form rejection is locked to the python side, and an empty
-run exits 2 with an explicit warning.
+controls: transport-level failures (both sides 500 / unreachable / 302
+redirect) stay red, a 200 response without a JSON-RPC envelope (the
+health-body shape) is rejected on both sides, the object-form rejection
+is locked to the python side, and an empty run exits 2 with an explicit
+warning.
 
 ## Command line options
 
@@ -111,6 +113,10 @@ config:
   tolerance:
     float_epsilon: 0.001       # numeric epsilon; also used for amount strings
     timestamp_seconds: 2       # timestamp comparison tolerance
+    timestamp_fields: []       # extra WHOLE field names whose numbers are
+                               # compared with the time tolerance (e.g.
+                               # head_stamp); default time tokens are
+                               # built in, see Tolerance semantics
 
 test_cases:
   - id: condenser-get-content   # stable id; names the per-case detail file
@@ -151,11 +157,13 @@ global list; per-case `tolerance` merges key-wise over the global one.
   (`created`, `time`, ...) or ends with `_<token>` (`db_head_age`,
   `cashout_time`, `last_read_at`); compound counters such as
   `created_block` or `read_count` are NOT timestamps and compare with the
-  plain epsilon. Epoch comparison additionally requires both values
-  >= 1e8 (plausible epoch seconds; values above 1e12 count as epoch
-  milliseconds). `*_age` fields hold small second durations and compare
-  by absolute difference. Plain numeric fields are never treated as
-  timestamps.
+  plain epsilon. Fields outside the built-in token set can be added via
+  `tolerance.timestamp_fields` (global or per-case; entries match the
+  whole field name, unlike the token suffix rule). Epoch comparison
+  additionally requires both values >= 1e8 (plausible epoch seconds;
+  values above 1e12 count as epoch milliseconds). `*_age` fields hold
+  small second durations and compare by absolute difference. Plain
+  numeric fields are never treated as timestamps.
 * Amount strings (`"1.500 SBD"`, `"$0.99"`) parse to (value, unit) and
   compare numerically within `float_epsilon` only when the currency units
   match (case-insensitive; `"$"` matches only `"$"`). An amount string

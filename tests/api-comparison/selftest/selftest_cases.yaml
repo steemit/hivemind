@@ -94,6 +94,29 @@ test_cases:
     # must fail red with zero evidence read as consistency. Expected FAIL.
     params: []
 
+  - id: selftest-non-envelope-200
+    name: "both sides 200 with non-envelope body never judged green (negative control)"
+    api: "stub.non_envelope_200"
+    priority: "P2"
+    # PR#420-review-r2 negative control: both stubs answer HTTP 200 with
+    # {"status": "ok"} -- the health-endpoint shape. Simulates
+    # --python-url/--go-url mispointed at a health service: the old
+    # comparator returned the whole body as the "result" on both sides and
+    # judged the run green with zero evidence. Must be red as a malformed
+    # (non-envelope) JSON-RPC response. Expected FAIL.
+    params: []
+
+  - id: selftest-redirect-302
+    name: "both sides 302 redirect: never followed, judged red (negative control)"
+    api: "stub.redirect_302"
+    priority: "P2"
+    # PR#420-review-r2 negative control: both stubs answer 302 with a
+    # Location header. requests rewrites POST 301/302 to GET while
+    # following; the comparator must disable following and fail closed
+    # (a followed redirect would silently compare whatever the target
+    # serves). Expected FAIL with a redirect transport error.
+    params: []
+
   - id: selftest-real-diff-control
     name: "a genuine data difference is still caught (negative control)"
     api: "condenser_api.get_blog"

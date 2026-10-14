@@ -53,6 +53,14 @@
     "validate": "any",
     "http_status": 500
   },
+  "stub.non_envelope_200": {
+    "validate": "any",
+    "raw_json": {"status": "ok"}
+  },
+  "stub.redirect_302": {
+    "validate": "any",
+    "redirect": "/health"
+  },
   "condenser_api.get_blog": {
     "validate": "any",
     "result": [
