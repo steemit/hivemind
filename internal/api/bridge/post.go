@@ -41,8 +41,12 @@ func (p *PostAPI) GetPost(ctx *gin.Context, params json.RawMessage) (interface{}
 
 	author, _ := pMap["author"].(string)
 	permlink, _ := pMap["permlink"].(string)
+	// observer is accepted (legacy methods.py:80 parses it) but produces no
+	// output field: legacy's get_post observer logic is itself a TODO and
+	// load_posts has no observer parameter (Q4 03-api.md §三-4 audit). Go's
+	// get_post has no response cache either, so there is no key to scope.
 	observer, _ := pMap["observer"].(string)
-	_ = observer // TODO: observer context (user-post state)
+	_ = observer
 
 	telemetry.AddSpanAttributes(span, map[string]string{
 		"author":   author,

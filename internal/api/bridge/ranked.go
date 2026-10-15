@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/steemit/hivemind/internal/api/condenser"
 	"github.com/steemit/hivemind/internal/api/objects"
@@ -82,18 +83,33 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 		tag = t
 	}
 	observer, _ := pMap["observer"].(string)
-	_ = observer // TODO: observer context (tag='my' subscribed communities)
 
-	// Generate cache key using hash to shorten long keys
-	cacheKeyParts := []string{
-		"bridge_get_ranked_posts",
-		sort,
-		startAuthor,
-		startPermlink,
-		fmt.Sprintf("%d", limit),
-		tag,
+	// Legacy resolves the observer unconditionally when provided
+	// (methods.py:118): an unknown account errors out even for non-'my'
+	// tags. The id drives the tag='my' subscription filter and its
+	// cache-key component.
+	var observerID int64
+	if observer != "" {
+		var acc models.Account
+		if err := r.repo.DB().WithContext(ctx.Request.Context()).
+			Select("id").
+			Where("name = ?", observer).
+			First(&acc).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, apierrors.Publicf("account not found: `%s`", observer)
+			}
+			return nil, err
+		}
+		observerID = acc.ID
 	}
-	cacheKey := cache.HashKey(cacheKeyParts...)
+
+	telemetry.AddSpanAttributes(span, map[string]string{
+		"sort":     sort,
+		"tag":      tag,
+		"observer": observer,
+	})
+
+	cacheKey := rankedCacheKey(sort, startAuthor, startPermlink, limit, tag, observerID)
 
 	// Check cache
 	if r.cache != nil {
@@ -120,8 +136,9 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 	}
 
 	// Get post IDs (bridge ranked semantics: toponly sorts, two-tuple seek
-	// tiebreaker, author-blocked filter, payout window, first-page pins).
-	ids, err := r.cursor.GetRankedPostIDs(ctx.Request.Context(), querySort, startAuthor, startPermlink, limit, tag)
+	// tiebreaker, author-blocked filter, payout window, first-page pins,
+	// tag='my' subscription filter).
+	ids, err := r.cursor.GetRankedPostIDs(ctx.Request.Context(), querySort, startAuthor, startPermlink, limit, tag, observerID)
 	if err != nil {
 		telemetry.RecordSpanError(span, err)
 		return nil, err
@@ -153,6 +170,27 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 
 	telemetry.SetSpanSuccess(span)
 	return result, nil
+}
+
+// rankedCacheKey builds the response-cache key for bridge.get_ranked_posts.
+// Mirrors legacy methods.py:125-142: the key covers every query parameter,
+// and the observer id participates ONLY when tag=='my' -- that is the one
+// sort whose result set is personalized (subscribed communities), so a
+// shared key would let one observer's cached [] poison another's. Every
+// other sort ignores the observer, so it must not fragment their keys.
+func rankedCacheKey(sort, startAuthor, startPermlink string, limit int, tag string, observerID int64) string {
+	parts := []string{
+		"bridge_get_ranked_posts",
+		sort,
+		startAuthor,
+		startPermlink,
+		fmt.Sprintf("%d", limit),
+		tag,
+	}
+	if tag == "my" && observerID != 0 {
+		parts = append(parts, fmt.Sprintf("%d", observerID))
+	}
+	return cache.HashKey(parts...)
 }
 
 // filterHidden removes article-blocked posts from an id list.
@@ -195,6 +233,10 @@ func (r *RankedAPI) getCacheTTL(sort string) time.Duration {
 
 // GetAccountPosts handles bridge.get_account_posts
 // Posts for an account: blog, feed, posts, comments, replies, or payout.
+// observer is accepted for parity but produces no output field: in legacy it
+// only ever entered the response cache key (methods.py:203-212, the observer
+// logic itself is a TODO), and Go serves this method without a response
+// cache, so there is no key to scope (Q4 03-api.md §三-4 audit).
 func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	_, span := telemetry.StartSpanWithName(ctx.Request.Context(), "bridge.get_account_posts")
 	defer span.End()
@@ -203,6 +245,9 @@ func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (i
 	if err := json.Unmarshal(params, &pMap); err != nil {
 		return nil, apierrors.PublicError("invalid parameters format")
 	}
+
+	observer, _ := pMap["observer"].(string)
+	_ = observer
 
 	sort, _ := pMap["sort"].(string)
 	if sort == "" {

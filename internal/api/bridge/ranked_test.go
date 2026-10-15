@@ -657,3 +657,237 @@ func seedRankedFixture(t *testing.T, gdb *gorm.DB) {
 		t.Fatalf("seed reblog: %v", err)
 	}
 }
+
+// TestGetRankedPosts_TagMy pins bridge.get_ranked_posts tag='my' (planned
+// PR#417): the result set is the observer's subscribed communities only
+// (legacy bridge cursor.py:61-63 _subscribed feeding pids_by_community), so
+//
+//   - an observer subscribed to community A sees only A's posts (community
+//     mode: grayed posts and comments excluded even with a higher score);
+//   - a second observer subscribed to community B gets a disjoint result;
+//   - a non-community post never surfaces under tag='my';
+//   - no observer, or an observer without subscriptions, yields [];
+//   - an unknown observer errors (legacy get_account_id assert).
+//
+// Requires a live Postgres; skipped when HIVE_TEST_DATABASE_URL is not set.
+func TestGetRankedPosts_TagMy(t *testing.T) {
+	if os.Getenv("HIVE_TEST_DATABASE_URL") == "" {
+		t.Skip("HIVE_TEST_DATABASE_URL not set; skipping tag=my test")
+	}
+	dbURL := newTestDB(t)
+
+	resetSchema(t, dbURL)
+	if err := db.RunMigrations(dbURL, 0); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	gdb, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open gorm: %v", err)
+	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("raw db: %v", err)
+	}
+	defer sqlDB.Close()
+
+	seedTagMyFixture(t, gdb)
+
+	gin.SetMode(gin.TestMode)
+	repo := db.NewRepository(gdb)
+	wrapped := &db.DB{DB: gdb}
+	api := NewRankedAPI(repo, wrapped, nil, "")
+
+	rankedMy := func(observer string) []string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(w)
+		ctx.Request = httptest.NewRequest("POST", "/", nil)
+		req := map[string]interface{}{"sort": "trending", "tag": "my", "limit": 10}
+		if observer != "" {
+			req["observer"] = observer
+		}
+		params, _ := json.Marshal(req)
+		result, err := api.GetRankedPosts(ctx, params)
+		if err != nil {
+			t.Fatalf("tag=my observer=%q: %v", observer, err)
+		}
+		posts, ok := result.([]map[string]interface{})
+		if !ok {
+			t.Fatalf("tag=my: expected []map, got %T", result)
+		}
+		out := make([]string, 0, len(posts))
+		for _, p := range posts {
+			out = append(out, p["permlink"].(string))
+		}
+		return out
+	}
+	expect := func(name string, got, want []string) {
+		t.Helper()
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: expected %v, got %v", name, want, got)
+		}
+	}
+
+	// alice subscribes to hive-1000 only.
+	expect("alice sees her community", rankedMy("alice"), []string{"my-a"})
+	// dave subscribes to hive-2000 only: a disjoint result for the same
+	// query shape (this is the pair the observer-scoped cache key must keep
+	// separate).
+	expect("dave sees his community", rankedMy("dave"), []string{"my-b"})
+	// erin has no subscriptions.
+	expect("no subscriptions", rankedMy("erin"), []string{})
+	// no observer at all.
+	expect("no observer", rankedMy(""), []string{})
+
+	// Unknown observer: legacy get_account_id asserts (methods.py:118).
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest("POST", "/", nil)
+	params, _ := json.Marshal(map[string]interface{}{"sort": "trending", "tag": "my", "observer": "ghost"})
+	if _, err := api.GetRankedPosts(ctx, params); err == nil || !strings.Contains(err.Error(), "account not found") {
+		t.Errorf("unknown observer: expected account-not-found error, got %v", err)
+	}
+}
+
+// TestRankedCacheKey pins the tag='my' cache-key contract (planned PR#417,
+// #415 registry note): the observer id participates in the response-cache key
+// ONLY for tag='my' -- the one sort whose result is personalized -- so two
+// observers never share a cached entry, while every other sort keeps one
+// shared key regardless of observer (legacy methods.py:125-142).
+func TestRankedCacheKey(t *testing.T) {
+	base := rankedCacheKey("trending", "", "", 20, "my", 0)
+
+	// tag='my': observer id fragments the key.
+	alice := rankedCacheKey("trending", "", "", 20, "my", 41)
+	dave := rankedCacheKey("trending", "", "", 20, "my", 42)
+	if alice == base || dave == base || alice == dave {
+		t.Errorf("tag=my: observer id must fragment the key (base=%s alice=%s dave=%s)", base, alice, dave)
+	}
+	// Deterministic for the same observer.
+	if rankedCacheKey("trending", "", "", 20, "my", 41) != alice {
+		t.Error("tag=my: same observer must produce the same key")
+	}
+
+	// Any other tag: observer must NOT fragment the key (shared cache).
+	for _, tag := range []string{"", "all", "hive-123456", "life"} {
+		if got, want := rankedCacheKey("trending", "", "", 20, tag, 41), rankedCacheKey("trending", "", "", 20, tag, 0); got != want {
+			t.Errorf("tag=%q: observer id must not change a non-personalized key (%s vs %s)", tag, got, want)
+		}
+	}
+
+	// Query parameters still partition the key.
+	if rankedCacheKey("hot", "", "", 20, "my", 41) == alice {
+		t.Error("different sort must produce a different key")
+	}
+	if rankedCacheKey("trending", "", "", 21, "my", 41) == alice {
+		t.Error("different limit must produce a different key")
+	}
+}
+
+// seedTagMyFixture builds the TestGetRankedPosts_TagMy fixture:
+//
+//	communities: hive-1000 (id 1000), hive-2000 (id 2000)
+//	my-a (alice, cid 1000, trend 30), my-b (bob, cid 2000, trend 20),
+//	my-c (carol, no community, trend 99 -- must never surface under tag=my),
+//	my-comment (bob, cid 1000, depth 1, trend 98 -- toponly excludes),
+//	my-gray (alice, cid 1000, grayed -- community mode excludes)
+//	subscriptions: alice -> 1000, dave -> 2000 (erin: none)
+func seedTagMyFixture(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	now := time.Now().UTC()
+
+	for _, name := range []string{"alice", "bob", "carol", "dave", "erin"} {
+		if err := gdb.Create(&models.Account{Name: name, CreatedAt: now}).Error; err != nil {
+			t.Fatalf("seed account %s: %v", name, err)
+		}
+	}
+	comms := []models.Community{
+		{ID: 1000, Name: "hive-1000", Title: "Comm A", CreatedAt: now},
+		{ID: 2000, Name: "hive-2000", Title: "Comm B", CreatedAt: now},
+	}
+	for i := range comms {
+		if err := gdb.Create(&comms[i]).Error; err != nil {
+			t.Fatalf("seed community %d: %v", comms[i].ID, err)
+		}
+	}
+
+	type postSpec struct {
+		id               int64
+		author, permlink string
+		depth            int16
+		community        int64
+		trend            float64
+		grayed           bool
+	}
+	specs := []postSpec{
+		{id: 201, author: "alice", permlink: "my-a", depth: 0, community: 1000, trend: 30},
+		{id: 202, author: "bob", permlink: "my-b", depth: 0, community: 2000, trend: 20},
+		{id: 203, author: "carol", permlink: "my-c", depth: 0, trend: 99},
+		{id: 204, author: "bob", permlink: "my-comment", depth: 1, community: 1000, trend: 98},
+		{id: 205, author: "alice", permlink: "my-gray", depth: 0, community: 1000, grayed: true, trend: 97},
+	}
+	for _, s := range specs {
+		p := models.Post{
+			Author: s.author, Permlink: s.permlink, Category: "general",
+			CreatedAt: now, Depth: s.depth, IsPinned: false,
+		}
+		p.ID = s.id
+		if s.community != 0 {
+			p.CommunityID.Valid = true
+			p.CommunityID.Int64 = s.community
+		}
+		if err := gdb.Create(&p).Error; err != nil {
+			t.Fatalf("seed post %d: %v", s.id, err)
+		}
+		for _, cache := range []models.PostCache{
+			{
+				PostID: s.id, Author: s.author, Permlink: s.permlink, Category: "general",
+				Title: "t-" + s.permlink, CreatedAt: now, PayoutAt: now, UpdatedAt: now,
+				Depth: s.depth, IsGrayed: s.grayed, SCTrend: s.trend, SCHot: s.trend,
+			},
+		} {
+			if s.community != 0 {
+				cache.CommunityID.Valid = true
+				cache.CommunityID.Int64 = s.community
+			}
+			if err := gdb.Create(&cache).Error; err != nil {
+				t.Fatalf("seed cache %d: %v", s.id, err)
+			}
+			temp := models.PostCacheTemp{
+				PostID: cache.PostID, Author: cache.Author, Permlink: cache.Permlink,
+				Category: cache.Category, Title: cache.Title, CreatedAt: now,
+				PayoutAt: cache.PayoutAt, UpdatedAt: now, Depth: cache.Depth,
+				IsGrayed: cache.IsGrayed, SCTrend: cache.SCTrend, SCHot: cache.SCHot,
+			}
+			if s.community != 0 {
+				temp.CommunityID.Valid = true
+				temp.CommunityID.Int64 = s.community
+			}
+			if err := gdb.Create(&temp).Error; err != nil {
+				t.Fatalf("seed cache temp %d: %v", s.id, err)
+			}
+		}
+	}
+
+	// Subscriptions: alice -> hive-1000, dave -> hive-2000.
+	subs := []models.Subscription{
+		{CommunityID: 1000, AccountID: mustRankAccountID(t, gdb, "alice"), CreatedAt: now},
+		{CommunityID: 2000, AccountID: mustRankAccountID(t, gdb, "dave"), CreatedAt: now},
+	}
+	for i := range subs {
+		if err := gdb.Create(&subs[i]).Error; err != nil {
+			t.Fatalf("seed subscription: %v", err)
+		}
+	}
+}
+
+func mustRankAccountID(t *testing.T, gdb *gorm.DB, name string) int64 {
+	t.Helper()
+	var acc models.Account
+	if err := gdb.Where("name = ?", name).First(&acc).Error; err != nil {
+		t.Fatalf("load account %s: %v", name, err)
+	}
+	return acc.ID
+}

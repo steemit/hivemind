@@ -127,13 +127,28 @@ func appendFollowContexts(ctx context.Context, db *gorm.DB, accounts map[int64]m
 
 // postsByID loads lite hive_api post objects by ID, returned in input order
 // together with the distinct authors. Mirrors legacy posts_by_id
-// (hive_api/objects.py): {"posts": [...], "accounts": [...]}.
+// (hive_api/objects.py): {"posts": [...], "accounts": [...]}. When observer
+// is set each post gains a context{reblogged,vote_rshares} object
+// (objects.py:163-167); observer-personalized fields are computed per
+// request and never enter any shared cache.
 func postsByID(ctx context.Context, db *gorm.DB, ids []int64, observer string, lite bool) (map[string]interface{}, error) {
 	if len(ids) == 0 {
 		return map[string]interface{}{
 			"posts":    []map[string]interface{}{},
 			"accounts": []map[string]interface{}{},
 		}, nil
+	}
+
+	// Observer reblog set: one batched IN query for the whole id list
+	// (legacy _reblogged_ids, objects.py:195-199). Votes need no query --
+	// the observer's rshares live in the already-loaded votes CSV.
+	var reblogged map[int64]bool
+	if observer != "" {
+		var err error
+		reblogged, err = observerRebloggedIDs(ctx, db, observer, ids)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var caches []models.PostCache
@@ -193,6 +208,12 @@ func postsByID(ctx context.Context, db *gorm.DB, ids []int64, observer string, l
 		obj["category"] = post.Category
 		obj["is_muted"] = post.IsMuted
 		obj["is_valid"] = post.IsValid
+		if observer != "" {
+			obj["context"] = map[string]interface{}{
+				"reblogged":    reblogged[id],
+				"vote_rshares": observerVoteRshares(cache.Votes, observer),
+			}
+		}
 
 		authorSet[cache.Author] = true
 		byID[id] = obj
@@ -268,6 +289,46 @@ func abs64(v int64) int64 {
 		return -v
 	}
 	return v
+}
+
+// observerVoteRshares returns the observer's rshares on a post from its
+// votes CSV, or nil when the observer has not voted. Mirrors the
+// observer_vote branch of legacy _top_votes (hive_api/objects.py:201-216):
+// name comparison against the first CSV field, rshares from the second. A
+// non-existent observer simply never matches (no account lookup, no error).
+func observerVoteRshares(voteCSV, observer string) interface{} {
+	if voteCSV == "" {
+		return nil
+	}
+	for _, line := range strings.Split(voteCSV, "\n") {
+		parts := strings.Split(line, ",")
+		if len(parts) < 2 || parts[0] != observer {
+			continue
+		}
+		rshares, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		return rshares
+	}
+	return nil
+}
+
+// observerRebloggedIDs returns the subset of `ids` reblogged by the observer.
+// Mirrors legacy _reblogged_ids (hive_api/objects.py:195-199): a single IN
+// query keyed by the observer's name, never per-post lookups.
+func observerRebloggedIDs(ctx context.Context, gdb *gorm.DB, observer string, ids []int64) (map[int64]bool, error) {
+	var reblogs []models.Reblog
+	if err := gdb.WithContext(ctx).
+		Where("account = ? AND post_id IN ?", observer, ids).
+		Find(&reblogs).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[int64]bool, len(reblogs))
+	for _, r := range reblogs {
+		out[r.PostID] = true
+	}
+	return out, nil
 }
 
 // nullString unwraps sql.NullString for JSON output (nil when NULL).
