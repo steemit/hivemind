@@ -49,7 +49,9 @@ func (p *PostAPI) GetPost(ctx *gin.Context, params json.RawMessage) (interface{}
 	}
 
 	postRepo := db.NewPostRepository(p.repo)
-	post, err := postRepo.GetByAuthorPermlink(ctx.Request.Context(), author, permlink)
+	// Legacy bridge _get_post_id filters is_deleted = '0' (methods.py:30-40):
+	// a deleted post is invisible to get_post.
+	post, err := postRepo.GetLiveByAuthorPermlink(ctx.Request.Context(), author, permlink)
 	if err != nil {
 		telemetry.RecordSpanError(span, err)
 		return nil, err
@@ -170,7 +172,8 @@ func (p *PostAPI) GetPostHeader(ctx *gin.Context, params json.RawMessage) (inter
 	}
 
 	postRepo := db.NewPostRepository(p.repo)
-	post, err := postRepo.GetByAuthorPermlink(ctx.Request.Context(), author, permlink)
+	// Legacy get_post_header filters is_deleted = '0' in SQL (support.py:19-27).
+	post, err := postRepo.GetLiveByAuthorPermlink(ctx.Request.Context(), author, permlink)
 	if err != nil {
 		telemetry.RecordSpanError(span, err)
 		return nil, err

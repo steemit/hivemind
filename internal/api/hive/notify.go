@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"github.com/steemit/hivemind/internal/apierrors"
-	"time"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/steemit/hivemind/internal/api/objects"
+	"github.com/steemit/hivemind/internal/apierrors"
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
 )
@@ -37,9 +40,9 @@ func (n *NotifyAPI) PostNotifications(ctx *gin.Context, params json.RawMessage) 
 		return nil, apierrors.PublicError("missing required parameters: author, permlink")
 	}
 
-	minScore := int16(25)
+	minScore := int32(25)
 	if ms, ok := pMap["min_score"].(float64); ok {
-		minScore = int16(ms)
+		minScore = int32(ms)
 	}
 	lastID := int64(0)
 	if li, ok := pMap["last_id"].(float64); ok {
@@ -53,17 +56,20 @@ func (n *NotifyAPI) PostNotifications(ctx *gin.Context, params json.RawMessage) 
 		}
 	}
 
-	// Get post ID
+	// Get post ID. Legacy get_post_id (hive_api/common.py) does NOT filter
+	// is_deleted here — deleted-post notifications are excluded by the query
+	// itself (COALESCE(hp.is_deleted, False) = False) — and asserts
+	// 'post id not found' when the post does not resolve.
 	postRepo := db.NewPostRepository(n.repo)
 	post, err := postRepo.GetByAuthorPermlink(ctx.Request.Context(), author, permlink)
 	if err != nil {
 		return nil, err
 	}
 	if post == nil {
-		return []interface{}{}, nil
+		return nil, apierrors.PublicError("post id not found")
 	}
 
-	// Query notifications
+	// Query notifications (deleted-post notifications filtered by the repo).
 	notifRepo := db.NewNotificationRepository(n.repo)
 	notifications, err := notifRepo.GetByPostID(ctx.Request.Context(), post.ID, minScore, lastID, limit)
 	if err != nil {
@@ -85,9 +91,9 @@ func (n *NotifyAPI) AccountNotifications(ctx *gin.Context, params json.RawMessag
 		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
-	minScore := int16(25)
+	minScore := int32(25)
 	if ms, ok := pMap["min_score"].(float64); ok {
-		minScore = int16(ms)
+		minScore = int32(ms)
 	}
 	lastID := int64(0)
 	if li, ok := pMap["last_id"].(float64); ok {
@@ -101,20 +107,27 @@ func (n *NotifyAPI) AccountNotifications(ctx *gin.Context, params json.RawMessag
 		}
 	}
 
-	// Get account ID
+	// Get account ID. Legacy get_account_id asserts "account not found" for
+	// unknown accounts (hive_api/common.py:36-40).
 	accountRepo := db.NewAccountRepository(n.repo)
 	acc, err := accountRepo.GetByName(ctx.Request.Context(), account)
 	if err != nil {
 		return nil, err
 	}
 	if acc == nil {
-		return []interface{}{}, nil
+		return nil, apierrors.Publicf("account not found: `%s`", account)
 	}
 
-	// For community accounts (hive-*), query by community_id
+	// For community accounts (hive-*), query by community_id and force
+	// min_score=0 (legacy account_notifications, notify.py).
+	isCommunity := strings.HasPrefix(account, "hive-")
+	if isCommunity {
+		minScore = 0
+	}
+
 	notifRepo := db.NewNotificationRepository(n.repo)
 	var notifications []*models.Notification
-	if len(account) >= 5 && account[:5] == "hive-" {
+	if isCommunity {
 		// Get community ID (same as account ID for communities)
 		notifications, err = notifRepo.GetByCommunityID(ctx.Request.Context(), acc.ID, minScore, lastID, limit)
 		if err != nil {
@@ -143,35 +156,35 @@ func (n *NotifyAPI) UnreadNotifications(ctx *gin.Context, params json.RawMessage
 		return nil, apierrors.PublicError("missing required parameter: account")
 	}
 
-	minScore := int16(25)
+	minScore := int32(25)
 	if ms, ok := pMap["min_score"].(float64); ok {
-		minScore = int16(ms)
+		minScore = int32(ms)
 	}
 
-	// Get account
+	// Get account. Legacy get_account_id asserts "account not found" for
+	// unknown accounts.
 	accountRepo := db.NewAccountRepository(n.repo)
 	acc, err := accountRepo.GetByName(ctx.Request.Context(), account)
 	if err != nil {
 		return nil, err
 	}
 	if acc == nil {
-		return map[string]interface{}{
-			"lastread": "1970-01-01T00:00:00",
-			"unread":   0,
-		}, nil
+		return nil, apierrors.Publicf("account not found: `%s`", account)
 	}
 
-	// Count unread notifications
+	// Count unread notifications. Note: legacy unread SQL has no
+	// deleted-post filter and no hive-* min_score override.
 	notifRepo := db.NewNotificationRepository(n.repo)
 	unread, err := notifRepo.CountUnread(ctx.Request.Context(), acc.ID, acc.LastreadAt, minScore)
 	if err != nil {
 		return nil, err
 	}
 
-	// Format lastread timestamp
-	lastread := acc.LastreadAt.Format(time.RFC3339)
+	// Legacy renders lastread as str(datetime): 'YYYY-MM-DD HH:MM:SS'
+	// (space-separated, no timezone).
+	lastread := acc.LastreadAt.Format("2006-01-02 15:04:05")
 	if acc.LastreadAt.IsZero() {
-		lastread = "1970-01-01T00:00:00"
+		lastread = "1970-01-01 00:00:00"
 	}
 
 	return map[string]interface{}{
@@ -290,9 +303,11 @@ func (n *NotifyAPI) renderNotifications(ctx context.Context, notifications []*mo
 			"id":    notif.ID,
 			"type":  getNotifyTypeName(notif.Type),
 			"score": notif.Score,
-			"date":  notif.CreatedAt.Format(time.RFC3339),
-			"msg":   renderMessage(notif.Type, srcName, dstName, author, permlink, communityTitle, notif.Payload),
-			"url":   renderURL(author, permlink, communityName, srcName, dstName),
+			// Legacy renders dates with json_date: 'T'-joined, no timezone
+			// (hive_api/notify.py _render).
+			"date": objects.JsonDate(notif.CreatedAt),
+			"msg":  renderMessage(notif.Type, srcName, dstName, author, permlink, communityTitle, notif.Payload),
+			"url":  renderURL(author, permlink, communityName, srcName, dstName),
 		}
 
 		result = append(result, notifObj)
@@ -368,14 +383,16 @@ func renderMessage(typeID int16, src, dst, author, permlink, communityTitle stri
 		return "unknown notification"
 	}
 
-	// Special handling for vote notifications
+	// Special handling for vote notifications (legacy _render_msg, notify.py):
+	// a "$x.yz" payload of at least $0.01 appends " (<payload>)" to the
+	// message and re-formats the amount as "$%.2f"; below $0.01 (or a payload
+	// that is not parseable as an amount) the message stays bare and the
+	// payload is not inserted. Legacy crashes on an unparseable payload
+	// (float()); Go treats it as the bare-message case instead.
 	if typeID == models.NotifyTypeVote && payload.Valid && len(payloadStr) > 1 {
-		// Parse amount from payload (format: "$0.123")
-		if payloadStr[0] == '$' {
-			amt := payloadStr[1:]
-			if len(amt) > 0 {
-				msg += " (<payload>)"
-			}
+		if amt, perr := strconv.ParseFloat(payloadStr[1:], 64); perr == nil && amt >= 0.01 {
+			msg += " (<payload>)"
+			payloadStr = fmt.Sprintf("$%.2f", amt)
 		}
 	}
 

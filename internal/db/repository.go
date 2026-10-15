@@ -371,11 +371,18 @@ func (r *NotificationRepository) Create(ctx context.Context, notification *model
 	return r.db.WithContext(ctx).Create(notification).Error
 }
 
+// notifPostNotDeletedSQL mirrors legacy _notifs_sql's
+// `COALESCE(hp.is_deleted, False) = False` join condition (hive_api/notify.py):
+// notifications pointing at a deleted post are excluded, while notifications
+// without any post reference (LEFT JOIN miss) pass through. NOT EXISTS is the
+// SQL-equivalent of that COALESCE form.
+const notifPostNotDeletedSQL = `NOT EXISTS (SELECT 1 FROM hive_posts hp WHERE hp.id = hive_notifs.post_id AND hp.is_deleted = TRUE)`
+
 // GetByDstID retrieves notifications by destination account ID
-func (r *NotificationRepository) GetByDstID(ctx context.Context, dstID int64, minScore int16, lastID int64, limit int) ([]*models.Notification, error) {
+func (r *NotificationRepository) GetByDstID(ctx context.Context, dstID int64, minScore int32, lastID int64, limit int) ([]*models.Notification, error) {
 	var notifications []*models.Notification
 	query := r.db.WithContext(ctx).
-		Where("dst_id = ? AND score >= ?", dstID, minScore).
+		Where("dst_id = ? AND score >= CAST(? AS integer) AND "+notifPostNotDeletedSQL, dstID, minScore).
 		Order("id DESC").
 		Limit(limit)
 
@@ -390,10 +397,10 @@ func (r *NotificationRepository) GetByDstID(ctx context.Context, dstID int64, mi
 }
 
 // GetByCommunityID retrieves notifications by community ID
-func (r *NotificationRepository) GetByCommunityID(ctx context.Context, communityID int64, minScore int16, lastID int64, limit int) ([]*models.Notification, error) {
+func (r *NotificationRepository) GetByCommunityID(ctx context.Context, communityID int64, minScore int32, lastID int64, limit int) ([]*models.Notification, error) {
 	var notifications []*models.Notification
 	query := r.db.WithContext(ctx).
-		Where("community_id = ? AND score >= ?", communityID, minScore).
+		Where("community_id = ? AND score >= CAST(? AS integer) AND "+notifPostNotDeletedSQL, communityID, minScore).
 		Order("id DESC").
 		Limit(limit)
 
@@ -408,10 +415,10 @@ func (r *NotificationRepository) GetByCommunityID(ctx context.Context, community
 }
 
 // GetByPostID retrieves notifications by post ID
-func (r *NotificationRepository) GetByPostID(ctx context.Context, postID int64, minScore int16, lastID int64, limit int) ([]*models.Notification, error) {
+func (r *NotificationRepository) GetByPostID(ctx context.Context, postID int64, minScore int32, lastID int64, limit int) ([]*models.Notification, error) {
 	var notifications []*models.Notification
 	query := r.db.WithContext(ctx).
-		Where("post_id = ? AND score >= ?", postID, minScore).
+		Where("post_id = ? AND score >= CAST(? AS integer) AND "+notifPostNotDeletedSQL, postID, minScore).
 		Order("id DESC").
 		Limit(limit)
 
@@ -425,12 +432,15 @@ func (r *NotificationRepository) GetByPostID(ctx context.Context, postID int64, 
 	return notifications, nil
 }
 
-// CountUnread counts unread notifications for an account
-func (r *NotificationRepository) CountUnread(ctx context.Context, dstID int64, lastreadAt time.Time, minScore int16) (int64, error) {
+// CountUnread counts unread notifications for an account.
+// Legacy unread_notifications has NO deleted-post filter (its SQL only checks
+// dst_id/score/created_at, hive_api/notify.py unread_notifications), so none
+// is applied here either.
+func (r *NotificationRepository) CountUnread(ctx context.Context, dstID int64, lastreadAt time.Time, minScore int32) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).
 		Model(&models.Notification{}).
-		Where("dst_id = ? AND score >= ? AND created_at > ?", dstID, minScore, lastreadAt).
+		Where("dst_id = ? AND score >= CAST(? AS integer) AND created_at > ?", dstID, minScore, lastreadAt).
 		Count(&count).Error
 	return count, err
 }

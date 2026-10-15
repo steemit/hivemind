@@ -220,6 +220,13 @@ func jsonDate(ts time.Time) string {
 	return ts.Format("2006-01-02T15:04:05")
 }
 
+// JsonDate exposes jsonDate for the other API packages (bridge, hive) that
+// also render legacy json_date timestamps (e.g. bridge.get_profile dates,
+// notify notification dates).
+func JsonDate(ts time.Time) string {
+	return jsonDate(ts)
+}
+
 // postURL mirrors legacy objects.py:183: the URL comes from the steemd
 // raw_json (comment URLs point at the root post with a #/@author/permlink
 // fragment); the constructed form is only a fallback for rows whose
