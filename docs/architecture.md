@@ -251,6 +251,25 @@ Key configuration options:
 
 - **Docker**: Containerized deployment
 - **Health Checks**: `/health` and `/.well-known/healthcheck.json` endpoints
+  (server main port; the indexer serves `/health` on its observability
+  port). Real semantics per legacy `serve.py`: 500 when the database is
+  unreachable, and — for reader processes only — when the indexed head
+  block lags more than `HIVE_HEALTH_MAX_HEAD_AGE` (1h default; the
+  indexer is exempt, legacy `is_syncer`). The head probe runs on a
+  dedicated single-connection pool so a saturated main pool cannot starve
+  it (legacy isolated health engine).
+- **Sync lag sampling**: `/head_age` answers `db_head_age` in seconds as
+  plain text (200 whenever the database answers).
 - **Logging**: Structured logging for monitoring
-- **Metrics**: Can be extended with Prometheus metrics
+- **Metrics**: Both binaries serve `/metrics` on
+  `HIVE_PROMETHEUS_PORT` (server 9090 / indexer 9091) from one unified
+  registry: the `hivemind_*` counters/histograms, the DB connection pool
+  in_use/idle/wait gauges, the Go runtime family (`go_goroutines`,
+  `go_memstats_*`, `go_gc_duration_seconds`) and the OpenTelemetry
+  bridge. pprof is mounted at `/debug/pprof/*` on the same port
+  (`HIVE_PPROF_ENABLED`, default on — keep the port internal-only).
+- **Graceful shutdown**: the API server drains in-flight requests within
+  `HIVE_HTTP_SHUTDOWN_GRACE` (45s default, >= the 30s statement timeout)
+  and cancels their contexts when the grace expires; the indexer waits
+  for the in-flight block batch to commit before tearing down.
 

@@ -61,8 +61,20 @@ compose/README, derive names from `toEnvKey`, not memory.
   events — keep large arrays out of hot paths).
 - Metrics: `metrics.go` declares promauto families (requests, db, cache,
   posts, follows, communities, notifications) recorded via `telemetry.Record*`
-  helpers. **The exporter endpoint (`/metrics` HTTP listener) is a known open
-  gap** — recording works, exposure does not (see pitfalls).
+  helpers. Since PR#430 every family is built on the shared
+  `telemetry.Registry` (`registry.go`) — never the client_golang default
+  registry — and the OpenTelemetry Prometheus exporter is bridged onto the
+  same registry, so one scrape carries both. `metricsserver.go` exposes it:
+  both binaries serve `/metrics` (plus `/debug/pprof/*` when
+  `HIVE_PPROF_ENABLED`, default on) on `HIVE_PROMETHEUS_PORT`; the indexer
+  additionally mounts `/health` and `/head_age` there.
+  `RegisterDBPoolMetrics(sqlDB)` adds the connection-pool in_use/idle/wait
+  gauges — call it once after `db.New` (both mains do).
+- Health (`internal/health`, PR#430): real `/health` + `/head_age` with
+  legacy serve.py semantics (500 on DB failure; readers also 500 when the
+  head lags past `HIVE_HEALTH_MAX_HEAD_AGE`, 1h; the indexer is exempt —
+  legacy `is_syncer`). The head probe uses a dedicated one-connection
+  pool (`NewDBHeadQuerier`) so a saturated main pool cannot starve it.
 - Two tracer entry points coexist (`telemetry.StartSpanWithName` with an
   internal tracer, and `otel.Tracer("hivemind")` in middleware/steem) — both
   end up at the same provider; prefer `StartSpanWithName` in new code.
@@ -129,11 +141,18 @@ Common order: `config.Load()` → `logging.InitLogger()` → `telemetry.Init()`
 
 - **Server** (`cmd/server/main.go`): installs shared mutes, optional steemd
   client (lazy; server starts even if steemd is down), optional Redis, Gin
-  with `Recovery → Tracing → Metrics` middleware, `POST /` + health routes;
-  SIGINT/SIGTERM → `srv.Shutdown(10 s)`.
+  with `Recovery → Tracing → Metrics` middleware, `POST /` + the real
+  health routes (`/health`, `/.well-known/healthcheck.json`, `/head_age`
+  from `internal/health`); SIGINT/SIGTERM → `shutdownServer`: drain within
+  `HIVE_HTTP_SHUTDOWN_GRACE` (45 s default, >= the 30 s statement timeout,
+  enforced by `Validate`), then cancel the request root context (every
+  request derives from it via `BaseContext`) and a bounded 5 s unwind
+  wait.
 - **Indexer** (`cmd/indexer/main.go`): db + migrations → mutes → steemd
-  client → `indexer.NewSync` → `Run(ctx)` in a goroutine; signal cancels the
-  context. `Run` = initial-sync detection → fast sync → background CacheSync
+  client → observability listener (metrics + pprof + `/health` +
+  `/head_age` on `HIVE_PROMETHEUS_PORT`) → `indexer.NewSync` → `Run(ctx)`
+  in a goroutine; signal cancels the context. `Run` = initial-sync
+  detection → fast sync → background CacheSync
   / jobs goroutines → irreversible polling loop.
 
 `logger.Fatal` skips deferred cleanups (zap calls `os.Exit`); anything that

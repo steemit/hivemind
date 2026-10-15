@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/steemit/hivemind/internal/db"
+	"github.com/steemit/hivemind/internal/health"
 	"github.com/steemit/hivemind/internal/indexer"
 	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/config"
@@ -51,6 +55,17 @@ func main() {
 	}
 	defer database.Close()
 
+	// Expose the connection pool gauges on the shared metrics registry
+	// (planned PR#430; the indexer's write path is what saturates the pool,
+	// so its water level is the primary signal).
+	if sqlDB, err := database.DB.DB(); err == nil {
+		if err := telemetry.RegisterDBPoolMetrics(sqlDB); err != nil {
+			logger.Error("Failed to register DB pool metrics", zap.Error(err))
+		}
+	} else {
+		logger.Error("Failed to get underlying sql.DB for pool metrics", zap.Error(err))
+	}
+
 	// Install the shared mutes list (irredeemables) used by CachedPost
 	// notifications (PR#6d). Empty URL = disabled list.
 	steem.SetSharedMutes(steem.NewMutes(cfg.Steem.MutedAccountsURL))
@@ -79,6 +94,49 @@ func main() {
 	steemClient, err := steem.New(&cfg.Steem)
 	if err != nil {
 		logger.Fatal("Failed to initialize Steem client", zap.Error(err))
+	}
+
+	// Minimal observability HTTP listener (planned PR#430, 05-deploy.md
+	// sections 1.1-1.3): /metrics + /debug/pprof + /health + /head_age on
+	// the dedicated HIVE_PROMETHEUS_PORT (9091 in compose). The legacy
+	// indexer served no HTTP at all; this listener keeps the EB health
+	// check and the sync-lag sampling working for the writer process.
+	//
+	// The checker is flagged as a sync service: like the legacy is_syncer
+	// branch, a writer lagging during a multi-hour catch-up is healthy, so
+	// /health only fails when the database is unreachable (head lag is
+	// watched through /head_age and the block-rate metrics instead).
+	headQuerier, err := health.NewDBHeadQuerier(cfg.Database.URL)
+	if err != nil {
+		logger.Fatal("Failed to open health check pool", zap.Error(err))
+	}
+	defer headQuerier.Close()
+	healthChecker := health.NewChecker(headQuerier, cfg.Telemetry.HealthMaxHeadAge, true)
+
+	metricsServer, err := telemetry.NewMetricsServer(telemetry.MetricsServerConfig{
+		Enabled:      cfg.Telemetry.PrometheusEnabled,
+		Port:         cfg.Telemetry.PrometheusPort,
+		PprofEnabled: cfg.Telemetry.PprofEnabled,
+	}, map[string]http.Handler{
+		"/health":   http.HandlerFunc(healthChecker.HandleHealth),
+		"/head_age": http.HandlerFunc(healthChecker.HandleHeadAge),
+	})
+	if err != nil {
+		logger.Fatal("Failed to create metrics server", zap.Error(err))
+	}
+	if metricsServer != nil {
+		go func() {
+			if err := metricsServer.Serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("Metrics server failed", zap.Error(err))
+			}
+		}()
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := metricsServer.Shutdown(ctx); err != nil {
+				logger.Error("Metrics server shutdown failed", zap.Error(err))
+			}
+		}()
 	}
 
 	// Create sync manager

@@ -16,10 +16,10 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/steemit/hivemind/internal/apierrors"
+	"github.com/steemit/hivemind/pkg/telemetry"
 )
 
 // newTestEngine builds a gin engine around a JSONRPCHandler with a set of
@@ -801,7 +801,9 @@ func TestCORSOnSuccessAndErrors(t *testing.T) {
 // label set, value stripped), with its current value.
 func rpcMetricSamples(t *testing.T) map[string]float64 {
 	t.Helper()
-	handler := promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{})
+	// hivemind_* metrics live on the unified telemetry registry since the
+	// PR#430 registry unification, no longer on DefaultGatherer.
+	handler := promhttp.HandlerFor(telemetry.Registry, promhttp.HandlerOpts{})
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)

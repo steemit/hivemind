@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -27,6 +28,14 @@ import (
 var (
 	tracer trace.Tracer
 )
+
+// meterProviderOnce guards the otel Prometheus exporter registration. The
+// exporter registers a collector on the shared Registry; a second
+// registration attempt would fail with "duplicate metrics collector
+// registration attempted", so repeated Init calls (tests, embedded use)
+// keep the first provider. The resource (service name) of the first call
+// is the one that labels the metrics.
+var meterProviderOnce sync.Once
 
 // Init initializes OpenTelemetry with OTLP and Prometheus exporters
 func Init(cfg *config.TelemetryConfig) (func(), error) {
@@ -91,21 +100,13 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 
 	logging.GetLogger().Info("OTLP trace exporter initialized", zap.String("endpoint", endpoint))
 
-	// Initialize metric provider with Prometheus exporter
+	// Initialize metric provider with Prometheus exporter, bridged onto the
+	// shared Registry (registry.go) so otel SDK metrics and the promauto
+	// hivemind_* metrics are scraped from the same /metrics endpoint.
 	if cfg.PrometheusEnabled {
-		exporter, err := prometheus.New()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create Prometheus exporter: %w", err)
+		if err := initMeterProvider(res); err != nil {
+			return nil, fmt.Errorf("failed to initialize Prometheus exporter: %w", err)
 		}
-
-		mp := metric.NewMeterProvider(
-			metric.WithReader(exporter),
-			metric.WithResource(res),
-		)
-
-		otel.SetMeterProvider(mp)
-		shutdownFuncs = append(shutdownFuncs, mp.Shutdown)
-
 		logging.GetLogger().Info("Prometheus exporter initialized", zap.Int("port", cfg.PrometheusPort))
 	}
 
@@ -136,6 +137,31 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 	}
 
 	return shutdown, nil
+}
+
+// initMeterProvider creates the otel Prometheus exporter bound to the
+// shared Registry (registry.go) and installs the global meter provider.
+// See meterProviderOnce for the single-registration guard. The provider
+// needs no shutdown hook (unlike the trace batcher): the Prometheus
+// exporter is pull-based, so nothing is buffered to flush.
+func initMeterProvider(res *resource.Resource) error {
+	var err error
+	meterProviderOnce.Do(func() {
+		var exporter *prometheus.Exporter
+		exporter, err = prometheus.New(prometheus.WithRegisterer(Registry))
+		if err != nil {
+			return
+		}
+
+		opts := []metric.Option{metric.WithReader(exporter)}
+		if res != nil {
+			opts = append(opts, metric.WithResource(res))
+		}
+		mp := metric.NewMeterProvider(opts...)
+
+		otel.SetMeterProvider(mp)
+	})
+	return err
 }
 
 // Tracer returns the global tracer

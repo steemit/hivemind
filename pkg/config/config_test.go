@@ -259,3 +259,96 @@ func TestLoadMaxBodyBytes(t *testing.T) {
 		t.Errorf("Server.MaxBodyBytes = %d, want 12345 (from HIVE_HTTP_MAX_BODY_BYTES)", cfg.Server.MaxBodyBytes)
 	}
 }
+
+// TestValidateShutdownGrace pins the PR#430 graceful-shutdown invariant
+// (05-deploy.md section 1.4): the grace window must cover the statement
+// timeout so DB-bounded requests can complete; 0 selects the default and
+// negative values are rejected.
+func TestValidateShutdownGrace(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Database: DatabaseConfig{
+				URL: "postgresql://test@localhost/test", MaxOpenConns: 25,
+				MaxIdleConns: 10, StatementTimeout: 30 * time.Second,
+			},
+			Steem: SteemConfig{URL: "u", MaxBatch: 50, MaxWorkers: 4},
+		}
+	}
+
+	// Zero value (unset -> default 45s) must validate, including against a
+	// longer statement timeout (hand-built configs).
+	if err := base().Validate(); err != nil {
+		t.Errorf("zero ShutdownGracePeriod should be valid, got: %v", err)
+	}
+
+	// Default 45s >= statement timeout 30s.
+	c := base()
+	c.Server.ShutdownGracePeriod = 45 * time.Second
+	if err := c.Validate(); err != nil {
+		t.Errorf("45s grace vs 30s statement timeout should be valid, got: %v", err)
+	}
+
+	// Explicit grace below the statement timeout is rejected.
+	c = base()
+	c.Server.ShutdownGracePeriod = 20 * time.Second
+	if err := c.Validate(); err == nil {
+		t.Error("expected error for http_shutdown_grace < db_statement_timeout")
+	}
+
+	// Negative grace is rejected.
+	c = base()
+	c.Server.ShutdownGracePeriod = -time.Second
+	if err := c.Validate(); err == nil {
+		t.Error("expected error for negative http_shutdown_grace")
+	}
+
+	// With the statement timeout disabled (0) any non-negative grace is OK.
+	c = base()
+	c.Database.StatementTimeout = 0
+	c.Server.ShutdownGracePeriod = time.Second
+	if err := c.Validate(); err != nil {
+		t.Errorf("grace with disabled statement timeout should be valid, got: %v", err)
+	}
+}
+
+// TestLoadHealthObservabilityDefaults pins the PR#430 defaults and env
+// overrides for the new observability knobs.
+func TestLoadHealthObservabilityDefaults(t *testing.T) {
+	t.Setenv("HIVE_DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+	if cfg.Telemetry.HealthMaxHeadAge != time.Hour {
+		t.Errorf("default HealthMaxHeadAge = %v, want 1h (legacy max_head_age)", cfg.Telemetry.HealthMaxHeadAge)
+	}
+	if !cfg.Telemetry.PprofEnabled {
+		t.Error("default PprofEnabled should be true")
+	}
+	if cfg.Server.ShutdownGracePeriod != 45*time.Second {
+		t.Errorf("default ShutdownGracePeriod = %v, want 45s", cfg.Server.ShutdownGracePeriod)
+	}
+
+	t.Setenv("HIVE_HEALTH_MAX_HEAD_AGE", "5m")
+	t.Setenv("HIVE_PPROF_ENABLED", "false")
+	t.Setenv("HIVE_HTTP_SHUTDOWN_GRACE", "2m")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Failed to load config with overrides: %v", err)
+	}
+	if cfg.Telemetry.HealthMaxHeadAge != 5*time.Minute {
+		t.Errorf("HealthMaxHeadAge = %v, want 5m (from HIVE_HEALTH_MAX_HEAD_AGE)", cfg.Telemetry.HealthMaxHeadAge)
+	}
+	if cfg.Telemetry.PprofEnabled {
+		t.Error("PprofEnabled should be false (from HIVE_PPROF_ENABLED)")
+	}
+	if cfg.Server.ShutdownGracePeriod != 2*time.Minute {
+		t.Errorf("ShutdownGracePeriod = %v, want 2m (from HIVE_HTTP_SHUTDOWN_GRACE)", cfg.Server.ShutdownGracePeriod)
+	}
+
+	// Negative head age threshold is rejected.
+	t.Setenv("HIVE_HEALTH_MAX_HEAD_AGE", "-1s")
+	if _, err := Load(); err == nil {
+		t.Error("expected error for negative health_max_head_age")
+	}
+}

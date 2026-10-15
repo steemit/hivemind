@@ -104,6 +104,14 @@ type ServerConfig struct {
 	// 10MB; 0 selects the default. The legacy aiohttp default is 1MB
 	// (client_max_size).
 	MaxBodyBytes int64
+
+	// ShutdownGracePeriod bounds the graceful-shutdown window on SIGTERM
+	// (planned PR#430, 05-deploy.md section 1.4): the server waits this
+	// long for in-flight requests to finish, then cancels their contexts.
+	// It must be >= db_statement_timeout so every request bounded by the
+	// statement timeout can complete naturally (default 45s vs the 30s
+	// statement timeout); 0 selects the default.
+	ShutdownGracePeriod time.Duration
 }
 
 // IndexerConfig holds indexer configuration
@@ -155,6 +163,18 @@ type TelemetryConfig struct {
 	PrometheusEnabled bool
 	PrometheusPort    int
 	ServiceName       string
+
+	// HealthMaxHeadAge is the /health head-lag threshold (planned PR#430,
+	// 05-deploy.md section 1.2). Readers answer 500 when the indexed head
+	// block is older than this (legacy serve.py max_head_age, 1h). 0
+	// disables the lag criterion (catch-up deployments). Sync-service
+	// processes (the indexer) are always exempt.
+	HealthMaxHeadAge time.Duration
+
+	// PprofEnabled mounts /debug/pprof/* on the metrics port of both
+	// binaries (05-deploy.md section 1.3). The metrics port is expected to
+	// be internal-only; do not expose it publicly while this is on.
+	PprofEnabled bool
 }
 
 // Load loads configuration from environment variables and config file
@@ -204,12 +224,13 @@ func Load() (*Config, error) {
 			Enabled: getString("redis_url", "") != "",
 		},
 		Server: ServerConfig{
-			Port:         getInt("http_server_port", 8080),
-			Host:         getString("http_server_host", "0.0.0.0"),
-			ReadTimeout:  getDuration("http_read_timeout", 30*time.Second),
-			WriteTimeout: getDuration("http_write_timeout", 30*time.Second),
-			IdleTimeout:  getDuration("http_idle_timeout", 120*time.Second),
-			MaxBodyBytes: getInt64("http_max_body_bytes", 10<<20),
+			Port:                getInt("http_server_port", 8080),
+			Host:                getString("http_server_host", "0.0.0.0"),
+			ReadTimeout:         getDuration("http_read_timeout", 30*time.Second),
+			WriteTimeout:        getDuration("http_write_timeout", 30*time.Second),
+			IdleTimeout:         getDuration("http_idle_timeout", 120*time.Second),
+			MaxBodyBytes:        getInt64("http_max_body_bytes", 10<<20),
+			ShutdownGracePeriod: getDuration("http_shutdown_grace", 45*time.Second),
 		},
 		Indexer: IndexerConfig{
 			TrailBlocks:            getInt("trail_blocks", 2),
@@ -237,6 +258,8 @@ func Load() (*Config, error) {
 			PrometheusEnabled: getBool("prometheus_enabled", true),
 			PrometheusPort:    getInt("prometheus_port", 9090),
 			ServiceName:       getString("service_name", "hivemind"),
+			HealthMaxHeadAge:  getDuration("health_max_head_age", time.Hour),
+			PprofEnabled:      getBool("pprof_enabled", true),
 		},
 	}
 
@@ -267,6 +290,7 @@ func setDefaults() {
 	viper.SetDefault("http_write_timeout", 30*time.Second)
 	viper.SetDefault("http_idle_timeout", 120*time.Second)
 	viper.SetDefault("http_max_body_bytes", 10<<20)
+	viper.SetDefault("http_shutdown_grace", 45*time.Second)
 	viper.SetDefault("log_level", "INFO")
 	viper.SetDefault("log_format", "json")
 	viper.SetDefault("log_scalyr_format", true)
@@ -281,6 +305,8 @@ func setDefaults() {
 	viper.SetDefault("prometheus_enabled", true)
 	viper.SetDefault("prometheus_port", 9090)
 	viper.SetDefault("service_name", "hivemind")
+	viper.SetDefault("health_max_head_age", time.Hour)
+	viper.SetDefault("pprof_enabled", true)
 }
 
 func getString(key, defaultValue string) string {
@@ -437,6 +463,23 @@ func (c *Config) Validate() error {
 	// to prevent.
 	if c.Server.MaxBodyBytes < 0 || c.Server.MaxBodyBytes > 1<<30 {
 		return fmt.Errorf("http_max_body_bytes must be between 0 (default) and %d bytes", 1<<30)
+	}
+	// Graceful shutdown: 0 selects the default (45s); negative is invalid.
+	// When set explicitly it must cover the statement timeout so every
+	// DB-bounded request can complete inside the grace window (planned
+	// PR#430, 05-deploy.md section 1.4).
+	if c.Server.ShutdownGracePeriod < 0 {
+		return fmt.Errorf("http_shutdown_grace must not be negative (0 = default)")
+	}
+	if c.Server.ShutdownGracePeriod > 0 && c.Database.StatementTimeout > 0 &&
+		c.Server.ShutdownGracePeriod < c.Database.StatementTimeout {
+		return fmt.Errorf("http_shutdown_grace (%s) must be >= db_statement_timeout (%s) so in-flight statements can complete",
+			c.Server.ShutdownGracePeriod, c.Database.StatementTimeout)
+	}
+	// /health head-lag threshold: 0 disables the criterion (catch-up
+	// deployments); negative is invalid.
+	if c.Telemetry.HealthMaxHeadAge < 0 {
+		return fmt.Errorf("health_max_head_age must not be negative (0 = disabled)")
 	}
 	return nil
 }
