@@ -41,8 +41,22 @@ func (p *PostAPI) GetPost(ctx *gin.Context, params json.RawMessage) (interface{}
 
 	author, _ := pMap["author"].(string)
 	permlink, _ := pMap["permlink"].(string)
+	// observer produces no output field (legacy load_posts has no observer
+	// parameter; Q4 03-api.md §三-4), but legacy methods.py:80 still
+	// resolves it -- an unknown account is an error.
 	observer, _ := pMap["observer"].(string)
-	_ = observer // TODO: observer context (user-post state)
+	if observer != "" {
+		var obsAcc models.Account
+		if err := p.repo.DB().WithContext(ctx.Request.Context()).
+			Select("id").
+			Where("name = ?", observer).
+			First(&obsAcc).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, apierrors.Publicf("account not found: `%s`", observer)
+			}
+			return nil, err
+		}
+	}
 
 	telemetry.AddSpanAttributes(span, map[string]string{
 		"author":   author,

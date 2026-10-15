@@ -449,7 +449,9 @@ Fetch a single post.
 **Parameters:**
 - `author` (string, required)
 - `permlink` (string, required)
-- `observer` (string, optional): Observer account for personalized content
+- `observer` (string, optional): Accepted for parity but produces no output
+  field — legacy's get_post observer logic is itself a TODO (methods.py:80);
+  there is no personalized content on this method.
 
 **Returns:** Post object
 
@@ -495,12 +497,14 @@ Query posts sorted by given method.
 - `start_author` (string, optional)
 - `start_permlink` (string, optional)
 - `limit` (integer, optional): Default 20, max 100
-- `tag` (string, optional): Filter by tag
-- `observer` (string, optional)
+- `tag` (string, optional): Filter by tag; `my` restricts results to the
+  observer's subscribed communities, `all`/`hive-*` select community mode
+- `observer` (string, optional): Resolved when supplied (an unknown account
+  is an error, legacy get_account_id); read only for `tag='my'`
 
 **Returns:** Array of post objects
 
-**Note:** Results are cached based on sort type (3s for 'created', 300s for 'trending'/'hot', etc.)
+**Note:** Results are cached based on sort type (3s for 'created', 300s for 'trending'/'hot', etc.). For `tag='my'` the observer id participates in the cache key (the one personalized sort); every other sort shares one key regardless of observer.
 
 ### bridge.get_account_posts
 
@@ -512,7 +516,9 @@ Get posts for an account by type.
 - `start_author` (string, optional)
 - `start_permlink` (string, optional)
 - `limit` (integer, optional): Default 20, max 100
-- `observer` (string, optional)
+- `observer` (string, optional): Accepted for parity but produces no output
+  field — in legacy it only ever entered the response-cache key
+  (methods.py:203-212) and this method is served without a response cache
 
 **Returns:** Array of post objects
 
@@ -747,10 +753,16 @@ Get blog feed (posts and reblogs).
 **Parameters:**
 - `account` (string, required)
 - `limit` (integer, optional): Default 10, max 50
-- `observer` (string, optional)
+- `observer` (string, optional): When supplied, every post gains a
+  `context` object `{reblogged: bool, vote_rshares: int|null}` — whether the
+  observer reblogged the post (one batched `hive_reblogs` lookup) and the
+  observer's vote rshares from the votes CSV (null when they did not vote).
+  Without an observer there is no `context` key.
 - `last_post` (string, optional): Last post URL for pagination
 
-**Returns:** Array of post objects
+**Returns:** `{posts: [...], accounts: [...]}` — lite post objects (with
+`context` under an observer) plus the distinct authors (whose own
+`context{followed,muted?}` follows the accounts contract).
 
 #### hive_api.list_account_posts
 
@@ -759,10 +771,12 @@ Get account's posts and comments.
 **Parameters:**
 - `account` (string, required)
 - `limit` (integer, optional): Default 10, max 50
-- `observer` (string, optional)
+- `observer` (string, optional): Same post `context{reblogged, vote_rshares}`
+  contract as `list_account_blog`
 - `last_post` (string, optional)
 
-**Returns:** Array of post objects
+**Returns:** `{posts: [...], accounts: [...]}` (same shape as
+`list_account_blog`)
 
 #### hive_api.list_account_feed
 
@@ -771,20 +785,47 @@ Get personalized feed (blogs and resteems from follows).
 **Parameters:**
 - `account` (string, required)
 - `limit` (integer, optional): Default 10, max 50
-- `observer` (string, optional)
+- `observer` (string, optional): Same post `context{reblogged, vote_rshares}`
+  contract as `list_account_blog`
 - `last_post` (string, optional)
 
-**Returns:** Array of post objects with `reblogged_by` field
+**Returns:** `{posts: [...], accounts: [...]}` — posts carry `reblogged_by`
+attribution for resteems, plus `context` under an observer
 
 ### Stats APIs
 
 #### bridge.get_payout_stats
 
-Get payout statistics.
+Get payout statistics for building a treemap. Aggregated at query time from
+unpaid `hive_posts_cache` rows (`is_paidout='0'`, no depth filter) with the
+same SQL semantics as the legacy `payout_stats` materialization, and cached
+in-process for 60 minutes (no background writer — the indexer gains no new
+write responsibility for this read-only endpoint). The cached aggregation is
+shared process-wide; this method has no observer dimension.
 
-**Parameters:** (varies)
+**Parameters:**
+- `limit` (integer, optional): Default 250, max 250 (legacy valid_limit)
 
-**Returns:** Payout statistics object
+**Returns:** `{items, total, blogs}` where each item is
+`[url, label, payout, posts, authors]`:
+
+```json
+{
+  "items": [
+    ["hive-123456", "Community Title", 123.456, 42, 17],
+    ["@alice", "@alice", 9.5, 3, null]
+  ],
+  "total": 987.65,
+  "blogs": 12.34
+}
+```
+
+Community rows carry `(name, title)` and a distinct-author count;
+non-community ("blogs") rows are author-level: `('@'+author)` for both url
+and label with a null `authors`. Author-level rows inside a community never
+surface in items. `total` is the unpaid payout across all rows; `blogs` is
+the unpaid non-community payout. (Divergence: on an empty index legacy
+raised `float(None)`; Go returns `{items: [], total: 0, blogs: 0}`.)
 
 ## Hive Core API
 

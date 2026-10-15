@@ -215,8 +215,10 @@ func scanPostIDs(tx *gorm.DB) ([]int64, error) {
 // GetRankedPostIDs returns ranked post IDs for bridge.get_ranked_posts.
 // It mirrors legacy bridge cursor.pids_by_ranked: community dispatch for
 // tag='my'/'all'/'hive-*' (vs category/tag mode otherwise), then first-page
-// pinned prepends for trending/created.
-func (c *Cursor) GetRankedPostIDs(ctx context.Context, sort, startAuthor, startPermlink string, limit int, tag string) ([]int64, error) {
+// pinned prepends for trending/created. tag='my' restricts the set to the
+// observer's subscribed communities (_subscribed, bridge cursor.py:61-63);
+// observerID 0 (no observer) yields an empty subscription set and no rows.
+func (c *Cursor) GetRankedPostIDs(ctx context.Context, sort, startAuthor, startPermlink string, limit int, tag string, observerID int64) ([]int64, error) {
 	// Community dispatch. communityMode=false means category/tag mode.
 	var cids []int64
 	communityMode := false
@@ -224,9 +226,16 @@ func (c *Cursor) GetRankedPostIDs(ctx context.Context, sort, startAuthor, startP
 	switch {
 	case tag == "my":
 		// Legacy _subscribed(observer_id): without an observer the
-		// subscription set is empty and pids_by_ranked returns []. Observer
-		// context (tag='my' subscribed communities) is planned PR#417.
-		return []int64{}, nil
+		// subscription set is empty and pids_by_ranked returns [].
+		subscribed, err := c.subscribedCommunityIDs(ctx, observerID)
+		if err != nil {
+			return nil, err
+		}
+		if len(subscribed) == 0 {
+			return []int64{}, nil
+		}
+		cids = subscribed
+		communityMode = true
 	case tag == "all":
 		cids = []int64{}
 		communityMode = true
@@ -464,6 +473,21 @@ func (c *Cursor) pinnedPostIDs(ctx context.Context, communityID int64) ([]int64,
 	           AND community_id = ?
 	     ORDER BY id DESC`
 	return scanPostIDs(c.db.WithContext(ctx).Raw(sql, communityID))
+}
+
+// subscribedCommunityIDs returns the community ids the account is subscribed
+// to. Mirrors legacy bridge cursor._subscribed (cursor.py:260-264); an
+// account_id of 0 (no observer) matches no rows.
+func (c *Cursor) subscribedCommunityIDs(ctx context.Context, accountID int64) ([]int64, error) {
+	var ids []int64
+	if err := c.db.WithContext(ctx).
+		Model(&models.Subscription{}).
+		Where("account_id = ?", accountID).
+		Order("community_id").
+		Pluck("community_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // pinnedByStatusType returns post ids from hive_posts_status entries of the
