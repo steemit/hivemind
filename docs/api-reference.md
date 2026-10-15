@@ -97,7 +97,7 @@ Get all accounts following a given account.
 - `follow_type` (string, optional): Type of follow ('blog' or 'ignore', default: 'blog')
 - `limit` (integer, optional): Maximum results (default: 1000, max: 1000)
 
-**Returns:** Array of follower objects with `follower`, `following`, `what` fields
+**Returns:** Array of follower objects with `follower`, `following`, `reputation`, `what` fields (`what` is a fixed-length two-element array, e.g. `["blog", ""]`)
 
 **Example:**
 ```json
@@ -408,7 +408,7 @@ List account reputations.
 {
   "reputations": [
     {
-      "account": "steemit",
+      "name": "steemit",
       "reputation": 1000000
     }
   ]

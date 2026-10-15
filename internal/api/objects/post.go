@@ -184,7 +184,7 @@ func (l *PostLoader) buildPostObject(ctx context.Context, post *models.Post, cac
 		"replies":           []interface{}{},
 		"reblogged_by":      l.getRebloggedBy(ctx, post.ID),
 		"body_length":       len(cache.Body),
-		"author_reputation": repToRaw(cache.AuthorRep),
+		"author_reputation": RepToRaw(cache.AuthorRep),
 		"promoted":          formatAmount(cache.Promoted),
 		"payout":            cache.Payout,
 		// last_payout/cashout_time always carry a string: json_date renders
@@ -302,9 +302,11 @@ func hydrateActiveVotes(voteCSV string) []interface{} {
 	return votes
 }
 
-// repToRaw converts a UI-ready reputation score back into its approximate
+// RepToRaw converts a UI-ready reputation score back into its approximate
 // raw steemd value. Mirrors legacy rep_to_raw (utils/normalize.py:136).
-func repToRaw(rep float64) float64 {
+// Callers that need legacy's integer form (e.g. get_account_reputations)
+// truncate toward zero, like Python's int().
+func RepToRaw(rep float64) float64 {
 	if rep == 25 {
 		return 0
 	}
@@ -324,7 +326,7 @@ func repToRawStr(repStr string) float64 {
 	if err != nil {
 		return 0
 	}
-	return repToRaw(rep)
+	return RepToRaw(rep)
 }
 
 // formatAmount returns a steem-style amount string ("X.XXX SBD").

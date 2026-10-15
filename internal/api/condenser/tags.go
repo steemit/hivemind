@@ -3,6 +3,9 @@ package condenser
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+
+	"github.com/steemit/hivemind/internal/api/objects"
 
 	"github.com/steemit/hivemind/internal/apierrors"
 
@@ -82,7 +85,9 @@ func (t *TagsAPI) GetTrendingTags(ctx *gin.Context, params json.RawMessage) (int
 	return out, nil
 }
 
-// GetAccountReputations handles condenser_api.get_account_reputations
+// GetAccountReputations handles condenser_api.get_account_reputations.
+// Each entry uses the legacy `name` key and converts the stored UI score to
+// its approximate raw value via rep_to_raw (cursor.py:267 → normalize.py).
 func (t *TagsAPI) GetAccountReputations(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
 	var p []interface{}
 	if err := json.Unmarshal(params, &p); err != nil {
@@ -97,6 +102,12 @@ func (t *TagsAPI) GetAccountReputations(ctx *gin.Context, params json.RawMessage
 	if len(p) > 1 {
 		if l, ok := p[1].(float64); ok {
 			limit = int(l)
+			// Clamp negative limits to the default; GORM treats a
+			// negative Limit as "no LIMIT clause", which would turn a
+			// bad request into an unbounded full-table scan.
+			if limit <= 0 {
+				limit = 1000
+			}
 			if limit > 1000 {
 				limit = 1000
 			}
@@ -125,12 +136,29 @@ func (t *TagsAPI) GetAccountReputations(ctx *gin.Context, params json.RawMessage
 	reputations := make([]map[string]interface{}, len(results))
 	for i, r := range results {
 		reputations[i] = map[string]interface{}{
-			"account":    r.Name,
-			"reputation": r.Reputation,
+			"name":       r.Name,
+			"reputation": repToRawInt(r.Reputation),
 		}
 	}
 
 	return map[string]interface{}{
 		"reputations": reputations,
 	}, nil
+}
+
+// repToRawInt is legacy rep_to_raw in its integer form: the float conversion
+// truncated toward zero (Python int()), with saturation guards for values
+// outside int64 range (float(6) DB extremes).
+func repToRawInt(rep float64) int64 {
+	v := objects.RepToRaw(rep)
+	switch {
+	case math.IsNaN(v):
+		return 0
+	case v >= math.MaxInt64:
+		return math.MaxInt64
+	case v <= math.MinInt64:
+		return math.MinInt64
+	default:
+		return int64(v)
+	}
 }
