@@ -102,6 +102,12 @@ func (t *TagsAPI) GetAccountReputations(ctx *gin.Context, params json.RawMessage
 	if len(p) > 1 {
 		if l, ok := p[1].(float64); ok {
 			limit = int(l)
+			// Clamp negative limits to the default; GORM treats a
+			// negative Limit as "no LIMIT clause", which would turn a
+			// bad request into an unbounded full-table scan.
+			if limit <= 0 {
+				limit = 1000
+			}
 			if limit > 1000 {
 				limit = 1000
 			}

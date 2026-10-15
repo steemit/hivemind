@@ -156,6 +156,11 @@ func TestFollowAPIsCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open gorm: %v", err)
 	}
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+	defer sqlDB.Close()
 
 	gin.SetMode(gin.TestMode)
 	repo := db.NewRepository(gdb)
