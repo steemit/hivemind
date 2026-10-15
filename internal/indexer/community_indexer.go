@@ -1076,10 +1076,10 @@ func (ci *CommunityIndexer) ValidatedID(ctx context.Context, tx *gorm.DB, name s
 // may post/comment in the community. Journal (type 2) requires member role
 // for top-level posts; council (type 3) requires member role for anything;
 // all other types merely require the author not be muted (role >= guest).
-// A missing author account row resolves to guest (legacy Accounts.get_id
-// returns None -> get_user_role finds no row -> guest), which matches the
-// block-processing order: comment ops are handled before the same block's
-// account registrations.
+// A missing author account row resolves to guest: legacy would crash on
+// the lookup (Accounts.get_id asserts), which can only happen when a
+// comment op precedes the same block's account registration; degrading to
+// guest is the chosen benign divergence from that crash.
 func (ci *CommunityIndexer) IsPostValid(ctx context.Context, tx *gorm.DB, communityID int64, op map[string]interface{}) (bool, error) {
 	var community models.Community
 	err := tx.WithContext(ctx).

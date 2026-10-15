@@ -268,10 +268,11 @@ func (pi *PostIndexer) writeErrorNotif(ctx context.Context, tx *gorm.DB, author 
 		return fmt.Errorf("failed to get account %s for error notif: %w", author, err)
 	}
 	if account == nil {
-		// Author not yet registered (same-block ordering edge): legacy
-		// would insert dst_id=NULL; hive_notifs.dst_id is NOT NULL here, so
-		// the notification is skipped. Feed-cache/Rebuild reconciliation
-		// makes this divergence unobservable after initial sync.
+		// Author not yet registered (same-block ordering edge). legacy
+		// would crash here (Accounts.get_id asserts); Go degrades to
+		// skipping the notification. dst_id is nullable in both schemas,
+		// so a NULL insert would be expressible -- skipping is the chosen
+		// benign divergence; queries filter on dst_id anyway.
 		pi.logger.Warn("post error notif skipped: author account missing",
 			zap.String("author", author), zap.Int64("post_id", postID))
 		return nil
@@ -295,9 +296,9 @@ func (pi *PostIndexer) insertFeedCache(ctx context.Context, tx *gorm.DB, postID 
 		return fmt.Errorf("failed to get account %s for feed cache: %w", author, err)
 	}
 	if account == nil {
-		// See writeErrorNotif: legacy inserts account_id=NULL, the Go model
-		// cannot express that (and the trailing Rebuild drops those rows
-		// anyway), so the entry is skipped.
+		// See writeErrorNotif: legacy would crash (hive_feed_cache.
+		// account_id is NOT NULL in both schemas, a NULL insert raises
+		// IntegrityError); Go skips the entry with a warning instead.
 		pi.logger.Warn("feed cache insert skipped: author account missing",
 			zap.String("author", author), zap.Int64("post_id", postID))
 		return nil
@@ -324,8 +325,9 @@ func (pi *PostIndexer) ProcessDelete(ctx context.Context, tx *gorm.DB, op map[st
 		return fmt.Errorf("failed to get post: %w", err)
 	}
 	if post == nil {
-		// Deleting an unknown post is a no-op (legacy UPDATE ... WHERE id
-		// NULL matches nothing).
+		// Deleting an unknown post is a no-op. legacy actually crashes on
+		// this path (_get_parent_by_child_id(None) asserts); the no-op is
+		// an intentional, safer divergence.
 		return nil
 	}
 
