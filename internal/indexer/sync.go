@@ -1009,13 +1009,16 @@ func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bo
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		// The commit itself failed: nothing is durably landed, so the
-		// batch's deltas must not survive either -- the retry re-processes
-		// and re-accumulates them. Defensive rollback releases the
-		// connection's transaction state (a failed COMMIT can leave it in
-		// limbo); ErrTxDone -- the transaction already terminated -- is
-		// harmlessly ignored by the driver (PR#411 review).
-		restoreDeltas()
+		// The commit itself failed: the retry re-processes this batch and
+		// re-accumulates its deltas, so they must not survive here. The
+		// rollback below is a harmless no-op on a terminated transaction
+		// (database/sql refuses to send ROLLBACK after Commit, returning
+		// ErrTxDone which we discard); connection health is handled by
+		// Tx.Commit's own close path. Recovery from an ambiguous commit
+		// (landed server-side, error client-side) relies on the
+		// hive_blocks primary key plus the loops re-reading head before
+		// retrying (PR#411 review).
+restoreDeltas()
 		tx.Rollback()
 		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}

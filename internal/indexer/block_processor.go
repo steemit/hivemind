@@ -125,11 +125,11 @@ func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]int
 	if err := tx.Commit().Error; err != nil {
 		// The block did not land: its follow deltas must not survive either,
 		// or the retry re-accumulates them (same double-count as a rollback).
-		// Defensive rollback releases the connection's transaction state (a
-		// failed COMMIT can leave it in limbo); ErrTxDone -- the transaction
-		// already terminated -- is harmlessly ignored by the driver
-		// (PR#411 review).
-		restoreDeltas()
+		// The rollback below is a harmless no-op on a terminated transaction
+		// (database/sql refuses to send ROLLBACK after Commit, returning
+		// ErrTxDone which we discard); connection health is handled by
+		// Tx.Commit's own close path (PR#411 review).
+restoreDeltas()
 		tx.Rollback()
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
