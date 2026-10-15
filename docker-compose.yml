@@ -25,7 +25,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hivemind"]
       interval: 10s
@@ -45,7 +45,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -160,7 +160,7 @@ services:
   # Services ship traces to http://jaeger:4318 (OTLP/HTTP) over the compose
   # network; no host port needed for ingestion. The UI is loopback-only.
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.62.0
     container_name: hivemind-jaeger
     ports:
       - "127.0.0.1:16686:16686" # UI (loopback only)

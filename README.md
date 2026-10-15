@@ -238,13 +238,13 @@ docker build -t hivemind:latest .
 # Run server only
 docker run -p 8080:8080 \
   -e HIVE_DATABASE_URL=postgresql://user:pass@host:5432/db \
-  -e HIVE_STEEM_URL=https://api.steemit.com \
+  -e HIVE_STEEMD_URL=https://api.steemit.com \
   hivemind-server:latest
 
 # Run indexer only
 docker run \
   -e HIVE_DATABASE_URL=postgresql://user:pass@host:5432/db \
-  -e HIVE_STEEM_URL=https://api.steemit.com \
+  -e HIVE_STEEMD_URL=https://api.steemit.com \
   hivemind-indexer:latest
 ```
 
