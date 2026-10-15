@@ -19,6 +19,10 @@ Test cases are declared in a YAML file (see test_cases.yaml). The file has:
       api: condenser_api.get_content
       priority: P0            # P0/P1/P2, used by --priority filter
       params: [...]           # request params (legacy protocol wire form)
+      expected_diff: true     # REGISTERED expected difference: counted in a
+                              # separate bucket, never as a failure; a passing
+                              # expected-diff case is reported as "resolved"
+                              # so the registry gets pruned (04 §一 1.9)
       ignore_fields: [...]    # per-case override; REPLACES the global list
       tolerance: {...}        # per-case override; merged key-wise over global
       unordered: true         # sort top-level list by `unordered_key` first
@@ -44,11 +48,30 @@ Comparison semantics:
     match (case-insensitive; "$" matches only "$"). An amount string never
     bridges to a bare number: the number side carries no unit to verify,
     so that pair is reported as a type mismatch.
+  * JSON-valued strings: when both strings parse as JSON and at least one
+    side parses to an object/array, the PARSED values are compared
+    recursively (planned PR#421 registration: community `settings` /
+    set_props payload strings render key order differently -- Go
+    alphabetical, legacy insertion-ordered -- so byte-wise string
+    comparison false-reds; scalar JSON strings stay plain strings).
+  * unordered/lenient_list matching uses maximum bipartite matching
+    (Kuhn's augmenting paths), not greedy first-match: greedy could pair
+    an element with the wrong counterpart and false-red a pair of lists
+    that DO have a perfect matching (planned PR#421 ⑥). unordered
+    additionally groups equal sort keys and lenient-matches within each
+    group, so two elements sharing a business key cannot be zipped into
+    the wrong partner.
   * When both endpoints return JSON-RPC application-layer errors, the
     error texts are compared. Transport-level failures (connection
     refused, timeout, HTTP status error, malformed response) are NEVER
     judged green, even when both sides fail identically -- identical
     transport errors carry no consistency evidence.
+  * Registered divergence whitelist (planned PR#421): error comparison
+    judges error.message ONLY -- never error.code nor error.data. Legacy
+    (jsonrpcserver 4.0.1 debug dispatch) always carries data such as
+    "ApiError: <msg>" on -32000 responses while the Go server omits data
+    on -32000 entirely; comparing data would be permanently red by
+    design, so the message layer is the contract.
   * Response envelope contract: "result" and "error" are mutually
     exclusive (by key existence, so {"result": null, "error": null} is
     rejected too), the response must echo the request id (int 1), and
@@ -58,9 +81,10 @@ Comparison semantics:
     at any depth, a dotted pattern matches only the exact path. This keeps a
     global ignore such as `author.id` from also masking a top-level `id`.
 
-Exit codes: 0 = every executed case passed, 1 = at least one failure,
-2 = no cases executed (e.g. a --priority filter that matched nothing) --
-zero evidence must never read as "all green" in CI.
+Exit codes: 0 = no UNEXPECTED failure (registered expected-diff cases are
+reported separately and never fail the run), 1 = at least one unexpected
+failure, 2 = no cases executed (e.g. a --priority filter that matched
+nothing) -- zero evidence must never read as "all green" in CI.
 
 `requests` is imported lazily so the pure comparison functions can be unit
 tested (test_api_comparator.py) without the HTTP dependency installed.
@@ -462,9 +486,49 @@ def _compare_strings(a: str, b: str, opts: CompareOptions,
             f"delta={diff} > epsilon={opts.float_epsilon}"
         )
 
+    # JSON-valued strings: when both sides parse as JSON and at least one
+    # parses to a structural value (object/array), compare the PARSED
+    # values instead of the bytes. Registration (planned PR#421): payload
+    # strings such as community `settings` (built from set_props) render
+    # key order differently -- Go marshals map keys alphabetically, legacy
+    # preserves insertion order -- so a byte-wise comparison false-reds on
+    # identical data. The structural gate keeps plain scalar strings ("42",
+    # "true") on the exact-string path: lenient scalar bridging is not the
+    # intent here.
+    json_a = try_parse_structural_json(a)
+    json_b = try_parse_structural_json(b)
+    if json_a is not _NOT_JSON or json_b is not _NOT_JSON:
+        if json_a is not _NOT_JSON and json_b is not _NOT_JSON:
+            return compare_values(json_a, json_b, opts, path + ("<json>",))
+        return False, (
+            f"{where}: JSON-string mismatch: one side is not JSON "
+            f"(python={_short(a)}, go={_short(b)})"
+        )
+
     if a == b:
         return True, None
     return False, f"{where}: string mismatch: python={_short(a)}, go={_short(b)}"
+
+
+# Sentinel returned by try_parse_structural_json for non-JSON (or scalar
+# JSON) strings; a real parsed value is never the sentinel.
+_NOT_JSON = object()
+
+
+def try_parse_structural_json(value: str):
+    """Parse a string as JSON, returning the value only when it is
+    structural (dict or list); otherwise returns the _NOT_JSON sentinel.
+
+    The structural gate is deliberate: numeric/boolean/null JSON scalars
+    ("1.5", "true") are still ordinary strings for comparison purposes --
+    only key-ordered payload objects/arrays need value-wise comparison."""
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        return _NOT_JSON
+    if isinstance(parsed, (dict, list)):
+        return parsed
+    return _NOT_JSON
 
 
 def _extract_sort_key(element: Any, key_path: Optional[str]) -> str:
@@ -492,40 +556,105 @@ def _compare_lists(a: list, b: list, opts: CompareOptions,
     top_level = len(path) == 0
     if top_level and opts.unordered:
         key = opts.unordered_key
-        a_sorted = sorted(a, key=lambda item: _extract_sort_key(item, key))
-        b_sorted = sorted(b, key=lambda item: _extract_sort_key(item, key))
-        for item_a, item_b in zip(a_sorted, b_sorted):
-            matched, diff = compare_values(item_a, item_b, opts, ("*",))
+        a_runs = _group_by_sort_key(a, key)
+        b_runs = _group_by_sort_key(b, key)
+        if [run_key for run_key, _ in a_runs] != [run_key for run_key, _ in b_runs]:
+            return False, (
+                f"{where}: unordered list mismatch: sorted "
+                f"{key or 'canonical json'} keys differ "
+                f"(python={_short([run_key for run_key, _ in a_runs])}, "
+                f"go={_short([run_key for run_key, _ in b_runs])})"
+            )
+        for (run_key, run_a), (_, run_b) in zip(a_runs, b_runs):
+            if len(run_a) == 1 and len(run_b) == 1:
+                matched, diff = compare_values(run_a[0], run_b[0], opts, ("*",))
+                if not matched:
+                    return False, (
+                        f"{where}: unordered list mismatch (key "
+                        f"{run_key}): {diff}"
+                    )
+                continue
+            # Multiple elements share this business key: zipping them in
+            # sorted order could pair the wrong partners, so find a perfect
+            # matching inside the group instead.
+            matched, unmatched = _bipartite_match(run_a, run_b, opts)
             if not matched:
                 return False, (
-                    f"{where}: unordered list mismatch after sort by "
-                    f"{key or 'canonical json'}: {diff}"
+                    f"{where}: unordered list mismatch within equal-key "
+                    f"group {run_key}: python element has no go match: "
+                    f"{canonical_json(unmatched)[:REPORT_FIELD_LIMIT]}"
                 )
         return True, None
 
     if top_level and opts.lenient_list:
-        used = [False] * len(b)
-        for item in a:
-            found = None
-            for idx, candidate in enumerate(b):
-                if used[idx]:
-                    continue
-                ok, _ = compare_values(item, candidate, opts, ("*",))
-                if ok:
-                    found = idx
-                    break
-            if found is None:
-                return False, (
-                    f"{where}: lenient list: python element has no go match: "
-                    f"{canonical_json(item)[:REPORT_FIELD_LIMIT]}"
-                )
-            used[found] = True
+        matched, unmatched = _bipartite_match(a, b, opts)
+        if not matched:
+            return False, (
+                f"{where}: lenient list: python element has no go match: "
+                f"{canonical_json(unmatched)[:REPORT_FIELD_LIMIT]}"
+            )
         return True, None
 
     for idx, (item_a, item_b) in enumerate(zip(a, b)):
         matched, diff = compare_values(item_a, item_b, opts, path + ("*",))
         if not matched:
             return False, diff
+    return True, None
+
+
+def _group_by_sort_key(items: list, key_path: Optional[str]) -> list:
+    """Sort items by the business key and group consecutive equal keys.
+
+    Returns a list of (key, [items]) runs in sorted order; used by the
+    unordered comparison so elements sharing a sort key are matched
+    leniently within their run instead of being zipped arbitrarily."""
+    grouped = []
+    for item in sorted(items, key=lambda entry: _extract_sort_key(entry, key_path)):
+        item_key = _extract_sort_key(item, key_path)
+        if grouped and grouped[-1][0] == item_key:
+            grouped[-1][1].append(item)
+        else:
+            grouped.append((item_key, [item]))
+    return grouped
+
+
+def _bipartite_match(a: list, b: list, opts: CompareOptions) -> tuple[bool, Optional[Any]]:
+    """Maximum bipartite matching between two equal-length lists.
+
+    Edge predicate: compare_values(item_a, item_b, opts, ("*",)). Uses
+    Kuhn's augmenting-path algorithm with a memoized edge matrix, so each
+    element pair is compared at most once. Replaces the previous greedy
+    first-match pairing, which could consume an element needed by a later
+    item and false-red lists that DO have a perfect matching (planned
+    PR#421 ⑥; greedy failures were in the safe direction, but maximum
+    matching removes the noise class entirely).
+
+    Returns (True, None) when a perfect matching exists, else
+    (False, first_unmatched_a_element).
+    """
+    edges = [[None] * len(b) for _ in a]
+
+    def can_match(i: int, j: int) -> bool:
+        if edges[i][j] is None:
+            ok, _ = compare_values(a[i], b[j], opts, ("*",))
+            edges[i][j] = ok
+        return edges[i][j]
+
+    match_of_b = [-1] * len(b)  # b index -> matched a index
+
+    def augment(i: int, seen: list) -> bool:
+        for j in range(len(b)):
+            if seen[j] or not can_match(i, j):
+                continue
+            seen[j] = True
+            if match_of_b[j] == -1 or augment(match_of_b[j], seen):
+                match_of_b[j] = i
+                return True
+        return False
+
+    for i in range(len(a)):
+        if not augment(i, [False] * len(b)):
+            return False, a[i]
     return True, None
 
 
@@ -736,6 +865,7 @@ class CaseResult:
     error: Optional[str] = None
     duration_ms: int = 0
     detail_file: Optional[str] = None
+    expected_diff: bool = False
 
     def to_report_dict(self) -> dict:
         return {
@@ -744,6 +874,7 @@ class CaseResult:
             "api": self.api,
             "priority": self.priority,
             "passed": self.passed,
+            "expected_diff": self.expected_diff,
             "difference": truncate_for_report(self.difference),
             "error": truncate_for_report(self.error),
             "python_error": truncate_for_report(self.python_error),
@@ -861,6 +992,7 @@ class APITestRunner:
             difference=difference,
             error=error,
             duration_ms=duration_ms,
+            expected_diff=bool(case.get("expected_diff", False)),
         )
         result.detail_file = self._write_detail_file(result)
         self.results.append(result)
@@ -909,6 +1041,10 @@ class APITestRunner:
     def get_summary(self) -> dict:
         total = len(self.results)
         passed = sum(1 for result in self.results if result.passed)
+        expected_results = [r for r in self.results if r.expected_diff]
+        expected_diffed = sum(1 for r in expected_results if not r.passed)
+        unexpected_failures = sum(
+            1 for r in self.results if not r.passed and not r.expected_diff)
         by_priority = {}
         for result in self.results:
             bucket = by_priority.setdefault(result.priority or "-", {"total": 0, "passed": 0})
@@ -920,6 +1056,14 @@ class APITestRunner:
             "passed": passed,
             "failed": total - passed,
             "pass_rate": f"{(passed / total * 100):.1f}%" if total else "0%",
+            "unexpected_failures": unexpected_failures,
+            "expected_diff": {
+                "total": len(expected_results),
+                # still differing (the registered state) vs resolved (the
+                # registry entry can be pruned)
+                "diffing": expected_diffed,
+                "resolved": len(expected_results) - expected_diffed,
+            },
             "total_duration_ms": sum(result.duration_ms for result in self.results),
             "by_priority": by_priority,
         }
@@ -937,6 +1081,7 @@ class ReportGenerator:
         self.summary = summary
 
     def generate_console_report(self) -> str:
+        expected = self.summary.get("expected_diff", {})
         lines = [
             "=" * 62,
             "Hivemind API consistency report",
@@ -947,6 +1092,10 @@ class ReportGenerator:
             f"  passed:   {self.summary['passed']}",
             f"  failed:   {self.summary['failed']}",
             f"  pass rate:{self.summary['pass_rate']}",
+            f"  unexpected failures: {self.summary.get('unexpected_failures', 0)}",
+            f"  expected-diff (registered): "
+            f"{expected.get('diffing', 0)} diffing / "
+            f"{expected.get('resolved', 0)} resolved",
             f"  duration: {self.summary['total_duration_ms']} ms",
         ]
         for name in sorted(self.summary.get("by_priority", {})):
@@ -960,13 +1109,30 @@ class ReportGenerator:
                 "verified -- check the --priority filter."
             )
         lines.append("")
-        if self.summary["failed"] == 0:
+
+        # Registered expected differences get their own section (04 §二:
+        # counted separately, never as failures).
+        expected_results = [r for r in self.results if r.expected_diff]
+        if expected_results:
+            lines.extend(["Expected differences (registered):", "-" * 62])
+            for result in expected_results:
+                state = "RESOLVED (prune the registry entry)" if result.passed \
+                    else "diffing (registered)"
+                lines.append(f"  - [{result.priority}] {result.case_id} "
+                             f"({result.api}): {state}")
+                if result.difference:
+                    lines.append(f"      diff:  {truncate_for_report(result.difference)}")
+                lines.append(f"      detail: {result.detail_file}")
+            lines.append("")
+
+        unexpected = [r for r in self.results if not r.passed and not r.expected_diff]
+        if not unexpected:
             lines.append("All cases passed.")
             return "\n".join(lines)
 
         lines.extend(["Failed cases:", "-" * 62])
         for result in self.results:
-            if result.passed:
+            if result.passed or result.expected_diff:
                 continue
             lines.append(f"  - [{result.priority}] {result.case_id} "
                          f"({result.api})")
@@ -989,7 +1155,12 @@ class ReportGenerator:
     def generate_html_report(self, output_file: str):
         rows = []
         for result in self.results:
-            status = "PASS" if result.passed else "FAIL"
+            if result.passed:
+                status = "PASS"
+            elif result.expected_diff:
+                status = "EXPECTED-DIFF (registered)"
+            else:
+                status = "FAIL"
             css = "result-passed" if result.passed else "result-failed"
             # Escape everything attacker- or payload-controlled (case ids,
             # api names, diff text) so response bodies cannot inject
@@ -1111,7 +1282,11 @@ def main(argv=None):
         )
         return 2
 
-    return 0 if summary["failed"] == 0 else 1
+    # Registered expected-diff cases (expected_diff: true in the YAML) are
+    # reported separately and never fail the run; only unexpected failures
+    # drive the exit code (04 §一 1.9: get_state et al. count as "expected
+    # difference", not failure).
+    return 0 if summary.get("unexpected_failures", 0) == 0 else 1
 
 
 if __name__ == "__main__":

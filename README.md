@@ -34,6 +34,9 @@ hivemind/
 │   ├── telemetry/       # OpenTelemetry integration
 │   ├── config/          # Configuration management
 │   └── logging/         # Logging system
+├── tools/
+│   └── db-checksum/     # 20M sync checksum comparison tooling (Go vs
+│                        # legacy Python fresh sync; see tools/db-checksum/README.md)
 ├── migrations/          # Database migrations
 └── docs/                # Documentation
 ```

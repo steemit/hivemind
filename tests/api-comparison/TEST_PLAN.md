@@ -1,359 +1,367 @@
-# Hivemind API 一致性测试计划
+# Hivemind API Consistency Test Plan
 
-## 概述
+## Overview
 
-本文档描述如何在测试环境中验证 Go 重构版 Hivemind API 与旧版 Python API 的行为一致性。
+This document describes how the Go rewrite of the Hivemind API is verified
+against the legacy Python API for behavioral consistency (2026-Q4 KR4).
 
-## 测试目标
+Source of truth for scope and priorities: `2026-Q4/04-comparison.md` §二
+(the authoritative comparison matrix). This plan restates it for day-to-day
+use; when the two disagree, §二 wins.
 
-1. 验证 Go 版本 API 返回的数据结构、字段和值与 Python 版本一致
-2. 确保所有 API 端点功能正常
-3. 发现并修复行为差异
-4. 为生产环境迁移提供信心
+## Goals
 
-## 架构说明
+1. Verify that the Go API returns the same structures, fields and values
+   as the Python API.
+2. Ensure every endpoint in the comparison matrix behaves correctly.
+3. Discover and fix behavioral differences; register the ones that are
+   deliberate (expected differences) instead of silently passing them.
+4. Provide evidence and confidence for the production migration.
 
-### 系统架构
+## Architecture
 
 ```
 ┌─────────────────┐     ┌─────────────────┐
-│  Python 版本    │     │   Go 版本       │
-│  (Legacy)       │     │  (New)          │
+│  Python server  │     │   Go server     │
+│  (legacy)       │     │   (rewrite)     │
 │  Port: 8081     │     │  Port: 8082     │
 └────────┬────────┘     └────────┬────────┘
-         │                        │
-         └──────────┬─────────────┘
+         │                       │
+         └──────────┬────────────┘
                     │
             ┌───────▼────────┐
-            │  测试脚本      │
+            │  Comparator    │
             │  (Python)      │
-            │  对比结果      │
+            │  reports diff  │
             └────────────────┘
 ```
 
-### 共享数据库
+### Shared database
 
-两个版本应连接到同一个 PostgreSQL 数据库，以确保数据源一致。
+Both servers connect to the SAME PostgreSQL database so responses are
+deterministic for a given block state. In the 2026-Q4 runs this is the
+test-environment hivemind RDS (04 §三); for local smoke testing,
+`docker-compose.test.yml` brings up one shared PostgreSQL.
 
-## API 端点清单
+## Endpoint Matrix (authoritative, 68 legacy-registered method names)
 
-### Hive Core API (1 个)
+The legacy server (`hive/server/serve.py build_methods`) registers exactly
+68 method names; cross-service comparison is only possible for those. The
+Go-only surface (below) is verified on a separate track (decision D4).
 
-| API 方法 | 功能 | 优先级 |
-|---------|------|--------|
-| `hive.db_head_state` | 获取数据库头部状态 | P0 |
+### Hive core (1)
 
-### Condenser API (26 个)
+| API method | Purpose | Priority |
+|------------|---------|----------|
+| `hive.db_head_state` | DB head block/time/age | P0 |
 
-| API 方法 | 功能 | 优先级 |
-|---------|------|--------|
-| `condenser_api.get_followers` | 获取关注者列表 | P0 |
-| `condenser_api.get_following` | 获取关注列表 | P0 |
-| `condenser_api.get_follow_count` | 获取关注数 | P0 |
-| `condenser_api.get_reblogged_by` | 获取转发信息 | P0 |
-| `condenser_api.get_followers_by_page` | 分页获取关注者 | P1 |
-| `condenser_api.get_following_by_page` | 分页获取关注 | P1 |
-| `condenser_api.get_content` | 获取文章内容 | P0 |
-| `condenser_api.get_content_replies` | 获取文章回复 | P1 |
-| `condenser_api.get_discussions_by_trending` | 热门讨论 | P0 |
-| `condenser_api.get_discussions_by_hot` | 热点讨论 | P0 |
-| `condenser_api.get_discussions_by_created` | 最新讨论 | P0 |
-| `condenser_api.get_discussions_by_promoted` | 推广讨论 | P0 |
-| `condenser_api.get_discussions_by_blog` | 博客讨论 | P0 |
-| `condenser_api.get_discussions_by_feed` | 动态讨论 | P0 |
-| `condenser_api.get_blog` | 获取博客 | P0 |
-| `condenser_api.get_blog_entries` | 获取博客条目 | P1 |
-| `condenser_api.get_trending_tags` | 热门标签 | P1 |
-| `condenser_api.get_account_reputations` | 账户声望 | P1 |
-| `condenser_api.get_discussions_by_comments` | 评论讨论 | P1 |
-| `condenser_api.get_replies_by_last_update` | 最新回复 | P1 |
-| `condenser_api.get_discussions_by_author_before_date` | 作者历史讨论 | P1 |
-| `condenser_api.get_post_discussions_by_payout` | 按收益排序文章 | P1 |
-| `condenser_api.get_comment_discussions_by_payout` | 按收益排序评论 | P2 |
-| `condenser_api.get_transaction` | 获取交易 | P2 |
-| `condenser_api.get_state` | 获取状态 | P1 |
-| `condenser_api.get_account_votes` | 获取账户投票 | P2 |
+### Condenser API (26)
 
-### Bridge API (20 个)
+| API method | Purpose | Priority |
+|------------|---------|----------|
+| `condenser_api.get_followers` | Followers list | P0 |
+| `condenser_api.get_following` | Following list | P0 |
+| `condenser_api.get_follow_count` | Follow counts | P0 |
+| `condenser_api.get_reblogged_by` | Rebloggers of a post | P0 |
+| `condenser_api.get_followers_by_page` | Followers, page window (EOL) | P1 |
+| `condenser_api.get_following_by_page` | Following, page window (EOL) | P1 |
+| `condenser_api.get_content` | Single post | P0 |
+| `condenser_api.get_content_replies` | Direct replies | P1 |
+| `condenser_api.get_state` | Retired-frontend state monolith | P2 (expected difference) |
+| `condenser_api.get_discussions_by_trending` | Trending discussions | P0 |
+| `condenser_api.get_discussions_by_hot` | Hot discussions | P0 |
+| `condenser_api.get_discussions_by_created` | Newest discussions | P0 |
+| `condenser_api.get_discussions_by_promoted` | Promoted discussions | P0 |
+| `condenser_api.get_discussions_by_blog` | Account blog | P0 |
+| `condenser_api.get_discussions_by_feed` | Account feed | P0 |
+| `condenser_api.get_discussions_by_comments` | Comments by author | P1 |
+| `condenser_api.get_replies_by_last_update` | Replies to author | P1 |
+| `condenser_api.get_discussions_by_author_before_date` | Author history (date ignored) | P1 |
+| `condenser_api.get_post_discussions_by_payout` | Posts by payout | P1 |
+| `condenser_api.get_comment_discussions_by_payout` | Comments by payout | P1 |
+| `condenser_api.get_blog` | Blog entries (full posts) | P0 |
+| `condenser_api.get_blog_entries` | Blog entries (lite) | P1 |
+| `condenser_api.get_trending_tags` | Trending tags | P1 |
+| `condenser_api.get_account_reputations` | Account reputations | P1 |
+| `condenser_api.get_transaction` | Transaction lookup (needs steemd) | P2 (env-gated) |
+| `condenser_api.get_account_votes` | Dummy (both sides error) | P2 |
 
-| API 方法 | 功能 | 优先级 |
-|---------|------|--------|
-| `bridge.get_post` | 获取文章 | P0 |
-| `bridge.normalize_post` | 标准化文章 | P1 |
-| `bridge.get_post_header` | 获取文章头 | P1 |
-| `bridge.get_discussion` | 获取讨论 | P0 |
-| `bridge.get_profile` | 获取用户资料 | P0 |
-| `bridge.get_ranked_posts` | 排名文章 | P0 |
-| `bridge.get_account_posts` | 账户文章 | P0 |
-| `bridge.get_trending_topics` | 热门话题 | P1 |
-| `bridge.get_payout_stats` | 收益统计 | P1 |
-| `bridge.get_community` | 获取社区 | P0 |
-| `bridge.get_community_context` | 社区上下文 | P1 |
-| `bridge.list_communities` | 社区列表 | P0 |
-| `bridge.list_top_communities` | 顶级社区 | P2 |
-| `bridge.list_pop_communities` | 热门社区 | P1 |
-| `bridge.list_community_roles` | 社区角色 | P1 |
-| `bridge.list_subscribers` | 订阅者列表 | P1 |
-| `bridge.list_all_subscriptions` | 所有订阅 | P2 |
-| `bridge.post_notifications` | 文章通知 | P1 |
-| `bridge.account_notifications` | 账户通知 | P0 |
-| `bridge.unread_notifications` | 未读通知 | P0 |
+### follow_api / tags_api aliases (21)
 
-### Hive API (8 个)
+Every alias binds the same legacy handler as its condenser counterpart
+(one reachability case per alias; deep re-runs are wasteful):
 
-| API 方法 | 功能 | 优先级 |
-|---------|------|--------|
-| `hive_api.get_account` | 获取账户 | P2 |
-| `hive_api.get_accounts` | 批量获取账户 | P2 |
-| `hive_api.list_followers` | 列出关注者 | P2 |
-| `hive_api.list_following` | 列出关注 | P2 |
-| `hive_api.list_all_muted` | 列出所有屏蔽 | P2 |
-| `hive_api.list_account_blog` | 列出账户博客 | P2 |
-| `hive_api.list_account_posts` | 列出账户文章 | P2 |
-| `hive_api.list_account_feed` | 列出账户动态 | P2 |
+- `follow_api.*` (9): `get_followers`, `get_following`,
+  `get_followers_by_page`, `get_following_by_page`, `get_follow_count`,
+  `get_account_reputations`, `get_blog`, `get_blog_entries`,
+  `get_reblogged_by` — P1 (dummy `tags_api.get_account_votes` is P2).
+- `tags_api.*` (12): `get_discussion` (alias of `get_content`),
+  `get_content_replies`, `get_discussions_by_trending`, `_hot`,
+  `_promoted`, `_created`, `_blog`, `_comments`,
+  `_author_before_date`, `get_post_discussions_by_payout`,
+  `get_comment_discussions_by_payout`, `get_account_votes` — P1 (the
+  account-votes dummy is P2).
 
-> 优先级与 `test_cases.yaml` 对齐（2026-Q4 矩阵口径）：P0=22 / P1=10 /
-> P2=11。Go-only 方法（`hive_api.*`、`bridge.list_top_communities`）在
-> cross-service 对比中必然红（legacy 无此方法，决策 D4），统一标 P2，
-> 待 #421 重构矩阵后移入 Go-vs-Go 自检轨道。
+### Bare `call` (1)
 
-## 测试环境配置
+| API method | Purpose | Priority |
+|------------|---------|----------|
+| `call` | Legacy `["condenser_api", method, params]` adapter | P1 |
 
-### 环境变量
+### Bridge API (19)
+
+| API method | Purpose | Priority |
+|------------|---------|----------|
+| `bridge.get_post` | Single post (bridge shape) | P0 |
+| `bridge.get_discussion` | Full discussion tree | P0 |
+| `bridge.get_ranked_posts` | Ranked posts (trending/hot/created/promoted/payout/muted) | P0 |
+| `bridge.get_account_posts` | Account posts (posts/comments/replies/...) | P0 |
+| `bridge.get_profile` | Account profile | P0 |
+| `bridge.normalize_post` | Normalize a steemd post object | P1 (expected difference until baseline #23) |
+| `bridge.get_post_header` | Minimal post header | P1 |
+| `bridge.get_trending_topics` | Trending topics | P1 |
+| `bridge.get_payout_stats` | Payout statistics | P1 |
+| `bridge.get_community` | Community by name | P0 |
+| `bridge.get_community_context` | Account's role/subscription in a community | P1 |
+| `bridge.list_communities` | Community list | P0 |
+| `bridge.list_pop_communities` | Popular communities | P1 |
+| `bridge.list_community_roles` | Community roles | P1 |
+| `bridge.list_subscribers` | Community subscribers | P1 |
+| `bridge.list_all_subscriptions` | Account's subscriptions | P1 |
+| `bridge.account_notifications` | Account notifications | P0 |
+| `bridge.unread_notifications` | Unread counts | P0 |
+| `bridge.post_notifications` | Notifications about a post | P1 |
+
+### Go-only methods (9) — decision D4, separate track
+
+Legacy never registers `hive_api.*` nor `bridge.list_top_communities`;
+they cannot be compared cross-service. They are covered by Go-side
+real-PG integration tests plus a manual cross-read against
+`hivemind_legacy/hive/server/hive_api/{public,objects}.py` (W5 memo), and
+one reachability case each lives in `test_cases_go_only.yaml` for Go-vs-Go
+self-regression runs (point both `--python-url` and `--go-url` at the Go
+server).
+
+### Priority definitions
+
+- **P0** (core; the W7 acceptance gate requires 100%): `get_content`,
+  `get_discussions_by_{trending,hot,created,promoted,blog,feed}`,
+  `get_blog`, `get_followers`/`get_following`/`get_follow_count`,
+  `get_reblogged_by`, `bridge.get_post`/`get_discussion`/
+  `get_ranked_posts`/`get_account_posts`/`get_profile`,
+  `bridge.list_communities`/`get_community`,
+  `bridge.account_notifications`/`unread_notifications`,
+  `hive.db_head_state` — 22 methods.
+- **P1**: the remaining condenser query methods, the remaining bridge
+  methods, and the alias reachability cases.
+- **P2**: registered expected differences (`get_state`,
+  `bridge.normalize_post` while baseline #23 is open), dummy-method error
+  text (`get_account_votes`), and env-gated `get_transaction` (requires a
+  configured steemd endpoint on both servers).
+
+## Test Environment
+
+### Environment variables
 
 ```bash
-# Python 版本 API
+# Python (legacy) API
 PYTHON_API_URL=http://localhost:8081
-PYTHON_API_PORT=8081
 
-# Go 版本 API
+# Go API
 GO_API_URL=http://localhost:8082
-GO_API_PORT=8082
 
-# 数据库（两版本共享）
+# Shared database (both servers)
 DATABASE_URL=postgresql://user:pass@localhost:5432/hivemind
 
-# 测试配置
+# Tool settings
 TEST_TIMEOUT=30
-TEST_PARALLEL=5
+TEST_PRIORITY=            # e.g. P0 or P0,P1
 ```
 
-### Docker Compose 配置
+### Docker Compose
 
-创建 `docker-compose.test.yml`:
+`tests/api-comparison/docker-compose.test.yml` brings up PostgreSQL,
+Redis, both API servers and the runner. The legacy checkout path is
+parameterized (`LEGACY_CONTEXT`, 04 §一 1.8) so the compose file carries
+no machine-specific absolute paths:
 
-```yaml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: hivemind
-      POSTGRES_PASSWORD: hivemind
-      POSTGRES_DB: hivemind
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7
-    ports:
-      - "6379:6379"
-
-  python-api:
-    build:
-      context: /home/ety001/workspace/hivemind_legacy
-      dockerfile: Dockerfile
-    ports:
-      - "8081:8080"
-    environment:
-      DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
-      REDIS_URL: redis://redis:6379
-    depends_on:
-      - postgres
-      - redis
-
-  go-api:
-    build:
-      context: /home/ety001/workspace/hivemind
-      dockerfile: Dockerfile
-    ports:
-      - "8082:8080"
-    environment:
-      HIVE_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
-      HIVE_REDIS_URL: redis://redis:6379
-      HIVE_HTTP_SERVER_PORT: 8080
-    depends_on:
-      - postgres
-      - redis
-
-  test-runner:
-    build:
-      context: ./tests/api-comparison
-      dockerfile: Dockerfile
-    environment:
-      PYTHON_API_URL: http://python-api:8080
-      GO_API_URL: http://go-api:8080
-    depends_on:
-      - python-api
-      - go-api
-    volumes:
-      - ./tests/results:/app/results
-
-volumes:
-  postgres_data:
+```bash
+LEGACY_CONTEXT=/path/to/hivemind_legacy \
+  docker compose -f tests/api-comparison/docker-compose.test.yml up -d
 ```
 
-## 测试执行流程
+## Execution Flow
 
-### 阶段 1: 环境准备
+1. **Prepare**: start the shared database and both API servers; verify
+   `/health` on each.
+2. **P0 pass**: run the P0 subset (`--priority P0`).
+3. **P1 pass**: `--priority P1`.
+4. **P2 pass**: `--priority P2`.
+5. **Reports**: JSON/HTML reports and per-case detail files land in
+   `results/` (git-ignored; the directory is kept via `results/.gitkeep`).
 
-1. 启动数据库服务
-2. 启动 Python 版本 API
-3. 启动 Go 版本 API
-4. 验证两个版本的健康状态
+Full-matrix run: `bash run_tests.sh --python-url ... --go-url ...`
+(no `--priority`) executes all cases.
 
-### 阶段 2: P0 优先级测试
+## Comparison Strategy
 
-执行所有 P0 优先级的 API 测试用例
+### Exact matching
 
-### 阶段 3: P1 优先级测试
+Scalars and lists compare exactly:
 
-执行所有 P1 优先级的 API 测试用例
+- numbers: `==` (within epsilon, see below)
+- strings: `==` (with the normalizations below)
+- booleans: `==` (bool never equals 1)
+- null: `==`
 
-### 阶段 4: P2 优先级测试
+### Tolerant matching
 
-执行所有 P2 优先级的 API 测试用例
+Numeric, timestamp and amount drift compares within tolerances
+(04 §五):
 
-### 阶段 5: 报告生成
+- numbers: `float_epsilon` (default 0.001)
+- timestamps: normalized to epoch, compared within `timestamp_seconds`
+  (default 2s); ISO8601 variants (with/without Z, offsets, naive, space
+  separator, date-only) and epoch seconds/milliseconds are recognized.
+  Numeric fields compare as timestamps only at time-ish field names
+  (`created`, `db_head_age`, `cashout_time`, ...); compound counters
+  (`created_block`, `read_count`) stay plain numbers.
+- amount strings: parsed to (value, unit) and compared numerically within
+  `float_epsilon` ("1.500 SBD" == "1.5 SBD"); the currency must match
+  (case-insensitive; "$" matches only "$"); amount strings never bridge
+  to bare numbers.
+- JSON-valued strings: when both sides parse as JSON and at least one is
+  an object/array, the parsed values are compared recursively (community
+  `settings` payloads render key order differently: Go alphabetical,
+  legacy insertion-ordered — registered normalization, planned PR#421).
 
-生成 HTML 和 JSON 格式的测试报告
+### Path-aware ignores
 
-## 数据对比策略
+`ignore_fields` patterns are path-aware (see `IgnoreMatcher`):
+a bare name matches that key at any depth (use sparingly); a dotted path
+matches one exact path; `*` and `**` wildcards are supported; list
+indices normalize to `*`. Nothing is ignored globally today — on a shared
+database business ids must match.
 
-### 完全匹配
+### Deep comparison
 
-对于简单的标量值和列表，要求完全相等：
+Nested objects/arrays compare recursively; top-level lists default to
+strict positional comparison with optional per-case `unordered` (sort by
+a business key, group equal keys, maximum bipartite matching within each
+group) and `lenient_list` (length + maximum-bipartite one-to-one
+matching). Both modes use maximum matching rather than greedy pairing so
+a valid pairing is never false-redded (planned PR#421 ⑥). Use them only
+where legacy itself is unordered, with a per-case justification comment.
 
-- 数值: `==`
-- 字符串: `==`
-- 布尔值: `==`
-- 空值: `==`
+### Error comparison
 
-### 近似匹配
+When both endpoints return JSON-RPC application-layer errors, the error
+**messages** are compared. Registered whitelist (planned PR#421): neither
+`error.code` nor `error.data` is compared — legacy (debug dispatch)
+always carries `data` such as `"ApiError: <msg>"` on -32000 responses
+while Go omits data on -32000; the message layer is the contract.
+Transport-level failures (connection refused, timeout, HTTP status
+error, malformed response) are never judged green, even when identical.
 
-对于数值、时间戳和金额，允许一定误差（口径见 2026-Q4/04-comparison.md §五）：
+### Expected differences (`expected_diff: true`)
 
-- 数值: `float_epsilon`（默认 0.001）
-- 时间戳: 归一为 epoch 后按 `timestamp_seconds`（默认 2 秒）比较；
-  识别 ISO8601 变体（带/不带 Z、带偏移、无时区、空格分隔、日期-only）
-  与 epoch 秒/毫秒（数值仅在时间语义字段名上生效，如 `created`、`db_head_age`）
-- 金额字符串: `parse_amount` 归一为数值后按 `float_epsilon` 比较
-  （"1.500 SBD" 与 "1.5 SBD" 判等）；**币种必须匹配**（大小写不敏感；
-  "$" 只匹配 "$"；SBD vs STEEM 判红）；**金额串不与裸数字桥接**
-  （"0.750 SBD" vs 0.75 判 type mismatch——数字侧无币种可校验）
+Cases whose difference is REGISTERED (get_state: legacy serves the
+retired-frontend monolith while Go answers -32000 not-implemented;
+normalize_post: Go binds the post object at the wrong level, baseline
+#23) are marked `expected_diff: true` in the YAML. The comparator counts
+them in a separate bucket — they never count as failures and never fail
+the exit code — and reports each as "diffing" or "RESOLVED" (a resolved
+entry means the registry can be pruned).
 
-### 结构忽略（路径感知）
+## Test Case Configuration
 
-`ignore_fields` 为路径感知匹配（见 `api_comparator.py` 的 `IgnoreMatcher`）：
+Case files: `tests/api-comparison/test_cases.yaml` (the 68-method
+cross-service matrix) and `tests/api-comparison/test_cases_go_only.yaml`
+(D4 Go-vs-Go track).
 
-- 裸字段名（如 `request_id`）匹配任意深度的同名键（保留 legacy 深度语义，慎用）
-- 点分路径（如 `author.id`）只匹配该精确路径，防止全局 `id` 误伤所有层级的业务字段
-- 支持 `*`（任一段）与 `**`（任意层级段）；list 下标归一为 `*`
-
-### 深度比较
-
-递归比较嵌套对象和数组，直到叶子节点；list 默认严格按位置比较，
-per-case 可选 `unordered`（按业务键排序后比）与 `lenient_list`
-（长度 + 集合式一对一匹配），仅用于 legacy 本身无序的场景并在 yaml 注释登记理由。
-
-## 测试用例配置
-
-测试用例配置文件: `tests/api-comparison/test_cases.yaml`
-
-参数形态以 legacy Python 端协议为准：condenser 用例为**位置数组**
-（讨论类查询为 `[query对象]` 嵌套形态）；bridge/hive_api 用例为对象
-（键名与 legacy 方法签名一致）。
+Parameter shapes follow the legacy wire protocol: condenser-family and
+`call` cases use positional arrays (discussion queries in the steemd
+nested-query form `[query]`); bridge cases use kwargs objects whose keys
+match the legacy signatures. Sample parameters (1.10) are
+protocol-legal typical samples (steemit/firstpost, hive-139531); cursor
+cases use seek semantics so they stay deterministic on any shared
+database — adjust samples to real rows when a run needs non-empty page-N
+results.
 
 ```yaml
-# 顶层全局配置（逐层应用到每个用例，per-case 可覆盖）
 config:
-  ignore_fields: []            # 路径感知
+  ignore_fields: []            # path-aware
   tolerance:
     float_epsilon: 0.001
     timestamp_seconds: 2
 
 test_cases:
-  - id: "condenser-get-content"          # 稳定 id，用于结果文件命名
+  - id: "condenser-get-content"          # stable id (detail file names)
     name: "condenser_api.get_content steemit/firstpost"
     api: "condenser_api.get_content"
     priority: "P0"
-    params: ["steemit", "firstpost"]     # 位置数组（legacy 协议形态）
-    # ignore_fields: [...]               # per-case 覆盖（整体替换全局）
-    # tolerance: {...}                   # per-case 覆盖（按键合并）
-    # unordered: true                    # 顶层 list 按业务键排序后比
-    # unordered_key: "author"
-    # lenient_list: true                 # 顶层 list 长度 + 集合式匹配
+    params: ["steemit", "firstpost"]     # legacy wire form
+    # expected_diff: true                # registered, counted separately
+    # ignore_fields: [...]               # per-case override (replaces)
+    # tolerance: {...}                   # per-case override (merges)
+    # unordered: true / unordered_key: "author"
+    # lenient_list: true
 ```
 
-工具自测（不依赖真实服务）：
+Tool self-tests (no real services needed):
 
 ```bash
 cd tests/api-comparison
-python3 -m pytest test_api_comparator.py    # 比较器核心单元测试
-python3 selftest/run_selftest.py            # stub 双端端到端冒烟
+python3 -m pytest test_api_comparator.py    # comparator core + matrix coverage
+python3 selftest/run_selftest.py            # stub end-to-end smoke incl.
+                                            # full-matrix reachability
 ```
 
-### 退出码约定
+### Exit codes
 
-`api_comparator.py` 与 `run_tests.sh` 退出码一致：
+`api_comparator.py` and `run_tests.sh` share the contract:
 
-- `0` = 所有执行的用例全部通过
-- `1` = 至少一个用例失败
-- `2` = 没有用例被执行（如 `--priority` 过滤后为空——零证据不得
-  视为"全绿"，CI 中必须与 0 区分）
+- `0` = no unexpected failure (registered expected-diff cases are
+  reported separately and never fail the run)
+- `1` = at least one unexpected failure
+- `2` = no cases executed (e.g. an empty `--priority` filter — zero
+  evidence must never read as "all green")
 
-## 失败处理
+## Failure Handling
 
-### 测试失败分类
+### Failure categories
 
-1. **连接失败**: API 无法连接
-2. **结构差异**: 返回数据结构不一致
-3. **数值差异**: 返回值不一致
-4. **类型差异**: 数据类型不一致
-5. **超时**: 响应时间过长
+1. **Connection failure**: an API endpoint is unreachable.
+2. **Structural difference**: response shapes differ.
+3. **Value difference**: values differ beyond tolerance.
+4. **Type difference**: value types differ.
+5. **Timeout**: response too slow.
 
-### 失败报告
+### Failure reports
 
-每个失败用例记录：
-- API 方法名
-- 输入参数
-- 预期结果 (Python 版本)
-- 实际结果 (Go 版本)
-- 差异详情
-- 可能原因
+Each failed case records: the API method, the request params, the
+expected (Python) and actual (Go) responses (full payloads in the detail
+file), the difference path, and the duration. Differences are triaged
+into Go bug / tool noise / legacy quirk (04 §三); deliberate divergences
+are registered as `expected_diff` with a reason, never silently ignored.
 
-## 持续集成
+## Continuous Integration
 
-将测试集成到 CI/CD 流程：
+CI does not run cross-service comparison (it depends on an internal
+database). The comparator's pure comparison core and the stub-driven
+selftest (including full-matrix reachability) run in CI instead; a
+Go-vs-Go `--smoke` nightly is an optional W8 addition.
 
-1. 每次代码提交自动运行测试
-2. 生成测试报告并上传
-3. 失败时通知开发者
-4. 保留历史测试结果用于趋势分析
+## Success Criteria
 
-## 成功标准
+Phased targets (04 §三 judgment ladder):
 
-### 阶段性目标
+- **W4 smoke**: P0 subset green except the registered expected-red list.
+- **W6 full run**: difference inventory over the full 68-method matrix,
+  classified by priority and root cause.
+- **W7 acceptance**: P0 100% AND overall >95% (P0 100% with overall
+  90-95% and non-core >90% escalates to decision point D6).
 
-- **第一阶段**: P0 API 100% 通过
-- **第二阶段**: P0 + P1 API 100% 通过
-- **第三阶段**: 所有 API 95% 通过
-
-### 发布标准
-
-- 所有 P0 和 P1 API 100% 通过
-- P2 API 至少 95% 通过
-- 性能不低于 Python 版本的 80%
+Release bar: all P0/P1 endpoints 100% (P1 expected-diff entries resolved
+or re-registered through review); P2 at least 95%; performance not worse
+than 80% of the Python server.

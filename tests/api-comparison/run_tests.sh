@@ -6,6 +6,12 @@
 
 set -e
 
+# Self-anchor to this script's directory (2026-Q4 04 §一 1.8): the tool used
+# to resolve api_comparator.py/test_cases.yaml relative to the CALLER's cwd,
+# so `bash /path/to/tests/api-comparison/run_tests.sh` from anywhere else
+# broke. All relative paths below now resolve against the tool directory.
+cd "$(dirname "$0")"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'

@@ -1,10 +1,20 @@
-# Docker Compose 配置 - API 一致性测试环境
-# 用于同时运行 Python 和 Go 版本的 Hivemind API 并进行对比测试
+# Docker Compose config - API consistency test environment.
+# Runs the Python (legacy) and Go hivemind API servers side by side against
+# one database and executes the comparison suite.
+#
+# The legacy checkout path is parameterized via the LEGACY_CONTEXT env var
+# (2026-Q4 plan 04-comparison.md §一 1.8) so the file carries no
+# machine-specific absolute paths:
+#
+#   LEGACY_CONTEXT=/path/to/hivemind_legacy \
+#     docker compose -f tests/api-comparison/docker-compose.test.yml up -d
+#
+# The Go repo context stays relative to this compose file (repo root via ../..).
 
 version: '3.8'
 
 services:
-  # PostgreSQL 数据库
+  # PostgreSQL database
   postgres:
     image: postgres:15-alpine
     container_name: hivemind-test-postgres
@@ -22,7 +32,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis 缓存
+  # Redis cache
   redis:
     image: redis:7-alpine
     container_name: hivemind-test-redis
@@ -34,10 +44,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # Python 版本 Hivemind API
+  # Python (legacy) hivemind API - build context comes from LEGACY_CONTEXT
   python-api:
     build:
-      context: /home/ety001/workspace/hivemind_legacy
+      context: ${LEGACY_CONTEXT:-/home/ety001/workspace/hivemind_legacy}
       dockerfile: Dockerfile
     container_name: hivemind-python-api
     ports:
@@ -58,10 +68,10 @@ services:
       retries: 3
       start_period: 40s
 
-  # Go 版本 Hivemind API
+  # Go hivemind API
   go-api:
     build:
-      context: /home/ety001/workspace/hivemind
+      context: ${GO_CONTEXT:-../..}
       dockerfile: Dockerfile
     container_name: hivemind-go-api
     ports:
@@ -85,10 +95,10 @@ services:
       retries: 3
       start_period: 40s
 
-  # 测试运行器
+  # Test runner
   test-runner:
     build:
-      context: ./tests/api-comparison
+      context: .
       dockerfile: Dockerfile
     container_name: hivemind-test-runner
     environment:
@@ -101,7 +111,7 @@ services:
       go-api:
         condition: service_healthy
     volumes:
-      - ./tests/api-comparison/results:/app/results
+      - ./results:/app/results
     command: >
       --config test_cases.yaml
       --python-url http://python-api:8080
@@ -112,15 +122,17 @@ services:
 volumes:
   postgres_data:
 
-# 使用说明:
-# 1. 启动测试环境:
-#    docker-compose -f docker-compose.test.yml up -d
+# Usage:
+# 1. Start the test environment (LEGACY_CONTEXT defaults to the legacy
+#    checkout on this machine):
+#    docker compose -f docker-compose.test.yml up -d
+# 2. Watch the test runner logs:
+#    docker compose -f docker-compose.test.yml logs -f test-runner
+# 3. Re-run the tests:
+#    docker compose -f docker-compose.test.yml restart test-runner
+# 4. Stop and clean up:
+#    docker compose -f docker-compose.test.yml down -v
 #
-# 2. 查看测试运行日志:
-#    docker-compose -f docker-compose.test.yml logs -f test-runner
-#
-# 3. 重新运行测试:
-#    docker-compose -f docker-compose.test.yml restart test-runner
-#
-# 4. 停止并清理:
-#    docker-compose -f docker-compose.test.yml down -v
+# NOTE (registered to #432, not fixed here): the python-api service env names
+# (DATABASE_URL/REDIS_URL/STEEM_URL) do not match the legacy container's
+# expected HIVE_-prefixed variables; env alignment lands with #432.

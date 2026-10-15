@@ -52,7 +52,6 @@ func TestCallAdapterValidation(t *testing.T) {
 		{"query filter_tags", `["condenser_api","get_discussions_by_trending",[{"limit":5,"filter_tags":["x"]}]]`, "filter_tags not supported"},
 		{"query select_tags", `["condenser_api","get_discussions_by_trending",[{"limit":5,"select_tags":["x"]}]]`, "select_tags not supported"},
 		{"query unknown key", `["condenser_api","get_discussions_by_trending",[{"limit":5,"nope":1}]]`, "unknown query key {'nope'}"},
-		{"unknown method", `["condenser_api","get_xyz",[]]`, "unknown method: condenser_api.get_xyz"},
 	}
 
 	for _, tc := range cases {
@@ -70,6 +69,21 @@ func TestCallAdapterValidation(t *testing.T) {
 			}
 		})
 	}
+
+	// Unknown methods raise the not-supported class (legacy ApiError ->
+	// -32000), not a parameter error.
+	t.Run("unknown method", func(t *testing.T) {
+		_, err := callRaw(t, adapter, `["condenser_api","get_xyz",[]]`)
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if _, isPub := err.(apierrors.PublicError); isPub {
+			t.Fatalf("error type = %T, want NotSupportedError", err)
+		}
+		if err.Error() != "unknown method: condenser_api.get_xyz" {
+			t.Errorf("error = %q", err.Error())
+		}
+	})
 }
 
 // TestStrictQueryNormalization checks the blank-key stripping and
@@ -222,11 +236,13 @@ func TestCallAdapterDispatch(t *testing.T) {
 		t.Errorf("call get_replies_by_last_update = %v, want [reply-y]", repliesByLU)
 	}
 
-	// get_account_votes dummy and get_state refusal route through too.
+	// get_account_votes dummy and get_state refusal route through too; both
+	// are the not-supported class (apierrors.NotSupportedError → JSON-RPC
+	// -32000 "Server error", mirroring the legacy ApiError classification).
 	if _, err := callRaw(t, adapter, `["condenser_api","get_account_votes",["alice"]]`); err == nil {
 		t.Error("call get_account_votes must return the informational error")
-	} else if pe, ok := err.(apierrors.PublicError); !ok || string(pe) != "get_account_votes is no longer supported" {
-		t.Errorf("call get_account_votes error = %v, want the legacy dummy message", err)
+	} else if pe, ok := err.(apierrors.NotSupportedError); !ok || string(pe) != "get_account_votes is no longer supported" {
+		t.Errorf("call get_account_votes error = %v (%T), want the legacy dummy message as NotSupportedError", err, err)
 	}
 	if _, err := callRaw(t, adapter, `["condenser_api","get_state",["trending"]]`); err == nil {
 		t.Error("call get_state must return the registered not-implemented refusal")

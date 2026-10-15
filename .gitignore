@@ -50,6 +50,11 @@ cmd/indexer/indexer
 *.log
 logs/
 
+# API comparison run artifacts (reports + per-case detail files); the
+# directory itself is kept via results/.gitkeep (2026-Q4 04 §一 1.8).
+tests/api-comparison/results/*
+!tests/api-comparison/results/.gitkeep
+
 # OS
 .DS_Store
 Thumbs.db

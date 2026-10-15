@@ -27,6 +27,18 @@ Covers the Q4 planned-PR#420 fixes and the PR#420-review hardening:
     response id echo (strict int 1; notification form / id mismatch /
     type variants rejected), and strict error-object shape (int "code"
     + str "message"; no str(error) fallbacks)
+  * planned PR#421: 68-method matrix coverage + param-shape validation of
+    test_cases.yaml / test_cases_go_only.yaml (every legacy-registered
+    method name has at least one case; Go-only names live only in the D4
+    track file; condenser/call params are positional arrays, bridge
+    params are objects)
+  * planned PR#421: expected_diff accounting (registered differences are
+    counted separately and never count as unexpected failures)
+  * planned PR#421: JSON-valued strings compare by parsed value (key-order
+    drift in payload strings such as community settings is not a diff)
+  * planned PR#421 obligation ⑥: lenient_list / unordered use maximum
+    bipartite matching -- the greedy-trap scenario (an early element
+    consuming the only partner of a later one) no longer false-reds
 
 Run:  python3 -m pytest test_api_comparator.py  (from tests/api-comparison/)
 """
@@ -35,12 +47,15 @@ import os
 import sys
 
 import pytest
+import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from api_comparator import (  # noqa: E402
     ApiCallError,
     APIClient,
+    APITestRunner,
+    CaseResult,
     CompareOptions,
     IgnoreMatcher,
     compare_error_texts,
@@ -1112,3 +1127,379 @@ class TestDiffTruncation:
         opts = make_opts()
         _, diff = compare_values("x" * 5000, None, opts, ("body",))
         assert len(diff) < 600
+
+
+# ---------------------------------------------------------------------------
+# planned PR#421: authoritative 68-method matrix coverage (04 §二)
+# ---------------------------------------------------------------------------
+
+TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# The 68 method names the legacy server registers (serve.py
+# build_methods); the same extraction the Go registry golden test
+# (internal/api/router_test.go) locks. Cross-service comparison is only
+# possible for exactly these names.
+LEGACY_MATRIX_METHODS = {
+    "hive.db_head_state",
+    # condenser_api x26
+    "condenser_api.get_followers",
+    "condenser_api.get_following",
+    "condenser_api.get_followers_by_page",
+    "condenser_api.get_following_by_page",
+    "condenser_api.get_follow_count",
+    "condenser_api.get_content",
+    "condenser_api.get_content_replies",
+    "condenser_api.get_state",
+    "condenser_api.get_trending_tags",
+    "condenser_api.get_discussions_by_trending",
+    "condenser_api.get_discussions_by_hot",
+    "condenser_api.get_discussions_by_promoted",
+    "condenser_api.get_discussions_by_created",
+    "condenser_api.get_discussions_by_blog",
+    "condenser_api.get_discussions_by_feed",
+    "condenser_api.get_discussions_by_comments",
+    "condenser_api.get_replies_by_last_update",
+    "condenser_api.get_discussions_by_author_before_date",
+    "condenser_api.get_post_discussions_by_payout",
+    "condenser_api.get_comment_discussions_by_payout",
+    "condenser_api.get_blog",
+    "condenser_api.get_blog_entries",
+    "condenser_api.get_account_reputations",
+    "condenser_api.get_reblogged_by",
+    "condenser_api.get_transaction",
+    "condenser_api.get_account_votes",
+    # follow_api aliases x9
+    "follow_api.get_followers",
+    "follow_api.get_following",
+    "follow_api.get_followers_by_page",
+    "follow_api.get_following_by_page",
+    "follow_api.get_follow_count",
+    "follow_api.get_account_reputations",
+    "follow_api.get_blog",
+    "follow_api.get_blog_entries",
+    "follow_api.get_reblogged_by",
+    # tags_api aliases x12
+    "tags_api.get_account_votes",
+    "tags_api.get_discussion",
+    "tags_api.get_content_replies",
+    "tags_api.get_discussions_by_trending",
+    "tags_api.get_discussions_by_hot",
+    "tags_api.get_discussions_by_promoted",
+    "tags_api.get_discussions_by_created",
+    "tags_api.get_discussions_by_blog",
+    "tags_api.get_discussions_by_comments",
+    "tags_api.get_discussions_by_author_before_date",
+    "tags_api.get_post_discussions_by_payout",
+    "tags_api.get_comment_discussions_by_payout",
+    # bare call x1
+    "call",
+    # bridge x19
+    "bridge.normalize_post",
+    "bridge.get_post_header",
+    "bridge.get_discussion",
+    "bridge.get_post",
+    "bridge.get_account_posts",
+    "bridge.get_ranked_posts",
+    "bridge.get_profile",
+    "bridge.get_trending_topics",
+    "bridge.post_notifications",
+    "bridge.account_notifications",
+    "bridge.unread_notifications",
+    "bridge.get_payout_stats",
+    "bridge.get_community",
+    "bridge.get_community_context",
+    "bridge.list_communities",
+    "bridge.list_pop_communities",
+    "bridge.list_community_roles",
+    "bridge.list_subscribers",
+    "bridge.list_all_subscriptions",
+}
+
+# Go-only surface (decision D4): never comparable against legacy.
+GO_ONLY_METHODS = {
+    "hive_api.get_account",
+    "hive_api.get_accounts",
+    "hive_api.list_followers",
+    "hive_api.list_following",
+    "hive_api.list_all_muted",
+    "hive_api.list_account_blog",
+    "hive_api.list_account_posts",
+    "hive_api.list_account_feed",
+    "bridge.list_top_communities",
+}
+
+
+def _load_cases(filename):
+    with open(os.path.join(TOOL_DIR, filename)) as handle:
+        loaded = yaml.safe_load(handle) or {}
+    return loaded.get("test_cases") or []
+
+
+# Methods whose legacy wire form is a positional array (condenser family,
+# bare `call`, and the parameterless hive.db_head_state); bridge.* takes a
+# single kwargs object.
+_ARRAY_PARAM_PREFIXES = ("condenser_api.", "follow_api.", "tags_api.")
+_ARRAY_PARAM_METHODS = {"call", "hive.db_head_state"}
+
+
+def _expected_param_shape(method):
+    if method in _ARRAY_PARAM_METHODS or method.startswith(_ARRAY_PARAM_PREFIXES):
+        return "array"
+    return "object"
+
+
+class TestMatrixCoverage:
+    def test_main_config_covers_all_68_legacy_methods(self):
+        cases = _load_cases("test_cases.yaml")
+        covered = {case["api"] for case in cases}
+        missing = LEGACY_MATRIX_METHODS - covered
+        assert not missing, (
+            f"matrix methods without a single case: {sorted(missing)} "
+            f"(04 §二: every legacy-registered name needs >=1 case)")
+
+    def test_main_config_contains_no_go_only_methods(self):
+        cases = _load_cases("test_cases.yaml")
+        covered = {case["api"] for case in cases}
+        leaked = covered & GO_ONLY_METHODS
+        assert not leaked, (
+            f"Go-only methods must live in test_cases_go_only.yaml (D4 "
+            f"track), not the cross-service matrix: {sorted(leaked)}")
+
+    def test_go_only_track_file_covers_all_9_methods(self):
+        cases = _load_cases("test_cases_go_only.yaml")
+        covered = {case["api"] for case in cases}
+        assert covered == GO_ONLY_METHODS, (
+            f"Go-only track mismatch: missing={sorted(GO_ONLY_METHODS - covered)} "
+            f"extra={sorted(covered - GO_ONLY_METHODS)}")
+
+    def test_case_ids_unique_per_file(self):
+        for filename in ("test_cases.yaml", "test_cases_go_only.yaml"):
+            ids = [case.get("id") for case in _load_cases(filename)]
+            assert all(ids), f"{filename}: a case is missing its id"
+            assert len(ids) == len(set(ids)), (
+                f"{filename}: duplicate case ids {sorted({i for i in ids if ids.count(i) > 1})}")
+
+    def test_priorities_valid_and_param_shapes_match_wire_protocol(self):
+        """1.9/1.10: every case carries a valid priority and the legacy
+        wire param shape for its method family (positional arrays for the
+        condenser family and `call`, kwargs objects for bridge)."""
+        for filename in ("test_cases.yaml", "test_cases_go_only.yaml"):
+            for case in _load_cases(filename):
+                assert case.get("priority") in ("P0", "P1", "P2"), (
+                    f"{filename}:{case.get('id')}: priority {case.get('priority')!r}")
+                method = case["api"]
+                shape = _expected_param_shape(method)
+                params = case.get("params")
+                if shape == "array":
+                    assert isinstance(params, list), (
+                        f"{filename}:{case['id']}: {method} params must be a "
+                        f"positional array (legacy wire form), got {type(params).__name__}")
+                else:
+                    assert isinstance(params, dict), (
+                        f"{filename}:{case['id']}: {method} params must be an "
+                        f"object (legacy kwargs form), got {type(params).__name__}")
+
+    def test_pagination_cursor_cases_present(self):
+        """1.10: pagination families carry second-request cursor cases."""
+        cases = _load_cases("test_cases.yaml")
+        apis = [case["api"] for case in cases]
+        cursor_ids = [case["id"] for case in cases
+                      if "cursor" in case["id"] or "page2" in case["id"]
+                      or "last-id" in case["id"]]
+        # at least one cursor re-request for follows, blog, discussions,
+        # notifications and communities
+        assert "condenser-get-followers-start-cursor" in cursor_ids
+        assert "condenser-get-blog-page2" in cursor_ids
+        assert "condenser-discussions-trending-start-cursor" in cursor_ids
+        assert "bridge-account-notifications-last-id" in cursor_ids
+        assert "bridge-list-communities-cursor" in cursor_ids
+        assert len(cursor_ids) >= 6
+        assert apis  # (static sanity: the file parsed)
+
+
+# ---------------------------------------------------------------------------
+# planned PR#421: expected_diff accounting
+# ---------------------------------------------------------------------------
+
+def _runner_with_results(passed_flags, expected_flags):
+    """Build an APITestRunner without HTTP clients (get_summary only reads
+    .results); object.__new__ skips __init__ so `requests` networking is
+    never constructed."""
+    runner = object.__new__(APITestRunner)
+    runner.results = [
+        CaseResult(case_id=f"case-{i}", name=f"case {i}", api="x.y",
+                   priority="P1", passed=passed, expected_diff=expected)
+        for i, (passed, expected) in enumerate(zip(passed_flags, expected_flags))
+    ]
+    return runner
+
+
+class TestExpectedDiffAccounting:
+    def test_unregistered_failure_counts_as_unexpected(self):
+        summary = _runner_with_results(
+            [True, False, False], [False, False, False]).get_summary()
+        assert summary["unexpected_failures"] == 2
+        assert summary["failed"] == 2
+        assert summary["expected_diff"]["total"] == 0
+
+    def test_registered_diff_never_counts_as_unexpected(self):
+        summary = _runner_with_results(
+            [False, True, False], [True, False, False]).get_summary()
+        # case-0 failed but is registered; case-2 failed unregistered;
+        # case-1 passed.
+        assert summary["unexpected_failures"] == 1
+        assert summary["failed"] == 2                # honest actual count
+        assert summary["expected_diff"] == {"total": 1, "diffing": 1, "resolved": 0}
+
+    def test_all_green_with_registered_diffs(self):
+        summary = _runner_with_results(
+            [False, False], [True, True]).get_summary()
+        assert summary["unexpected_failures"] == 0
+        assert summary["expected_diff"]["diffing"] == 2
+
+    def test_console_report_lists_expected_diffs_separately(self):
+        from api_comparator import ReportGenerator
+        runner = _runner_with_results([False, True], [True, True])
+        report = ReportGenerator(
+            runner.results, runner.get_summary()).generate_console_report()
+        assert "Expected differences (registered)" in report
+        assert "RESOLVED" in report  # case-1: expected_diff and passed
+        assert "diffing (registered)" in report  # case-0
+        # Only unexpected failures belong under "Failed cases"; with none,
+        # the report must read as passing.
+        assert "Failed cases:" not in report
+        assert "All cases passed" in report
+
+    def test_yaml_expected_diff_flag_flows_into_case_result(self):
+        """The run_case path propagates expected_diff from the YAML dict."""
+        import tempfile
+        runner = object.__new__(APITestRunner)
+        runner.results = []
+        runner.output_dir = tempfile.mkdtemp(prefix="comparator-test-")
+
+        class _StubClient:
+            def __init__(self, result):
+                self.result = result
+
+            def call(self, method, params=None):
+                return self.result
+
+        runner.python_client = _StubClient({"a": 1})
+        runner.go_client = _StubClient({"a": 2})
+        case = {"id": "x", "api": "demo.method", "priority": "P2",
+                "params": [], "expected_diff": True}
+        result = runner.run_case(case, {})
+        assert result.expected_diff is True
+        assert result.passed is False
+        # default (flag absent) stays False
+        result2 = runner.run_case(
+            {"id": "y", "api": "demo.method", "priority": "P2", "params": []}, {})
+        assert result2.expected_diff is False
+
+
+# ---------------------------------------------------------------------------
+# planned PR#421: JSON-valued string comparison (set_props payload key order)
+# ---------------------------------------------------------------------------
+
+class TestJsonValuedStrings:
+    def test_key_order_drift_passes(self):
+        opts = make_opts()
+        a = '{"avatar_url":"https://x/y.png","title":"t","lang":"en"}'
+        b = '{"lang":"en","title":"t","avatar_url":"https://x/y.png"}'
+        matched, _ = compare_values(a, b, opts, ("settings",))
+        assert matched
+
+    def test_key_order_drift_with_value_difference_fails(self):
+        opts = make_opts()
+        a = '{"title":"one","lang":"en"}'
+        b = '{"lang":"en","title":"two"}'
+        matched, diff = compare_values(a, b, opts, ("settings",))
+        assert not matched
+        assert "title" in diff
+
+    def test_nested_json_payloads_compare_recursively(self):
+        opts = make_opts()
+        a = '{"list":[1,2,{"z":1,"a":2}]}'
+        b = '{"list":[1,2,{"a":2,"z":1}]}'
+        matched, _ = compare_values(a, b, opts, ("payload",))
+        assert matched
+
+    def test_one_side_json_one_side_plain_string_fails(self):
+        opts = make_opts()
+        matched, diff = compare_values('{"a":1}', "not json", opts, ("x",))
+        assert not matched
+        assert "JSON" in diff
+
+    def test_scalar_json_strings_stay_plain_strings(self):
+        """Numeric/boolean JSON scalars must NOT become lenient numeric
+        comparisons via the JSON bridge: "007" vs "7" is a real diff."""
+        opts = make_opts()
+        matched, _ = compare_values("007", "7", opts, ("zip",))
+        assert not matched
+        matched, _ = compare_values("true", "true", opts, ("flag",))
+        assert matched
+
+    def test_broken_json_stays_plain_string(self):
+        opts = make_opts()
+        matched, _ = compare_values('{"a": 1', '{"a": 1', opts, ("raw",))
+        assert matched
+
+
+# ---------------------------------------------------------------------------
+# planned PR#421 ⑥: maximum bipartite matching in list modes
+# ---------------------------------------------------------------------------
+
+class TestBipartiteListMatching:
+    def test_lenient_list_greedy_trap_now_passes(self):
+        """The classic greedy trap, built from tolerance-nontransitive
+        numbers (epsilon 0.15):
+
+            python = [1.0, 1.1]   go = [1.05, 0.9]
+
+            python[0]=1.0 matches go[0] (0.05) AND go[1] (0.10)
+            python[1]=1.1 matches go[0] (0.05) but NOT go[1] (0.20)
+
+        Greedy first-match pairs python[0]->go[0] and strands python[1]
+        (a false red: the perfect matching python[0]->go[1],
+        python[1]->go[0] exists). Maximum bipartite matching finds it."""
+        opts = make_opts(lenient_list=True, float_epsilon=0.15)
+        matched, diff = compare_values([1.0, 1.1], [1.05, 0.9], opts)
+        assert matched, diff
+
+    def test_lenient_list_simple_reorder_still_passes(self):
+        opts = make_opts(lenient_list=True)
+        matched, _ = compare_values(
+            ["1.500 SBD", "2.500 SBD"], ["2.500 SBD", "1.500 SBD"], opts)
+        assert matched
+
+    def test_lenient_list_no_matching_still_red(self):
+        a = [{"v": 1}, {"v": 3}]
+        b = [{"v": 1}, {"v": 2}]
+        opts = make_opts(lenient_list=True)
+        matched, _ = compare_values(a, b, opts)
+        assert not matched
+
+    def test_unordered_equal_key_group_matched_leniently(self):
+        """Two elements share the business sort key but differ in content:
+        zipping after sort could pair the wrong partners; group matching
+        finds the perfect pairing."""
+        a = [{"name": "x", "v": 1}, {"name": "x", "v": 2}]
+        b = [{"name": "x", "v": 2}, {"name": "x", "v": 1}]
+        opts = make_opts(unordered=True, unordered_key="name")
+        matched, diff = compare_values(a, b, opts)
+        assert matched, diff
+
+    def test_unordered_equal_key_group_with_real_diff_red(self):
+        a = [{"name": "x", "v": 1}, {"name": "x", "v": 2}]
+        b = [{"name": "x", "v": 2}, {"name": "x", "v": 3}]
+        opts = make_opts(unordered=True, unordered_key="name")
+        matched, _ = compare_values(a, b, opts)
+        assert not matched
+
+    def test_unordered_key_multiset_mismatch_red(self):
+        a = [{"name": "x"}, {"name": "y"}]
+        b = [{"name": "x"}, {"name": "z"}]
+        opts = make_opts(unordered=True, unordered_key="name")
+        matched, diff = compare_values(a, b, opts)
+        assert not matched
+        assert "keys differ" in diff

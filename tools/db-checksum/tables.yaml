@@ -1,0 +1,79 @@
+# 20M comparison table configuration (02-indexer.md §五 table-level
+# three-column method). Run the SAME file against BOTH databases; the
+# registered exemptions are the only deviations from a strict full-row
+# comparison, and each carries its justification.
+
+tables:
+  # ---- strict: deterministic write products of the block pipeline ----
+  hive_blocks:
+    key: [num]
+  hive_posts:
+    key: [id]
+  hive_trxid_block_num:
+    key: [trx_id]
+  hive_reblogs:
+    key: [account, post_id]
+  hive_payments:
+    key: [id]
+  hive_follows:
+    key: [following, follower]
+  hive_feed_cache:
+    # Rebuild product: content is determined by follows x posts, so a
+    # strict comparison is valid once both sides finished tail
+    # maintenance (feed-family P0 data source).
+    key: [post_id, account_id]
+
+  # ---- strict on business columns; volatile columns excluded ----
+  hive_accounts:
+    key: [id]
+    # rank: load-time dependent (volatile, tolerance registered);
+    # cached_at: legacy cache-sweep timestamp, load-time dependent.
+    exclude_columns: [rank, cached_at]
+    # follower/following counters get a dedicated single-column check so a
+    # mismatch is attributable without a second run (depends on the
+    # P0-1/P0-4 follow-delta fixes being correct).
+    column_subchecks: [followers, following]
+
+  # ---- strict, with the serial-hole id normalization ----
+  hive_notifs:
+    key: [id]
+    # id is EXCLUDED from the row digest: block rollbacks consume serial
+    # values differently on the two syncs (#404 registration), so equal
+    # logical rows carry different ids. Rows are ordered by id and
+    # aligned by ordinal; the hole pattern itself is not compared.
+    exclude_columns: [id]
+
+  # ---- strict except the recomputed/volatile score columns ----
+  hive_posts_cache:
+    key: [post_id]
+    # sc_trend/sc_hot: flush-time dependent scores -- normalize both DBs
+    # first by running recalc_sc_trend.sql (same file on both sides),
+    # then checksum. Everything else (payout/votes/flag_weight/...) is
+    # deterministic under a frozen steemd node.
+    exclude_columns: [sc_trend, sc_hot]
+  hive_posts_cache_temp:
+    key: [post_id]
+    # _synced_at is NOW() at sync time on both sides (hot-data mirror
+    # watermark) -- load-time volatile, excluded like the score columns.
+    exclude_columns: [sc_trend, sc_hot, _synced_at]
+
+  # ---- expected-empty below block 37.5M: consistent-empty = pass ----
+  hive_communities:
+    key: [id]
+  hive_roles:
+    key: [account_id, community_id]
+  hive_subscriptions:
+    key: [account_id, community_id]
+
+# hive_state is EXEMPT from checksumming (02 §五): Go's
+# StateRepository.Update is never called (price columns stay at seed
+# values on the Go side). head_block_num SHOULD match and is verified as a
+# single column:
+#   psql ... -c "SELECT head_block_num FROM hive_state ORDER BY block_num DESC LIMIT 1"
+#
+# Registered divergence exemptions to record in the comparison report
+# (NOT handled by this file):
+#   * audit-path undelete suppresses community error notifications on the
+#     Go side (deliberate: the repair tool must not fabricate history) --
+#     hive_notifs comparisons for segments BEYOND block 37,500,000 are
+#     exempt (#407 registration).
