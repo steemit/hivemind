@@ -48,17 +48,22 @@ func NewBlockProcessor(database *db.DB, repo *db.Repository, steemProvider steem
 	// accumulated through it (audit P0-4).
 	follows := NewFollowIndexer(repo, logger)
 
+	// The community indexer feeds PostIndexer's community_id resolution
+	// (validated_id) and post-authorization checks, so it must be built
+	// before the post indexer that references it.
+	communityIndexer := NewCommunityIndexer(repo, cachedPost, logger)
+
 	return &BlockProcessor{
 		db:               database,
 		repo:             repo,
 		steem:            steemProvider,
 		cachedPost:       cachedPost,
 		accounts:         NewAccountIndexer(repo, logger, steemProvider),
-		posts:            NewPostIndexer(repo, cachedPost, logger),
+		posts:            NewPostIndexer(repo, cachedPost, communityIndexer, logger),
 		follows:          follows,
 		payments:         NewPaymentIndexer(repo, logger),
 		customOps:        NewCustomOpProcessor(repo, follows, cachedPost, logger),
-		communityIndexer: NewCommunityIndexer(repo, cachedPost, logger),
+		communityIndexer: communityIndexer,
 		logger:           logger,
 	}
 }
@@ -384,7 +389,7 @@ func (bp *BlockProcessor) processOperation(
 	case "comment_operation":
 		return bp.posts.ProcessComment(ctx, tx, opValue, blockDate, isInitialSync)
 	case "delete_comment_operation":
-		return bp.posts.ProcessDelete(ctx, tx, opValue)
+		return bp.posts.ProcessDelete(ctx, tx, opValue, isInitialSync)
 
 	// Vote operations
 	case "vote_operation":

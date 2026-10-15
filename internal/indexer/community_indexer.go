@@ -1054,6 +1054,82 @@ func (ci *CommunityIndexer) isFlagged(ctx context.Context, tx *gorm.DB, op *comm
 	return count > 0, nil
 }
 
+// ValidatedID mirrors legacy Community.validated_id: a name resolves to a
+// community id only when it matches the hive-[123]xxxxx pattern AND a
+// hive_communities row exists for it. The legacy chain also checks
+// Accounts.exists(name) before the hive_communities lookup; that check is
+// redundant here because hive_communities rows are only ever created by
+// Register alongside their eponymous account row (community id == account
+// id), so a hive_communities hit already implies the account exists. A zero
+// return means "not a community".
+func (ci *CommunityIndexer) ValidatedID(ctx context.Context, tx *gorm.DB, name string) (int64, error) {
+	if name == "" {
+		return 0, nil
+	}
+	if !communityNamePattern.MatchString(name) {
+		return 0, nil
+	}
+	return ci.getCommunityID(ctx, tx, name)
+}
+
+// IsPostValid mirrors legacy Community.is_post_valid: whether op's author
+// may post/comment in the community. Journal (type 2) requires member role
+// for top-level posts; council (type 3) requires member role for anything;
+// all other types merely require the author not be muted (role >= guest).
+// A missing author account row resolves to guest (legacy Accounts.get_id
+// returns None -> get_user_role finds no row -> guest), which matches the
+// block-processing order: comment ops are handled before the same block's
+// account registrations.
+func (ci *CommunityIndexer) IsPostValid(ctx context.Context, tx *gorm.DB, communityID int64, op map[string]interface{}) (bool, error) {
+	var community models.Community
+	err := tx.WithContext(ctx).
+		Select("name").
+		Where("id = ?", communityID).
+		First(&community).Error
+	if err != nil {
+		// The id was resolved from hive_communities moments earlier in the
+		// same transaction; a missing row here is a consistency break, not a
+		// data condition (legacy would raise on `community[5]` of None).
+		return false, fmt.Errorf("community %d not found: %w", communityID, err)
+	}
+	if len(community.Name) < 6 {
+		return false, fmt.Errorf("community %d has malformed name %q", communityID, community.Name)
+	}
+
+	author, _ := op["author"].(string)
+	var account models.Account
+	err = tx.WithContext(ctx).
+		Select("id").
+		Where("name = ?", author).
+		First(&account).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Author account not registered yet (same-block registration ordering
+		// edge): no role row can exist, so the author resolves to guest.
+		account.ID = 0
+	} else if err != nil {
+		return false, fmt.Errorf("failed to look up author %s: %w", author, err)
+	}
+
+	role, err := ci.getUserRoleID(ctx, tx, communityID, account.ID)
+	if err != nil {
+		return false, err
+	}
+
+	// Legacy derives the community type from the 6th character of its name
+	// (hive-<type>xxxxx): 1=topic, 2=journal, 3=council.
+	typeID := community.Name[5]
+	parentAuthor, _ := op["parent_author"].(string)
+	switch typeID {
+	case '2': // journal: top-level posts require member role
+		if parentAuthor == "" {
+			return role >= models.RoleMember, nil
+		}
+	case '3': // council: any post/comment requires member role
+		return role >= models.RoleMember, nil
+	}
+	return role >= models.RoleGuest, nil
+}
+
 // getCommunityID gets community ID by name
 func (ci *CommunityIndexer) getCommunityID(ctx context.Context, tx *gorm.DB, name string) (int64, error) {
 	var community models.Community
