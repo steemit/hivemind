@@ -57,6 +57,23 @@ func TestValidate(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Error("Expected error for invalid max_batch")
 	}
+
+	// Tx batch blocks: 0 (unset -> legacy default), 1 (per-block) and the
+	// legacy 1000 are valid; negative and absurdly large values are not.
+	cfg.Steem.MaxBatch = 50
+	for _, v := range []int{0, 1, 1000, 50000} {
+		cfg.Indexer.TxBatchBlocks = v
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("TxBatchBlocks=%d should be valid: %v", v, err)
+		}
+	}
+	for _, v := range []int{-1, 50001} {
+		cfg.Indexer.TxBatchBlocks = v
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("TxBatchBlocks=%d should be rejected", v)
+		}
+	}
+	cfg.Indexer.TxBatchBlocks = 0
 }
 
 func TestValidateDatabasePool(t *testing.T) {

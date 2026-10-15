@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -120,6 +121,12 @@ func validURLProto(url string) bool {
 
 // Flush processes the dirty queue: fetches accounts from steemd in batches
 // of 1000 and updates ~17 columns. Returns the number processed.
+//
+// The per-account `SELECT id FROM hive_accounts` of the rank lookup is
+// batched into ONE id-resolution query per chunk (§4.3): legacy keeps a
+// name->id map in memory for exactly this purpose (accounts.py load_ids),
+// so its flush issues no per-account lookups -- the N+1 here was a Go-side
+// regression, not legacy shape.
 func (ai *AccountIndexer) FlushBatch(ctx context.Context, trx bool) (int, error) {
 	ai.mu.Lock()
 	names := make([]string, 0, len(ai.dirty))
@@ -141,18 +148,24 @@ func (ai *AccountIndexer) FlushBatch(ctx context.Context, trx bool) (int, error)
 		if end > len(names) {
 			end = len(names)
 		}
-		accts, err := ai.steem.GetAccounts(ctx, names[start:end])
+		chunk := names[start:end]
+		accts, err := ai.steem.GetAccounts(ctx, chunk)
 		if err != nil {
 			return processed, err
 		}
 		cachedAt := time.Now().UTC().Truncate(time.Second)
+
+		// Resolve every account id of the chunk in one query; the rank
+		// lookup itself is served from the in-memory rank cache, so the
+		// flush issues no per-account SELECTs.
+		ids := ai.accountIDs(ctx, gdb, chunk)
 
 		updates := make([]map[string]interface{}, 0, len(accts))
 		for _, acct := range accts {
 			if getStr(acct, "name") == "" {
 				continue
 			}
-			updates = append(updates, ai.buildAccountUpdate(ctx, acct, cachedAt))
+			updates = append(updates, ai.buildAccountUpdate(ctx, acct, cachedAt, ids[getStr(acct, "name")]))
 		}
 
 		err = gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -175,11 +188,39 @@ func (ai *AccountIndexer) FlushBatch(ctx context.Context, trx bool) (int, error)
 	return processed, nil
 }
 
-// buildAccountUpdate computes the column values for one account
-// (legacy accounts.py::_sql).
-func (ai *AccountIndexer) buildAccountUpdate(ctx context.Context, acct map[string]interface{}, cachedAt time.Time) map[string]interface{} {
-	gdb := ai.repo.DB()
+// accountIDs resolves account names to ids in one batched query. Best
+// effort like the per-account lookup it replaces (which silently left id 0
+// on a scan error): names missing from the result -- or the whole query
+// failing -- simply skip the rank column for this flush.
+func (ai *AccountIndexer) accountIDs(ctx context.Context, gdb *gorm.DB, names []string) map[string]int64 {
+	out := make(map[string]int64, len(names))
+	if len(names) == 0 {
+		return out
+	}
+	type row struct {
+		ID   int64
+		Name string
+	}
+	var rows []row
+	if err := gdb.WithContext(ctx).
+		Table("hive_accounts").
+		Select("id, name").
+		Where("name IN ?", names).
+		Scan(&rows).Error; err != nil {
+		ai.logger.Warn("account id batch resolution failed; rank column skipped for this flush", zap.Error(err))
+		return out
+	}
+	for _, r := range rows {
+		out[r.Name] = r.ID
+	}
+	return out
+}
 
+// buildAccountUpdate computes the column values for one account
+// (legacy accounts.py::_sql). accountID is the pre-resolved hive_accounts id
+// (0 = unresolved; the rank column is skipped, matching the old per-account
+// SELECT that left id 0 for unknown names).
+func (ai *AccountIndexer) buildAccountUpdate(ctx context.Context, acct map[string]interface{}, cachedAt time.Time, accountID int64) map[string]interface{} {
 	vests, _ := VestsAmount(acct["vesting_shares"])
 	received, _ := VestsAmount(acct["received_vesting_shares"])
 	delegated, _ := VestsAmount(acct["delegated_vesting_shares"])
@@ -250,16 +291,11 @@ func (ai *AccountIndexer) buildAccountUpdate(ctx context.Context, acct map[strin
 		values["raw_json"] = string(rawJSON)
 	}
 
-	// Rank (when the shared cache knows this account).
-	name := getStr(acct, "name")
-	var id int64
-	gdb.WithContext(ctx).
-		Table("hive_accounts").
-		Select("id").
-		Where("name = ?", name).
-		Scan(&id)
-	if id != 0 {
-		if rank, ok := sharedRankCache(gdb).Rank(ctx, id); ok {
+	// Rank (when the shared cache knows this account). The id was resolved
+	// in bulk by the caller (legacy: Accounts._ranks[_ids[name]] -- pure
+	// in-memory lookups on both sides).
+	if accountID != 0 {
+		if rank, ok := sharedRankCache(ai.repo.DB()).Rank(ctx, accountID); ok {
 			values["rank"] = rank
 		}
 	}

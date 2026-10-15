@@ -109,6 +109,35 @@ var (
 			Help: "Total number of notifications fetched",
 		},
 	)
+
+	// Indexer throughput metrics (§4.2): blocks/s comes from rate() over
+	// the processed-blocks counter; the fetch histogram isolates the steemd
+	// GetBlocksRange RPC latency from the transactional write path so a
+	// throughput regression is attributable to one side or the other.
+	IndexerBlocksProcessed = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "hivemind_indexer_blocks_processed_total",
+			Help: "Total blocks committed by the indexer (per tx batch); rate() yields blocks/s",
+		},
+		[]string{"phase"}, // "initial" | "live"
+	)
+
+	IndexerBatchFetchDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "hivemind_indexer_blocks_fetch_duration_seconds",
+			Help:    "Wall time of the steemd GetBlocksRange fetches of one tx batch (RPC latency)",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+		},
+	)
+
+	IndexerBatchWriteDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "hivemind_indexer_tx_batch_duration_seconds",
+			Help:    "Wall time of a committed tx batch (transaction open through COMMIT; excludes fetch)",
+			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+		},
+		[]string{"phase"},
+	)
 )
 
 // RecordRequest records a request metric
@@ -132,4 +161,14 @@ func RecordDBQuery(operation, table string, duration float64) {
 func RecordCacheOperation(operation, result string, duration float64) {
 	CacheOperations.WithLabelValues(operation, result).Inc()
 	CacheOperationDuration.WithLabelValues(operation).Observe(duration)
+}
+
+// RecordIndexerBatch records one committed indexer tx batch: the block count
+// (the blocks/s numerator), the aggregate steemd fetch wall time and the
+// transactional write wall time. phase is "initial" or "live" (whether the
+// batch ran under initial-sync semantics).
+func RecordIndexerBatch(phase string, blocks int, fetchSeconds, writeSeconds float64) {
+	IndexerBlocksProcessed.WithLabelValues(phase).Add(float64(blocks))
+	IndexerBatchFetchDuration.Observe(fetchSeconds)
+	IndexerBatchWriteDuration.WithLabelValues(phase).Observe(writeSeconds)
 }

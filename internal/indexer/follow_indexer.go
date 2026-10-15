@@ -221,9 +221,28 @@ func (fi *FollowIndexer) ProcessFollow(ctx context.Context, tx *gorm.DB, account
 	return nil
 }
 
-// Flush applies pending follow/following count deltas in batched UPDATEs
-// (legacy Follow.flush: group accounts by delta magnitude).
+// Flush applies pending follow/following count deltas in batched UPDATEs on
+// the connection pool (legacy Follow.flush on its own connection).
 func (fi *FollowIndexer) Flush(ctx context.Context) error {
+	return fi.flushOn(ctx, fi.repo.DB())
+}
+
+// FlushTx applies pending follow count deltas on an OPEN transaction --
+// legacy Follow.flush(trx=False) inside blocks.process_multi's chunk
+// transaction: the count UPDATEs commit atomically with the blocks whose
+// ops accumulated them, closing the crash window where committed blocks'
+// deltas lived only in memory and were lost if the process died before the
+// flush (PR#406 audit registration, delivered with tx batching in #408).
+// The caller owns the transaction: on error the statements have failed
+// inside it and the whole transaction must roll back (the deltas are
+// re-queued here so a pool-side retry does not lose them either).
+func (fi *FollowIndexer) FlushTx(ctx context.Context, tx *gorm.DB) error {
+	return fi.flushOn(ctx, tx)
+}
+
+// flushOn applies the pending deltas on the given gorm handle (legacy
+// Follow.flush: group accounts by delta magnitude).
+func (fi *FollowIndexer) flushOn(ctx context.Context, gdb *gorm.DB) error {
 	fi.mu.Lock()
 	foll := fi.deltaFoll
 	fing := fi.deltaFing
@@ -241,7 +260,6 @@ func (fi *FollowIndexer) Flush(ctx context.Context) error {
 		return out
 	}
 
-	gdb := fi.repo.DB()
 	for col, deltas := range map[string]map[int64]int{"followers": foll, "following": fing} {
 		for mag, ids := range byMag(deltas) {
 			sql := fmt.Sprintf("UPDATE hive_accounts SET %s = %s + ? WHERE id IN ?", col, col)
@@ -265,18 +283,19 @@ func (fi *FollowIndexer) Flush(ctx context.Context) error {
 
 // SnapshotDeltas deep-copies both pending delta maps and returns a restore
 // closure that swaps them back in. The count deltas accumulate in memory
-// OUTSIDE the block transaction, so a block rollback does not touch them:
-// without a restore, a failed block leaves its deltas pending, the sync
-// layer's retry of the same block re-accumulates them, and the next Flush
-// applies them twice -- permanently inflating hive_accounts.followers/
-// following (ForceRecount only runs at the end of initial sync and never
-// self-heals live drift; PR#406 audit P1).
+// OUTSIDE the transaction, so a rollback does not touch them: without a
+// restore, a failed unit of work leaves its deltas pending, the retry
+// re-accumulates them, and the next Flush applies them twice -- permanently
+// inflating hive_accounts.followers/following (ForceRecount only runs at the
+// end of initial sync and never self-heals live drift; PR#406 audit P1).
 //
-// The snapshot granularity is a single block, not a batch: deltas of blocks
-// that already committed earlier in the batch live on in the snapshot and
-// survive the restore. Replacing both maps wholesale is correct because the
-// sync loop processes blocks single-threaded -- between SnapshotDeltas and
-// restore, the only writers are the ops of the block being snapshotted.
+// The snapshot granularity must match the transaction's rollback boundary:
+// the batch driver (Sync.syncTxBatch) snapshots once per tx batch -- a batch
+// failure rolls back every block of the batch and the retry re-processes
+// them all -- while the degenerate ProcessBlock path snapshots per block.
+// Replacing both maps wholesale is correct because the sync loop processes
+// blocks single-threaded: between SnapshotDeltas and restore, the only
+// writers are the ops of the unit being snapshotted.
 func (fi *FollowIndexer) SnapshotDeltas() func() {
 	fi.mu.Lock()
 	foll := make(map[int64]int, len(fi.deltaFoll))

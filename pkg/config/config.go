@@ -129,6 +129,15 @@ type IndexerConfig struct {
 	// prune pauses; at or below it (live), pruning resumes. Legacy only
 	// runs CacheSync from live mode; 100 mirrors the legacy stream max_gap.
 	CacheSyncCatchupBlocks int
+
+	// TxBatchBlocks is the number of blocks sharing ONE database
+	// transaction (§4.1): the batch is fetched first, then processed,
+	// follow-count-flushed and committed atomically -- the Go analogue of
+	// legacy sync.py's chunk_size=1000 (Blocks.process_multi wraps 1000
+	// blocks per START TRANSACTION ... COMMIT). A failure of any block in
+	// the batch rolls back the whole batch and the sync layer retries it
+	// from its first block. 1 restores per-block transactions.
+	TxBatchBlocks int
 }
 
 // LoggingConfig holds logging configuration
@@ -214,6 +223,7 @@ func Load() (*Config, error) {
 			RecommendCommunities:   getString("recommend_communities", "hive-108451,hive-172186,hive-187187"),
 			JobsInterval:           getInt("jobs_interval", 0),
 			CacheSyncCatchupBlocks: getInt("cache_sync_catchup_blocks", 100),
+			TxBatchBlocks:          getInt("indexer_tx_batch_blocks", 1000),
 		},
 		Logging: LoggingConfig{
 			Level:        getString("log_level", "INFO"),
@@ -263,6 +273,7 @@ func setDefaults() {
 	viper.SetDefault("trail_blocks", 2)
 	viper.SetDefault("jobs_interval", 0)
 	viper.SetDefault("cache_sync_catchup_blocks", 100)
+	viper.SetDefault("indexer_tx_batch_blocks", 1000)
 	viper.SetDefault("max_batch", 50)
 	viper.SetDefault("max_workers", 4)
 	viper.SetDefault("telemetry_enabled", true)
@@ -378,6 +389,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Indexer.CacheSyncCatchupBlocks < 0 {
 		return fmt.Errorf("cache_sync_catchup_blocks must not be negative")
+	}
+	// The tx batch is the atomic unit of the sync loop: 1 restores per-block
+	// transactions (the degenerate mode), and an absurdly large batch would
+	// hold a transaction (and its locks) open for far too long on dense
+	// blocks. 0 means "unset" (zero-value configs; the sync loop applies the
+	// legacy default of 1000). 1000 is the legacy chunk_size.
+	if c.Indexer.TxBatchBlocks < 0 || c.Indexer.TxBatchBlocks > 50000 {
+		return fmt.Errorf("indexer_tx_batch_blocks must be between 0 (default) and 50000 (1 = per-block transactions)")
 	}
 	// Pool sizing sanity checks. MaxOpenConns=0 means "unlimited" in
 	// database/sql, which defeats the purpose of pool protection, so reject it.
