@@ -95,7 +95,7 @@ Get all accounts following a given account.
 - `account` (string, required): Account name
 - `start` (string, optional): Start account for pagination
 - `follow_type` (string, optional): Type of follow ('blog' or 'ignore', default: 'blog')
-- `limit` (integer, optional): Maximum results (default: 1000, max: 1000)
+- `limit` (integer, required): Maximum results (1-1000; legacy valid_limit — a missing, non-positive or over-limit value is an error)
 
 **Returns:** Array of follower objects with `follower`, `following`, `reputation`, `what` fields (`what` is a fixed-length two-element array, e.g. `["blog", ""]`)
 
@@ -126,8 +126,8 @@ Get followers with page-based pagination.
 
 **Parameters:**
 - `account` (string, required)
-- `page` (integer, required): Page number (0-based)
-- `page_size` (integer, optional): Results per page (default: 100)
+- `page` (integer, required): Page number (0-based; values below -1 are an error, legacy valid_offset)
+- `page_size` (integer, required): Results per page (1-100, legacy valid_limit)
 - `follow_type` (string, optional): 'blog' or 'ignore'
 
 **Returns:** Array of follower objects
@@ -245,7 +245,7 @@ Get posts sorted by trending score.
 **Parameters:**
 - `start_author` (string, optional): Start author for pagination
 - `start_permlink` (string, optional): Start permlink for pagination
-- `limit` (integer, optional): Results limit (default: 20, max: 100)
+- `limit` (integer, optional): Results limit (default: 20, max: 100; a provided limit outside 1-100 is an error, legacy valid_limit)
 - `tag` (string, optional): Filter by tag
 - `truncate_body` (integer, optional): Truncate body to N characters (0 = no truncation)
 - `filter_tags` (array, optional): Not supported
@@ -388,8 +388,8 @@ Same as `get_blog` but returns minimal post references.
 Get trending tags.
 
 **Parameters:**
-- `after_tag` (string, optional): Start tag for pagination
-- `limit` (integer, optional): Results limit (default: 100)
+- `after_tag` (string, optional): Start tag for pagination (validated like legacy valid_tag)
+- `limit` (integer, optional): Results limit (default: 250, max: 250)
 
 **Returns:** Array of tag objects with `name` and `total_payouts`
 
@@ -401,7 +401,7 @@ List account reputations.
 
 **Parameters:**
 - `account_lower_bound` (string, optional): Lower bound account name
-- `limit` (integer, optional): Results limit (default: 1000)
+- `limit` (integer, required): Results limit (1-1000, legacy valid_limit)
 
 **Returns:**
 ```json
@@ -520,7 +520,7 @@ Get posts for an account by type.
 Return top trending topics.
 
 **Parameters:**
-- `limit` (integer, optional): Default 10, max 25
+- `limit` (integer, optional): Default 10, max 25 (a provided limit outside 1-25 is an error, legacy valid_limit)
 - `observer` (string, optional): Not supported
 
 **Returns:** Array of tuples: `[("tag", "Title"), ...]`
@@ -630,7 +630,7 @@ Load notifications for a specific post.
 - `permlink` (string, required)
 - `min_score` (integer, optional): Minimum notification score (default: 25)
 - `last_id` (integer, optional): Last notification ID for pagination
-- `limit` (integer, optional): Default 100, max 100
+- `limit` (integer, optional): Default 100, max 100 (a provided limit outside 1-100 is an error, legacy valid_limit)
 
 **Returns:** Array of notification objects. Notifications referencing a
 deleted post are excluded; an unknown author/permlink is an error.
@@ -643,7 +643,7 @@ Load notifications for an account.
 - `account` (string, required)
 - `min_score` (integer, optional): Default 25
 - `last_id` (integer, optional)
-- `limit` (integer, optional): Default 100
+- `limit` (integer, optional): Default 100, max 100 (a provided limit outside 1-100 is an error, legacy valid_limit)
 
 **Returns:** Array of notification objects. For community accounts
 (`hive-*`) the query switches to community notifications and `min_score`
@@ -793,9 +793,32 @@ No explicit rate limiting is implemented. Consider implementing rate limiting in
 
 ## API Aliases
 
-For backward compatibility, some methods are available under multiple namespaces:
+For backward compatibility, some methods are available under multiple namespaces.
+The full registry is locked by a golden test (`internal/api/router_test.go`):
+68 legacy names (serve.py `build_methods`) plus 9 Go-only names = 77 methods.
 
-- `follow_api.*` methods map to `condenser_api.*` equivalents
-- `tags_api.*` methods map to `condenser_api.*` equivalents
-- `call` method provides legacy call-style adapter
+**follow_api** (9, all aliasing condenser handlers):
+`get_followers`, `get_following`, `get_followers_by_page`,
+`get_following_by_page`, `get_follow_count`, `get_account_reputations`,
+`get_blog`, `get_blog_entries`, `get_reblogged_by`
+
+**tags_api** (12, all aliasing condenser handlers):
+`get_discussion` (→ `get_content`), `get_content_replies`,
+`get_discussions_by_trending`, `get_discussions_by_hot`,
+`get_discussions_by_promoted`, `get_discussions_by_created`,
+`get_discussions_by_blog`, `get_discussions_by_comments`,
+`get_discussions_by_author_before_date`,
+`get_post_discussions_by_payout`, `get_comment_discussions_by_payout`,
+`get_account_votes` (informational dummy)
+
+**Legacy `call` adapter** (1): the bare `call` method routes legacy-style
+requests — `params: ["condenser_api", method, args]` — to the condenser
+methods, enforcing `api == "condenser_api"` and the legacy
+`_strict_list`/`_strict_query` argument checks before dispatching (see
+`internal/api/condenser/call.go`). Only the method set legacy call.py
+routes is accepted; unknown methods error with
+`unknown method: condenser_api.<method>`.
+
+**Go-only additions** (9): `hive_api.*` (8 methods, never exposed by the
+legacy server) and `bridge.list_top_communities`.
 

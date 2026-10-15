@@ -34,6 +34,9 @@ func (t *TagsAPI) GetTrendingTags(ctx *gin.Context, params json.RawMessage) (int
 	}
 
 	startTag := paramString(arr, 0)
+	if _, err := apierrors.ValidTag(startTag, true); err != nil {
+		return nil, err
+	}
 	limit := 250
 	if len(arr) > 1 {
 		limit = paramInt(arr, 1)
@@ -98,21 +101,22 @@ func (t *TagsAPI) GetAccountReputations(ctx *gin.Context, params json.RawMessage
 	if len(p) > 0 {
 		accountLowerBound, _ = p[0].(string)
 	}
-	limit := 1000
-	if len(p) > 1 {
-		if l, ok := p[1].(float64); ok {
-			limit = int(l)
-			// Clamp negative limits to the default; GORM treats a
-			// negative Limit as "no LIMIT clause", which would turn a
-			// bad request into an unbounded full-table scan.
-			if limit <= 0 {
-				limit = 1000
-			}
-			if limit > 1000 {
-				limit = 1000
-			}
-		}
+	// legacy valid_limit(limit, 1000) over a `limit: int = None` signature:
+	// the limit is required (absent/JSON-null -> "limit must be provided"),
+	// positive and <= 1000. Resolves the #412-① registered leniency (the
+	// old clamp-to-1000 behavior, including its negative-limit guard).
+	if len(p) <= 1 || p[1] == nil {
+		return nil, apierrors.PublicError("limit must be provided")
 	}
+	limit := 0
+	if l, ok := p[1].(float64); ok {
+		limit = int(l)
+	}
+	validated, err := apierrors.ValidLimit(limit, 1000)
+	if err != nil {
+		return nil, err
+	}
+	limit = validated
 
 	// Query account reputations
 	query := t.db.DB.WithContext(ctx.Request.Context()).

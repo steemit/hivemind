@@ -57,7 +57,10 @@ func (d *DiscussionsAPI) getDiscussionsBySort(ctx *gin.Context, sort string, par
 
 	startAuthor, _ := p["start_author"].(string)
 	startPermlink, _ := p["start_permlink"].(string)
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 	tag, _ := p["tag"].(string)
 
 	// Get post IDs
@@ -87,12 +90,16 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 	tag, _ := p["tag"].(string)
 	startAuthor, _ := p["start_author"].(string)
 	startPermlink, _ := p["start_permlink"].(string)
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 
-	// tag parameter is actually the account name for blog queries
+	// tag parameter is actually the account name for blog queries;
+	// legacy validates it with valid_account (allow_empty=False).
 	account := tag
-	if account == "" {
-		return nil, apierrors.PublicError("missing required parameter: tag (account name)")
+	if _, err := apierrors.ValidAccount(account, false); err != nil {
+		return nil, err
 	}
 
 	// Get post IDs from feed cache (condenser flavor: no unreblogged
@@ -124,9 +131,8 @@ func (d *DiscussionsAPI) GetDiscussionsByFeed(ctx *gin.Context, params json.RawM
 	}
 
 	tag, _ := p["tag"].(string)
-	if tag == "" {
-		return nil, apierrors.PublicError("`tag` cannot be blank")
-	}
+	// legacy: valid_account(tag) (allow_empty=False) — a blank or invalid
+	// tag/account is "invalid account (not specified)" / the name errors.
 	account, err := apierrors.ValidAccount(tag, false)
 	if err != nil {
 		return nil, err
@@ -144,7 +150,10 @@ func (d *DiscussionsAPI) GetDiscussionsByFeed(ctx *gin.Context, params json.RawM
 			return nil, err
 		}
 	}
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 	truncateBody := truncateBodyFromQuery(p)
 
 	entries, err := d.cursor.GetPostIDsByFeedWithReblog(ctx.Request.Context(), account, startAuthor, startPermlink, limit)

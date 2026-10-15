@@ -68,7 +68,10 @@ func legacyFollowerWithReputation(follower string, reputation float64, following
 }
 
 // parseFollowSeekParams parses the common (account, start, follow_type,
-// limit) positional list of the follow cursor methods.
+// limit) positional list of the follow cursor methods. limit is required
+// and validated with legacy valid_limit semantics (methods.py declares
+// `limit: int = None`, so an absent/JSON-null limit is "limit must be
+// provided" — not a default; #412-① leniency resolved here).
 func parseFollowSeekParams(params json.RawMessage) (account, start, followType string, limit int, err error) {
 	arr, err := parseListParams(params, 4, 1)
 	if err != nil {
@@ -90,23 +93,23 @@ func parseFollowSeekParams(params json.RawMessage) (account, start, followType s
 		return "", "", "", 0, err
 	}
 
-	limit = 1000
-	if len(arr) > 3 {
-		if l, ok := arr[3].(float64); ok {
-			limit = int(l)
-		}
+	if len(arr) <= 3 || arr[3] == nil {
+		return "", "", "", 0, apierrors.PublicError("limit must be provided")
 	}
-	if limit > 1000 {
-		limit = 1000
+	if l, ok := arr[3].(float64); ok {
+		limit = int(l)
 	}
-	if limit < 1 {
-		limit = 100
+	if limit, err = apierrors.ValidLimit(limit, 1000); err != nil {
+		return "", "", "", 0, err
 	}
 	return account, start, followType, limit, nil
 }
 
 // parseFollowPageParams parses the common (account, page, page_size,
-// follow_type) positional list of the by-page follow methods.
+// follow_type) positional list of the by-page follow methods. page follows
+// legacy valid_offset (only values below -1 are rejected); page_size
+// follows legacy valid_limit(page_size, 100) — required, positive, ubound
+// 100 (#412-① registered the old ubound-1000 clamp; resolved here).
 func parseFollowPageParams(params json.RawMessage) (account string, page, pageSize int, followType string, err error) {
 	arr, err := parseListParams(params, 4, 2)
 	if err != nil {
@@ -119,18 +122,22 @@ func parseFollowPageParams(params json.RawMessage) (account string, page, pageSi
 	}
 
 	page = paramInt(arr, 1)
-	pageSize = 100
-	if len(arr) > 2 {
-		pageSize = paramInt(arr, 2)
-	}
-	if pageSize > 1000 {
-		pageSize = 1000
-	}
-	if pageSize < 1 {
-		pageSize = 100
+	// legacy valid_offset: >= -1. -1 itself passes validation upstream but
+	// makes legacy fail on `OFFSET -1` (a SQL error); clamping to 0 is the
+	// registered Go leniency.
+	if page < -1 {
+		return "", 0, 0, "", apierrors.PublicError("offset cannot be negative")
 	}
 	if page < 0 {
 		page = 0
+	}
+
+	if len(arr) <= 2 || arr[2] == nil {
+		return "", 0, 0, "", apierrors.PublicError("limit must be provided")
+	}
+	pageSize = paramInt(arr, 2)
+	if pageSize, err = apierrors.ValidLimit(pageSize, 100); err != nil {
+		return "", 0, 0, "", err
 	}
 
 	followType = paramString(arr, 3)
@@ -190,6 +197,9 @@ func (f *FollowAPI) GetFollowCount(c *gin.Context, params json.RawMessage) (inte
 	}
 
 	account, _ := p[0].(string)
+	if _, err := apierrors.ValidAccount(account, false); err != nil {
+		return nil, err
+	}
 
 	accountRepo := db.NewAccountRepository(f.repo)
 	acc, err := accountRepo.GetByName(c.Request.Context(), account)
@@ -220,6 +230,12 @@ func (f *FollowAPI) GetRebloggedBy(c *gin.Context, params json.RawMessage) (inte
 
 	author, _ := p[0].(string)
 	permlink, _ := p[1].(string)
+	if _, err := apierrors.ValidAccount(author, false); err != nil {
+		return nil, err
+	}
+	if _, err := apierrors.ValidPermlink(permlink, false); err != nil {
+		return nil, err
+	}
 
 	// Get post ID
 	postRepo := db.NewPostRepository(f.repo)

@@ -88,3 +88,68 @@ func TestPublicErrorFormatting(t *testing.T) {
 		t.Errorf("Publicf = %q", e.Error())
 	}
 }
+
+func TestValidTag(t *testing.T) {
+	if _, err := ValidTag("life", false); err != nil {
+		t.Errorf("valid tag failed: %v", err)
+	}
+	if _, err := ValidTag("steem-1_0", false); err != nil {
+		t.Errorf("tag with dash/underscore failed: %v", err)
+	}
+	if _, err := ValidTag("", true); err != nil {
+		t.Errorf("empty allowed tag failed: %v", err)
+	}
+	if _, err := ValidTag("", false); err == nil {
+		t.Error("blank tag should fail when not allowed")
+	} else if e := err.(PublicError); string(e) != "tag was blank" {
+		t.Errorf("blank tag message = %q, want legacy 'tag was blank'", string(e))
+	}
+	if _, err := ValidTag("BadTag", false); err == nil {
+		t.Error("uppercase tag should fail")
+	} else if e := err.(PublicError); string(e) != "invalid tag `BadTag`" {
+		t.Errorf("invalid tag message = %q, want legacy format", string(e))
+	}
+	if _, err := ValidTag("nsfw tag", false); err == nil {
+		t.Error("tag with space should fail")
+	}
+}
+
+func TestValidQueryLimit(t *testing.T) {
+	// Absent keeps the default (legacy `limit: int = 20` signatures).
+	if got, err := ValidQueryLimit(map[string]interface{}{}, 20, 100); err != nil || got != 20 {
+		t.Errorf("absent limit = %d, %v; want default 20", got, err)
+	}
+	// Present and valid.
+	p := map[string]interface{}{"limit": float64(50)}
+	if got, err := ValidQueryLimit(p, 20, 100); err != nil || got != 50 {
+		t.Errorf("valid limit = %d, %v; want 50", got, err)
+	}
+	// Explicit JSON null is legacy None -> "limit must be provided".
+	if _, err := ValidQueryLimit(map[string]interface{}{"limit": nil}, 20, 100); err == nil {
+		t.Error("null limit should fail")
+	} else if e := err.(PublicError); string(e) != "limit must be provided" {
+		t.Errorf("null limit message = %q", string(e))
+	}
+	// Legacy error messages for invalid values.
+	for _, tc := range []struct {
+		limit float64
+		want  string
+	}{
+		{-5, "limit must be positive"},
+		{0, "limit must be positive"},
+		{101, "limit exceeds max (101 > 100)"},
+	} {
+		_, err := ValidQueryLimit(map[string]interface{}{"limit": tc.limit}, 20, 100)
+		if err == nil {
+			t.Errorf("limit %v should fail", tc.limit)
+			continue
+		}
+		if e := err.(PublicError); string(e) != tc.want {
+			t.Errorf("limit %v message = %q, want %q", tc.limit, string(e), tc.want)
+		}
+	}
+	// Non-numeric values are treated as absent (registered leniency).
+	if got, err := ValidQueryLimit(map[string]interface{}{"limit": "ten"}, 20, 100); err != nil || got != 20 {
+		t.Errorf("non-numeric limit = %d, %v; want default 20", got, err)
+	}
+}
