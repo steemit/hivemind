@@ -74,6 +74,21 @@ func TestValidate(t *testing.T) {
 		}
 	}
 	cfg.Indexer.TxBatchBlocks = 0
+
+	// TEST_MAX_BLOCK: 0 (unset) and positive stop points are valid; negative
+	// values must be rejected instead of silently behaving as unset
+	// (PR#407 registration item 4).
+	for _, v := range []int{0, 1000, 30000000} {
+		cfg.Indexer.TestMaxBlock = v
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("TestMaxBlock=%d should be valid: %v", v, err)
+		}
+	}
+	cfg.Indexer.TestMaxBlock = -1
+	if err := cfg.Validate(); err == nil {
+		t.Error("Expected error for negative test_max_block")
+	}
+	cfg.Indexer.TestMaxBlock = 0
 }
 
 func TestValidateDatabasePool(t *testing.T) {

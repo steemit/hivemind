@@ -363,6 +363,14 @@ func (c *CachedPost) loadNoids(ctx context.Context) (int, error) {
 // (legacy dirty_paidouts). markAccountDirty, when non-nil, receives the
 // authors of the swept posts -- legacy calls Accounts.dirty_set(authors) so
 // payout-time account stats are refreshed on the next account flush.
+//
+// The post_id scan can return a very large id list (a payout backlog that
+// built up while the indexer was down), and the hive_posts lookup feeds those
+// ids into ONE `id IN (...)` parameter list -- beyond ~65535 ids that exceeds
+// the extended-protocol parameter limit and every sweep turns into a hard
+// error (PR#409 registration; legacy has the same latent bug). The ids are
+// therefore fetched in batchChunk-sized chunks: purely internal, the union of
+// the chunk results is identical to the unchunked query.
 func (c *CachedPost) DirtyPaidouts(ctx context.Context, date time.Time, markAccountDirty func(string)) (int, error) {
 	var ids []int64
 	if err := c.db.WithContext(ctx).
@@ -380,21 +388,29 @@ func (c *CachedPost) DirtyPaidouts(ctx context.Context, date time.Time, markAcco
 		Author   string
 		Permlink string
 	}
-	var rows []row
-	if err := c.db.WithContext(ctx).
-		Table("hive_posts").
-		Select("id", "author", "permlink").
-		Where("id IN ?", ids).
-		Scan(&rows).Error; err != nil {
-		return 0, err
-	}
-	for _, r := range rows {
-		c.dirty(levelPayout, r.Author, r.Permlink, r.ID)
-		if markAccountDirty != nil {
-			markAccountDirty(r.Author)
+	total := 0
+	for start := 0; start < len(ids); start += batchChunk {
+		end := start + batchChunk
+		if end > len(ids) {
+			end = len(ids)
 		}
+		var rows []row
+		if err := c.db.WithContext(ctx).
+			Table("hive_posts").
+			Select("id", "author", "permlink").
+			Where("id IN ?", ids[start:end]).
+			Scan(&rows).Error; err != nil {
+			return 0, err
+		}
+		for _, r := range rows {
+			c.dirty(levelPayout, r.Author, r.Permlink, r.ID)
+			if markAccountDirty != nil {
+				markAccountDirty(r.Author)
+			}
+		}
+		total += len(rows)
 	}
-	return len(rows), nil
+	return total, nil
 }
 
 // RecoverMissingPosts is the startup routine that cycles through posts
