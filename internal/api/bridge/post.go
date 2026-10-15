@@ -608,7 +608,6 @@ func buildNormalizedPostObject(row *normalizeRow, rawFields map[string]interface
 	// author value is net of the curator payout recorded in raw_json.
 	var pending, authorPayout, curatorPayout float64
 	if paid {
-		authorPayout = row.payout
 		cpRaw, err := rawVal("curator_payout_value")
 		if err != nil {
 			return nil, err
