@@ -119,8 +119,9 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 		return nil, apierrors.Publicf("invalid sort type: %s", sort)
 	}
 
-	// Get post IDs
-	ids, err := r.cursor.GetPostIDsByQuery(ctx.Request.Context(), querySort, startAuthor, startPermlink, limit, tag)
+	// Get post IDs (bridge ranked semantics: toponly sorts, two-tuple seek
+	// tiebreaker, author-blocked filter, payout window, first-page pins).
+	ids, err := r.cursor.GetRankedPostIDs(ctx.Request.Context(), querySort, startAuthor, startPermlink, limit, tag)
 	if err != nil {
 		telemetry.RecordSpanError(span, err)
 		return nil, err

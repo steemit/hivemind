@@ -95,8 +95,9 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 		return nil, apierrors.PublicError("missing required parameter: tag (account name)")
 	}
 
-	// Get post IDs from feed cache
-	ids, err := d.cursor.GetPostIDsByBlog(ctx.Request.Context(), account, startAuthor, startPermlink, limit)
+	// Get post IDs from feed cache (condenser flavor: no unreblogged
+	// community-post skip — legacy condenser pids_by_blog).
+	ids, err := d.cursor.GetPostIDsByBlogCondenser(ctx.Request.Context(), account, startAuthor, startPermlink, limit)
 	if err != nil {
 		return nil, err
 	}
