@@ -57,13 +57,24 @@ Syncs from current head to last irreversible block.
 **Process:**
 1. Get current head block number
 2. Get last irreversible block number
-3. Fetch blocks in batches (default: 1000 blocks)
-4. Process blocks in transaction
-5. Flush dirty queues:
-   - Accounts.flush()
-   - CachedPost.flush()
-   - Follow.flush()
-6. Commit transaction
+3. Group the range into tx batches of `HIVE_INDEXER_TX_BATCH_BLOCKS` blocks
+   (default 1000, legacy `chunk_size`)
+4. Per tx batch:
+   - Fetch the whole batch from steemd first (fetch chunks of
+     `HIVE_MAX_BATCH`; cancellable between chunks -- a shutdown here aborts
+     with nothing in flight)
+   - Open ONE transaction, process every block of the batch, flush the
+     follow count deltas INSIDE the transaction (legacy
+     `Follow.flush(trx=False)` in `process_multi`), COMMIT -- all on a
+     context with the cancellation removed, so an in-flight batch always
+     finishes
+   - Between transactions: `Accounts.FlushBatch` then `CachedPost.Flush`,
+     each in its own transaction (legacy `from_steemd` runs both after the
+     chunk loop; they make steemd RPC calls and stay out of the batch
+     transaction)
+5. A failure of any block in the batch rolls back the WHOLE batch (legacy
+   parity: a chunk transaction failure rolls back the chunk); the sync loop
+   retries the batch from its first block
 
 ### 3. Live Sync (Block Following)
 
@@ -391,11 +402,54 @@ Accounts are marked dirty and updated periodically.
 ## Performance Optimizations
 
 1. **Batch Processing**: Operations batched for efficiency
-2. **Transaction Management**: Each block in single transaction
+2. **Transaction Batching**: `HIVE_INDEXER_TX_BATCH_BLOCKS` blocks (default
+   1000, legacy `chunk_size`) share one transaction -- one COMMIT per batch
+   instead of one per block. Set to 1 to restore per-block transactions
+   (degenerate mode, useful for isolating a poison block's blast radius).
 3. **Dirty Queues**: Changes queued and flushed in batches
 4. **Index Management**: Non-critical indexes disabled during initial sync
 5. **Connection Pooling**: Database connections reused
 6. **Memory Caching**: Account ID map, post ID map, ranks cached in memory
+7. **Batched Account Flush**: account ids for the rank column are resolved
+   in one query per 1000-account chunk (legacy keeps a name->id map in
+   memory -- accounts.py `load_ids`)
+
+Throughput observability (Prometheus): `hivemind_indexer_blocks_processed_total`
+(rate() = blocks/s, `phase` = initial|live),
+`hivemind_indexer_blocks_fetch_duration_seconds` (steemd fetch RPC wall time
+per batch) and `hivemind_indexer_tx_batch_duration_seconds` (transaction
+open through COMMIT). The per-batch log line `Synced block batch` carries
+the same numbers (blocks, fetch, write, blocks_per_sec).
+`hivemind_indexer_poison_retries_total{phase}` counts every failed sync
+attempt the poison loops retry (see the poison runbook below for the
+amplification math it guards).
+
+## PostgreSQL Tuning for Bulk Sync (Operations Runbook)
+
+Recommended settings for the dedicated sync instance during a 0->30M
+initial sync (baseline sized for a 64 GiB / 8 vCPU box; scale
+proportionally). These are instance-level recommendations, not code:
+
+| Setting | Value | Rationale |
+|---|---|---|
+| `synchronous_commit` | `off` | A crash loses the last few commits; the indexer replays from `hive_blocks` MAX(num) on restart, so nothing is lost but time. Revert to `on` for the long-lived live instance. |
+| `max_wal_size` | `32GB` | 1000-block batch transactions generate large WAL bursts; the default (1-4GB) forces frequent checkpoints that stall write throughput. |
+| `checkpoint_timeout` | `30min` | Spreads checkpoints out during the multi-week bulk load. |
+| `wal_compression` | `on` | Trades a little CPU for substantially less WAL volume. |
+| `shared_buffers` | `16GB` | Write-heavy working set on a dedicated instance. |
+| `effective_cache_size` | `48GB` | Planner hint; the OS page cache holds the rest. |
+
+Notes:
+
+- **UNLOGGED tables are NOT applicable**: every hive table must survive a
+  restart (`hive_posts_cache_temp` is a durability-preserving staging table
+  synced into `hive_posts_cache`, not a scratch table).
+- The batch transaction holds row locks for its full duration (up to 1000
+  blocks of writes). Keep the sync database dedicated during initial sync --
+  API readers contending on locked rows is expected otherwise.
+- The 30s statement timeout does not bound the batch: it applies per
+  statement, not per transaction. Maintenance SQL keeps its explicit
+  exemption (see `db.WithoutStatementTimeout`).
 
 ## Error Handling
 
@@ -414,6 +468,7 @@ Key metrics to monitor:
 - Fork frequency
 - Database connection pool usage
 - Error rates
+- Poison retry rate (`hivemind_indexer_poison_retries_total`; see below)
 
 ## Poison-Block Runbook: Orphan Comments
 
@@ -432,3 +487,38 @@ row deletion). Recovery options:
 
 The initial-sync path gives up after 10 consecutive failures (process exits
 with a non-zero status); the live path keeps retrying with escalated logs.
+
+### Retry amplification under tx batching (PR#411 review registration)
+
+Whole-batch rollback (§4.1) turns a deterministically failing block anywhere
+in a batch into a per-retry cost proportional to the BATCH size N (default
+1000), not to the failing block:
+
+- **Re-fetch**: the retry re-fetches the entire batch before its transaction
+  opens; the range fetch issues one `get_block` RPC per block, so each retry
+  costs ~N RPCs.
+- **Re-process**: the up to N-1 blocks before the failing one are processed
+  into the open transaction and then rolled back with it — wasted write work
+  on every retry.
+- **Initial sync** gives up after 10 consecutive failures of the same block:
+  for a failing block at the batch tail that is ~10×N blocks of ineffective
+  fetch+process before the process exits (and a restart starts the cycle
+  again from the same head).
+- **Live mode** never gives up: one full retry round every sync interval
+  (default 3s) plus the batch duration, indefinitely.
+
+Operational signal: `hivemind_indexer_poison_retries_total{phase=initial|live}`
+counts every failed sync attempt the poison loops retry (per attempt, not per
+block). A sustained nonzero `rate()` on either phase pins a deterministically
+failing block — take the block number from the `poison block` log marker (the
+error carries the actually-failing block, not the batch start) and apply the
+recovery options above.
+
+Follow-up candidate (registered, NOT implemented in this PR): once the poison
+threshold is reached, automatically shrink the tx batch to 1 — a
+binary-search isolation of the failing block within the batch, converting the
+per-retry cost from O(N) RPCs + N blocks of rolled-back processing to
+O(log N) lookups plus the single poison block's processing. Until then the
+batch size stays fixed and recovery relies on the manual options above (an
+operator can also restart with `HIVE_INDEXER_TX_BATCH_BLOCKS=1` to isolate a
+poison block's blast radius manually).

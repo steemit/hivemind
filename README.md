@@ -108,6 +108,7 @@ Configuration is managed via environment variables or config file:
 | `HIVE_PROMETHEUS_ENABLED` | Enable Prometheus metrics | true |
 | `HIVE_PROMETHEUS_PORT` | Prometheus metrics port | 9090 |
 | `HIVE_CACHE_SYNC_CATCHUP_BLOCKS` | CacheSync gate: pause the hive_posts_cache_temp 90-day prune while the indexer trails the chain head by more than this many blocks (catch-up); resume in live mode | 100 |
+| `HIVE_INDEXER_TX_BATCH_BLOCKS` | Blocks sharing one database transaction (fetch, process, follow-count flush, COMMIT); a failure rolls back the whole batch (legacy chunk_size; 1 = per-block transactions) | 1000 |
 
 ### Building
 

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -13,6 +14,7 @@ import (
 	"github.com/steemit/hivemind/internal/steem"
 	"github.com/steemit/hivemind/pkg/config"
 	"github.com/steemit/hivemind/pkg/logging"
+	"github.com/steemit/hivemind/pkg/telemetry"
 )
 
 // Sync manages the blockchain synchronization process
@@ -24,6 +26,13 @@ type Sync struct {
 	stateRepo      *db.StateRepository
 	cacheSync      *CacheSync
 	logger         *zap.Logger
+
+	// jobsBehind is the trailing-distance gate for the cache-jobs loop
+	// (PR#411 review), published by the sync loop at the same point as
+	// CacheSync.SetBehind: while the indexer catches up (or the distance is
+	// unknown before the first report), cache-jobs ticks skip. See
+	// runCacheJobsTick.
+	jobsBehind atomic.Int64
 }
 
 // NewSync creates a new sync manager. The steemClient is accepted as the
@@ -33,14 +42,19 @@ func NewSync(cfg *config.Config, database *db.DB, steemClient steem.Provider) (*
 	repo := db.NewRepository(database.DB)
 	blockProcessor := NewBlockProcessor(database, repo, steemClient)
 
-	return &Sync{
+	s := &Sync{
 		config:         cfg,
 		db:             database,
 		steem:          steemClient,
 		blockProcessor: blockProcessor,
 		stateRepo:      db.NewStateRepository(repo),
 		logger:         logging.GetLogger().With(zap.String("component", "indexer")),
-	}, nil
+	}
+	// Cache-jobs gate starts UNKNOWN (paused), mirroring CacheSync's
+	// behind=-1 start: until the sync loop reports the first live distance,
+	// ticks skip.
+	s.jobsBehind.Store(-1)
+	return s, nil
 }
 
 // Run starts the sync process
@@ -51,8 +65,17 @@ func (s *Sync) Run(ctx context.Context) error {
 	// (falling back to the legacy feed_cache derivation on databases that
 	// predate them), materializing the derived value so the flag is
 	// authoritative from this boot on.
+	//
+	// Cancellation mapping (PR#407 registration for #408): a SIGTERM during
+	// this startup flag resolution used to surface as a plain error and the
+	// process Fatal-exited with exit 1; the phase never began, so the clean
+	// exit (nil, restart resumes) is the correct mapping.
 	flags, err := s.resolveInitialSyncState(ctx)
-	if err != nil {
+	if err = runPhase(err); err != nil {
+		if errors.Is(err, errPhaseCancelled) {
+			s.logger.Info("Shutdown during startup state resolution; exiting cleanly (restart resumes)")
+			return nil
+		}
 		return fmt.Errorf("failed to check initial sync status: %w", err)
 	}
 
@@ -96,7 +119,14 @@ func (s *Sync) Run(ctx context.Context) error {
 			// Legacy parity (sync.py:86-88): with test_max_block set, an
 			// already-initialized database catches up to the cap in normal
 			// semantics and then returns instead of entering the runloop.
-			if err := s.syncToCapAndExit(ctx); err != nil {
+			// Cancellation mapping (PR#407 registration for #408): a SIGTERM
+			// during the cap path's fail-closed head read used to Fatal-exit
+			// the process; nothing was synced, so the clean exit is correct.
+			if err := runPhase(s.syncToCapAndExit(ctx)); err != nil {
+				if errors.Is(err, errPhaseCancelled) {
+					s.logger.Info("Shutdown during TEST_MAX_BLOCK catch-up; exiting cleanly (restart resumes)")
+					return nil
+				}
 				return err
 			}
 			return nil
@@ -112,7 +142,8 @@ func (s *Sync) Run(ctx context.Context) error {
 	go s.cacheSync.Run(ctx)
 
 	// Optional periodic cache-consistency audits (0 = disabled; legacy runs
-	// these manually).
+	// these manually). Ticks are catch-up gated -- they skip while the
+	// indexer trails the chain head (see runCacheJobsTick, PR#411 review).
 	if interval := s.config.Indexer.JobsInterval; interval > 0 {
 		go s.runCacheJobsLoop(ctx, interval)
 	}
@@ -168,10 +199,37 @@ func (s *Sync) runCacheJobsLoop(ctx context.Context, intervalSec int) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := RunCacheJobs(ctx, s.db.DB, s.blockProcessor.CachedPost(), s.steem); err != nil {
-				s.logger.Warn("cache jobs run failed", zap.Error(err))
-			}
+			s.runCacheJobsTick(ctx)
 		}
+	}
+}
+
+// runCacheJobsTick runs one cache-audit jobs round, gated by the catch-up
+// distance (PR#411 review): while the indexer trails the chain head beyond
+// the gate threshold -- or the distance is unknown, before the sync loop's
+// first report -- the tick skips; live mode resumes it. Two concurrent-run
+// hazards motivate the gate, both amplified by tx batching from ~1 block to
+// up to a whole ~1000-block batch transaction:
+//
+//   - the jobs' UPDATE/INSERT statements (hive_posts is_deleted flips,
+//     cache-row INSERTs) contend with the batch transaction's row locks,
+//     and the losing side is killed by the 30s statement_timeout mid-audit;
+//   - the jobs' CachedPost.Flush sweeps the SHARED dirty queue while the
+//     batch transaction is still open, landing hive_posts_cache rows for a
+//     batch that may yet roll back (orphan cache rows).
+//
+// The gate reuses CacheSync's semantics (§2.7: legacy runs cache work from
+// live mode only): same threshold source (HIVE_CACHE_SYNC_CATCHUP_BLOCKS)
+// and the same behind value the sync loop publishes for the prune gate.
+func (s *Sync) runCacheJobsTick(ctx context.Context) {
+	if behind := s.jobsBehind.Load(); catchupPaused(behind, s.catchupGateBlocks()) {
+		s.logger.Debug("cache jobs paused during catch-up",
+			zap.Int64("behind", behind),
+			zap.Int64("threshold", s.catchupGateBlocks()))
+		return
+	}
+	if err := RunCacheJobs(ctx, s.db.DB, s.blockProcessor.CachedPost(), s.steem); err != nil {
+		s.logger.Warn("cache jobs run failed", zap.Error(err))
 	}
 }
 
@@ -516,6 +574,40 @@ func blockNumberOf(block map[string]interface{}) int64 {
 	return 0
 }
 
+// processBlockError marks a failed block PROCESS attempt inside a tx batch
+// and carries the failing block's number out to the sync loops. With
+// batch-level rollback the first unprocessed block is the batch START (the
+// whole batch rolled back), so the poison-block observability must take the
+// actually-failing block from the error instead of head+1 -- which did
+// identify the failing block back when each block committed individually.
+type processBlockError struct {
+	block int64
+	err   error
+}
+
+func (e *processBlockError) Error() string {
+	return fmt.Sprintf("failed to process block %d: %v", e.block, e.err)
+}
+
+// Unwrap exposes both the errProcessBlock sentinel (failure classification)
+// and the underlying cause (context cancellation, driver errors) so existing
+// errors.Is checks keep working.
+func (e *processBlockError) Unwrap() error {
+	return errors.Join(errProcessBlock, e.err)
+}
+
+// poisonTargetBlock returns the block a failed syncBlocks attempt will retry:
+// the actually-failing block for process failures (see processBlockError),
+// falling back to the first unprocessed block of the attempt (fetch failures
+// and the legacy convention).
+func poisonTargetBlock(head int64, err error) int64 {
+	var pbe *processBlockError
+	if errors.As(err, &pbe) {
+		return pbe.block
+	}
+	return head + 1
+}
+
 // syncFailureKind classifies a syncBlocks error for poison logging.
 func syncFailureKind(err error) string {
 	if errors.Is(err, errFetchBlocks) {
@@ -571,10 +663,14 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 				continue
 			}
 
-			// Feed the CacheSync gate: prune pauses while catching up.
+			// Feed the CacheSync gate: prune pauses while catching up. The
+			// same distance feeds the cache-jobs gate (PR#411 review):
+			// audit ticks pause while catching up, resuming in live mode.
+			behind := irreversible - currentHead
 			if s.cacheSync != nil {
-				s.cacheSync.SetBehind(irreversible - currentHead)
+				s.cacheSync.SetBehind(behind)
 			}
+			s.jobsBehind.Store(behind)
 
 			// TEST_MAX_BLOCK (§2.6): stop cleanly once the cap is reached
 			// instead of entering the steady-state runloop.
@@ -610,12 +706,22 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 						// Shutdown requested mid-sync: not a poison block.
 						return ctx.Err()
 					}
-					if retryBlock := currentHead + 1; retryBlock == poisonBlock {
+					// The retry target: with batch-level rollback the whole
+					// tx batch rolled back, so head+1 is the batch START --
+					// for process failures the actually-failing block comes
+					// from the error itself (see processBlockError).
+					retryBlock := poisonTargetBlock(currentHead, err)
+					if retryBlock == poisonBlock {
 						poisonFails++
 					} else {
 						poisonBlock = retryBlock
 						poisonFails = 1
 					}
+					// Poison retry accounting (PR#411 review): every failed
+					// attempt re-fetches and re-processes the whole tx batch
+					// under whole-batch rollback -- the counter's rate() is
+					// the operational signal to open the runbook.
+					telemetry.RecordIndexerPoisonRetry("live")
 					if poisonFails >= poisonBlockThreshold {
 						// Escalated, marked error -- emitted on EVERY failure
 						// at/after the threshold so the spin never goes quiet.
@@ -729,16 +835,19 @@ func (s *Sync) syncBlocksBoundedRetry(ctx context.Context, ubound, headBefore in
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		// The first unprocessed block of the failed attempt: every block
-		// before the failure committed, so head+1 identifies the retry
-		// target (same convention as the steady-state loop).
-		retryBlock := head + 1
+		// The first unprocessed block of the failed attempt: with
+		// batch-level rollback every block of the failed tx batch rolled
+		// back, so head+1 is the batch start; process failures identify the
+		// actually-failing block through the error (see processBlockError).
+		retryBlock := poisonTargetBlock(head, err)
 		if retryBlock == poisonBlock {
 			poisonFails++
 		} else {
 			poisonBlock = retryBlock
 			poisonFails = 1
 		}
+		// Poison retry accounting (PR#411 review), same as the live loop.
+		telemetry.RecordIndexerPoisonRetry("initial")
 		if poisonFails >= poisonBlockThreshold {
 			s.logger.Error("poison block: initial sync giving up after repeated failures of the same block",
 				zap.Int64("block", poisonBlock),
@@ -759,6 +868,20 @@ func (s *Sync) syncBlocksBoundedRetry(ctx context.Context, ubound, headBefore in
 	}
 }
 
+// defaultTxBatchBlocks mirrors legacy sync.py's chunk_size (from_steemd /
+// from_checkpoints): the number of blocks sharing one database transaction.
+const defaultTxBatchBlocks = 1000
+
+// txBatchBlocks returns the configured tx-batch size (HIVE_INDEXER_TX_BATCH_
+// BLOCKS). Values <= 0 select the legacy default; this also covers tests
+// that construct config.Config zero-values.
+func (s *Sync) txBatchBlocks() int64 {
+	if s.config == nil || s.config.Indexer.TxBatchBlocks <= 0 {
+		return defaultTxBatchBlocks
+	}
+	return int64(s.config.Indexer.TxBatchBlocks)
+}
+
 // syncBlocks syncs a range of blocks. isInitialSync must reflect the phase
 // the indexer is in: historical catch-up during startup passes true (suppresses
 // follow count deltas, follow notifications and account dirty-marking, exactly
@@ -766,77 +889,196 @@ func (s *Sync) syncBlocksBoundedRetry(ctx context.Context, ubound, headBefore in
 // syncIrreversible loop passes false. The phase itself is persisted in
 // hive_state.is_initial_sync (see resolveInitialSyncState).
 //
-// Shutdown semantics (§2.9): cancellation is only checked BETWEEN batches.
-// A batch whose fetch already succeeded always finishes -- its block
-// transactions and the trailing queue flushes run on a context with the
-// cancellation removed -- so a SIGTERM cannot leave a half-flushed dirty
-// queue or an aborted in-flight block transaction behind.
+// Transaction structure (§4.1, legacy blocks.process_multi): blocks are
+// grouped into tx batches of HIVE_INDEXER_TX_BATCH_BLOCKS (default 1000 =
+// legacy chunk_size). One batch = one transaction: the blocks are fetched
+// first, then processed, follow-count-flushed and committed atomically. A
+// failure of ANY block in the batch rolls back the WHOLE batch (legacy
+// parity: a chunk transaction failure rolls back the chunk and the sync
+// retries it), and the retry re-processes the batch from its first block.
+//
+// Shutdown semantics (§2.9, batch granularity): cancellation is only checked
+// BETWEEN tx batches. A batch whose fetch already succeeded always finishes
+// -- its transaction, the in-transaction follow flush and the trailing queue
+// flushes run on a context with the cancellation removed -- so a SIGTERM
+// cannot leave a half-flushed dirty queue or an aborted in-flight
+// transaction behind.
 func (s *Sync) syncBlocks(ctx context.Context, from, to int64, isInitialSync bool) error {
 	s.logger.Info("Syncing blocks",
 		zap.Int64("from", from),
 		zap.Int64("to", to),
 		zap.Int64("count", to-from+1),
-		zap.Bool("initial_sync", isInitialSync))
+		zap.Bool("initial_sync", isInitialSync),
+		zap.Int64("tx_batch_blocks", s.txBatchBlocks()))
 
-	// Fetch blocks in batches
-	batchSize := int64(s.config.Indexer.MaxBatch)
-	for start := from; start <= to; start += batchSize {
-		// Cancellation boundary between batches (see method comment).
+	txBatch := s.txBatchBlocks()
+	for start := from; start <= to; start += txBatch {
+		// Cancellation boundary between tx batches (see method comment): a
+		// shutdown here aborts with nothing in flight -- the previous batch
+		// committed and flushed, this one has no transaction open.
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		end := start + batchSize - 1
+		end := start + txBatch - 1
 		if end > to {
 			end = to
 		}
+		if err := s.syncTxBatch(ctx, start, end, isInitialSync); err != nil {
+			return err
+		}
+	}
 
-		// Fetch blocks from steemd. Cancellable: a cancelled fetch leaves
-		// nothing in flight (the queue was drained at the previous batch's
-		// flush) and aborts the range.
-		blocks, err := s.steem.GetBlocksRange(ctx, start, end)
+	return nil
+}
+
+// syncTxBatch runs one transaction batch: fetch the whole batch, then open
+// the transaction, process every block, flush the follow count deltas
+// INSIDE it, COMMIT, and run the trailing queue flushes between
+// transactions.
+func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bool) error {
+	// Phase 1 -- fetch the whole batch BEFORE opening the transaction
+	// (legacy sync.py from_steemd: `blocks = steemd.get_blocks_range(lbound,
+	// to)` then `Blocks.process_multi(blocks)`): the transaction never spans
+	// an RPC, and a cancelled fetch aborts the batch with nothing open to
+	// roll back. Fetches are chunked at the fetch batch size (capped by the
+	// tx batch size so the degenerate 1-block tx batch also fetches singly).
+	fetchSize := int64(s.config.Indexer.MaxBatch)
+	if fetchSize > s.txBatchBlocks() || fetchSize < 1 {
+		fetchSize = s.txBatchBlocks()
+	}
+	blocks := make([]map[string]interface{}, 0, to-from+1)
+	var fetchDur time.Duration
+	for start := from; start <= to; start += fetchSize {
+		end := start + fetchSize - 1
+		if end > to {
+			end = to
+		}
+		fetchStart := time.Now()
+		got, err := s.steem.GetBlocksRange(ctx, start, end)
+		fetchDur += time.Since(fetchStart)
 		if err != nil {
 			return fmt.Errorf("%w %d-%d: %w", errFetchBlocks, start, end, err)
 		}
-
-		// The in-flight batch completes regardless of cancellation: block
-		// transactions and flushes below must not be aborted by a shutdown
-		// signal (context.WithoutCancel keeps tracing values, drops the
-		// cancellation).
-		batchCtx := context.WithoutCancel(ctx)
-		for _, block := range blocks {
-			if err := s.blockProcessor.ProcessBlock(batchCtx, block, isInitialSync); err != nil {
-				return fmt.Errorf("%w %d: %w", errProcessBlock, blockNumberOf(block), err)
-			}
-		}
-
-		// Flush the post-cache dirty queue (steemd fetch + dual-write) after
-		// each batch, mirroring legacy blocks.process_multi.
-		if counts, err := s.blockProcessor.CachedPost().Flush(batchCtx, false); err != nil {
-			s.logger.Warn("post cache flush failed", zap.Error(err))
-		} else if total := len(counts); total > 0 {
-			s.logger.Debug("Post cache flushed",
-				zap.Int("inserts", counts["insert"]),
-				zap.Int("updates", counts["update"]+counts["payout"]+counts["upvote"]+counts["recount"]))
-		}
-
-		// Flush pending follow count deltas (legacy: Follow.flush(trx=False)
-		// after each block batch).
-		if err := s.blockProcessor.Follows().Flush(batchCtx); err != nil {
-			s.logger.Warn("follow delta flush failed", zap.Error(err))
-		}
-
-		// Flush dirty accounts (steemd get_accounts + ~17-column update).
-		if n, err := s.blockProcessor.Accounts().FlushBatch(batchCtx, false); err != nil {
-			s.logger.Warn("account flush failed", zap.Error(err))
-		} else if n > 0 {
-			s.logger.Debug("Accounts flushed", zap.Int("count", n))
-		}
-
-		s.logger.Debug("Synced block batch",
-			zap.Int64("from", start),
-			zap.Int64("to", end))
+		blocks = append(blocks, got...)
 	}
 
+	// Phase 2 -- the transaction. Runs on a context with the cancellation
+	// removed (#405 semantics at the tx-batch granularity): a batch whose
+	// fetch succeeded always finishes.
+	batchCtx := context.WithoutCancel(ctx)
+	writeStart := time.Now()
+	tx := s.db.DB.WithContext(batchCtx).Begin()
+	if tx.Error != nil {
+		return fmt.Errorf("failed to start batch transaction: %w", tx.Error)
+	}
+	committed := false
+	// Snapshot the pending follow count deltas before the batch: they
+	// accumulate in FollowIndexer memory OUTSIDE the transaction, so a batch
+	// rollback must discard the whole batch's deltas -- the retry re-processes
+	// every block of the batch and re-accumulates them (the batch-level
+	// analogue of the per-block snapshot in ProcessBlock; PR#406 audit P1).
+	restoreDeltas := s.blockProcessor.Follows().SnapshotDeltas()
+	defer func() {
+		if r := recover(); r != nil {
+			restoreDeltas()
+			if !committed {
+				tx.Rollback()
+			}
+			panic(r)
+		}
+	}()
+
+	for _, block := range blocks {
+		if err := s.blockProcessor.ProcessBlockInTx(batchCtx, tx, block, isInitialSync); err != nil {
+			restoreDeltas()
+			tx.Rollback()
+			return &processBlockError{block: blockNumberOf(block), err: err}
+		}
+	}
+
+	// Follow count deltas ride the batch transaction (legacy
+	// blocks.process_multi: Follow.flush(trx=False) runs INSIDE the chunk
+	// transaction, before COMMIT): the block writes and the count UPDATEs
+	// become atomic, closing the crash window where committed blocks'
+	// deltas lived only in memory and were lost on a process death before
+	// the flush (PR#406 audit registration, delivered with #408).
+	if err := s.blockProcessor.Follows().FlushTx(batchCtx, tx); err != nil {
+		restoreDeltas()
+		tx.Rollback()
+		return fmt.Errorf("failed to flush follow deltas in batch transaction: %w", err)
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		// The commit itself failed: the retry re-processes this batch and
+		// re-accumulates its deltas, so they must not survive here. The
+		// rollback below is a harmless no-op on a terminated transaction
+		// (database/sql refuses to send ROLLBACK after Commit, returning
+		// ErrTxDone which we discard); connection health is handled by
+		// Tx.Commit's own close path. Recovery from an ambiguous commit
+		// (landed server-side, error client-side) relies on the
+		// hive_blocks primary key plus the loops re-reading head before
+		// retrying (PR#411 review).
+restoreDeltas()
+		tx.Rollback()
+		return fmt.Errorf("failed to commit batch transaction: %w", err)
+	}
+	committed = true
+
+	// Trailing queue flushes after each batch transaction. Placement
+	// precision (PR#411 review): legacy runs Accounts.flush(trx=True) and
+	// CachedPost.flush(trx=True) ONCE, after from_steemd's chunk loop has
+	// finished the WHOLE catch-up range (and only when not in initial sync)
+	// -- not per chunk. The Go sync flushes after EVERY tx batch, an
+	// intentional deviation: the in-memory dirty queues stay bounded across
+	// a multi-week 0->30M catch-up instead of growing with the whole range,
+	// and a crash loses at most one batch's queued work instead of the
+	// entire range's. What IS copied from legacy exactly: the flushes run
+	// OUTSIDE the batch transaction, in their own transactions -- they make
+	// steemd RPC calls (get_accounts / get_content_batch), which is why
+	// legacy keeps them out of the chunk transaction; only Follow.flush
+	// rides it. Their dirty queues are explicitly disposable in legacy
+	// terms: a crash can lose edits and pre-payout votes ("worst case it
+	// will be synced upon payout"), and RecoverMissingPosts heals missing
+	// cache INSERTs at startup.
+	if n, err := s.blockProcessor.Accounts().FlushBatch(batchCtx, true); err != nil {
+		s.logger.Warn("account flush failed", zap.Error(err))
+	} else if n > 0 {
+		s.logger.Debug("Accounts flushed", zap.Int("count", n))
+	}
+
+	if counts, err := s.blockProcessor.CachedPost().Flush(batchCtx, true); err != nil {
+		s.logger.Warn("post cache flush failed", zap.Error(err))
+	} else if total := len(counts); total > 0 {
+		s.logger.Debug("Post cache flushed",
+			zap.Int("inserts", counts["insert"]),
+			zap.Int("updates", counts["update"]+counts["payout"]+counts["upvote"]+counts["recount"]))
+	}
+
+	// Throughput observability (§4.2): the counter's rate() is blocks/s;
+	// fetch and write histograms attribute a slowdown to the RPC or the
+	// transactional path. Log at Info for substantial batches (initial-sync
+	// chunks) and Debug for the small live-mode batches.
+	writeDur := time.Since(writeStart)
+	phase := "live"
+	if isInitialSync {
+		phase = "initial"
+	}
+	telemetry.RecordIndexerBatch(phase, len(blocks), fetchDur.Seconds(), writeDur.Seconds())
+	rate := 0.0
+	if writeDur > 0 {
+		rate = float64(len(blocks)) / writeDur.Seconds()
+	}
+	batchLog := s.logger.Debug
+	if len(blocks) >= 100 {
+		batchLog = s.logger.Info
+	}
+	batchLog("Synced block batch",
+		zap.Int64("from", from),
+		zap.Int64("to", to),
+		zap.Int("blocks", len(blocks)),
+		zap.Duration("fetch", fetchDur),
+		zap.Duration("write", writeDur),
+		zap.Float64("blocks_per_sec", rate))
 	return nil
 }
 

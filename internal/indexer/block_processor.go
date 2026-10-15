@@ -84,7 +84,16 @@ func (bp *BlockProcessor) Accounts() *AccountIndexer {
 	return bp.accounts
 }
 
-// ProcessBlock processes a single block
+// ProcessBlock processes a single block in its OWN transaction -- used by
+// tests and single-block callers. It is NOT the degenerate tx-batch mode:
+// that is Sync.syncTxBatch with HIVE_INDEXER_TX_BATCH_BLOCKS=1, which still
+// runs the batch driver (fetch-then-transaction, in-transaction follow
+// flush, trailing queue flushes). The sync loop instead drives
+// ProcessBlockInTx over a multi-block batch transaction; both paths share
+// the same per-block logic, and the per-block follow-delta snapshot taken
+// here is layered defense for callers below the batch driver -- the
+// snapshot/restore must match the transaction's rollback boundary, so each
+// path takes its own snapshot at its own granularity.
 func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]interface{}, isInitialSync bool) error {
 	// Start transaction
 	tx := bp.db.DB.WithContext(ctx).Begin()
@@ -102,12 +111,11 @@ func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]int
 	// accumulate in FollowIndexer memory outside this transaction, so a
 	// block rollback must also discard the deltas this block accumulates --
 	// otherwise the sync layer's retry of the same block re-applies them and
-	// the next Flush doubles the counts (PR#406 audit P1). Deltas of blocks
-	// committed earlier in the batch survive the restore.
+	// the next Flush doubles the counts (PR#406 audit P1).
 	restoreDeltas := bp.follows.SnapshotDeltas()
 
 	// Process block
-	if err := bp.processBlockInTx(ctx, tx, block, isInitialSync); err != nil {
+	if err := bp.ProcessBlockInTx(ctx, tx, block, isInitialSync); err != nil {
 		restoreDeltas()
 		tx.Rollback()
 		return err
@@ -117,15 +125,26 @@ func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]int
 	if err := tx.Commit().Error; err != nil {
 		// The block did not land: its follow deltas must not survive either,
 		// or the retry re-accumulates them (same double-count as a rollback).
-		restoreDeltas()
+		// The rollback below is a harmless no-op on a terminated transaction
+		// (database/sql refuses to send ROLLBACK after Commit, returning
+		// ErrTxDone which we discard); connection health is handled by
+		// Tx.Commit's own close path (PR#411 review).
+restoreDeltas()
+		tx.Rollback()
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return nil
 }
 
-// processBlockInTx processes a block within a transaction
-func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, block map[string]interface{}, isInitialSync bool) error {
+// ProcessBlockInTx processes a single block inside a CALLER-OWNED open
+// transaction (legacy blocks._process: "Assumes a trx is open"). The caller
+// controls the transaction lifecycle AND the follow-delta snapshot/restore
+// around its rollback boundary: in the batch driver (Sync.syncTxBatch) one
+// snapshot covers the whole batch, because a failure rolls back every block
+// of the batch and the retry re-processes (and re-accumulates deltas for)
+// all of them.
+func (bp *BlockProcessor) ProcessBlockInTx(ctx context.Context, tx *gorm.DB, block map[string]interface{}, isInitialSync bool) error {
 	// Extract block metadata
 	blockNum := int64(block["block_num"].(float64))
 	blockHash := block["block_id"].(string)
