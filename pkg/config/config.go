@@ -435,6 +435,13 @@ func (c *Config) Validate() error {
 	if c.Indexer.TxBatchBlocks < 0 || c.Indexer.TxBatchBlocks > 50000 {
 		return fmt.Errorf("indexer_tx_batch_blocks must be between 0 (default) and 50000 (1 = per-block transactions)")
 	}
+	// TEST_MAX_BLOCK: 0 means unset; a negative value previously slipped
+	// through Validate and silently behaved as unset everywhere (every
+	// consumer checks `> 0`) -- an operator typo went unnoticed. Reject it
+	// up front (PR#407 registration item 4, delivered with planned PR#440).
+	if c.Indexer.TestMaxBlock < 0 {
+		return fmt.Errorf("test_max_block must not be negative (0 = unset)")
+	}
 	// Pool sizing sanity checks. MaxOpenConns=0 means "unlimited" in
 	// database/sql, which defeats the purpose of pool protection, so reject it.
 	if c.Database.MaxOpenConns < 1 {

@@ -3,8 +3,13 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
@@ -399,6 +404,113 @@ func TestPayoutSweepMarksFlushesAndDirtiesAuthors(t *testing.T) {
 	}
 	if n := s.blockProcessor.Accounts().PendingDirtyLen(); n != 1 {
 		t.Errorf("dirty accounts after sweep = %d, want 1 (legacy dirty_set on payout authors)", n)
+	}
+}
+
+// stmtCapture is a gorm logger.Interface that records the SQL of every
+// statement run on its session (used to pin the DirtyPaidouts id-IN chunking
+// below: the placeholder count per statement is the observable chunk size).
+type stmtCapture struct {
+	mu         sync.Mutex
+	statements []string
+}
+
+func (c *stmtCapture) LogMode(gormlogger.LogLevel) gormlogger.Interface { return c }
+func (c *stmtCapture) Info(context.Context, string, ...interface{})     {}
+func (c *stmtCapture) Warn(context.Context, string, ...interface{})     {}
+func (c *stmtCapture) Error(context.Context, string, ...interface{})    {}
+
+func (c *stmtCapture) Trace(_ context.Context, _ time.Time, fc func() (string, int64), _ error) {
+	sql, _ := fc()
+	c.mu.Lock()
+	c.statements = append(c.statements, sql)
+	c.mu.Unlock()
+}
+
+// inStatements returns the recorded statements containing an IN (...) list.
+func (c *stmtCapture) inStatements() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, s := range c.statements {
+		if strings.Contains(s, "IN (") {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// inListLen counts the elements of the first IN (...) list in a captured
+// statement (the gorm trace callback reports executed SQL with the bound
+// values inlined, so the element count -- not a placeholder count -- is the
+// observable chunk size).
+func inListLen(stmt string) int {
+	const marker = "IN ("
+	i := strings.Index(stmt, marker)
+	if i < 0 {
+		return -1
+	}
+	rest := stmt[i+len(marker):]
+	j := strings.Index(rest, ")")
+	if j < 0 {
+		return -1
+	}
+	list := rest[:j]
+	if list == "" {
+		return 0
+	}
+	return strings.Count(list, ",") + 1
+}
+
+// TestDirtyPaidoutsChunksIDInParameters pins the PR#440 fix for the PR#409
+// registration: DirtyPaidouts feeds the unpaid post ids into `id IN (...)`
+// queries in batchChunk-sized (1000) chunks, so a payout backlog beyond the
+// extended-protocol parameter limit (~65535) can no longer turn every sweep
+// into a hard error. 1200 rows force exactly two chunks (1000 + 200); the
+// element counts of the executed IN lists are asserted directly, which a
+// regression back to one unchunked query (1200 ids) or a wrong chunk size
+// fails.
+func TestDirtyPaidoutsChunksIDInParameters(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedAccounts(t, database, "alice")
+
+	const rows = 1200 // batchChunk (1000) + 200: exactly two chunks
+	if err := database.DB.WithContext(ctx).Exec(
+		`INSERT INTO hive_posts (id, author, permlink, created_at, depth)
+		 SELECT g, 'alice', 'p' || g, '2026-01-01', 0 FROM generate_series(1, $1) g`, rows).Error; err != nil {
+		t.Fatalf("seed posts: %v", err)
+	}
+	if err := database.DB.WithContext(ctx).Exec(
+		`INSERT INTO hive_posts_cache (post_id, author, permlink, payout_at, is_paidout)
+		 SELECT g, 'alice', 'p' || g, '2026-01-09', false FROM generate_series(1, $1) g`, rows).Error; err != nil {
+		t.Fatalf("seed cache rows: %v", err)
+	}
+
+	capt := &stmtCapture{}
+	session := database.DB.Session(&gorm.Session{Logger: capt})
+	cp := NewCachedPost(session, &fakeSteemProvider{})
+
+	n, err := cp.DirtyPaidouts(ctx, time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC), nil)
+	if err != nil {
+		t.Fatalf("DirtyPaidouts: %v", err)
+	}
+	if n != rows {
+		t.Errorf("DirtyPaidouts marked %d posts, want %d (chunking must not drop rows)", n, rows)
+	}
+	if q := cp.PendingQueueLen(); q != rows {
+		t.Errorf("dirty queue after sweep = %d, want %d", q, rows)
+	}
+
+	ins := capt.inStatements()
+	if len(ins) != 2 {
+		t.Fatalf("executed %d id-IN statements, want 2 (1200 ids / batchChunk 1000)", len(ins))
+	}
+	for i, stmt := range ins {
+		if got := inListLen(stmt); got != 1000 && got != 200 {
+			t.Errorf("id-IN statement %d carried %d ids, want 1000 or 200 (batchChunk chunking)", i+1, got)
+		}
 	}
 }
 
