@@ -458,9 +458,32 @@ Load account/profile data.
 
 **Parameters:**
 - `account` (string, required)
-- `observer` (string, optional): Observer account
+- `observer` (string, optional): Observer account; when supplied and known,
+  the profile gains a top-level `context` object `{followed, muted?}`
+  describing the observer's follow/ignore state toward the account. An
+  unknown observer is an error; without an observer there is no `context`.
 
-**Returns:** Profile object with account details
+**Returns:** Profile object:
+
+```json
+{
+  "id": 27,
+  "name": "steemit",
+  "created": "2016-03-24T16:05:00",
+  "active": "2023-01-31T22:45:11",
+  "post_count": 12345,
+  "reputation": 78.42,
+  "blacklists": [],
+  "stats": {"sp": 5000000, "rank": 12, "following": 3, "followers": 250000},
+  "metadata": {
+    "profile": {"name": "...", "about": "...", "website": "...",
+                "location": "...", "cover_image": "...", "profile_image": "..."}
+  }
+}
+```
+
+`stats.sp` is `vote_weight * steem_per_mvest / 1e6`; `blacklists` carries
+the muted/irredeemables and reputation tags. Unknown accounts return `null`.
 
 ### bridge.get_ranked_posts
 
@@ -609,7 +632,8 @@ Load notifications for a specific post.
 - `last_id` (integer, optional): Last notification ID for pagination
 - `limit` (integer, optional): Default 100, max 100
 
-**Returns:** Array of notification objects
+**Returns:** Array of notification objects. Notifications referencing a
+deleted post are excluded; an unknown author/permlink is an error.
 
 #### bridge.account_notifications
 
@@ -621,7 +645,9 @@ Load notifications for an account.
 - `last_id` (integer, optional)
 - `limit` (integer, optional): Default 100
 
-**Returns:** Array of notification objects
+**Returns:** Array of notification objects. For community accounts
+(`hive-*`) the query switches to community notifications and `min_score`
+is forced to 0; an unknown account is an error.
 
 #### bridge.unread_notifications
 
@@ -634,10 +660,14 @@ Get unread notification status.
 **Returns:**
 ```json
 {
-  "lastread": "2016-03-24T16:05:00",
+  "lastread": "2016-03-24 16:05:00",
   "unread": 5
 }
 ```
+
+Notes: an unknown account is an error; `lastread` renders as
+`YYYY-MM-DD HH:MM:SS`; the unread count (unlike the list methods) does not
+exclude notifications that reference deleted posts, matching legacy.
 
 ### Public APIs
 

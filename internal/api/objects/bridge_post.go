@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/steemit/hivemind/internal/models"
+	"github.com/steemit/hivemind/internal/steem"
 )
 
 // RoleIDToString maps the numeric role_id to its display name.
@@ -32,7 +33,9 @@ var RoleIDToString = map[int16]string{
 //   - author_reputation is the raw float from hive_posts_cache (not repToRaw)
 //   - payout keys are is_paidout/payout_at/payout (not total/pending_payout_value)
 //   - includes stats sub-object {hide, gray, total_votes, flag_weight, is_pinned}
-//   - includes community/community_title/author_role/author_title (batch queries)
+//   - includes blacklists (Mutes tags) which also drive stats.hide/stats.gray
+//   - includes community/community_title/author_role/author_title (batch queries);
+//     community is the category string (objects.py:135), not a hive-{id} name
 //   - includes raw_json import fields (beneficiaries, max_accepted_payout, etc.)
 func (l *PostLoader) LoadPostsKeyed(ctx context.Context, ids []int64, truncateBody int) (map[int64]map[string]interface{}, error) {
 	if len(ids) == 0 {
@@ -109,6 +112,10 @@ func (l *PostLoader) LoadPostsKeyed(ctx context.Context, ids []int64, truncateBo
 		}
 
 		obj := l.buildBridgePost(post, cache, author.Rep, truncateBody)
+		// Blacklist tags drive the stats.hide/stats.gray decoration below
+		// (legacy load_posts_keyed, objects.py:81). Reputation comes from
+		// hive_accounts, not the cache row.
+		obj["blacklists"] = steem.SharedMutes().Lists(post.Author, author.Rep)
 		postsByID[id] = obj
 
 		// Collect community context for batch queries.
@@ -163,27 +170,48 @@ func (l *PostLoader) LoadPostsKeyed(ctx context.Context, ids []int64, truncateBo
 		}
 	}
 
-	// 7. Decorate posts with community/role info.
+	// 7. Decorate posts with community/role info and Mutes-derived stats.
+	// Mirrors legacy load_posts_keyed (objects.py:131-143) exactly:
+	//   - community posts: community/community_title/author_role/author_title;
+	//     community is the (sanitized) category string, NOT a hive-{id} name
+	//     (objects.py:135); community_title falls back to the category when
+	//     the community row carries no title (objects.py:136).
+	//   - non-community posts: stats.gray overwritten with the Mutes-derived
+	//     value — irredeemable OR two-or-more blacklist tags (objects.py:140-142).
+	//   - ALL posts: stats.hide overwritten with irredeemables membership
+	//     (objects.py:143); the cache row's is_hidden seeded in
+	//     buildBridgePost is legacy's initial value that this line replaces.
 	for pid, obj := range postsByID {
 		cid, hasCID := postCIDs[pid]
-		if !hasCID {
-			continue
-		}
-		obj["community"] = fmt.Sprintf("hive-%d", cid)
-		obj["community_title"] = commTitles[cid]
+		blacklists, _ := obj["blacklists"].([]string)
+		irredeemable := slices.Contains(blacklists, "irredeemables")
+		stats := obj["stats"].(map[string]interface{})
 
-		// Find the author's role in this community.
-		authorName, _ := obj["author"].(string)
-		author := authorMap[authorName]
-		if author != nil {
-			if r, ok := roles[roleKey{cid, author.ID}]; ok {
-				obj["author_role"] = RoleIDToString[r.RoleID]
-				obj["author_title"] = r.Title
-			} else {
-				obj["author_role"] = "guest"
-				obj["author_title"] = ""
+		if hasCID {
+			category, _ := obj["category"].(string)
+			obj["community"] = category
+			title := commTitles[cid]
+			if title == "" {
+				title = category
 			}
+			obj["community_title"] = title
+
+			// Find the author's role in this community.
+			authorName, _ := obj["author"].(string)
+			author := authorMap[authorName]
+			if author != nil {
+				if r, ok := roles[roleKey{cid, author.ID}]; ok {
+					obj["author_role"] = RoleIDToString[r.RoleID]
+					obj["author_title"] = r.Title
+				} else {
+					obj["author_role"] = "guest"
+					obj["author_title"] = ""
+				}
+			}
+		} else {
+			stats["gray"] = irredeemable || len(blacklists) >= 2
 		}
+		stats["hide"] = irredeemable
 	}
 
 	// 8. Batch query: pinned posts.
@@ -316,21 +344,32 @@ func (l *PostLoader) buildBridgePost(post *models.Post, cache *models.PostCache,
 		pendingPayout = cache.Payout
 	}
 
+	// Legacy reads category from the hive_posts_cache row and applies the
+	// condenser#3424 mitigation: empty category becomes 'undefined'
+	// (_condenser_post_object, objects.py:236-240). The same (possibly
+	// sanitized) value feeds the `community` field in LoadPostsKeyed.
+	category := cache.Category
+	if category == "" {
+		category = "undefined"
+	}
+
+	// created/updated/payout_at use legacy json_date formatting ('T'-joined,
+	// no timezone).
 	obj := map[string]interface{}{
 		"post_id":       post.ID,
 		"author":        post.Author,
 		"permlink":      post.Permlink,
-		"category":      post.Category,
+		"category":      category,
 		"title":         cache.Title,
 		"body":          body,
 		"json_metadata": jsonMeta,
-		"created":       post.CreatedAt.Format(time.RFC3339),
-		"updated":       cache.UpdatedAt.Format(time.RFC3339),
+		"created":       jsonDate(post.CreatedAt),
+		"updated":       jsonDate(cache.UpdatedAt),
 		"depth":         post.Depth,
 		"children":      cache.Children,
 		"net_rshares":   cache.RShares,
 		"is_paidout":    cache.IsPaidout,
-		"payout_at":     cache.PayoutAt.Format(time.RFC3339),
+		"payout_at":     jsonDate(cache.PayoutAt),
 		"payout":        cache.Payout,
 		// Payout split mirrors legacy bridge _condenser_post_object: before
 		// payout the whole amount is pending; after payout the author value is
@@ -343,7 +382,10 @@ func (l *PostLoader) buildBridgePost(post *models.Post, cache *models.PostCache,
 		"active_votes":         votes,
 		"author_reputation":    authorRep, // raw float, no repToRaw for bridge_api
 		"stats": map[string]interface{}{
-			"hide":        false, // display flag from Mutes/irredeemables list (TODO); DB-level hiding is enforced by get_discussion via hive_posts_status
+			// Initial values from the cache row; LoadPostsKeyed overwrites
+			// hide for every post and gray for non-community posts with the
+			// Mutes-derived values (legacy objects.py:140-143).
+			"hide":        cache.IsHidden,
 			"gray":        cache.IsGrayed,
 			"total_votes": cache.TotalVotes,
 			"flag_weight": cache.FlagWeight,
