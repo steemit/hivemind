@@ -107,7 +107,7 @@ func main() {
 	router.Use(middleware.MetricsMiddleware())
 
 	// Setup API routes
-	apiRouter := api.NewRouter(database, redisCache, steemd, cfg.Indexer.RecommendCommunities)
+	apiRouter := api.NewRouter(database, redisCache, steemd, cfg.Indexer.RecommendCommunities, cfg.Server.MaxBodyBytes)
 	apiRouter.SetupRoutes(router)
 
 	// Create HTTP server with timeouts to prevent slow-client goroutine leaks
