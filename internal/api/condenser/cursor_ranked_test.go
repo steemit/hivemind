@@ -123,7 +123,8 @@ func TestCursorRepliesPaginationRebind(t *testing.T) {
 	// Page 2 seeks at bob/reply-2: rebinding the subquery to alice yields
 	// alice's remaining replies (the seek post itself included — legacy seek
 	// is the inclusive `id <= start_id`). The pre-fix behavior (subquery
-	// stays bob) yields [14], the children of bob.
+	// stays bob, so the seek resolves to bob/reply-2 and prunes the
+	// result by `id <= 14` on the wrong parent set) yields [].
 	page2, err := cursor.GetPostIDsByRepliesToAccount(context.Background(), "bob", "reply-2", 10)
 	if err != nil {
 		t.Fatalf("page2: %v", err)

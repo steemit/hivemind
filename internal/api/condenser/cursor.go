@@ -99,8 +99,12 @@ func (c *Cursor) GetPostIDsByQuery(ctx context.Context, sort, startAuthor, start
 		if sort == "payout" || sort == "payout_comments" {
 			query = query.Where("category = ?", tag)
 		} else if strings.HasPrefix(tag, "hive-") {
-			// Community tag
+			// Community tag: category filter plus (like legacy
+			// cursor.py:306-311) the tag-index conjunction that applies
+			// to every non-payout sort.
 			query = query.Where("category = ?", tag)
+			query = query.Joins("INNER JOIN hive_post_tags ON hive_posts_cache.post_id = hive_post_tags.post_id").
+				Where("hive_post_tags.tag = ?", tag)
 			if sort == "trending" || sort == "hot" {
 				query = query.Where("depth = ?", 0)
 			}
@@ -383,7 +387,7 @@ func (c *Cursor) rankedPidsByCommunity(ctx context.Context, cids []int64, sort s
 	d, ok := defs[sort]
 	if !ok {
 		// payout_comments has no community definition in legacy (asserts).
-		return nil, fmt.Errorf("sort %q is not valid in community mode", sort)
+		return nil, fmt.Errorf("unknown sort %s", sort)
 	}
 
 	table := rankedCacheTable(sort)
