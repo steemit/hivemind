@@ -48,6 +48,14 @@ func (c *ContentAPI) GetContent(ctx *gin.Context, params json.RawMessage) (inter
 
 	author, _ := p[0].(string)
 	permlink, _ := p[1].(string)
+	// legacy get_content: valid_account(author) + valid_permlink(permlink)
+	// run before any lookup.
+	if _, err := apierrors.ValidAccount(author, false); err != nil {
+		return nil, err
+	}
+	if _, err := apierrors.ValidPermlink(permlink, false); err != nil {
+		return nil, err
+	}
 
 	postRepo := db.NewPostRepository(c.repo)
 	post, err := postRepo.GetLiveByAuthorPermlink(ctx.Request.Context(), author, permlink)
@@ -97,6 +105,13 @@ func (c *ContentAPI) GetContentReplies(ctx *gin.Context, params json.RawMessage)
 
 	author, _ := p[0].(string)
 	permlink, _ := p[1].(string)
+	// legacy get_content_replies: valid_account + valid_permlink first.
+	if _, err := apierrors.ValidAccount(author, false); err != nil {
+		return nil, err
+	}
+	if _, err := apierrors.ValidPermlink(permlink, false); err != nil {
+		return nil, err
+	}
 
 	// Get parent post (deleted parents resolve to nil, like legacy's
 	// is_deleted-filtered get_post_id returning no id).

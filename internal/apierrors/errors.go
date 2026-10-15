@@ -87,3 +87,48 @@ func ClampLimit(limit int) int {
 	}
 	return limit
 }
+
+// tagRe matches valid steem tags (legacy valid_tag).
+var tagRe = regexp.MustCompile(`^[a-z0-9-_]+$`)
+
+// ValidTag validates a tag (lowercase alnum plus - and _). Mirrors legacy
+// valid_tag.
+func ValidTag(tag string, allowEmpty bool) (string, error) {
+	if tag == "" {
+		if !allowEmpty {
+			return "", PublicError("tag was blank")
+		}
+		return "", nil
+	}
+	if !tagRe.MatchString(tag) {
+		return "", Publicf("invalid tag `%s`", tag)
+	}
+	return tag, nil
+}
+
+// ValidQueryLimit applies legacy valid_limit semantics to an optional limit
+// key in a decoded params map:
+//   - absent keeps the method default (legacy signatures like
+//     `limit: int = 20` only validate what the client sends);
+//   - an explicit JSON null is legacy None and errors "limit must be
+//     provided";
+//   - a present number must be positive and within ubound, with the legacy
+//     error messages.
+//
+// Non-numeric values are treated as absent: the legacy int() coercion
+// paths (int("10") succeeding, ValueError elsewhere) are not replicated;
+// this is a registered leniency.
+func ValidQueryLimit(p map[string]interface{}, def, ubound int) (int, error) {
+	v, present := p["limit"]
+	if !present {
+		return def, nil
+	}
+	if v == nil {
+		return 0, PublicError("limit must be provided")
+	}
+	f, ok := v.(float64)
+	if !ok {
+		return def, nil
+	}
+	return ValidLimit(int(f), ubound)
+}

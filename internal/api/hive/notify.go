@@ -48,12 +48,13 @@ func (n *NotifyAPI) PostNotifications(ctx *gin.Context, params json.RawMessage) 
 	if li, ok := pMap["last_id"].(float64); ok {
 		lastID = int64(li)
 	}
-	limit := 100
-	if l, ok := pMap["limit"].(float64); ok {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
+	// legacy notify: valid_limit(limit, 100) — default 100; a provided
+	// limit must be positive and <= 100. The old clamp let a negative
+	// limit reach GORM, where a negative Limit means "no LIMIT clause"
+	// (an unbounded notifications scan); rejecting it fixes that path.
+	limit, err := apierrors.ValidQueryLimit(pMap, 100, 100)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get post ID. Legacy get_post_id (hive_api/common.py) does NOT filter
@@ -99,12 +100,13 @@ func (n *NotifyAPI) AccountNotifications(ctx *gin.Context, params json.RawMessag
 	if li, ok := pMap["last_id"].(float64); ok {
 		lastID = int64(li)
 	}
-	limit := 100
-	if l, ok := pMap["limit"].(float64); ok {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
+	// legacy notify: valid_limit(limit, 100) — default 100; a provided
+	// limit must be positive and <= 100. The old clamp let a negative
+	// limit reach GORM, where a negative Limit means "no LIMIT clause"
+	// (an unbounded notifications scan); rejecting it fixes that path.
+	limit, err := apierrors.ValidQueryLimit(pMap, 100, 100)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get account ID. Legacy get_account_id asserts "account not found" for

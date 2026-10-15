@@ -57,7 +57,10 @@ func (d *DiscussionsAPI) getDiscussionsBySort(ctx *gin.Context, sort string, par
 
 	startAuthor, _ := p["start_author"].(string)
 	startPermlink, _ := p["start_permlink"].(string)
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 	tag, _ := p["tag"].(string)
 
 	// Get post IDs
@@ -87,12 +90,20 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 	tag, _ := p["tag"].(string)
 	startAuthor, _ := p["start_author"].(string)
 	startPermlink, _ := p["start_permlink"].(string)
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 
-	// tag parameter is actually the account name for blog queries
+	// tag parameter is actually the account name for blog queries;
+	// legacy asserts non-blank first ("`tag` cannot be blank",
+	// methods.py:260-261), then validates with valid_account.
+	if tag == "" {
+		return nil, apierrors.PublicError("`tag` cannot be blank")
+	}
 	account := tag
-	if account == "" {
-		return nil, apierrors.PublicError("missing required parameter: tag (account name)")
+	if _, err := apierrors.ValidAccount(account, false); err != nil {
+		return nil, err
 	}
 
 	// Get post IDs from feed cache (condenser flavor: no unreblogged
@@ -124,6 +135,8 @@ func (d *DiscussionsAPI) GetDiscussionsByFeed(ctx *gin.Context, params json.RawM
 	}
 
 	tag, _ := p["tag"].(string)
+	// legacy asserts non-blank tag first ("`tag` cannot be blank",
+	// methods.py:274-275), then validates with valid_account.
 	if tag == "" {
 		return nil, apierrors.PublicError("`tag` cannot be blank")
 	}
@@ -144,7 +157,10 @@ func (d *DiscussionsAPI) GetDiscussionsByFeed(ctx *gin.Context, params json.RawM
 			return nil, err
 		}
 	}
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 	truncateBody := truncateBodyFromQuery(p)
 
 	entries, err := d.cursor.GetPostIDsByFeedWithReblog(ctx.Request.Context(), account, startAuthor, startPermlink, limit)

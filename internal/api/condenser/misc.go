@@ -40,11 +40,12 @@ func (m *MiscAPI) GetDiscussionsByComments(ctx *gin.Context, params json.RawMess
 	}
 
 	startAuthor, _ := p["start_author"].(string)
+	// legacy asserts non-blank start_author first ("`start_author` cannot
+	// be blank", methods.py:296-297), then validates with valid_account.
 	if startAuthor == "" {
 		return nil, apierrors.PublicError("`start_author` cannot be blank")
 	}
-	startAuthor, err = apierrors.ValidAccount(startAuthor, false)
-	if err != nil {
+	if _, err := apierrors.ValidAccount(startAuthor, false); err != nil {
 		return nil, err
 	}
 
@@ -54,7 +55,10 @@ func (m *MiscAPI) GetDiscussionsByComments(ctx *gin.Context, params json.RawMess
 			return nil, err
 		}
 	}
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 	truncateBody := truncateBodyFromQuery(p)
 
 	ids, err := m.cursor.GetPostIDsByAccountComments(ctx.Request.Context(), startAuthor, startPermlink, limit)
@@ -73,11 +77,13 @@ func (m *MiscAPI) GetRepliesByLastUpdate(ctx *gin.Context, params json.RawMessag
 	}
 
 	startAuthor, _ := p["start_author"].(string)
+	// legacy asserts non-blank start_author first ("`start_author` cannot
+	// be blank", methods.py:310-311), then validates with valid_account.
 	if startAuthor == "" {
 		return nil, apierrors.PublicError("`start_author` cannot be blank")
 	}
-	startAuthor, err = apierrors.ValidAccount(startAuthor, false)
-	if err != nil {
+	// legacy valid_account(start_author), allow_empty=False.
+	if _, err := apierrors.ValidAccount(startAuthor, false); err != nil {
 		return nil, err
 	}
 
@@ -87,7 +93,10 @@ func (m *MiscAPI) GetRepliesByLastUpdate(ctx *gin.Context, params json.RawMessag
 			return nil, err
 		}
 	}
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 
 	ids, err := m.cursor.GetPostIDsByRepliesToAccount(ctx.Request.Context(), startAuthor, startPermlink, limit)
 	if err != nil {
@@ -107,11 +116,12 @@ func (m *MiscAPI) GetDiscussionsByAuthorBeforeDate(ctx *gin.Context, params json
 	}
 
 	author, _ := p["author"].(string)
+	// legacy asserts non-blank author first ("`author` cannot be blank",
+	// methods.py:330-331), then validates with valid_account.
 	if author == "" {
 		return nil, apierrors.PublicError("`author` cannot be blank")
 	}
-	author, err = apierrors.ValidAccount(author, false)
-	if err != nil {
+	if _, err := apierrors.ValidAccount(author, false); err != nil {
 		return nil, err
 	}
 
@@ -121,7 +131,10 @@ func (m *MiscAPI) GetDiscussionsByAuthorBeforeDate(ctx *gin.Context, params json
 			return nil, err
 		}
 	}
-	limit := limitFromQuery(p, 10, 100)
+	limit, err := limitFromQuery(p, 10, 100)
+	if err != nil {
+		return nil, err
+	}
 
 	ids, err := m.cursor.GetPostIDsByBlogWithoutReblog(ctx.Request.Context(), author, startPermlink, limit)
 	if err != nil {
@@ -162,7 +175,10 @@ func (m *MiscAPI) getDiscussionsByPayout(ctx *gin.Context, params json.RawMessag
 			return nil, err
 		}
 	}
-	limit := limitFromQuery(p, 20, 100)
+	limit, err := limitFromQuery(p, 20, 100)
+	if err != nil {
+		return nil, err
+	}
 	tag, _ := p["tag"].(string)
 	truncateBody := truncateBodyFromQuery(p)
 
@@ -249,16 +265,13 @@ func (m *MiscAPI) GetAccountVotes(ctx *gin.Context, params json.RawMessage) (int
 	return nil, apierrors.PublicError("get_account_votes is no longer supported")
 }
 
-// limitFromQuery extracts and clamps the limit from a query params map.
-func limitFromQuery(p map[string]interface{}, def, ubound int) int {
-	limit := def
-	if l, ok := p["limit"].(float64); ok {
-		limit = int(l)
-	}
-	if limit, err := apierrors.ValidLimit(limit, ubound); err == nil {
-		return limit
-	}
-	return def
+// limitFromQuery extracts the limit from a query params map with legacy
+// valid_limit semantics: absent keeps the method default; a present limit
+// that is not positive or exceeds ubound is an error (methods.py
+// `limit: int = <default>` signatures — the old silent fall-back-to-default
+// behavior is the deviation §1.5 removes).
+func limitFromQuery(p map[string]interface{}, def, ubound int) (int, error) {
+	return apierrors.ValidQueryLimit(p, def, ubound)
 }
 
 // truncateBodyFromQuery extracts the optional truncate_body length.

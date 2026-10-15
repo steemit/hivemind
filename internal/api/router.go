@@ -76,6 +76,10 @@ func (r *Router) registerMethods(steemd *steem.Client, recommendCommunities stri
 	r.handler.RegisterMethod("condenser_api.get_reblogged_by", condenserFollow.GetRebloggedBy)
 	r.handler.RegisterMethod("condenser_api.get_followers_by_page", condenserFollow.GetFollowersByPage)
 	r.handler.RegisterMethod("condenser_api.get_following_by_page", condenserFollow.GetFollowingByPage)
+
+	// Follow API aliases for by-page (legacy serve.py follow_api set)
+	r.handler.RegisterMethod("follow_api.get_followers_by_page", condenserFollow.GetFollowersByPage)
+	r.handler.RegisterMethod("follow_api.get_following_by_page", condenserFollow.GetFollowingByPage)
 	r.handler.RegisterMethod("condenser_api.get_content", condenserContent.GetContent)
 	r.handler.RegisterMethod("condenser_api.get_content_replies", condenserContent.GetContentReplies)
 
@@ -99,6 +103,9 @@ func (r *Router) registerMethods(steemd *steem.Client, recommendCommunities stri
 	// Follow API aliases for blog
 	r.handler.RegisterMethod("follow_api.get_blog", condenserBlog.GetBlog)
 	r.handler.RegisterMethod("follow_api.get_blog_entries", condenserBlog.GetBlogEntries)
+	// Follow API aliases for tags/reputations (legacy serve.py follow_api set)
+	r.handler.RegisterMethod("follow_api.get_account_reputations", condenserTags.GetAccountReputations)
+	r.handler.RegisterMethod("follow_api.get_reblogged_by", condenserFollow.GetRebloggedBy)
 
 	// Misc API
 	condenserMisc := condenser.NewMiscAPI(repo, r.db, steemd)
@@ -119,6 +126,20 @@ func (r *Router) registerMethods(steemd *steem.Client, recommendCommunities stri
 	r.handler.RegisterMethod("tags_api.get_discussions_by_promoted", condenserDiscussions.GetDiscussionsByPromoted)
 	r.handler.RegisterMethod("tags_api.get_discussions_by_blog", condenserDiscussions.GetDiscussionsByBlog)
 	r.handler.RegisterMethod("tags_api.get_discussions_by_comments", condenserMisc.GetDiscussionsByComments)
+	// Tags API aliases: content primitives / payout sorts / misc
+	// (legacy serve.py tags_api set; get_discussion is an alias of
+	// get_content, get_account_votes is the informational dummy)
+	r.handler.RegisterMethod("tags_api.get_discussion", condenserContent.GetContent)
+	r.handler.RegisterMethod("tags_api.get_content_replies", condenserContent.GetContentReplies)
+	r.handler.RegisterMethod("tags_api.get_discussions_by_author_before_date", condenserMisc.GetDiscussionsByAuthorBeforeDate)
+	r.handler.RegisterMethod("tags_api.get_post_discussions_by_payout", condenserMisc.GetPostDiscussionsByPayout)
+	r.handler.RegisterMethod("tags_api.get_comment_discussions_by_payout", condenserMisc.GetCommentDiscussionsByPayout)
+	r.handler.RegisterMethod("tags_api.get_account_votes", condenserMisc.GetAccountVotes)
+
+	// Legacy `call` adapter: routes ["condenser_api", method, args] requests
+	// to the condenser methods (legacy condenser_api/call.py).
+	condenserCall := condenser.NewCallAPI(condenserFollow, condenserContent, condenserDiscussions, condenserBlog, condenserTags, condenserMisc)
+	r.handler.RegisterMethod("call", condenserCall.Call)
 
 	// Follow API aliases
 	r.handler.RegisterMethod("follow_api.get_followers", condenserFollow.GetFollowers)

@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -163,6 +164,19 @@ func NewJSONRPCHandler(maxBodyBytes int64) *JSONRPCHandler {
 // RegisterMethod registers a method handler
 func (h *JSONRPCHandler) RegisterMethod(method string, handler MethodHandler) {
 	h.methods[method] = handler
+}
+
+// RegisteredMethods returns the sorted names of every registered method.
+// The registry golden test locks this set against the legacy server's
+// method registry (serve.py build_methods) plus the registered Go-only
+// additions, so any registry change has to be made explicitly.
+func (h *JSONRPCHandler) RegisteredMethods() []string {
+	names := make([]string, 0, len(h.methods))
+	for name := range h.methods {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Handle handles a JSON-RPC request or batch of requests (POST /).

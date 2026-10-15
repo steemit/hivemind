@@ -359,12 +359,13 @@ func (r *RankedAPI) GetTrendingTopics(ctx *gin.Context, params json.RawMessage) 
 	if err := json.Unmarshal(params, &pMap); err != nil {
 		pMap = map[string]interface{}{}
 	}
-	limit := 10
-	if l, ok := pMap["limit"].(float64); ok {
-		limit = int(l)
-		if limit > 25 {
-			limit = 25
-		}
+	// legacy get_trending_topics: valid_limit(limit, 25) — default 10; a
+	// provided limit must be positive and <= 25. The old clamp also let a
+	// negative limit through, which GORM turns into "no LIMIT clause" (an
+	// unbounded communities scan) — rejecting it fixes that path.
+	limit, err := apierrors.ValidQueryLimit(pMap, 10, 25)
+	if err != nil {
+		return nil, err
 	}
 
 	out := []interface{}{}
