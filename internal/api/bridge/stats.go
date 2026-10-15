@@ -22,6 +22,14 @@ import (
 // new write responsibility for a read-only stats endpoint).
 const payoutStatsTTL = 60 * time.Minute
 
+// payoutStatsErrBackoff throttles retries after a failed refresh so queued
+// requests cannot serially re-run a doomed full-table scan; the refresh
+// itself gets its own budget decoupled from any request deadline.
+const (
+	payoutStatsErrBackoff     = 30 * time.Second
+	payoutStatsRefreshTimeout = 120 * time.Second
+)
+
 // payoutStatsDefaultLimit and payoutStatsMaxLimit mirror legacy
 // valid_limit(limit, 250) with the signature default 250
 // (hive_api/stats.py:21-24). The aggregation is cached at the max bound and
@@ -45,6 +53,8 @@ type StatsAPI struct {
 	cacheMu     sync.Mutex
 	cachedAt    time.Time
 	cachedStats *payoutStats
+	lastErrAt   *time.Time
+	lastErr     error
 }
 
 // NewStatsAPI creates a new stats API
@@ -149,13 +159,29 @@ func (s *StatsAPI) payoutStats(ctx context.Context) (*payoutStats, error) {
 	if s.cachedStats != nil && time.Since(s.cachedAt) < payoutStatsTTL {
 		return s.cachedStats, nil
 	}
+	// Negative caching: after a failed refresh, back off so a stuck or
+	// slow aggregation cannot be retried serially by every queued request
+	// (each holding the mutex for a full scan).
+	if s.lastErrAt != nil && time.Since(*s.lastErrAt) < payoutStatsErrBackoff {
+		return nil, s.lastErr
+	}
 
-	stats, err := s.queryPayoutStats(ctx)
+	// The refresh must not be tied to the triggering request: a client
+	// disconnect would cancel the shared aggregation other waiters
+	// depend on.
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), payoutStatsRefreshTimeout)
+	defer cancel()
+	stats, err := s.queryPayoutStats(refreshCtx)
 	if err != nil {
+		now := time.Now()
+		s.lastErrAt = &now
+		s.lastErr = err
 		return nil, err
 	}
 	s.cachedStats = stats
 	s.cachedAt = time.Now()
+	s.lastErrAt = nil
+	s.lastErr = nil
 	return stats, nil
 }
 

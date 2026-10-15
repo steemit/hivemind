@@ -88,19 +88,9 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 	// (methods.py:118): an unknown account errors out even for non-'my'
 	// tags. The id drives the tag='my' subscription filter and its
 	// cache-key component.
-	var observerID int64
-	if observer != "" {
-		var acc models.Account
-		if err := r.repo.DB().WithContext(ctx.Request.Context()).
-			Select("id").
-			Where("name = ?", observer).
-			First(&acc).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return nil, apierrors.Publicf("account not found: `%s`", observer)
-			}
-			return nil, err
-		}
-		observerID = acc.ID
+	observerID, err := r.resolveObserver(ctx, observer)
+	if err != nil {
+		return nil, err
 	}
 
 	telemetry.AddSpanAttributes(span, map[string]string{
@@ -170,6 +160,26 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 
 	telemetry.SetSpanSuccess(span)
 	return result, nil
+}
+
+// resolveObserver mirrors legacy get_account_id (methods.py:118 / :80 / :203):
+// an observer that does not resolve is an error, even when the method does
+// not produce observer-scoped output.
+func (r *RankedAPI) resolveObserver(ctx *gin.Context, observer string) (int64, error) {
+	if observer == "" {
+		return 0, nil
+	}
+	var acc models.Account
+	if err := r.repo.DB().WithContext(ctx.Request.Context()).
+		Select("id").
+		Where("name = ?", observer).
+		First(&acc).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return 0, apierrors.Publicf("account not found: `%s`", observer)
+		}
+		return 0, err
+	}
+	return acc.ID, nil
 }
 
 // rankedCacheKey builds the response-cache key for bridge.get_ranked_posts.
@@ -247,7 +257,11 @@ func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (i
 	}
 
 	observer, _ := pMap["observer"].(string)
-	_ = observer
+	// legacy methods.py:203 resolves the observer (unknown account is an
+	// error) even though the method emits no observer-scoped output.
+	if _, err := r.resolveObserver(ctx, observer); err != nil {
+		return nil, err
+	}
 
 	sort, _ := pMap["sort"].(string)
 	if sort == "" {

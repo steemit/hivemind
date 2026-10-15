@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/steemit/hivemind/internal/apierrors"
 	"github.com/steemit/hivemind/internal/models"
 )
 
@@ -139,11 +140,23 @@ func postsByID(ctx context.Context, db *gorm.DB, ids []int64, observer string, l
 		}, nil
 	}
 
-	// Observer reblog set: one batched IN query for the whole id list
-	// (legacy _reblogged_ids, objects.py:195-199). Votes need no query --
-	// the observer's rshares live in the already-loaded votes CSV.
+	// Observer handling mirrors legacy: the observer resolves through
+	// get_account_id (objects.py:42-43) -- an unknown account is an error
+	// -- and its reblog set comes from one batched IN query for the whole
+	// id list (legacy _reblogged_ids, objects.py:195-199). Votes need no
+	// query: the observer's rshares live in the already-loaded votes CSV.
 	var reblogged map[int64]bool
 	if observer != "" {
+		var obsAcc models.Account
+		if err := db.WithContext(ctx).
+			Select("id").
+			Where("name = ?", observer).
+			First(&obsAcc).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, apierrors.Publicf("account not found: `%s`", observer)
+			}
+			return nil, err
+		}
 		var err error
 		reblogged, err = observerRebloggedIDs(ctx, db, observer, ids)
 		if err != nil {
