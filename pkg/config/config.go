@@ -471,10 +471,16 @@ func (c *Config) Validate() error {
 	if c.Server.ShutdownGracePeriod < 0 {
 		return fmt.Errorf("http_shutdown_grace must not be negative (0 = default)")
 	}
-	if c.Server.ShutdownGracePeriod > 0 && c.Database.StatementTimeout > 0 &&
-		c.Server.ShutdownGracePeriod < c.Database.StatementTimeout {
+	grace := c.Server.ShutdownGracePeriod
+	if grace == 0 {
+		// 0 means "use the default" (45s via setDefaults); the invariant
+		// must hold for the effective value, not just explicit settings.
+		grace = 45 * time.Second
+	}
+	if grace > 0 && c.Database.StatementTimeout > 0 &&
+		grace < c.Database.StatementTimeout {
 		return fmt.Errorf("http_shutdown_grace (%s) must be >= db_statement_timeout (%s) so in-flight statements can complete",
-			c.Server.ShutdownGracePeriod, c.Database.StatementTimeout)
+			grace, c.Database.StatementTimeout)
 	}
 	// /health head-lag threshold: 0 disables the criterion (catch-up
 	// deployments); negative is invalid.
