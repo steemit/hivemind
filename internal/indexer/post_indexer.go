@@ -197,7 +197,10 @@ func (pi *PostIndexer) ProcessComment(ctx context.Context, tx *gorm.DB, op map[s
 				return err
 			}
 			if pi.cachedPost != nil {
-				if err := pi.cachedPost.Undelete(ctx, existing.ID, author, permlink, bp.category); err != nil {
+				// The placeholder INSERTs ride the block transaction: legacy
+				// CachedPost.undelete runs inside process_multi, so a rolled
+				// back block leaves no orphaned placeholder rows behind.
+				if err := pi.cachedPost.Undelete(ctx, existing.ID, author, permlink, bp.category, tx); err != nil {
 					return fmt.Errorf("cached-post undelete failed for %s/%s: %w", author, permlink, err)
 				}
 			}
@@ -343,9 +346,11 @@ func (pi *PostIndexer) ProcessDelete(ctx context.Context, tx *gorm.DB, op map[st
 
 	// Evict from both cache tables, tags, and the dirty queue. Fail the
 	// block on error: a swallowed failure would leave stale cache rows
-	// behind (legacy lets the exception halt the sync).
+	// behind (legacy lets the exception halt the sync). The DELETEs ride
+	// the block transaction: legacy CachedPost.delete runs inside
+	// process_multi, so a rolled-back block leaves no orphaned evictions.
 	if pi.cachedPost != nil {
-		if err := pi.cachedPost.Delete(ctx, post.ID, author, permlink); err != nil {
+		if err := pi.cachedPost.Delete(ctx, post.ID, author, permlink, tx); err != nil {
 			return fmt.Errorf("cached-post delete failed for %s/%s: %w", author, permlink, err)
 		}
 	}

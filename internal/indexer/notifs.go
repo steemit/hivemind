@@ -147,6 +147,11 @@ func (p *PostNotifs) mentionNotifs(ctx context.Context, post map[string]interfac
 	}
 
 	// Batch: already-mentioned (type 16) and muted (follows state 2/3).
+	// Mute direction (P1-8): legacy suppresses a mention when the MENTIONED
+	// account ignores the AUTHOR -- `_muted(mention_id, author_id)` with
+	// _muted(account, target) == "account ignores target". The query below
+	// is therefore "which of these followers ignore the author", NOT "which
+	// of these does the author ignore".
 	mentionIDs := make([]int64, 0, len(mentionNames))
 	for _, name := range mentionNames {
 		mentionIDs = append(mentionIDs, resolved[name])
@@ -156,7 +161,7 @@ func (p *PostNotifs) mentionNotifs(ctx context.Context, post map[string]interfac
 		p.logger.Warn("notifs: mention dedup query failed", zap.Error(err))
 		return
 	}
-	mutedSet, err := p.mutedTargets(ctx, authorID, mentionIDs)
+	mutingFollowers, err := p.mutingFollowers(ctx, authorID, mentionIDs)
 	if err != nil {
 		p.logger.Warn("notifs: mention mute query failed", zap.Error(err))
 		return
@@ -165,7 +170,7 @@ func (p *PostNotifs) mentionNotifs(ctx context.Context, post map[string]interfac
 	finalScore := int16(int(score) - penalty)
 	for _, name := range mentionNames {
 		mid := resolved[name]
-		if already[mid] || mutedSet[mid] {
+		if already[mid] || mutingFollowers[mid] {
 			continue
 		}
 		if err := p.notify.Write(ctx, models.NotifyTypeMention, when, &authorID, &mid, nil, &pid, nil, &finalScore); err != nil {
@@ -304,17 +309,22 @@ func (p *PostNotifs) isMuted(ctx context.Context, follower, target int64) (bool,
 	return n > 0, err
 }
 
-// mutedTargets batch variant of isMuted: which targets the follower ignores.
-func (p *PostNotifs) mutedTargets(ctx context.Context, follower int64, targets []int64) (map[int64]bool, error) {
+// mutingFollowers returns which of the follower candidates ignore target
+// (state IN (2,3)). This is the legacy _muted(account, target) direction:
+// "account ignores target". For mention notifications the candidates are the
+// mentioned accounts and the target is the author -- the mention recipient's
+// mute of the author suppresses the notification (P1-8: the query was
+// previously inverted, asking which mentions the AUTHOR ignores).
+func (p *PostNotifs) mutingFollowers(ctx context.Context, target int64, followers []int64) (map[int64]bool, error) {
 	out := map[int64]bool{}
-	if len(targets) == 0 {
+	if len(followers) == 0 {
 		return out, nil
 	}
 	var ids []int64
 	err := p.db.WithContext(ctx).
 		Table("hive_follows").
-		Select("following").
-		Where("follower = ? AND following IN ? AND state IN (2, 3)", follower, targets).
+		Select("follower").
+		Where("follower IN ? AND following = ? AND state IN (2, 3)", followers, target).
 		Scan(&ids).Error
 	if err != nil {
 		return nil, err

@@ -122,8 +122,12 @@ func TestAuditCacheUndelete(t *testing.T) {
 		IsValid: true, IsDeleted: true}
 	database.DB.WithContext(ctx).Create(post)
 
-	// steemd still serves the post → it was erroneously deleted.
+	// steemd still serves the post → it was erroneously deleted. The
+	// undelete now runs the block-path rebuild (PR#407 parity): a root
+	// post's category comes from the chain parent_permlink, so the fixture
+	// must carry it exactly as get_content does.
 	steemd := steemdPostFor("alice", "p1", "recovered body")
+	steemd["parent_permlink"] = "life"
 	provider := &fakeSteemProvider{getContentBatch: func(_ context.Context, posts [][]string) ([]map[string]interface{}, error) {
 		out := make([]map[string]interface{}, len(posts))
 		for i := range posts {
