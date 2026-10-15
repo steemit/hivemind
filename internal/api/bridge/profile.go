@@ -85,6 +85,13 @@ func (pr *ProfileAPI) GetProfile(ctx *gin.Context, params json.RawMessage) (inte
 		telemetry.RecordSpanError(span, err)
 		return nil, err
 	}
+	if state == nil {
+		// Migrations always seed one row; a missing row means a broken or
+		// trimmed database. Fail the request instead of nil-derefing.
+		err := apierrors.PublicError("hive_state is empty; steem per vest is unavailable")
+		telemetry.RecordSpanError(span, err)
+		return nil, err
+	}
 	steemPerVest := state.SteemPerMVest / 1e6
 
 	profile := map[string]interface{}{
