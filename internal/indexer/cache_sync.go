@@ -49,6 +49,15 @@ type CacheSync struct {
 	logger  *zap.Logger
 }
 
+// catchupPaused reports whether background maintenance must pause: the
+// trailing distance from the chain head is unknown (< 0 -- before the sync
+// loop's first report) or beyond the catch-up threshold. Shared by
+// CacheSync's prune gate and the cache-jobs tick gate (PR#411 review) so
+// both consumers keep identical pause semantics.
+func catchupPaused(behind, threshold int64) bool {
+	return behind < 0 || behind > threshold
+}
+
 // CacheSync defaults (legacy SYNC_WINDOW = 60s, HOT_DAYS = 90).
 const (
 	CacheSyncWindow  = 60 * time.Second
@@ -125,7 +134,7 @@ func (c *CacheSync) Sync(ctx context.Context) {
 	}
 	defer c.syncing.Store(false)
 
-	if behind := c.behind.Load(); behind < 0 || behind > c.catchupBlocks {
+	if behind := c.behind.Load(); catchupPaused(behind, c.catchupBlocks) {
 		c.logger.Debug("catch-up in progress; temp-table prune paused",
 			zap.Int64("behind", behind),
 			zap.Int64("threshold", c.catchupBlocks))

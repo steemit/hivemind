@@ -84,12 +84,16 @@ func (bp *BlockProcessor) Accounts() *AccountIndexer {
 	return bp.accounts
 }
 
-// ProcessBlock processes a single block in its OWN transaction -- the
-// degenerate tx-batch of size 1 (tests and single-block callers). The sync
-// loop instead drives ProcessBlockInTx over a multi-block batch transaction
-// (Sync.syncTxBatch): both paths share the same per-block logic, but the
-// follow-delta snapshot/restore must match the transaction's rollback
-// boundary, so each path takes its own snapshot at its own granularity.
+// ProcessBlock processes a single block in its OWN transaction -- used by
+// tests and single-block callers. It is NOT the degenerate tx-batch mode:
+// that is Sync.syncTxBatch with HIVE_INDEXER_TX_BATCH_BLOCKS=1, which still
+// runs the batch driver (fetch-then-transaction, in-transaction follow
+// flush, trailing queue flushes). The sync loop instead drives
+// ProcessBlockInTx over a multi-block batch transaction; both paths share
+// the same per-block logic, and the per-block follow-delta snapshot taken
+// here is layered defense for callers below the batch driver -- the
+// snapshot/restore must match the transaction's rollback boundary, so each
+// path takes its own snapshot at its own granularity.
 func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]interface{}, isInitialSync bool) error {
 	// Start transaction
 	tx := bp.db.DB.WithContext(ctx).Begin()
@@ -121,7 +125,12 @@ func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]int
 	if err := tx.Commit().Error; err != nil {
 		// The block did not land: its follow deltas must not survive either,
 		// or the retry re-accumulates them (same double-count as a rollback).
+		// Defensive rollback releases the connection's transaction state (a
+		// failed COMMIT can leave it in limbo); ErrTxDone -- the transaction
+		// already terminated -- is harmlessly ignored by the driver
+		// (PR#411 review).
 		restoreDeltas()
+		tx.Rollback()
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

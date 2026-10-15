@@ -31,15 +31,30 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"gorm.io/gorm"
 
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
 	"github.com/steemit/hivemind/pkg/config"
+	"github.com/steemit/hivemind/pkg/telemetry"
 )
+
+// counterValue reads a prometheus counter's current value (the testutil
+// package would pull extra modules into go.mod for one assertion).
+func counterValue(t *testing.T, c prometheus.Counter) float64 {
+	t.Helper()
+	m := &dto.Metric{}
+	if err := c.Write(m); err != nil {
+		t.Fatalf("write counter metric: %v", err)
+	}
+	return m.GetCounter().GetValue()
+}
 
 // ---- fixtures -------------------------------------------------------------
 
@@ -737,6 +752,180 @@ func TestCacheSyncGating(t *testing.T) {
 	}
 }
 
+// ---- cache-jobs catch-up gating (PR#411 review) -----------------------------
+
+// seedPostMissingCacheRow inserts a hive_posts row with NO hive_posts_cache
+// entry -- the AuditCacheMissing repair target the gating tests observe (the
+// shared CachedPost flush heals it via get_content_batch).
+func seedPostMissingCacheRow(t *testing.T, database *db.DB, ctx context.Context) *models.Post {
+	t.Helper()
+	post := &models.Post{
+		Author:    "alice",
+		Permlink:  "gated",
+		Category:  "life",
+		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+		Depth:     0,
+		IsValid:   true,
+	}
+	if err := database.DB.WithContext(ctx).Create(post).Error; err != nil {
+		t.Fatalf("seed post: %v", err)
+	}
+	return post
+}
+
+// gatedJobsProvider serves the content fetch the audit's repair needs and
+// counts the calls (a call proves a jobs round actually ran).
+func gatedJobsProvider(calls *int32) *fakeSteemProvider {
+	return &fakeSteemProvider{
+		getContentBatch: func(_ context.Context, posts [][]string) ([]map[string]interface{}, error) {
+			atomic.AddInt32(calls, 1)
+			out := make([]map[string]interface{}, len(posts))
+			for i, p := range posts {
+				out[i] = steemdPostFor(p[0], p[1], "gated repair")
+			}
+			return out, nil
+		},
+	}
+}
+
+// TestCacheJobsTickCatchupGating pins the PR#411 review gate on the tick
+// itself: while the indexer trails the chain head beyond the catch-up
+// threshold -- or the distance is unknown (a fresh Sync before the sync
+// loop's first report) -- a cache-jobs tick must skip (no audit, no shared
+// dirty-queue sweep); once live (behind=0, or exactly at the threshold,
+// matching CacheSync's semantics) the tick runs and AuditCacheMissing heals
+// the seeded missing cache row.
+func TestCacheJobsTickCatchupGating(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedAccounts(t, database, "alice")
+	post := seedPostMissingCacheRow(t, database, ctx)
+
+	var calls int32
+	s, err := NewSync(&config.Config{Indexer: config.IndexerConfig{MaxBatch: 50, CacheSyncCatchupBlocks: 100}}, database, gatedJobsProvider(&calls))
+	if err != nil {
+		t.Fatalf("NewSync: %v", err)
+	}
+
+	cacheRows := func() int64 {
+		var n int64
+		database.DB.WithContext(ctx).
+			Table("hive_posts_cache").Where("post_id = ?", post.ID).Count(&n)
+		return n
+	}
+
+	// Unknown distance (fresh Sync, before the first publish): tick skips.
+	s.runCacheJobsTick(ctx)
+	if n := cacheRows(); n != 0 {
+		t.Fatalf("cache rows after tick with unknown behind-distance = %d, want 0 (paused)", n)
+	}
+	if calls != 0 {
+		t.Fatalf("getContentBatch calls while paused = %d, want 0", calls)
+	}
+
+	// Catch-up beyond the default threshold (100): tick skips.
+	s.jobsBehind.Store(101)
+	s.runCacheJobsTick(ctx)
+	if n := cacheRows(); n != 0 {
+		t.Fatalf("cache rows after tick during catch-up = %d, want 0 (paused)", n)
+	}
+	if calls != 0 {
+		t.Fatalf("getContentBatch calls during catch-up = %d, want 0", calls)
+	}
+
+	// Live (behind=0): the tick runs and repairs the missing cache row.
+	s.jobsBehind.Store(0)
+	s.runCacheJobsTick(ctx)
+	if n := cacheRows(); n != 1 {
+		t.Fatalf("cache rows after live tick = %d, want 1 (audit repaired)", n)
+	}
+	if calls == 0 {
+		t.Fatal("live tick did not reach the content fetch")
+	}
+	var body string
+	database.DB.WithContext(ctx).
+		Table("hive_posts_cache").Select("body").Where("post_id = ?", post.ID).Scan(&body)
+	if body != "gated repair" {
+		t.Errorf("repaired body = %q, want %q", body, "gated repair")
+	}
+
+	// Exactly AT the threshold counts as live too (catchupPaused uses a
+	// strict >, matching CacheSync's semantics): a second missing row is
+	// repaired by a tick at behind=100.
+	post2 := &models.Post{
+		Author:    "alice",
+		Permlink:  "gated2",
+		Category:  "life",
+		CreatedAt: time.Date(2026, 1, 2, 3, 4, 6, 0, time.UTC),
+		Depth:     0,
+		IsValid:   true,
+	}
+	if err := database.DB.WithContext(ctx).Create(post2).Error; err != nil {
+		t.Fatalf("seed second post: %v", err)
+	}
+	s.jobsBehind.Store(100)
+	s.runCacheJobsTick(ctx)
+	var n2 int64
+	database.DB.WithContext(ctx).
+		Table("hive_posts_cache").Where("post_id = ?", post2.ID).Count(&n2)
+	if n2 != 1 {
+		t.Fatalf("cache rows for second post after at-threshold tick = %d, want 1 (at-threshold is live)", n2)
+	}
+}
+
+// TestCacheJobsLoopSkipsTicksWhileBehind drives the real runCacheJobsLoop
+// goroutine (1s ticks): while the published distance stays beyond the
+// threshold, multiple tick windows pass with no repair; after the distance
+// goes live the next tick repairs. The live phase doubles as the liveness
+// proof that ticks really fire in this process (so the paused phase's empty
+// result is the gate skipping, not a starved loop).
+func TestCacheJobsLoopSkipsTicksWhileBehind(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedAccounts(t, database, "alice")
+	post := seedPostMissingCacheRow(t, database, ctx)
+
+	var calls int32
+	s, err := NewSync(&config.Config{Indexer: config.IndexerConfig{MaxBatch: 50, CacheSyncCatchupBlocks: 100}}, database, gatedJobsProvider(&calls))
+	if err != nil {
+		t.Fatalf("NewSync: %v", err)
+	}
+	s.jobsBehind.Store(101) // catching up
+
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.runCacheJobsLoop(runCtx, 1)
+	}()
+
+	cacheRows := func() int64 {
+		var n int64
+		database.DB.WithContext(ctx).
+			Table("hive_posts_cache").Where("post_id = ?", post.ID).Count(&n)
+		return n
+	}
+
+	// 2.5s spans at least two 1s tick opportunities: none may repair while
+	// the gate reports catch-up.
+	time.Sleep(2500 * time.Millisecond)
+	if n := cacheRows(); n != 0 {
+		t.Fatalf("cache rows while behind=101 = %d, want 0 (ticks skipped during catch-up)", n)
+	}
+	if calls != 0 {
+		t.Fatalf("getContentBatch calls while behind=101 = %d, want 0", calls)
+	}
+
+	// Going live: the next tick repairs.
+	s.jobsBehind.Store(0)
+	waitFor(t, "cache jobs repair after going live", func() bool { return cacheRows() == 1 })
+
+	cancel()
+	<-done
+}
+
 // ---- §2.9 graceful shutdown -------------------------------------------------
 
 // TestGracefulShutdownFlushesInFlightBatch cancels the run context DURING
@@ -1196,6 +1385,10 @@ func TestInitialSyncBoundedRetryPoison(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSync: %v", err)
 	}
+	// Poison retry counter (PR#411 review): every failed attempt the loop
+	// retries must bump hivemind_indexer_poison_retries_total{phase}. The
+	// global counter accumulates across tests, so assert the delta.
+	before := counterValue(t, telemetry.IndexerPoisonRetries.WithLabelValues("initial"))
 	err = s.syncBlocksBoundedRetry(ctx, 1, 0)
 	if err == nil {
 		t.Fatal("bounded retry returned nil for a permanently failing block")
@@ -1205,6 +1398,9 @@ func TestInitialSyncBoundedRetryPoison(t *testing.T) {
 	}
 	if attempts != poisonBlockThreshold {
 		t.Errorf("attempts = %d, want %d", attempts, poisonBlockThreshold)
+	}
+	if got := counterValue(t, telemetry.IndexerPoisonRetries.WithLabelValues("initial")) - before; got != poisonBlockThreshold {
+		t.Errorf("poison retry counter delta = %v, want %d (one increment per retried failure)", got, poisonBlockThreshold)
 	}
 
 	// Transient failure: two failures then success completes the sync.

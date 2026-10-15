@@ -10,8 +10,11 @@ package indexer
 //   - §4.1 follow count deltas ride the batch transaction (legacy
 //     Follow.flush(trx=False) inside process_multi): after a COMMITTED batch
 //     the counts are applied with no separate flush, after a ROLLED-BACK
-//     batch no deltas survive (batch-level snapshot/restore), and a retried
-//     batch never doubles them;
+//     batch no deltas survive (batch-level snapshot/restore), a retried
+//     batch never doubles them, and an injected FlushTx-INTERNAL failure
+//     rolls the batch's block writes back with it (M3 atomicity, PR#411
+//     review -- distinguishing the in-tx flush from a post-commit
+//     pool-side one);
 //   - §4.1 poison observability keeps identifying the actually-failing
 //     block, not the rolled-back batch's start;
 //   - §4.3 the account flush resolves ids in ONE batched query per chunk
@@ -321,6 +324,111 @@ func TestTxBatchFollowDeltaConsistencyAcrossRetries(t *testing.T) {
 	if n := s2.blockProcessor.Follows().PendingDeltasLen(); n != 0 {
 		t.Fatalf("pending deltas after success = %d, want 0", n)
 	}
+}
+
+// TestTxBatchFollowFlushAtomicityInjectedFailure is the M3 discriminating
+// test (PR#411 review): inject a failure INSIDE the in-transaction follow
+// flush -- a temporary trigger on hive_accounts raising on any
+// followers/following UPDATE, i.e. exactly FlushTx's statements -- and prove
+// the batch's BLOCK WRITES roll back with it: zero hive_blocks/hive_posts/
+// hive_follows rows and untouched count columns. This distinguishes the
+// in-transaction flush from a pool-side post-commit flush implementation:
+// the latter would have the blocks COMMITTED with only the flush failing
+// separately (and its re-queued deltas pending). Recovery after removing
+// the fault lands everything with the counts applied in-transaction.
+func TestTxBatchFollowFlushAtomicityInjectedFailure(t *testing.T) {
+	database, _, cleanup := withMigratedDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	seedAccounts(t, database, "alice", "bob")
+
+	followTuple := []interface{}{"custom_json_operation", customJSONOp("alice",
+		`["follow",{"follower":"alice","following":"bob","what":["blog"]}]`)}
+	blocks := map[int64]map[string]interface{}{
+		1: syncBlockFixture(1, "2026-01-01T00:00:00", commentOp("alice", "p1")),
+		2: syncBlockFixture(2, "2026-01-01T00:00:03", followTuple),
+		3: syncBlockFixture(3, "2026-01-01T00:00:06", commentOp("alice", "p3")),
+	}
+	cfg := &config.Config{Indexer: config.IndexerConfig{MaxBatch: 2, TxBatchBlocks: 5}}
+	s, err := NewSync(cfg, database, txBatchTestProvider(blocks, 3))
+	if err != nil {
+		t.Fatalf("NewSync: %v", err)
+	}
+
+	// Fault injection: any UPDATE of the count columns raises. Inside the
+	// batch transaction the only such UPDATE is FlushTx's grouped
+	// followers/following increment (account registration INSERTs, op writes
+	// and notifications do not touch these columns), so the trigger fails
+	// the flush mid-transaction without touching anything else.
+	if err := database.DB.WithContext(ctx).Exec(`CREATE FUNCTION fail_follow_flush() RETURNS trigger AS $$
+		BEGIN RAISE EXCEPTION 'injected flush failure'; END $$ LANGUAGE plpgsql`).Error; err != nil {
+		t.Fatalf("create fault function: %v", err)
+	}
+	if err := database.DB.WithContext(ctx).Exec(`CREATE TRIGGER fail_follow_flush BEFORE UPDATE ON hive_accounts
+		FOR EACH ROW
+		WHEN (NEW.followers IS DISTINCT FROM OLD.followers OR NEW.following IS DISTINCT FROM OLD.following)
+		EXECUTE FUNCTION fail_follow_flush()`).Error; err != nil {
+		t.Fatalf("create fault trigger: %v", err)
+	}
+
+	err = s.syncBlocks(ctx, 1, 3, false)
+	if err == nil {
+		t.Fatal("syncBlocks must fail when the in-transaction follow flush fails")
+	}
+	if !strings.Contains(err.Error(), "failed to flush follow deltas in batch transaction") {
+		t.Fatalf("error = %v, want the batch follow-flush failure", err)
+	}
+
+	// The DISCRIMINATING assertions: the blocks that "succeeded" before the
+	// flush rolled back WITH the batch (nothing committed), and the counts
+	// never landed outside it either. A pool-side post-commit flush would
+	// show 3 committed hive_blocks with a separately failed flush. (The
+	// genesis row num=0 seeded by the migration is outside the range.)
+	if n := countWhere(t, database, "hive_blocks", "num BETWEEN 1 AND 3"); n != 0 {
+		t.Fatalf("hive_blocks rows after flush failure = %d, want 0 (rolled back with the batch)", n)
+	}
+	if n := countWhere(t, database, "hive_posts", "1=1"); n != 0 {
+		t.Fatalf("hive_posts rows after flush failure = %d, want 0", n)
+	}
+	if n := countWhere(t, database, "hive_follows", "1=1"); n != 0 {
+		t.Fatalf("hive_follows rows after flush failure = %d, want 0", n)
+	}
+	alice := getAccount(t, database, ctx, "alice")
+	bob := getAccount(t, database, ctx, "bob")
+	if alice.Following != 0 || bob.Followers != 0 {
+		t.Fatalf("counts after flush failure = %d/%d, want 0/0 (count UPDATEs rolled back with the blocks)", alice.Following, bob.Followers)
+	}
+	// FlushTx re-queues its deltas on failure, then the batch-level
+	// restoreDeltas() swaps in the (empty) batch-start snapshot: no pending
+	// deltas survive to double-apply on a retry.
+	if n := s.blockProcessor.Follows().PendingDeltasLen(); n != 0 {
+		t.Fatalf("pending deltas after flush failure = %d, want 0 (batch-start snapshot restored)", n)
+	}
+
+	// Recovery: remove the fault, retry the whole batch -- everything lands
+	// with the counts applied by the in-transaction flush.
+	if err := database.DB.WithContext(ctx).Exec("DROP TRIGGER fail_follow_flush ON hive_accounts").Error; err != nil {
+		t.Fatalf("drop fault trigger: %v", err)
+	}
+	if err := database.DB.WithContext(ctx).Exec("DROP FUNCTION fail_follow_flush()").Error; err != nil {
+		t.Fatalf("drop fault function: %v", err)
+	}
+	s2, err := NewSync(cfg, database, txBatchTestProvider(blocks, 3))
+	if err != nil {
+		t.Fatalf("NewSync (retry): %v", err)
+	}
+	if err := s2.syncBlocks(ctx, 1, 3, false); err != nil {
+		t.Fatalf("syncBlocks retry: %v", err)
+	}
+	if head := s2.headBlockNum(ctx); head != 3 {
+		t.Fatalf("head after retry = %d, want 3", head)
+	}
+	alice = getAccount(t, database, ctx, "alice")
+	bob = getAccount(t, database, ctx, "bob")
+	if alice.Following != 1 || bob.Followers != 1 {
+		t.Fatalf("counts after retry = %d/%d, want 1/1 (in-transaction flush)", alice.Following, bob.Followers)
+	}
+	assertFollowCountsMatchRows(t, database)
 }
 
 // selectCountingLogger wraps the pool's gorm logger, counting SELECT

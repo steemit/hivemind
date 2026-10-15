@@ -138,6 +138,21 @@ var (
 		},
 		[]string{"phase"},
 	)
+
+	// Poison-block retry counter (PR#411 review registration): counts every
+	// failed sync attempt the poison loops retry (per attempt, not per
+	// block). With whole-batch rollback a deterministically failing block
+	// makes every retry re-fetch and re-process the entire tx batch (see the
+	// amplification math in docs/indexer-flow.md), so a sustained nonzero
+	// rate() on this counter is the operational signal to open the
+	// poison-block runbook.
+	IndexerPoisonRetries = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "hivemind_indexer_poison_retries_total",
+			Help: "Failed sync attempts counted by the poison-block loops (per retry attempt, not per block); a sustained nonzero rate pins a deterministically failing block -- see the poison runbook in docs/indexer-flow.md",
+		},
+		[]string{"phase"}, // "initial" | "live"
+	)
 )
 
 // RecordRequest records a request metric
@@ -171,4 +186,10 @@ func RecordIndexerBatch(phase string, blocks int, fetchSeconds, writeSeconds flo
 	IndexerBlocksProcessed.WithLabelValues(phase).Add(float64(blocks))
 	IndexerBatchFetchDuration.Observe(fetchSeconds)
 	IndexerBatchWriteDuration.WithLabelValues(phase).Observe(writeSeconds)
+}
+
+// RecordIndexerPoisonRetry counts one failed sync attempt that the
+// poison-block loops will retry. phase is "initial" or "live".
+func RecordIndexerPoisonRetry(phase string) {
+	IndexerPoisonRetries.WithLabelValues(phase).Inc()
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -25,6 +26,13 @@ type Sync struct {
 	stateRepo      *db.StateRepository
 	cacheSync      *CacheSync
 	logger         *zap.Logger
+
+	// jobsBehind is the trailing-distance gate for the cache-jobs loop
+	// (PR#411 review), published by the sync loop at the same point as
+	// CacheSync.SetBehind: while the indexer catches up (or the distance is
+	// unknown before the first report), cache-jobs ticks skip. See
+	// runCacheJobsTick.
+	jobsBehind atomic.Int64
 }
 
 // NewSync creates a new sync manager. The steemClient is accepted as the
@@ -34,14 +42,19 @@ func NewSync(cfg *config.Config, database *db.DB, steemClient steem.Provider) (*
 	repo := db.NewRepository(database.DB)
 	blockProcessor := NewBlockProcessor(database, repo, steemClient)
 
-	return &Sync{
+	s := &Sync{
 		config:         cfg,
 		db:             database,
 		steem:          steemClient,
 		blockProcessor: blockProcessor,
 		stateRepo:      db.NewStateRepository(repo),
 		logger:         logging.GetLogger().With(zap.String("component", "indexer")),
-	}, nil
+	}
+	// Cache-jobs gate starts UNKNOWN (paused), mirroring CacheSync's
+	// behind=-1 start: until the sync loop reports the first live distance,
+	// ticks skip.
+	s.jobsBehind.Store(-1)
+	return s, nil
 }
 
 // Run starts the sync process
@@ -129,7 +142,8 @@ func (s *Sync) Run(ctx context.Context) error {
 	go s.cacheSync.Run(ctx)
 
 	// Optional periodic cache-consistency audits (0 = disabled; legacy runs
-	// these manually).
+	// these manually). Ticks are catch-up gated -- they skip while the
+	// indexer trails the chain head (see runCacheJobsTick, PR#411 review).
 	if interval := s.config.Indexer.JobsInterval; interval > 0 {
 		go s.runCacheJobsLoop(ctx, interval)
 	}
@@ -185,10 +199,37 @@ func (s *Sync) runCacheJobsLoop(ctx context.Context, intervalSec int) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := RunCacheJobs(ctx, s.db.DB, s.blockProcessor.CachedPost(), s.steem); err != nil {
-				s.logger.Warn("cache jobs run failed", zap.Error(err))
-			}
+			s.runCacheJobsTick(ctx)
 		}
+	}
+}
+
+// runCacheJobsTick runs one cache-audit jobs round, gated by the catch-up
+// distance (PR#411 review): while the indexer trails the chain head beyond
+// the gate threshold -- or the distance is unknown, before the sync loop's
+// first report -- the tick skips; live mode resumes it. Two concurrent-run
+// hazards motivate the gate, both amplified by tx batching from ~1 block to
+// up to a whole ~1000-block batch transaction:
+//
+//   - the jobs' UPDATE/INSERT statements (hive_posts is_deleted flips,
+//     cache-row INSERTs) contend with the batch transaction's row locks,
+//     and the losing side is killed by the 30s statement_timeout mid-audit;
+//   - the jobs' CachedPost.Flush sweeps the SHARED dirty queue while the
+//     batch transaction is still open, landing hive_posts_cache rows for a
+//     batch that may yet roll back (orphan cache rows).
+//
+// The gate reuses CacheSync's semantics (§2.7: legacy runs cache work from
+// live mode only): same threshold source (HIVE_CACHE_SYNC_CATCHUP_BLOCKS)
+// and the same behind value the sync loop publishes for the prune gate.
+func (s *Sync) runCacheJobsTick(ctx context.Context) {
+	if behind := s.jobsBehind.Load(); catchupPaused(behind, s.catchupGateBlocks()) {
+		s.logger.Debug("cache jobs paused during catch-up",
+			zap.Int64("behind", behind),
+			zap.Int64("threshold", s.catchupGateBlocks()))
+		return
+	}
+	if err := RunCacheJobs(ctx, s.db.DB, s.blockProcessor.CachedPost(), s.steem); err != nil {
+		s.logger.Warn("cache jobs run failed", zap.Error(err))
 	}
 }
 
@@ -622,10 +663,14 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 				continue
 			}
 
-			// Feed the CacheSync gate: prune pauses while catching up.
+			// Feed the CacheSync gate: prune pauses while catching up. The
+			// same distance feeds the cache-jobs gate (PR#411 review):
+			// audit ticks pause while catching up, resuming in live mode.
+			behind := irreversible - currentHead
 			if s.cacheSync != nil {
-				s.cacheSync.SetBehind(irreversible - currentHead)
+				s.cacheSync.SetBehind(behind)
 			}
+			s.jobsBehind.Store(behind)
 
 			// TEST_MAX_BLOCK (§2.6): stop cleanly once the cap is reached
 			// instead of entering the steady-state runloop.
@@ -672,6 +717,11 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 						poisonBlock = retryBlock
 						poisonFails = 1
 					}
+					// Poison retry accounting (PR#411 review): every failed
+					// attempt re-fetches and re-processes the whole tx batch
+					// under whole-batch rollback -- the counter's rate() is
+					// the operational signal to open the runbook.
+					telemetry.RecordIndexerPoisonRetry("live")
 					if poisonFails >= poisonBlockThreshold {
 						// Escalated, marked error -- emitted on EVERY failure
 						// at/after the threshold so the spin never goes quiet.
@@ -796,6 +846,8 @@ func (s *Sync) syncBlocksBoundedRetry(ctx context.Context, ubound, headBefore in
 			poisonBlock = retryBlock
 			poisonFails = 1
 		}
+		// Poison retry accounting (PR#411 review), same as the live loop.
+		telemetry.RecordIndexerPoisonRetry("initial")
 		if poisonFails >= poisonBlockThreshold {
 			s.logger.Error("poison block: initial sync giving up after repeated failures of the same block",
 				zap.Int64("block", poisonBlock),
@@ -959,21 +1011,32 @@ func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bo
 	if err := tx.Commit().Error; err != nil {
 		// The commit itself failed: nothing is durably landed, so the
 		// batch's deltas must not survive either -- the retry re-processes
-		// and re-accumulates them.
+		// and re-accumulates them. Defensive rollback releases the
+		// connection's transaction state (a failed COMMIT can leave it in
+		// limbo); ErrTxDone -- the transaction already terminated -- is
+		// harmlessly ignored by the driver (PR#411 review).
 		restoreDeltas()
+		tx.Rollback()
 		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}
 	committed = true
 
-	// Trailing queue flushes BETWEEN batch transactions (legacy from_steemd:
-	// `Accounts.flush(trx=True)` and `CachedPost.flush(trx=True)` run AFTER
-	// the chunk loop, in their own transactions -- NOT inside the chunk
-	// transaction; only Follow.flush rides it). These make steemd RPC calls
-	// (get_accounts / get_content_batch), which is exactly why legacy keeps
-	// them out of the chunk transaction. Their dirty queues live in memory
-	// and are explicitly disposable in legacy terms: a crash can lose edits
-	// and pre-payout votes ("worst case it will be synced upon payout"),
-	// and RecoverMissingPosts heals missing cache INSERTs at startup.
+	// Trailing queue flushes after each batch transaction. Placement
+	// precision (PR#411 review): legacy runs Accounts.flush(trx=True) and
+	// CachedPost.flush(trx=True) ONCE, after from_steemd's chunk loop has
+	// finished the WHOLE catch-up range (and only when not in initial sync)
+	// -- not per chunk. The Go sync flushes after EVERY tx batch, an
+	// intentional deviation: the in-memory dirty queues stay bounded across
+	// a multi-week 0->30M catch-up instead of growing with the whole range,
+	// and a crash loses at most one batch's queued work instead of the
+	// entire range's. What IS copied from legacy exactly: the flushes run
+	// OUTSIDE the batch transaction, in their own transactions -- they make
+	// steemd RPC calls (get_accounts / get_content_batch), which is why
+	// legacy keeps them out of the chunk transaction; only Follow.flush
+	// rides it. Their dirty queues are explicitly disposable in legacy
+	// terms: a crash can lose edits and pre-payout votes ("worst case it
+	// will be synced upon payout"), and RecoverMissingPosts heals missing
+	// cache INSERTs at startup.
 	if n, err := s.blockProcessor.Accounts().FlushBatch(batchCtx, true); err != nil {
 		s.logger.Warn("account flush failed", zap.Error(err))
 	} else if n > 0 {

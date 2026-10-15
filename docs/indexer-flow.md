@@ -420,6 +420,9 @@ Throughput observability (Prometheus): `hivemind_indexer_blocks_processed_total`
 per batch) and `hivemind_indexer_tx_batch_duration_seconds` (transaction
 open through COMMIT). The per-batch log line `Synced block batch` carries
 the same numbers (blocks, fetch, write, blocks_per_sec).
+`hivemind_indexer_poison_retries_total{phase}` counts every failed sync
+attempt the poison loops retry (see the poison runbook below for the
+amplification math it guards).
 
 ## PostgreSQL Tuning for Bulk Sync (Operations Runbook)
 
@@ -465,6 +468,7 @@ Key metrics to monitor:
 - Fork frequency
 - Database connection pool usage
 - Error rates
+- Poison retry rate (`hivemind_indexer_poison_retries_total`; see below)
 
 ## Poison-Block Runbook: Orphan Comments
 
@@ -483,3 +487,38 @@ row deletion). Recovery options:
 
 The initial-sync path gives up after 10 consecutive failures (process exits
 with a non-zero status); the live path keeps retrying with escalated logs.
+
+### Retry amplification under tx batching (PR#411 review registration)
+
+Whole-batch rollback (§4.1) turns a deterministically failing block anywhere
+in a batch into a per-retry cost proportional to the BATCH size N (default
+1000), not to the failing block:
+
+- **Re-fetch**: the retry re-fetches the entire batch before its transaction
+  opens; the range fetch issues one `get_block` RPC per block, so each retry
+  costs ~N RPCs.
+- **Re-process**: the up to N-1 blocks before the failing one are processed
+  into the open transaction and then rolled back with it — wasted write work
+  on every retry.
+- **Initial sync** gives up after 10 consecutive failures of the same block:
+  for a failing block at the batch tail that is ~10×N blocks of ineffective
+  fetch+process before the process exits (and a restart starts the cycle
+  again from the same head).
+- **Live mode** never gives up: one full retry round every sync interval
+  (default 3s) plus the batch duration, indefinitely.
+
+Operational signal: `hivemind_indexer_poison_retries_total{phase=initial|live}`
+counts every failed sync attempt the poison loops retry (per attempt, not per
+block). A sustained nonzero `rate()` on either phase pins a deterministically
+failing block — take the block number from the `poison block` log marker (the
+error carries the actually-failing block, not the batch start) and apply the
+recovery options above.
+
+Follow-up candidate (registered, NOT implemented in this PR): once the poison
+threshold is reached, automatically shrink the tx batch to 1 — a
+binary-search isolation of the failing block within the batch, converting the
+per-retry cost from O(N) RPCs + N blocks of rolled-back processing to
+O(log N) lookups plus the single poison block's processing. Until then the
+batch size stays fixed and recovery relies on the manual options above (an
+operator can also restart with `HIVE_INDEXER_TX_BATCH_BLOCKS=1` to isolate a
+poison block's blast radius manually).
