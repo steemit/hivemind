@@ -167,6 +167,24 @@ func (r *PostRepository) GetByAuthorPermlink(ctx context.Context, author, permli
 	return &post, nil
 }
 
+// GetLiveByAuthorPermlink retrieves a non-deleted post by author and
+// permlink. API-facing variant mirroring legacy cursor.get_post_id
+// (condenser_api/cursor.py:20-27), which filters is_deleted = '0'. The base
+// GetByAuthorPermlink intentionally returns deleted rows: the indexer's
+// undelete path depends on finding them (post_indexer.go).
+func (r *PostRepository) GetLiveByAuthorPermlink(ctx context.Context, author, permlink string) (*models.Post, error) {
+	var post models.Post
+	if err := r.db.WithContext(ctx).
+		Where("author = ? AND permlink = ? AND is_deleted = ?", author, permlink, false).
+		First(&post).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &post, nil
+}
+
 // PostStatusRepository provides operations on hive_posts_status, the
 // append-only moderation table (list_type 1 = article block, 3 = user block).
 type PostStatusRepository struct {

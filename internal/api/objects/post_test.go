@@ -2,7 +2,12 @@ package objects
 
 import (
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/steemit/hivemind/internal/steem"
 )
 
 // TestHydrateActiveVotes verifies CSV parsing of the votes column.
@@ -122,5 +127,77 @@ func TestRepToRawStr(t *testing.T) {
 	want := repToRaw(34)
 	if got != want {
 		t.Errorf("repToRawStr(\"34\") = %v, want %v", got, want)
+	}
+}
+
+// TestJSONDate verifies the legacy json_date port: 'T'-joined timezone-less
+// timestamps and the '1969-12-31T23:59:59' sentinel for zero values.
+func TestJSONDate(t *testing.T) {
+	// Zero time -> legacy sentinel (helpers.py:52-55).
+	if got := jsonDate(time.Time{}); got != "1969-12-31T23:59:59" {
+		t.Errorf("jsonDate(zero) = %q, want sentinel", got)
+	}
+
+	// Real timestamp: no 'Z'/offset suffix, exactly like Python
+	// 'T'.join(str(date).split(' ')).
+	ts := time.Date(2026, 10, 14, 8, 30, 5, 0, time.UTC)
+	if got := jsonDate(ts); got != "2026-10-14T08:30:05" {
+		t.Errorf("jsonDate(ts) = %q, want 2026-10-14T08:30:05", got)
+	}
+}
+
+// TestWhen verifies the conditional helper feeding jsonDate.
+func TestWhen(t *testing.T) {
+	ts := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if got := when(true, ts); !got.Equal(ts) {
+		t.Errorf("when(true, ts) = %v, want %v", got, ts)
+	}
+	if got := when(false, ts); !got.IsZero() {
+		t.Errorf("when(false, ts) = %v, want zero time", got)
+	}
+}
+
+// TestMuteVotes verifies muted voters are stripped while others survive.
+// Mirrors legacy _mute_votes (condenser_api/objects.py:71-74).
+func TestMuteVotes(t *testing.T) {
+	voter := func(name string) interface{} {
+		return map[string]interface{}{"voter": name, "rshares": "1000"}
+	}
+	votes := []interface{}{voter("alice"), voter("badguy"), voter("carol")}
+
+	// Empty mute list: untouched (same slice, same length).
+	if got := muteVotes(votes, nil); len(got) != 3 {
+		t.Errorf("muteVotes with empty list = %v, want untouched", got)
+	}
+
+	muted := map[string]bool{"badguy": true, "worseguy": true}
+	got := muteVotes(votes, muted)
+	if len(got) != 2 {
+		t.Fatalf("muteVotes = %v, want 2 votes", got)
+	}
+	if got[0].(map[string]interface{})["voter"] != "alice" ||
+		got[1].(map[string]interface{})["voter"] != "carol" {
+		t.Errorf("muteVotes kept wrong voters: %v", got)
+	}
+}
+
+// TestMutedAccountSet verifies the shared-snapshot helper: names from the
+// process-wide irredeemables list become the filter set; an unset list
+// yields nil so filtering is skipped entirely.
+func TestMutedAccountSet(t *testing.T) {
+	if got := mutedAccountSet(); got != nil {
+		t.Errorf("mutedAccountSet with empty shared list = %v, want nil", got)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("badguy spamking"))
+	}))
+	defer srv.Close()
+	steem.SetSharedMutes(steem.NewMutes(srv.URL))
+	defer steem.SetSharedMutes(steem.NewMutes(""))
+
+	got := mutedAccountSet()
+	if got == nil || !got["badguy"] || !got["spamking"] || got["alice"] {
+		t.Errorf("mutedAccountSet = %v, want {badguy,spamking}", got)
 	}
 }

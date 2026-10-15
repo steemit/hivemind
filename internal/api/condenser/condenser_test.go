@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -109,29 +108,7 @@ func TestParseListParams(t *testing.T) {
 // newTestDB creates a dedicated database (hive_condenser_test) for this package.
 func newTestDB(t *testing.T) string {
 	t.Helper()
-	baseURL := os.Getenv("HIVE_TEST_DATABASE_URL")
-
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		t.Fatalf("parse db url: %v", err)
-	}
-	u.Path = "/postgres"
-	maintDSN := u.String()
-
-	raw, err := sql.Open("pgx", maintDSN)
-	if err != nil {
-		t.Fatalf("open maintenance conn: %v", err)
-	}
-	defer raw.Close()
-	if _, err := raw.Exec(`DROP DATABASE IF EXISTS hive_condenser_test;`); err != nil {
-		t.Fatalf("drop test db: %v", err)
-	}
-	if _, err := raw.Exec(`CREATE DATABASE hive_condenser_test;`); err != nil {
-		t.Fatalf("create test db: %v", err)
-	}
-
-	u.Path = "/hive_condenser_test"
-	return u.String()
+	return newNamedTestDB(t, "hive_condenser_test")
 }
 
 // call invokes a condenser API handler with raw JSON params.
