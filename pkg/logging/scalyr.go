@@ -2,6 +2,7 @@ package logging
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"go.uber.org/zap/buffer"
@@ -54,14 +55,31 @@ func (e *ScalyrEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field)
 			fieldMap[field.Key] = field.Integer
 		case zapcore.Uint64Type, zapcore.Uint32Type, zapcore.Uint16Type, zapcore.Uint8Type:
 			fieldMap[field.Key] = field.Integer
-		case zapcore.Float64Type, zapcore.Float32Type:
-			fieldMap[field.Key] = field.Interface
+		case zapcore.Float64Type:
+			// zap packs floats as raw bits in Integer; Interface is nil.
+			fieldMap[field.Key] = math.Float64frombits(uint64(field.Integer))
+		case zapcore.Float32Type:
+			fieldMap[field.Key] = math.Float32frombits(uint32(field.Integer))
 		case zapcore.BoolType:
 			fieldMap[field.Key] = field.Integer == 1
 		case zapcore.DurationType:
-			fieldMap[field.Key] = field.Interface.(time.Duration).String()
+			// zap.Duration stores nanoseconds in Integer and leaves
+			// Interface nil; the previous Interface.(time.Duration)
+			// assertion panicked on every Duration field (found when the
+			// PR#430 smoke run crashed in steem.New's startup log).
+			fieldMap[field.Key] = time.Duration(field.Integer).String()
 		case zapcore.TimeType:
-			fieldMap[field.Key] = field.Interface.(time.Time).Format(time.RFC3339Nano)
+			// zap.Time packs unix nanos in Integer and the *time.Location
+			// in Interface.
+			loc, _ := field.Interface.(*time.Location)
+			if loc == nil {
+				loc = time.Local
+			}
+			fieldMap[field.Key] = time.Unix(0, field.Integer).In(loc).Format(time.RFC3339Nano)
+		case zapcore.TimeFullType:
+			if t, ok := field.Interface.(time.Time); ok {
+				fieldMap[field.Key] = t.Format(time.RFC3339Nano)
+			}
 		case zapcore.ErrorType:
 			fieldMap[field.Key] = field.Interface.(error).Error()
 		default:

@@ -47,9 +47,10 @@ func NewRouter(database *db.DB, redisCache *cache.Cache, steemd *steem.Client, r
 
 // SetupRoutes sets up all API routes
 func (r *Router) SetupRoutes(engine *gin.Engine) {
-	// Health check endpoints
-	engine.GET("/health", r.healthHandler)
-	engine.GET("/.well-known/healthcheck.json", r.healthHandler)
+	// Health check endpoints are NOT registered here: /health and
+	// /head_age are deployment endpoints served by internal/health (real
+	// DB/head-lag semantics, planned PR#430) and wired by cmd/server's
+	// main on the main API port.
 
 	// JSON-RPC endpoint (+ CORS preflight, see CORSPreflightHandler)
 	engine.POST("/", r.handler.Handle)
@@ -190,14 +191,6 @@ func (r *Router) registerMethods(steemd *steem.Client, recommendCommunities stri
 	r.handler.RegisterMethod("bridge.post_notifications", hiveNotify.PostNotifications)
 	r.handler.RegisterMethod("bridge.account_notifications", hiveNotify.AccountNotifications)
 	r.handler.RegisterMethod("bridge.unread_notifications", hiveNotify.UnreadNotifications)
-}
-
-// healthHandler handles health check requests
-func (r *Router) healthHandler(c *gin.Context) {
-	c.JSON(200, gin.H{
-		"status":  "OK",
-		"service": "hivemind-api",
-	})
 }
 
 // dbHeadState returns database head state

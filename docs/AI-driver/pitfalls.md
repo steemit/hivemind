@@ -171,7 +171,6 @@ delete or finish them when touched:
 - `AccountIndexer.DirtyOldest` — never called (rank/profile refresh dead).
 - `api/errors.go` `Error` struct — dead code.
 - `-32602/-32663` JSON-RPC codes — defined, never emitted.
-- Prometheus metrics recording — works, but **no endpoint exposes it**.
 - `HIVE_TRAIL_BLOCKS` — validated, never consumed (Strategy B).
 - `SetMaxRetry` in the vendored SDK — still never called by our wrapper.
   Do not confuse it with the actual wiring: since the v0.0.31 upgrade
@@ -187,8 +186,6 @@ promise them to clients; strike entries when fixed:
 
 - JSON-RPC batch requests (arrays) and CORS headers unsupported;
   notifications (no `id`) incorrectly get responses.
-- `/health` always 200 (legacy: 500 on DB failure / head age > 1 h);
-  `/head_age` endpoint missing.
 - Response-shape divergences: condenser post object missing 6 fields and
   curator-payout split; follow lists missing `reputation`/fixed-length
   `what`; `get_account_reputations` key `account` vs legacy `name`;

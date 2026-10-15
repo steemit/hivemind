@@ -106,10 +106,13 @@ Configuration is managed via environment variables or config file:
 | `HIVE_HTTP_WRITE_TIMEOUT` | HTTP write timeout | 30s |
 | `HIVE_HTTP_IDLE_TIMEOUT` | HTTP idle timeout | 120s |
 | `HIVE_HTTP_MAX_BODY_BYTES` | JSON-RPC request body cap; larger bodies get HTTP 413 before parsing (0 = default, max 1073741824) | 10485760 (10MB) |
+| `HIVE_HTTP_SHUTDOWN_GRACE` | Graceful-shutdown window on SIGTERM; must be >= `HIVE_DB_STATEMENT_TIMEOUT` so in-flight statements complete (0 = default) | 45s |
 | `HIVE_LOG_LEVEL` | Logging level | INFO |
 | `HIVE_TRACES_ENDPOINT` | OTLP traces endpoint | localhost:4318 |
-| `HIVE_PROMETHEUS_ENABLED` | Enable Prometheus metrics | true |
-| `HIVE_PROMETHEUS_PORT` | Prometheus metrics port | 9090 |
+| `HIVE_PROMETHEUS_ENABLED` | Enable the observability HTTP listener (`/metrics`, pprof, and the indexer's `/health`) | true |
+| `HIVE_PROMETHEUS_PORT` | Observability HTTP port (server default 9090; the indexer is typically set to 9091) | 9090 |
+| `HIVE_PPROF_ENABLED` | Mount `/debug/pprof/*` on the observability port (keep the port internal-only) | true |
+| `HIVE_HEALTH_MAX_HEAD_AGE` | `/health` fails (500) for reader processes when the indexed head block is older than this (legacy `max_head_age`; 0 = disabled) | 1h |
 | `HIVE_CACHE_SYNC_CATCHUP_BLOCKS` | CacheSync gate: pause the hive_posts_cache_temp 90-day prune while the indexer trails the chain head by more than this many blocks (catch-up); resume in live mode | 100 |
 | `HIVE_INDEXER_TX_BATCH_BLOCKS` | Blocks sharing one database transaction (fetch, process, follow-count flush, COMMIT); a failure rolls back the whole batch (legacy chunk_size; 1 = per-block transactions) | 1000 |
 
@@ -143,6 +146,44 @@ All JSON-RPC methods are automatically traced with:
 - Request parameters (as span events)
 - Response status and duration
 - Error details (if any)
+
+## Observability Endpoints
+
+Both binaries expose an observability HTTP listener on `HIVE_PROMETHEUS_PORT`
+(server default 9090; the indexer is typically set to 9091 in compose):
+
+- **`/metrics`** — Prometheus scrape endpoint. One unified registry carries
+  the `hivemind_*` metrics (requests, DB queries, indexer batches, DB
+  connection pool in_use/idle/wait gauges), the Go runtime family
+  (`go_goroutines`, `go_memstats_*`, `go_gc_duration_seconds`), and the
+  OpenTelemetry bridge metrics.
+- **`/debug/pprof/`** — Go pprof index (plus `cmdline`, `profile`,
+  `symbol`, `trace`), enabled by default via `HIVE_PPROF_ENABLED`. Keep
+  this listener internal-only; do not expose it on a public load balancer.
+
+Health endpoints (legacy serve.py semantics):
+
+- **`/health`** (also `/.well-known/healthcheck.json`, server main port)
+  — answers 500 when the database is unreachable or, for reader processes
+  (the API server), when the indexed head block is older than
+  `HIVE_HEALTH_MAX_HEAD_AGE` (1h by default: lagging that far is a writer
+  problem, not a reader problem — legacy issue #174 rationale). The
+  indexer answers on its observability port and is exempt from the head
+  lag criterion (legacy `is_syncer` branch): a writer lagging during a
+  multi-hour catch-up is working as intended and must not be recycled by
+  a health check. The head query runs on a dedicated single-connection
+  pool (the legacy isolated health engine) so a saturated main pool
+  cannot starve the probe.
+- **`/head_age`** — the `db_head_age` value in seconds as plain text
+  (server main port; indexer observability port). Answers 200 whenever
+  the database is reachable — including while badly lagged — so external
+  monitors can sample sync lag continuously; 500 only on database
+  failure.
+
+The API server shuts down gracefully on SIGTERM within
+`HIVE_HTTP_SHUTDOWN_GRACE` (45s default, >= the 30s statement timeout);
+requests still in flight when the grace expires have their contexts
+canceled. The indexer waits for the in-flight block batch (WS1 2.9).
 
 ## Docker
 

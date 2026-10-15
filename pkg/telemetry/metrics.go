@@ -2,12 +2,11 @@ package telemetry
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var (
 	// Request metrics
-	RequestsTotal = promauto.NewCounterVec(
+	RequestsTotal = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_requests_total",
 			Help: "Total number of JSON-RPC requests",
@@ -15,7 +14,7 @@ var (
 		[]string{"namespace", "method", "status"},
 	)
 
-	RequestDuration = promauto.NewHistogramVec(
+	RequestDuration = metricFactory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "hivemind_request_duration_seconds",
 			Help:    "Request latency in seconds",
@@ -24,7 +23,7 @@ var (
 		[]string{"namespace", "method"},
 	)
 
-	RequestErrors = promauto.NewCounterVec(
+	RequestErrors = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_request_errors_total",
 			Help: "Total number of request errors",
@@ -33,7 +32,7 @@ var (
 	)
 
 	// Database metrics
-	DBQueriesTotal = promauto.NewCounterVec(
+	DBQueriesTotal = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_db_queries_total",
 			Help: "Total number of database queries",
@@ -41,7 +40,7 @@ var (
 		[]string{"operation", "table"},
 	)
 
-	DBQueryDuration = promauto.NewHistogramVec(
+	DBQueryDuration = metricFactory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "hivemind_db_query_duration_seconds",
 			Help:    "Database query latency in seconds",
@@ -51,7 +50,7 @@ var (
 	)
 
 	// Cache metrics
-	CacheOperations = promauto.NewCounterVec(
+	CacheOperations = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_cache_operations_total",
 			Help: "Total number of cache operations",
@@ -59,14 +58,14 @@ var (
 		[]string{"operation", "result"},
 	)
 
-	CacheHitRatio = promauto.NewGauge(
+	CacheHitRatio = metricFactory.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "hivemind_cache_hit_ratio",
 			Help: "Cache hit ratio",
 		},
 	)
 
-	CacheOperationDuration = promauto.NewHistogramVec(
+	CacheOperationDuration = metricFactory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "hivemind_cache_operation_duration_seconds",
 			Help:    "Cache operation latency in seconds",
@@ -76,7 +75,7 @@ var (
 	)
 
 	// Post metrics
-	PostsFetched = promauto.NewCounterVec(
+	PostsFetched = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_posts_fetched_total",
 			Help: "Total number of posts fetched",
@@ -85,7 +84,7 @@ var (
 	)
 
 	// Follow metrics
-	FollowsFetched = promauto.NewCounterVec(
+	FollowsFetched = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_follows_fetched_total",
 			Help: "Total number of follow relationships fetched",
@@ -94,7 +93,7 @@ var (
 	)
 
 	// Community metrics
-	CommunitiesQueried = promauto.NewCounterVec(
+	CommunitiesQueried = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_communities_queried_total",
 			Help: "Total number of community queries",
@@ -103,7 +102,7 @@ var (
 	)
 
 	// Notification metrics
-	NotificationsFetched = promauto.NewCounter(
+	NotificationsFetched = metricFactory.NewCounter(
 		prometheus.CounterOpts{
 			Name: "hivemind_notifications_fetched_total",
 			Help: "Total number of notifications fetched",
@@ -114,7 +113,7 @@ var (
 	// the processed-blocks counter; the fetch histogram isolates the steemd
 	// GetBlocksRange RPC latency from the transactional write path so a
 	// throughput regression is attributable to one side or the other.
-	IndexerBlocksProcessed = promauto.NewCounterVec(
+	IndexerBlocksProcessed = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_indexer_blocks_processed_total",
 			Help: "Total blocks committed by the indexer (per tx batch); rate() yields blocks/s",
@@ -122,7 +121,7 @@ var (
 		[]string{"phase"}, // "initial" | "live"
 	)
 
-	IndexerBatchFetchDuration = promauto.NewHistogram(
+	IndexerBatchFetchDuration = metricFactory.NewHistogram(
 		prometheus.HistogramOpts{
 			Name:    "hivemind_indexer_blocks_fetch_duration_seconds",
 			Help:    "Wall time of the steemd GetBlocksRange fetches of one tx batch (RPC latency)",
@@ -130,7 +129,7 @@ var (
 		},
 	)
 
-	IndexerBatchWriteDuration = promauto.NewHistogramVec(
+	IndexerBatchWriteDuration = metricFactory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "hivemind_indexer_tx_batch_duration_seconds",
 			Help:    "Wall time of a committed tx batch (transaction open through COMMIT; excludes fetch)",
@@ -146,7 +145,7 @@ var (
 	// amplification math in docs/indexer-flow.md), so a sustained nonzero
 	// rate() on this counter is the operational signal to open the
 	// poison-block runbook.
-	IndexerPoisonRetries = promauto.NewCounterVec(
+	IndexerPoisonRetries = metricFactory.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hivemind_indexer_poison_retries_total",
 			Help: "Failed sync attempts counted by the poison-block loops (per retry attempt, not per block); a sustained nonzero rate pins a deterministically failing block -- see the poison runbook in docs/indexer-flow.md",
