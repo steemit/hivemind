@@ -16,15 +16,26 @@ import (
 
 // PaymentIndexer handles payment indexing
 type PaymentIndexer struct {
-	repo   *db.Repository
-	logger *zap.Logger
+	repo       *db.Repository
+	cachedPost *CachedPost
+	logger     *zap.Logger
 }
 
-// NewPaymentIndexer creates a new payment indexer
-func NewPaymentIndexer(repo *db.Repository, logger *zap.Logger) *PaymentIndexer {
+// NewPaymentIndexer creates a new payment indexer. cachedPost must be the
+// BlockProcessor's shared CachedPost instance: a valid promotion queues the
+// post on the one dirty queue that Sync flushes (legacy op_transfer tail:
+// CachedPost.update_promoted_amount + CachedPost.vote), and a privately-owned
+// instance would silently drop every promoted-cache update. A nil cachedPost
+// therefore fails fast here -- constructing a fallback instance would
+// resurrect exactly that bug (same policy as NewCustomOpProcessor).
+func NewPaymentIndexer(repo *db.Repository, cachedPost *CachedPost, logger *zap.Logger) *PaymentIndexer {
+	if cachedPost == nil {
+		panic("NewPaymentIndexer: cachedPost must not be nil; inject the BlockProcessor's shared CachedPost (P1-14)")
+	}
 	return &PaymentIndexer{
-		repo:   repo,
-		logger: logger,
+		repo:       repo,
+		cachedPost: cachedPost,
+		logger:     logger,
 	}
 }
 
@@ -47,10 +58,19 @@ func NewPaymentIndexer(repo *db.Repository, logger *zap.Logger) *PaymentIndexer 
 //     legacy asserts on Accounts.get_id and cannot proceed either;
 //   - reads and writes ride the block transaction (P1-15): the post lookup
 //     must see posts created earlier in the same block, and the payment row
-//     / promoted update roll back with the block.
+//     / promoted update roll back with the block;
+//   - the tx_idx is the transfer's index in the block's transaction list
+//     (legacy passes enumerate(block['transactions']) position);
+//   - outside the initial sync, the promotion is propagated to the post
+//     cache: the new promoted balance is staged for the post's next cache
+//     write and the post is queued at upvote level (legacy op_transfer tail:
+//     `CachedPost.update_promoted_amount(post_id, new_amount)` followed by
+//     `CachedPost.vote(author, permlink, post_id)` with no voter -- no vote
+//     notification). This is what actually lands promoted in
+//     hive_posts_cache and restores promoted sorting.
 //
 // Infrastructure failures propagate for block-level retry (P1-1).
-func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op map[string]interface{}, blockNum int64, blockDate time.Time) error {
+func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op map[string]interface{}, blockNum int64, txIdx int16, blockDate time.Time, isInitialSync bool) error {
 	from, _ := op["from"].(string)
 	to, _ := op["to"].(string)
 	amountStr, _ := op["amount"].(string)
@@ -132,7 +152,7 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 	// Record payment, then bump promoted (legacy op_transfer order).
 	payment := &models.Payment{
 		BlockNum:      blockNum,
-		TXIndex:       0, // TODO: Get actual transaction index
+		TXIndex:       txIdx,
 		PostID:        post.ID,
 		FromAccountID: fromAccount.ID,
 		ToAccountID:   toAccount.ID,
@@ -150,6 +170,16 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 	post.Promoted += amount
 	if err := tx.WithContext(ctx).Save(post).Error; err != nil {
 		return fmt.Errorf("failed to update post promoted amount: %w", err)
+	}
+
+	// Propagate the promotion to the post cache (legacy op_transfer tail,
+	// gated on !is_initial_sync): stage the new balance for the post's next
+	// cache write, then queue the post at upvote level. During initial sync
+	// the cache is built wholesale by the trailing recovery, which reads
+	// hive_posts.promoted itself (dirtyMissing re-stages it).
+	if !isInitialSync {
+		pay.cachedPost.UpdatePromotedAmount(post.ID, post.Promoted)
+		pay.cachedPost.Vote(author, permlink, post.ID, "")
 	}
 
 	pay.logger.Debug("Processed payment",

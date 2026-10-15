@@ -326,16 +326,27 @@ func (cop *CustomOpProcessor) processNotify(ctx context.Context, tx *gorm.DB, ac
 // through the block transaction (P1-15): pool-bound reads could not see
 // rows created earlier in the same block, and a pool-bound write would
 // survive a block rollback as an orphan row. Deterministic chain-data
-// failures (missing author/permlink, unknown post/account, non-root post)
-// are data errors -- legacy returns silently in all these cases, so here
-// they return opValidationError and the caller skips the op while the
-// block continues; infrastructure failures propagate for block-level retry.
+// failures (missing author/permlink, impersonated account, unknown
+// post/account, non-root post) are data errors -- legacy returns silently
+// in all these cases, so here they return opValidationError and the caller
+// skips the op while the block continues; infrastructure failures
+// propagate for block-level retry.
 func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, account string, opJSON map[string]interface{}, blockDate time.Time, isInitialSync bool) error {
 	author, _ := opJSON["author"].(string)
 	permlink, _ := opJSON["permlink"].(string)
 
 	if author == "" || permlink == "" {
 		return opValidationErr("missing author or permlink in reblog op")
+	}
+
+	// Impersonation check (legacy custom_op.py:117): the payload's
+	// `account` must match the signing account. The follow plugin signs
+	// with the reblogger's posting key, so a payload naming anyone else is
+	// forged and silently dropped by legacy. A missing `account` key fails
+	// the same way (blogger "" != account).
+	blogger, _ := opJSON["account"].(string)
+	if blogger != account {
+		return opValidationErr("reblog impersonation: payload account %q does not match signing account %q", blogger, account)
 	}
 
 	// Get post ID
@@ -364,6 +375,17 @@ func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, ac
 	}
 	if accountObj == nil {
 		return opValidationErr("reblog account not found: %s", account)
+	}
+
+	// The post author's account id is the notification destination (and,
+	// per legacy `all(map(Accounts.exists, [author, blogger]))`, its
+	// absence drops the op entirely).
+	authorAcc, err := accountRepo.GetByName(ctx, author)
+	if err != nil {
+		return fmt.Errorf("failed to get author account: %w", err)
+	}
+	if authorAcc == nil {
+		return opValidationErr("reblog author not registered: %s", author)
 	}
 
 	reblogRepo := db.NewReblogRepository(cop.repo.WithTx(tx))
@@ -408,18 +430,31 @@ func (cop *CustomOpProcessor) ProcessReblog(ctx context.Context, tx *gorm.DB, ac
 			cop.logger.Debug("Reblog already exists",
 				zap.String("account", account),
 				zap.Int64("post_id", post.ID))
-			return nil
 		}
 
-		// Add to feed cache (only if not in initial sync)
+		// Add to feed cache and notify the post author. Both ride the block
+		// transaction and are gated on !isInitialSync (legacy
+		// custom_op.py:144-148). The feed insert is idempotent (ON CONFLICT
+		// DO NOTHING), and -- matching legacy exactly -- the notification is
+		// emitted for EVERY non-delete reblog op, including a duplicate
+		// re-reblog (legacy has no reblog-notif dedup).
 		if !isInitialSync {
 			if err := feedCacheRepo.Insert(ctx, post.ID, accountObj.ID, blockDate); err != nil {
 				return fmt.Errorf("failed to insert into feed cache: %w", err)
 			}
+
+			// Notify the post author of the reblog (legacy:
+			// Notify('reblog', src_id=blogger_id, dst_id=author_id,
+			// post_id=post_id, when=block_date,
+			// score=Accounts.default_score(blogger)).write()).
+			score := defaultScoreForAccount(ctx, tx, accountObj.ID)
+			if err := cop.notifyIndexer.WithTx(tx).Write(ctx,
+				models.NotifyTypeReblog, blockDate,
+				&accountObj.ID, &authorAcc.ID, nil, &post.ID, nil, &score); err != nil {
+				return fmt.Errorf("failed to write reblog notif: %w", err)
+			}
 		}
 
-		// Send notification to post author
-		// TODO: Implement notification for reblog (#407)
 		cop.logger.Debug("Created reblog",
 			zap.String("account", account),
 			zap.String("author", author),

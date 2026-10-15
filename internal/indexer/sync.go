@@ -649,10 +649,52 @@ func (s *Sync) syncIrreversible(ctx context.Context) error {
 					zap.Int64("irreversible", irreversible))
 			}
 
+			// Payout backlog sweep (P1-10): legacy takes care of the payout
+			// backlog after every catch-up round and, in live mode, before
+			// each block's flush (sync.py:98 and sync.py:208). This loop's
+			// iteration -- one catch-up step followed by the sync-interval
+			// wait -- covers both cadences. Failures are logged and retried
+			// on the next iteration; the sweep is idempotent.
+			if err := s.payoutSweep(ctx); err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				s.logger.Error("Payout sweep failed", zap.Error(err))
+			}
+
 			// Wait before next check
 			s.wait(ctx, syncInterval)
 		}
 	}
+}
+
+// payoutSweep marks posts whose payout_at has passed without the is_paidout
+// flag, marks their authors dirty (legacy Accounts.dirty_set inside
+// dirty_paidouts), and flushes the dirty queue (legacy sync.py:97-99:
+// `CachedPost.dirty_paidouts(Blocks.head_date()); CachedPost.flush(trx=True)`,
+// and the per-block live variant at sync.py:208-209). The scan date is the
+// local head block's date -- the indexer never sweeps for payouts beyond
+// what it has actually indexed.
+func (s *Sync) payoutSweep(ctx context.Context) error {
+	headBlock, err := db.NewBlockRepository(s.blockProcessor.repo).GetHead(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get head block for payout sweep: %w", err)
+	}
+	if headBlock == nil {
+		// No blocks indexed yet: nothing can have paid out.
+		return nil
+	}
+	n, err := s.blockProcessor.CachedPost().DirtyPaidouts(ctx, headBlock.CreatedAt, s.blockProcessor.Accounts().MarkDirty)
+	if err != nil {
+		return fmt.Errorf("failed to mark paid-out posts: %w", err)
+	}
+	if n > 0 {
+		s.logger.Info("Payout sweep", zap.Int("posts", n))
+	}
+	if _, err := s.blockProcessor.CachedPost().Flush(ctx, true); err != nil {
+		return fmt.Errorf("failed to flush payout sweep: %w", err)
+	}
+	return nil
 }
 
 // syncBlocksBoundedRetry drives the initial-sync fast sync with the

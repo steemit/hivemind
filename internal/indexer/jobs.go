@@ -24,6 +24,7 @@ const jobsBatchStep = 1000000
 type cacheJobs struct {
 	db     *gorm.DB
 	cp     *CachedPost
+	posts  *PostIndexer
 	steem  steem.Provider
 	logger *zap.Logger
 }
@@ -119,7 +120,19 @@ func AuditCacheDeleted(ctx context.Context, database *gorm.DB, cp *CachedPost) e
 // get_content_batch, and restores the ones steemd still serves
 // (mirrors legacy audit_cache_undelete + Posts.undelete).
 func AuditCacheUndelete(ctx context.Context, database *gorm.DB, cp *CachedPost, provider steem.Provider) error {
-	j := &cacheJobs{db: database, cp: cp, steem: provider, logger: jobLogger()}
+	repo := db.NewRepository(database)
+	// The PostIndexer built here is jobs-local but wraps the SHARED
+	// CachedPost (the dirty queue Sync flushes); PostIndexer and
+	// CommunityIndexer are otherwise stateless query wrappers, so a
+	// jobs-local instance cannot lose writes the way a second FollowIndexer
+	// or CachedPost would (audit P0-4 class).
+	j := &cacheJobs{
+		db:     database,
+		cp:     cp,
+		posts:  NewPostIndexer(repo, cp, NewCommunityIndexer(repo, cp, jobLogger()), jobLogger()),
+		steem:  provider,
+		logger: jobLogger(),
+	}
 	lastID, err := j.lastPostID(ctx)
 	if err != nil {
 		return err
@@ -183,35 +196,58 @@ func AuditCacheUndelete(ctx context.Context, database *gorm.DB, cp *CachedPost, 
 
 // undeletePost restores a deleted hive_posts row from its on-chain state
 // (legacy Posts.undelete) and re-enters the cache pipeline.
+//
+// Field derivation reuses the block-path rebuild (PostIndexer.buildPost --
+// the same routine the comment-op undelete path runs, PR#406): category from
+// parent_permlink (root) or parent inheritance (comment), community_id via
+// the community table behind the START_DATE gate, is_valid/is_muted from
+// parent inheritance plus the community post-authorization check. Legacy's
+// audit path runs the very same Posts.undelete/_build_post (jobs.py
+// audit_cache_undelete -> Posts.undelete); hive_posts.created_at is NOT
+// touched (legacy's UPDATE does not include it either). The root post also
+// re-enters the feed cache (legacy _insert_feed_cache) keyed by the
+// author's account id.
+//
+// Deliberate divergence: legacy writes the community `error` notification
+// from Posts.undelete on this path too; the audit is a repair tool and
+// re-notifying on repair would fabricate history, so the notification is
+// suppressed here.
 func (j *cacheJobs) undeletePost(ctx context.Context, post map[string]interface{}, pid int64) error {
 	author := getStr(post, "author")
 	permlink := getStr(post, "permlink")
-	category := getStr(post, "category")
-	depth, _ := numberInt(post["depth"])
+
+	created, err := ParseTime(getStr(post, "created"))
+	if err != nil {
+		return fmt.Errorf("parse created: %w", err)
+	}
+
+	// buildPost consumes the fields a comment op carries; a get_content map
+	// (author/permlink/parent_author/parent_permlink) satisfies it, exactly
+	// as legacy _build_post runs on the content map in the audit path. The
+	// START_DATE community gate is evaluated against the post's on-chain
+	// creation time (legacy passes date=post['created'] here).
+	bp, err := j.posts.buildPost(ctx, j.db.WithContext(ctx), post, created)
+	if err != nil {
+		return fmt.Errorf("rebuild post fields: %w", err)
+	}
 
 	updates := map[string]interface{}{
 		"is_deleted": false,
 		"is_pinned":  false,
-		"is_valid":   true,
-		"is_muted":   false,
-		"category":   category,
-		"depth":      depth,
+		"is_valid":   bp.isValid,
+		"is_muted":   bp.isMuted,
+		"category":   bp.category,
+		"depth":      bp.depth,
 	}
-	// parent_id from the on-chain parent (comments).
-	if pa := getStr(post, "parent_author"); pa != "" {
-		if pp := getStr(post, "parent_permlink"); pp != "" {
-			var parentID int64
-			if err := j.db.WithContext(ctx).
-				Table("hive_posts").
-				Select("id").
-				Where("author = ? AND permlink = ?", pa, pp).
-				Scan(&parentID).Error; err == nil && parentID > 0 {
-				updates["parent_id"] = parentID
-			}
-		}
+	if bp.parentID.Valid {
+		updates["parent_id"] = bp.parentID.Int64
+	} else {
+		updates["parent_id"] = nil
 	}
-	if created, err := ParseTime(getStr(post, "created")); err == nil {
-		updates["created_at"] = created
+	if bp.communityID.Valid {
+		updates["community_id"] = bp.communityID.Int64
+	} else {
+		updates["community_id"] = nil
 	}
 
 	if err := j.db.WithContext(ctx).
@@ -220,7 +256,13 @@ func (j *cacheJobs) undeletePost(ctx context.Context, post map[string]interface{
 		Updates(updates).Error; err != nil {
 		return err
 	}
-	return j.cp.Undelete(ctx, pid, author, permlink, category)
+
+	// Feed-cache backfill (legacy _insert_feed_cache): only root posts
+	// enter the feed.
+	if err := j.posts.insertFeedCache(ctx, j.db.WithContext(ctx), pid, bp.depth, author, created); err != nil {
+		return err
+	}
+	return j.cp.Undelete(ctx, pid, author, permlink, bp.category)
 }
 
 func (j *cacheJobs) lastPostID(ctx context.Context) (int64, error) {

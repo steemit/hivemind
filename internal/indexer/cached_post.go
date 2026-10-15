@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -118,11 +119,19 @@ func (c *CachedPost) Recount(author, permlink string, pid int64) {
 }
 
 // Delete removes a post from both cache tables and its tags, and dequeues
-// any pending write.
-func (c *CachedPost) Delete(ctx context.Context, postID int64, author, permlink string) error {
+// any pending write. The optional tx routes the DELETEs through the block
+// transaction (P1-15 / #404 audit registration): legacy CachedPost.delete
+// executes inside process_multi's transaction, so a rolled-back block must
+// not leave the evictions behind as orphaned writes. Maintenance callers
+// (cache jobs) omit tx and write on the pool.
+func (c *CachedPost) Delete(ctx context.Context, postID int64, author, permlink string, tx ...*gorm.DB) error {
+	exec := c.db.WithContext(ctx)
+	if len(tx) > 0 && tx[0] != nil {
+		exec = tx[0].WithContext(ctx)
+	}
 	for _, table := range []string{"hive_posts_cache", "hive_posts_cache_temp", "hive_post_tags"} {
-		if err := c.db.WithContext(ctx).Exec(
-			fmt.Sprintf("DELETE FROM %s WHERE post_id = ?", table), postID).Error; err != nil {
+		if err := exec.
+			Exec(fmt.Sprintf("DELETE FROM %s WHERE post_id = ?", table), postID).Error; err != nil {
 			return err
 		}
 	}
@@ -139,7 +148,13 @@ func (c *CachedPost) Delete(ctx context.Context, postID int64, author, permlink 
 
 // Undelete handles a reused author/permlink slot: insert a placeholder row
 // (so the cache is aware of the id even after a restart) and queue an update.
-func (c *CachedPost) Undelete(ctx context.Context, postID int64, author, permlink, category string) error {
+// The optional tx routes the placeholder INSERTs through the block
+// transaction (P1-15 / #404 audit registration): legacy CachedPost.undelete
+// runs inside process_multi's transaction, so a rolled-back block must not
+// leave the placeholder rows behind as orphaned writes. The LastID cursor
+// read deliberately stays on the pool: it caches into memory, and a
+// tx-scoped read would poison the cached cursor if the block rolled back.
+func (c *CachedPost) Undelete(ctx context.Context, postID int64, author, permlink, category string, tx ...*gorm.DB) error {
 	last, err := c.LastID(ctx)
 	if err != nil {
 		return err
@@ -156,8 +171,12 @@ func (c *CachedPost) Undelete(ctx context.Context, postID int64, author, permlin
 		"permlink": permlink,
 		"category": category,
 	}
+	exec := c.db.WithContext(ctx)
+	if len(tx) > 0 && tx[0] != nil {
+		exec = tx[0].WithContext(ctx)
+	}
 	for _, table := range []string{"hive_posts_cache", "hive_posts_cache_temp"} {
-		if err := c.db.WithContext(ctx).Table(table).Create(vals).Error; err != nil {
+		if err := exec.Table(table).Create(vals).Error; err != nil {
 			return err
 		}
 	}
@@ -340,8 +359,11 @@ func (c *CachedPost) loadNoids(ctx context.Context) (int, error) {
 	return len(resolved), nil
 }
 
-// DirtyPaidouts marks all posts paid out before date but not yet flagged.
-func (c *CachedPost) DirtyPaidouts(ctx context.Context, date string) (int, error) {
+// DirtyPaidouts marks all posts paid out before date but not yet flagged
+// (legacy dirty_paidouts). markAccountDirty, when non-nil, receives the
+// authors of the swept posts -- legacy calls Accounts.dirty_set(authors) so
+// payout-time account stats are refreshed on the next account flush.
+func (c *CachedPost) DirtyPaidouts(ctx context.Context, date time.Time, markAccountDirty func(string)) (int, error) {
 	var ids []int64
 	if err := c.db.WithContext(ctx).
 		Table("hive_posts_cache").
@@ -368,6 +390,9 @@ func (c *CachedPost) DirtyPaidouts(ctx context.Context, date string) (int, error
 	}
 	for _, r := range rows {
 		c.dirty(levelPayout, r.Author, r.Permlink, r.ID)
+		if markAccountDirty != nil {
+			markAccountDirty(r.Author)
+		}
 	}
 	return len(rows), nil
 }

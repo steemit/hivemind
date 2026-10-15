@@ -61,7 +61,7 @@ func NewBlockProcessor(database *db.DB, repo *db.Repository, steemProvider steem
 		accounts:         NewAccountIndexer(repo, logger, steemProvider),
 		posts:            NewPostIndexer(repo, cachedPost, communityIndexer, logger),
 		follows:          follows,
-		payments:         NewPaymentIndexer(repo, logger),
+		payments:         NewPaymentIndexer(repo, cachedPost, logger),
 		customOps:        NewCustomOpProcessor(repo, follows, cachedPost, logger),
 		communityIndexer: communityIndexer,
 		logger:           logger,
@@ -200,7 +200,7 @@ func (bp *BlockProcessor) processBlockInTx(ctx context.Context, tx *gorm.DB, blo
 			// retries it with the transaction rolled back and no op lost;
 			// a data error (deterministically bad chain data) is logged
 			// with the block/op identification and the op is skipped.
-			if err := bp.processOperation(ctx, tx, opType, opValue, blockDate, blockNum, isInitialSync, accountNames, &jsonOps); err != nil {
+			if err := bp.processOperation(ctx, tx, opType, opValue, blockDate, blockNum, int16(txIdx), isInitialSync, accountNames, &jsonOps); err != nil {
 				if IsInfraError(err) {
 					return fmt.Errorf("block %d: op %s failed (infrastructure): %w", blockNum, opType, err)
 				}
@@ -354,7 +354,9 @@ func extractAccountName(opType string, opValue map[string]interface{}, accountNa
 	return false
 }
 
-// processOperation processes a single operation
+// processOperation processes a single operation. txIdx is the operation's
+// transaction position within the block (legacy enumerate index); it feeds
+// hive_payments.tx_idx.
 func (bp *BlockProcessor) processOperation(
 	ctx context.Context,
 	tx *gorm.DB,
@@ -362,6 +364,7 @@ func (bp *BlockProcessor) processOperation(
 	opValue map[string]interface{},
 	blockDate time.Time,
 	blockNum int64,
+	txIdx int16,
 	isInitialSync bool,
 	accountNames map[string]bool,
 	jsonOps *[]map[string]interface{},
@@ -414,7 +417,7 @@ func (bp *BlockProcessor) processOperation(
 
 	// Transfer operations
 	case "transfer_operation":
-		return bp.payments.ProcessTransfer(ctx, tx, opValue, blockNum, blockDate)
+		return bp.payments.ProcessTransfer(ctx, tx, opValue, blockNum, txIdx, blockDate, isInitialSync)
 
 	// Custom JSON operations
 	case "custom_json_operation":
