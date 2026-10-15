@@ -252,11 +252,11 @@ func TestProcessDelete_FeedEviction(t *testing.T) {
 	tx2.Create(&models.FeedCache{PostID: post.ID, AccountID: reblogger.ID, CreatedAt: time.Now().UTC()})
 	tx2.Commit()
 
-	pi := NewPostIndexer(repo, NewCachedPost(database.DB, &fakeSteemProvider{}), testLogger())
+	pi := NewPostIndexer(repo, NewCachedPost(database.DB, &fakeSteemProvider{}), NewCommunityIndexer(repo, nil, testLogger()), testLogger())
 	txDel := database.DB.WithContext(ctx).Begin()
 	if err := pi.ProcessDelete(ctx, txDel, map[string]interface{}{
 		"author": "author", "permlink": "p1",
-	}); err != nil {
+	}, false); err != nil {
 		t.Fatalf("ProcessDelete: %v", err)
 	}
 	txDel.Commit()

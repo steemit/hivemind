@@ -749,6 +749,16 @@ func TestGracefulShutdownFlushesInFlightBatch(t *testing.T) {
 	ctx := context.Background()
 	seedAccounts(t, database, "alice")
 
+	// Run in live (post-initial-sync) mode: comment ops only queue cache
+	// work outside initial sync (PR#406 aligning Posts.insert with legacy's
+	// DbState.is_initial_sync gate), and this test asserts the batch-end
+	// cache flush completes after cancellation -- which requires the queue
+	// to be fed in the first place.
+	if err := database.DB.WithContext(ctx).
+		Exec("UPDATE hive_state SET is_initial_sync = false, recount_done = true").Error; err != nil {
+		t.Fatalf("seed live-mode flags: %v", err)
+	}
+
 	blocks := map[int64]map[string]interface{}{
 		1: syncBlockFixture(1, "2026-01-01T00:00:00", commentOp("alice", "p1")),
 		2: syncBlockFixture(2, "2026-01-01T00:00:03", commentOp("alice", "p2")),

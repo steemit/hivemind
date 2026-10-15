@@ -415,3 +415,20 @@ Key metrics to monitor:
 - Database connection pool usage
 - Error rates
 
+## Poison-Block Runbook: Orphan Comments
+
+When the indexer logs `poison block` errors with `failure_kind=process` and a
+"parent post ... not found" message, a comment references a parent that does
+not exist in `hive_posts`. Steem protocol guarantees a parent with any reply
+can never be deleted, so a real orphan means hive-side data loss (e.g. manual
+row deletion). Recovery options:
+
+1. Re-insert the missing parent row (`author/permlink` from the log's error
+   context) and let the block retry proceed.
+2. If the parent is genuinely unavailable, an operator may advance the head
+   manually (`UPDATE hive_blocks SET ...` / delete the stuck block row) --
+   understand that this skips all operations in that block and diverges from
+   the reference sync; document the decision for the 20M comparison.
+
+The initial-sync path gives up after 10 consecutive failures (process exits
+with a non-zero status); the live path keeps retrying with escalated logs.
