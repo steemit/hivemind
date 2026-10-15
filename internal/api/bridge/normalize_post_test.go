@@ -252,7 +252,7 @@ func TestNormalizePost(t *testing.T) {
 		assertEq(t, "author_title", ret["author_title"], "")
 	})
 
-	t.Run("author_missing_is_server_error", func(t *testing.T) {
+	t.Run("author_missing_is_invalid_params", func(t *testing.T) {
 		post := cloneFixture(t)
 		post["author"] = "who-does-not-exist"
 
@@ -265,11 +265,11 @@ func TestNormalizePost(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for unknown author")
 		}
-		// Legacy TypeError class -> -32000 server error, i.e. NOT a
-		// PublicError (which would map to -32602).
+		// Legacy dereferences the None row (TypeError, support.py:82)
+		// which jsonrpcserver maps to -32602 invalid parameters.
 		var pub apierrors.PublicError
-		if ok := errors.As(err, &pub); ok {
-			t.Fatalf("expected non-public (server) error, got public: %v", err)
+		if ok := errors.As(err, &pub); !ok {
+			t.Fatalf("expected public (invalid-params) error, got: %v", err)
 		}
 	})
 
@@ -382,11 +382,18 @@ func TestNormalizePostValidation(t *testing.T) {
 		t.Fatalf("missing field should be a server-class error, got public: %v", err)
 	}
 
-	// json_metadata non-string -> invalid params (legacy json.loads TypeError).
+	// json_metadata non-string is tolerated (legacy post_basic wraps
+	// json.loads in "except Exception: pass" and yields {}); a missing key
+	// likewise. The sanitizer just sees an empty metadata map.
 	p = base()
 	p["json_metadata"] = map[string]interface{}{"tags": []interface{}{}}
-	if err := validateSteemdPost(p); err == nil || !errors.As(err, &pub) {
-		t.Fatalf("json_metadata type: expected public error, got %v", err)
+	if err := validateSteemdPost(p); err != nil {
+		t.Fatalf("json_metadata non-string should be tolerated, got %v", err)
+	}
+	p = base()
+	delete(p, "json_metadata")
+	if err := validateSteemdPost(p); err != nil {
+		t.Fatalf("missing json_metadata should be tolerated, got %v", err)
 	}
 
 	// active_votes non-list -> invalid params (legacy TypeError).

@@ -107,7 +107,7 @@ var normalizePostRoles = map[int16]string{
 // server error (NOT -32602), so Go returns a plain error; the check runs
 // upfront to make the failure deterministic instead of data-dependent.
 var steemdPostRequiredFields = []string{
-	"author", "permlink", "title", "body", "json_metadata", "created",
+	"author", "permlink", "title", "body", "created",
 	"last_update", "depth", "children", "net_rshares", "active_votes",
 	"author_reputation", "promoted", "cashout_time", "last_payout",
 	"max_accepted_payout", "percent_steem_dollars", "total_payout_value",
@@ -186,7 +186,9 @@ func (p *PostAPI) NormalizePost(ctx *gin.Context, params json.RawMessage) (inter
 		Where("name = ?", author).
 		First(&acc).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = fmt.Errorf("normalize_post: author %q not found in hive_accounts", author)
+			// legacy dereferences the None row (TypeError, support.py:82)
+			// which jsonrpcserver maps to -32602.
+			err = apierrors.Publicf("normalize_post: author %q not found in hive_accounts", author)
 		}
 		telemetry.RecordSpanError(span, err)
 		return nil, err
@@ -327,8 +329,9 @@ func (p *PostAPI) NormalizePost(ctx *gin.Context, params json.RawMessage) (inter
 	}
 	ret["author_reputation"] = acc.Reputation
 
-	// 7. Community decoration (support.py:89-101).
-	if communityID != nil {
+	// 7. Community decoration (support.py:89-101). Legacy checks
+	// "if core['community_id']:" -- 0 is falsy and skips decoration.
+	if communityID != nil && *communityID != 0 {
 		var comm models.Community
 		// community_title is the raw hive_communities.title -- None when the
 		// community row is gone (e.g. fork rollback). Unlike
@@ -447,11 +450,9 @@ func validateSteemdPost(post map[string]interface{}) error {
 			return fmt.Errorf("normalize_post: steemd post object lacks %q", k)
 		}
 	}
-	// json.loads(non-string) / iterating a non-list raise TypeError in
-	// legacy post_basic/post_payout -> invalid parameters.
-	if _, ok := post["json_metadata"].(string); !ok {
-		return apierrors.PublicError("json_metadata must be a JSON string")
-	}
+	// legacy post_basic wraps json.loads in "except Exception: pass",
+	// so a missing or non-string json_metadata yields {} rather than an
+	// error; ComputePostBasic treats it the same way.
 	votes, ok := post["active_votes"].([]interface{})
 	if !ok {
 		return apierrors.PublicError("active_votes must be a list")
