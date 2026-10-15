@@ -11,10 +11,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/steemit/hivemind/internal/apierrors"
 )
@@ -37,6 +40,9 @@ func newTestEngine(maxBodyBytes int64) *gin.Engine {
 	})
 	h.RegisterMethod("test.internal_error", func(c *gin.Context, params json.RawMessage) (interface{}, error) {
 		return nil, errors.New("sql: connection refused")
+	})
+	h.RegisterMethod("test.panic", func(c *gin.Context, params json.RawMessage) (interface{}, error) {
+		panic("boom: handler exploded")
 	})
 	engine := gin.New()
 	engine.POST("/", h.Handle)
@@ -203,6 +209,25 @@ func TestIDTypesEchoed(t *testing.T) {
 	}
 }
 
+// A large integer id beyond float64 precision (2^53) must be echoed
+// byte-for-byte: ids are carried as raw JSON, never decoded to float64,
+// so client-visible id values cannot be silently distorted.
+func TestLargeIntegerIDByteEcho(t *testing.T) {
+	const id = `12345678901234567890`
+	w := doPost(t, newTestEngine(0), `{"jsonrpc":"2.0","method":"test.echo","id":`+id+`}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"id":`+id) {
+		t.Fatalf("id not echoed byte-exactly: %q", w.Body.String())
+	}
+	obj := decodeObject(t, w)
+	if _, present := obj["result"]; !present {
+		t.Fatalf("result member missing: %v", obj)
+	}
+}
+
 func TestParamsFormsPassedThrough(t *testing.T) {
 	cases := []struct {
 		name string
@@ -243,6 +268,12 @@ func TestParseError(t *testing.T) {
 	if msg := errMessage(t, obj); msg != "Invalid JSON" {
 		t.Fatalf("message = %q, want %q", msg, "Invalid JSON")
 	}
+	// Legacy debug dispatch fills data with the parser message
+	// (dispatcher.py:222); Go exposes the encoding/json error derived
+	// from the client's bytes.
+	if data, ok := errData(t, obj).(string); !ok || data == "" {
+		t.Fatalf("data = %v, want a non-empty JSON parse error message", errData(t, obj))
+	}
 	if obj["id"] != nil {
 		t.Fatalf("id = %v, want null (id unknowable)", obj["id"])
 	}
@@ -266,6 +297,7 @@ func TestInvalidRequestVariants(t *testing.T) {
 		{"method wrong type", `{"jsonrpc":"2.0","method":5,"id":1}`},
 		{"id wrong type (bool)", `{"jsonrpc":"2.0","method":"test.echo","id":true}`},
 		{"id wrong type (array)", `{"jsonrpc":"2.0","method":"test.echo","id":[1]}`},
+		{"id wrong type (object)", `{"jsonrpc":"2.0","method":"test.echo","id":{"a":1}}`},
 		{"params wrong type", `{"jsonrpc":"2.0","method":"test.echo","id":1,"params":"x"}`},
 		{"params null", `{"jsonrpc":"2.0","method":"test.echo","id":1,"params":null}`},
 		{"bare string body", `"hello"`},
@@ -298,6 +330,30 @@ func TestEmptyBodyIsParseError(t *testing.T) {
 	if code := errCode(t, obj); code != -32700 {
 		t.Fatalf("code = %v, want -32700", code)
 	}
+	if data, ok := errData(t, obj).(string); !ok || data == "" {
+		t.Fatalf("data = %v, want a non-empty JSON parse error message", errData(t, obj))
+	}
+}
+
+// Trailing garbage after an otherwise valid JSON document must be a
+// -32700 parse error: legacy json.loads rejects the whole string
+// (dispatcher.py:221-222), it must not fall through to dispatch.
+func TestTrailingGarbageIsParseError(t *testing.T) {
+	w := doPost(t, newTestEngine(0), `{"jsonrpc":"2.0","method":"test.echo","id":1}xyz`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	obj := decodeObject(t, w)
+	if code := errCode(t, obj); code != -32700 {
+		t.Fatalf("code = %v, want -32700", code)
+	}
+	if data, ok := errData(t, obj).(string); !ok || data == "" {
+		t.Fatalf("data = %v, want a non-empty JSON parse error message", errData(t, obj))
+	}
+	if obj["id"] != nil {
+		t.Fatalf("id = %v, want null", obj["id"])
+	}
 }
 
 // --- Error-code mapping (legacy handle_exceptions parity) ---------------
@@ -313,8 +369,10 @@ func TestMethodNotFound(t *testing.T) {
 	if msg := errMessage(t, obj); msg != "Method not found" {
 		t.Fatalf("message = %q, want %q", msg, "Method not found")
 	}
-	if data := errData(t, obj); data != "method test.nope not found" {
-		t.Fatalf("data = %v", data)
+	// Legacy debug dispatch fills data with the bare requested method
+	// name (dispatcher.py:122-124: data=request.method), not a sentence.
+	if data := errData(t, obj); data != "test.nope" {
+		t.Fatalf("data = %v, want the bare method name \"test.nope\"", data)
 	}
 	if obj["id"] != float64(5) {
 		t.Fatalf("id = %v, want 5 (echo)", obj["id"])
@@ -373,6 +431,79 @@ func TestInternalErrorSanitized(t *testing.T) {
 	}
 }
 
+// --- Per-item panic isolation (audit P1) ---------------------------------
+
+// A panicking handler is mapped to -32000 "Server error" for that request
+// only, with the panic detail withheld, mirroring legacy handle_exceptions
+// which converts every raised exception into a per-item response. The zap
+// Error log with stack is asserted indirectly: nothing may leak into the
+// HTTP response.
+func TestSingleRequestPanicIsServerError(t *testing.T) {
+	w := doPost(t, newTestEngine(0), `{"jsonrpc":"2.0","method":"test.panic","id":1}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (panic must not escape to gin.Recovery)", w.Code)
+	}
+	obj := decodeObject(t, w)
+	if code := errCode(t, obj); code != -32000 {
+		t.Fatalf("code = %v, want -32000", code)
+	}
+	if msg := errMessage(t, obj); msg != "Server error" {
+		t.Fatalf("message = %q, want %q", msg, "Server error")
+	}
+	e := asObject(t, obj["error"])
+	if _, present := e["data"]; present {
+		t.Fatalf("panic detail must be withheld: %v", e)
+	}
+	if strings.Contains(w.Body.String(), "boom") {
+		t.Fatalf("panic detail leaked into the response: %q", w.Body.String())
+	}
+}
+
+// One panicking item must not take the whole batch down: every other item
+// keeps its (already computed) response and the panicking item is answered
+// with -32000. Without the per-item recover the panic unwinds to
+// gin.Recovery, which answers 500 with an empty body and discards all
+// responses — the exact regression the audit flagged.
+func TestBatchPanicIsolation(t *testing.T) {
+	engine := newTestEngine(0)
+	body := `[
+		{"jsonrpc":"2.0","method":"test.echo","id":1,"params":["a"]},
+		{"jsonrpc":"2.0","method":"test.panic","id":2},
+		{"jsonrpc":"2.0","method":"test.echo","id":3,"params":["c"]}
+	]`
+	w := doPost(t, engine, body)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (batch must survive the panic)", w.Code)
+	}
+	arr := decodeArray(t, w)
+	if len(arr) != 3 {
+		t.Fatalf("got %d responses, want 3: %v", len(arr), arr)
+	}
+
+	first := asObject(t, arr[0])
+	if _, present := first["result"]; !present {
+		t.Fatalf("item before the panic must keep its response: %v", first)
+	}
+
+	second := asObject(t, arr[1])
+	if second["id"] != float64(2) {
+		t.Fatalf("panicking item id = %v, want 2", second["id"])
+	}
+	if code := errCode(t, second); code != -32000 {
+		t.Fatalf("panicking item code = %v, want -32000", code)
+	}
+	if strings.Contains(w.Body.String(), "boom") {
+		t.Fatalf("panic detail leaked into the batch response: %q", w.Body.String())
+	}
+
+	third := asObject(t, arr[2])
+	if _, present := third["result"]; !present {
+		t.Fatalf("item after the panic must still be answered: %v", third)
+	}
+}
+
 // --- Notifications -------------------------------------------------------
 
 func TestSingleNotificationIsEmpty200(t *testing.T) {
@@ -398,6 +529,21 @@ func TestFailedNotificationStaysSilent(t *testing.T) {
 	}
 	if w.Body.Len() != 0 {
 		t.Fatalf("failed notification must not be answered, got body %q", w.Body.String())
+	}
+}
+
+// A notification whose handler panics is still never answered: the
+// recovered panic maps to a -32000 response that executeRequest discards
+// for notifications (legacy handle_exceptions finally-clause).
+func TestPanickingNotificationIsEmpty200(t *testing.T) {
+	engine := newTestEngine(0)
+	w := doPost(t, engine, `{"jsonrpc":"2.0","method":"test.panic","params":[]}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("panicking notification must not be answered, got body %q", w.Body.String())
 	}
 }
 
@@ -503,6 +649,30 @@ func TestBatchWithStructurallyInvalidItem(t *testing.T) {
 	}
 	if second["id"] != nil {
 		t.Fatalf("invalid item id = %v, want null", second["id"])
+	}
+}
+
+// Nested arrays as batch items are structurally invalid request objects,
+// answered per-item with -32600 and id null; the sibling items (here:
+// every item) keep being processed.
+func TestBatchNestedArrayItems(t *testing.T) {
+	w := doPost(t, newTestEngine(0), `[[1],[2]]`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	arr := decodeArray(t, w)
+	if len(arr) != 2 {
+		t.Fatalf("got %d responses, want 2: %v", len(arr), arr)
+	}
+	for i, item := range arr {
+		obj := asObject(t, item)
+		if code := errCode(t, obj); code != -32600 {
+			t.Fatalf("item %d code = %v, want -32600", i, code)
+		}
+		if obj["id"] != nil {
+			t.Fatalf("item %d id = %v, want null", i, obj["id"])
+		}
 	}
 }
 
@@ -621,6 +791,86 @@ func TestCORSOnSuccessAndErrors(t *testing.T) {
 		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
 			t.Fatalf("Access-Control-Allow-Origin = %q for %s, want *", got, body)
 		}
+	}
+}
+
+// --- Metrics label cardinality (audit P2) ---------------------------------
+
+// rpcMetricSamples renders the default Prometheus registry to text and
+// returns every hivemind_request* sample keyed by identity (metric name +
+// label set, value stripped), with its current value.
+func rpcMetricSamples(t *testing.T) map[string]float64 {
+	t.Helper()
+	handler := promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{})
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	samples := make(map[string]float64)
+	for _, line := range strings.Split(w.Body.String(), "\n") {
+		// Sample lines only: HELP/TYPE comments start with '#'.
+		if !strings.HasPrefix(line, "hivemind_request") {
+			continue
+		}
+		idx := strings.LastIndexByte(line, ' ')
+		if idx < 0 {
+			continue
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(line[idx+1:]), 64)
+		if err != nil {
+			t.Fatalf("unparsable metric sample line %q: %v", line, err)
+		}
+		samples[line[:idx]] = value
+	}
+	return samples
+}
+
+// TestMethodNotFoundMetricsLabelsBounded pins the metrics fix: unknown
+// method names are attacker-controlled, so they must never become
+// Prometheus label values — each unique probe would otherwise mint a new
+// requests_total series plus histogram buckets that stay resident
+// forever. Probing with unpredictable method names may bump counters but
+// must not create any new series carrying those names; the only series
+// the not-found path may touch is the fixed
+// hivemind_request_errors_total{namespace="unknown",method="unknown",
+// error_type="method_not_found"} counter, incremented once per probe.
+func TestMethodNotFoundMetricsLabelsBounded(t *testing.T) {
+	const fixedSeries = `hivemind_request_errors_total{error_type="method_not_found",method="unknown",namespace="unknown"}`
+	engine := newTestEngine(0)
+	probes := []string{
+		"zzzprobe.alpha.method",
+		"zzzprobe.beta.method",
+		"zzzprobe_no_dot_one",
+		"zzzprobe_no_dot_two",
+	}
+
+	before := rpcMetricSamples(t)
+	for _, m := range probes {
+		w := doPost(t, engine, fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"id":1}`, m))
+		if code := errCode(t, decodeObject(t, w)); code != -32601 {
+			t.Fatalf("probe %q: code = %v, want -32601", m, code)
+		}
+	}
+	after := rpcMetricSamples(t)
+
+	for identity := range after {
+		for _, m := range probes {
+			if strings.Contains(identity, m) {
+				t.Fatalf("metric series %q leaks attacker-controlled method name %q", identity, m)
+			}
+		}
+		if _, existed := before[identity]; !existed && identity != fixedSeries {
+			t.Fatalf("probe requests created unexpected new metric series %q", identity)
+		}
+	}
+
+	got, ok := after[fixedSeries]
+	if !ok {
+		t.Fatalf("fixed not-found error series %q was not recorded", fixedSeries)
+	}
+	base := before[fixedSeries] // an absent series reads as zero
+	if got-base < float64(len(probes)) {
+		t.Fatalf("fixed not-found error series incremented by %v, want at least %d", got-base, len(probes))
 	}
 }
 

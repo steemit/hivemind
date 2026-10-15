@@ -15,7 +15,20 @@
 //     -32700 "Invalid JSON", -32600 "Invalid JSON-RPC", -32601
 //     "Method not found", -32602 "Invalid parameters" (input validation:
 //     legacy AssertionError/TypeError == Go apierrors.PublicError), -32000
-//     "Server error" (any other handler failure; legacy never emits -32603).
+//     "Server error" (any other handler failure; legacy never emits -32603);
+//   - a handler panic is isolated to its own item: it is logged with a
+//     stack and mapped to that item's -32000 "Server error" response
+//     (legacy handle_exceptions maps every raised exception per item and
+//     the batch survives), while gin.Recovery stays installed as the
+//     process-level backstop;
+//   - error.data alignment with legacy debug=True dispatch: -32601 data is
+//     the bare requested method name (dispatcher.py:122-124 passes
+//     data=request.method), -32700 data is the JSON parse error message
+//     (dispatcher.py:222), -32600 data is null (dispatcher.py:224);
+//   - unknown method names never reach Prometheus labels: the not-found
+//     path records a single fixed error-counter series, because both the
+//     method label and the namespace label are attacker-controlled there
+//     (unbounded cardinality).
 
 package api
 
@@ -23,6 +36,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -194,7 +208,7 @@ func (h *JSONRPCHandler) readBody(c *gin.Context) ([]byte, bool) {
 		}
 		telemetry.RecordError("jsonrpc", "http", "parse_error")
 		h.logger.Warn("failed to read request body", zap.Error(err))
-		h.sendErrorResponse(c, frameworkErrorResponse(ErrParseError, msgInvalidJSON))
+		h.sendErrorResponse(c, parseErrorResponse(err))
 		return nil, false
 	}
 	return body, true
@@ -227,7 +241,7 @@ func (h *JSONRPCHandler) handleSingle(c *gin.Context, span trace.Span, body []by
 func (h *JSONRPCHandler) handleBatch(c *gin.Context, span trace.Span, body []byte) {
 	var items []json.RawMessage
 	if err := json.Unmarshal(body, &items); err != nil {
-		resp := frameworkErrorResponse(ErrParseError, msgInvalidJSON)
+		resp := parseErrorResponse(err)
 		recordFrameworkError(span, resp)
 		telemetry.RecordError("jsonrpc", "batch", "parse_error")
 		h.sendErrorResponse(c, resp)
@@ -315,16 +329,23 @@ func (h *JSONRPCHandler) dispatchRequest(c *gin.Context, span trace.Span, req *J
 
 	handler, ok := h.methods[req.Method]
 	if !ok {
-		telemetry.RecordError(namespace, method, "method_not_found")
-		telemetry.RecordRequest(namespace, method, "error", time.Since(start).Seconds())
-		return errorResponse(req.ID, ErrMethodNotFound, msgMethodNotFound,
-			apierrors.Publicf("method %s not found", req.Method))
+		// Metrics cardinality guard: the requested method string is
+		// attacker-controlled, and so is its namespace (the segment
+		// before the first dot), so neither may become a Prometheus
+		// label here — an unauthenticated caller could otherwise mint
+		// unlimited hivemind_requests_total / histogram series that
+		// stay resident forever. Record one fixed series on the error
+		// counter only and skip the request counter and histogram.
+		telemetry.RecordError("unknown", "unknown", "method_not_found")
+		// Legacy debug dispatch answers with data = the bare method name
+		// (dispatcher.py:122-124: data=request.method).
+		return errorResponse(req.ID, ErrMethodNotFound, msgMethodNotFound, req.Method)
 	}
 
 	methodCtx, methodSpan := telemetry.StartSpanWithName(c.Request.Context(), req.Method)
 	defer methodSpan.End()
 	c.Request = c.Request.WithContext(methodCtx)
-	result, err := handler(c, req.Params)
+	result, err := h.callHandler(c, req, handler)
 
 	duration := time.Since(start).Seconds()
 	if err != nil {
@@ -363,6 +384,39 @@ func (h *JSONRPCHandler) dispatchRequest(c *gin.Context, span trace.Span, req *J
 	}
 }
 
+// handlerPanicError wraps a panic value recovered from a method handler
+// so dispatchRequest's regular error mapping turns it into a per-item
+// -32000 "Server error" response.
+type handlerPanicError struct {
+	value interface{}
+}
+
+func (e *handlerPanicError) Error() string {
+	return fmt.Sprintf("jsonrpc handler panic: %v", e.value)
+}
+
+// callHandler invokes one method handler with per-item panic isolation.
+// Legacy handle_exceptions (dispatcher.py:117-135) maps any exception a
+// method raises to that item's -32000 response and lets the rest of the
+// batch survive; without this guard a Go panic unwinds straight to
+// gin.Recovery, which aborts the whole HTTP request with an empty 500
+// body and discards every response already computed. The panic is
+// converted to an error after being logged with its stack; gin.Recovery
+// remains installed as the process-level backstop for panics outside
+// handler invocation.
+func (h *JSONRPCHandler) callHandler(c *gin.Context, req *JSONRPCRequest, handler MethodHandler) (result interface{}, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			h.logger.Error("JSON-RPC handler panicked",
+				zap.String("method", req.Method),
+				zap.Any("panic", r),
+				zap.Stack("stack"))
+			err = &handlerPanicError{value: r}
+		}
+	}()
+	return handler(c, req.Params)
+}
+
 // parseMethod parses a method string into namespace and method name
 func parseMethod(fullMethod string) (namespace, method string) {
 	parts := strings.SplitN(fullMethod, ".", 2)
@@ -396,7 +450,7 @@ func parseJSONRPCRequest(body []byte) (*JSONRPCRequest, *JSONRPCResponse) {
 			// number, null, array item, or wrong member types).
 			return nil, frameworkErrorResponse(ErrInvalidRequest, msgInvalidJSONRPC)
 		}
-		return nil, frameworkErrorResponse(ErrParseError, msgInvalidJSON)
+		return nil, parseErrorResponse(err)
 	}
 	if raw.JSONRPC == nil || *raw.JSONRPC != "2.0" {
 		return nil, frameworkErrorResponse(ErrInvalidRequest, msgInvalidJSONRPC)
@@ -452,6 +506,16 @@ func validJSONRPCParams(raw json.RawMessage) bool {
 // debug=True).
 func frameworkErrorResponse(code int, message string) *JSONRPCResponse {
 	return errorResponse(nil, code, message, json.RawMessage("null"))
+}
+
+// parseErrorResponse builds the -32700 response. Legacy dispatch runs
+// with debug=True and fills error.data with the json.JSONDecodeError
+// message (dispatcher.py:222); the Go counterpart is the encoding/json
+// error, which is derived from the client's input bytes and carries no
+// server internals (#396 sanitizer), so exposing it is safe and keeps
+// parity with legacy's non-null data.
+func parseErrorResponse(err error) *JSONRPCResponse {
+	return errorResponse(nil, ErrParseError, msgInvalidJSON, err.Error())
 }
 
 // errorResponse builds an error response; data is exposed verbatim, so
