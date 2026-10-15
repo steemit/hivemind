@@ -87,6 +87,14 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 		return opValidationErr("failed to parse amount %q: %v", amountStr, err)
 	}
 
+	// Defensive gate (beyond legacy): a malicious/broken RPC node could
+	// inject a negative asset string; never let promoted go backwards.
+	if amount <= 0 {
+		pay.logger.Warn("skipping non-positive transfer amount",
+			zap.Float64("amount", amount), zap.Int64("block", blockNum))
+		return nil
+	}
+
 	// Legacy gate: only SBD payments are promotions.
 	if token != "SBD" {
 		pay.logger.Debug("Skipping non-SBD transfer to null",

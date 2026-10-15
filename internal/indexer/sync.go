@@ -688,8 +688,10 @@ func (s *Sync) payoutSweep(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to mark paid-out posts: %w", err)
 	}
-	if n > 0 {
+	if n > 200 {
 		s.logger.Info("Payout sweep", zap.Int("posts", n))
+	} else if n > 0 {
+		s.logger.Debug("Payout sweep", zap.Int("posts", n))
 	}
 	if _, err := s.blockProcessor.CachedPost().Flush(ctx, true); err != nil {
 		return fmt.Errorf("failed to flush payout sweep: %w", err)

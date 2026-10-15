@@ -252,7 +252,7 @@ func TestPaymentGoldenRealBlockPromotedWiring(t *testing.T) {
 		ctx := context.Background()
 
 		seedAccounts(t, database, "saifulsabri")
-		post := &models.Post{Author: "saifulsabri", Permlink: "promo-steem-activity-wherever-and-whenever-fa0355ff11b",
+		post := &models.Post{Author: "saifulsabri", Permlink: "promo-steem-activity-wherever-and-whenever-fa0355ff11bda",
 			Category: "promo-steem", CreatedAt: time.Unix(1458845200, 0).UTC(), Depth: 0, IsValid: true}
 		if err := database.DB.Create(post).Error; err != nil {
 			t.Fatalf("seed post: %v", err)
@@ -266,7 +266,7 @@ func TestPaymentGoldenRealBlockPromotedWiring(t *testing.T) {
 				[]interface{}{"transfer_operation", map[string]interface{}{
 					"from": "saifulsabri", "to": "null",
 					"amount": "0.001 SBD",
-					"memo":   "https://steemit.com/promo-steem/@saifulsabri/promo-steem-activity-wherever-and-whenever-fa0355ff11b",
+					"memo":   "https://steemit.com/promo-steem/@saifulsabri/promo-steem-activity-wherever-and-whenever-fa0355ff11bda",
 				}},
 			},
 		)

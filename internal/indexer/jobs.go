@@ -250,11 +250,19 @@ func (j *cacheJobs) undeletePost(ctx context.Context, post map[string]interface{
 		updates["community_id"] = nil
 	}
 
-	if err := j.db.WithContext(ctx).
+	res := j.db.WithContext(ctx).
 		Table("hive_posts").
-		Where("id = ?", pid).
-		Updates(updates).Error; err != nil {
-		return err
+		Where("id = ? AND is_deleted = true", pid).
+		Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		// The block path already undeleted this post concurrently
+		// (cache-jobs run alongside the sync loop); nothing to do.
+		j.logger.Debug("audit undelete skipped: post no longer deleted",
+			zap.Int64("post_id", pid))
+		return nil
 	}
 
 	// Feed-cache backfill (legacy _insert_feed_cache): only root posts
