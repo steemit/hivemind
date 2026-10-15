@@ -422,6 +422,22 @@ func (l *PostLoader) buildBridgePost(post *models.Post, cache *models.PostCache,
 	return obj
 }
 
+// FormatSBD renders a numeric SBD amount as a steem-style amount string
+// ("%.3f SBD"). Mirrors legacy _amount (bridge_api/objects.py:299). Exported
+// for the bridge.normalize_post pipeline, which formats amounts computed
+// from the caller-supplied steemd object rather than a cache row.
+func FormatSBD(amount float64) string {
+	return formatAmount(amount)
+}
+
+// HydrateBridgeVotes parses a votes CSV into 2-field vote objects
+// (voter, rshares) in the bridge_api active_votes shape. Exported for
+// bridge.normalize_post, which round-trips the steemd input votes through
+// the same CSV form legacy builds in post_to_internal (utils/post.py:194).
+func HydrateBridgeVotes(voteCSV string) []interface{} {
+	return hydrateBridgeVotes(voteCSV)
+}
+
 // hydrateBridgeVotes parses the CSV into 2-field vote objects (voter, rshares).
 // Mirrors the bridge_api active_votes shape.
 func hydrateBridgeVotes(voteCSV string) []interface{} {
