@@ -65,6 +65,7 @@ func (r *Router) registerMethods(steemd *steem.Client, recommendCommunities stri
 
 	// Condenser API
 	condenserFollow := condenser.NewFollowAPI(repo)
+	condenserFollow.SetDatabase(r.db.DB)
 	condenserContent := condenser.NewContentAPI(repo)
 	condenserContent.SetDatabase(r.db.DB)
 	condenserDiscussions := condenser.NewDiscussionsAPI(repo, r.db)

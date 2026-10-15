@@ -604,6 +604,170 @@ func (c *Cursor) GetFollowingNames(ctx context.Context, account, start string, l
 	return names, nil
 }
 
+// FollowRow is one follower/following entry from the joined follow query,
+// mirroring the legacy condenser cursor SELECT list (ha.name, ha.reputation,
+// hf.state) — see cursor.py get_followers/get_following.
+type FollowRow struct {
+	Name       string  `gorm:"column:name"`
+	Reputation float64 `gorm:"column:reputation"`
+	State      int16   `gorm:"column:state"`
+}
+
+// followStateClause returns the hardcoded state filter for a follow type.
+// Legacy hardcodes IN (2,3) for 'ignore' and IN (1,3) for everything else so
+// the blog branch matches the partial index (condenser cursor.py).
+func followStateClause(followType string) string {
+	if followType == "ignore" {
+		return "AND hf.state IN (2, 3)"
+	}
+	return "AND hf.state IN (1, 3)"
+}
+
+// GetFollowers returns followers of `account` (name, reputation, state),
+// paged by the created_at DESC cursor. Mirrors legacy condenser
+// cursor.get_followers: `start` seeks with created_at <= the start row's
+// created_at, so the start entry itself is included in the page.
+func (c *Cursor) GetFollowers(ctx context.Context, account, start, followType string, limit int) ([]FollowRow, error) {
+	accountID, err := c.getAccountIDByName(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	if accountID == 0 {
+		return nil, apierrors.Publicf("account not found: `%s`", account)
+	}
+
+	sql := `
+	    SELECT ha.name, ha.reputation, hf.state
+	      FROM hive_follows hf
+	     INNER JOIN hive_accounts ha ON hf.follower = ha.id
+	     WHERE hf.following = ?
+	       ` + followStateClause(followType)
+	args := []interface{}{accountID}
+
+	if start != "" {
+		startID, err := c.getAccountIDByName(ctx, start)
+		if err != nil {
+			return nil, err
+		}
+		if startID == 0 {
+			return nil, apierrors.Publicf("account not found: `%s`", start)
+		}
+		sql += ` AND hf.created_at <= (
+		             SELECT created_at FROM hive_follows
+		              WHERE following = ? AND follower = ?)`
+		args = append(args, accountID, startID)
+	}
+	sql += " ORDER BY hf.created_at DESC LIMIT ?"
+	args = append(args, apierrors.ClampLimit(limit))
+
+	var rows []FollowRow
+	if err := c.db.WithContext(ctx).Raw(sql, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// GetFollowing returns accounts followed by `account` (name, reputation,
+// state), paged by the created_at DESC cursor. Mirrors legacy condenser
+// cursor.get_following (inclusive start seek, see GetFollowers).
+func (c *Cursor) GetFollowing(ctx context.Context, account, start, followType string, limit int) ([]FollowRow, error) {
+	accountID, err := c.getAccountIDByName(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	if accountID == 0 {
+		return nil, apierrors.Publicf("account not found: `%s`", account)
+	}
+
+	sql := `
+	    SELECT ha.name, ha.reputation, hf.state
+	      FROM hive_follows hf
+	     INNER JOIN hive_accounts ha ON hf.following = ha.id
+	     WHERE hf.follower = ?
+	       ` + followStateClause(followType)
+	args := []interface{}{accountID}
+
+	if start != "" {
+		startID, err := c.getAccountIDByName(ctx, start)
+		if err != nil {
+			return nil, err
+		}
+		if startID == 0 {
+			return nil, apierrors.Publicf("account not found: `%s`", start)
+		}
+		sql += ` AND hf.created_at <= (
+		             SELECT created_at FROM hive_follows
+		              WHERE follower = ? AND following = ?)`
+		args = append(args, accountID, startID)
+	}
+	sql += " ORDER BY hf.created_at DESC LIMIT ?"
+	args = append(args, apierrors.ClampLimit(limit))
+
+	var rows []FollowRow
+	if err := c.db.WithContext(ctx).Raw(sql, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// GetFollowersByPage returns followers of `account` (name, reputation,
+// state) by offset pagination, ordered created_at DESC. Mirrors legacy
+// condenser cursor.get_followers_by_page.
+func (c *Cursor) GetFollowersByPage(ctx context.Context, account string, page, pageSize int, followType string) ([]FollowRow, error) {
+	accountID, err := c.getAccountIDByName(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	if accountID == 0 {
+		return nil, apierrors.Publicf("account not found: `%s`", account)
+	}
+
+	sql := `
+	    SELECT ha.name, ha.reputation, hf.state
+	      FROM hive_follows hf
+	     INNER JOIN hive_accounts ha ON hf.follower = ha.id
+	     WHERE hf.following = ?
+	       ` + followStateClause(followType) + `
+	    ORDER BY hf.created_at DESC
+	    LIMIT ? OFFSET ?`
+	args := []interface{}{accountID, apierrors.ClampLimit(pageSize), page * pageSize}
+
+	var rows []FollowRow
+	if err := c.db.WithContext(ctx).Raw(sql, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// GetFollowingByPage returns accounts followed by `account` (name,
+// reputation, state) by offset pagination, ordered created_at DESC. Mirrors
+// legacy condenser cursor.get_following_by_page.
+func (c *Cursor) GetFollowingByPage(ctx context.Context, account string, page, pageSize int, followType string) ([]FollowRow, error) {
+	accountID, err := c.getAccountIDByName(ctx, account)
+	if err != nil {
+		return nil, err
+	}
+	if accountID == 0 {
+		return nil, apierrors.Publicf("account not found: `%s`", account)
+	}
+
+	sql := `
+	    SELECT ha.name, ha.reputation, hf.state
+	      FROM hive_follows hf
+	     INNER JOIN hive_accounts ha ON hf.following = ha.id
+	     WHERE hf.follower = ?
+	       ` + followStateClause(followType) + `
+	    ORDER BY hf.created_at DESC
+	    LIMIT ? OFFSET ?`
+	args := []interface{}{accountID, apierrors.ClampLimit(pageSize), page * pageSize}
+
+	var rows []FollowRow
+	if err := c.db.WithContext(ctx).Raw(sql, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // GetMutedNames returns names of all accounts muted by `account`
 // (state includes the ignore bit). Mirrors legacy hive_api list_all_muted.
 func (c *Cursor) GetMutedNames(ctx context.Context, account string) ([]string, error) {

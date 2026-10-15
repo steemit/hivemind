@@ -50,8 +50,10 @@ func (b *BlogAPI) GetBlog(ctx *gin.Context, params json.RawMessage) (interface{}
 	if limit, err = apierrors.ValidLimit(limit, 500); err != nil {
 		return nil, err
 	}
-	if startIndex < 0 {
-		return nil, apierrors.Publicf("invalid start entry_id: %d", startIndex)
+	// legacy valid_offset allows exactly -1 (newest entry); only values
+	// below -1 are rejected. The cursor layer implements the -1 branch.
+	if startIndex < -1 {
+		return nil, apierrors.PublicError("offset cannot be negative")
 	}
 
 	entries, err := b.loadBlogEntries(ctx, account, startIndex, limit)
@@ -84,8 +86,10 @@ func (b *BlogAPI) GetBlogEntries(ctx *gin.Context, params json.RawMessage) (inte
 	if limit, err = apierrors.ValidLimit(limit, 500); err != nil {
 		return nil, err
 	}
-	if startIndex < 0 {
-		return nil, apierrors.Publicf("invalid start entry_id: %d", startIndex)
+	// legacy valid_offset allows exactly -1 (newest entry); only values
+	// below -1 are rejected. The cursor layer implements the -1 branch.
+	if startIndex < -1 {
+		return nil, apierrors.PublicError("offset cannot be negative")
 	}
 
 	fullEntries, err := b.loadBlogEntries(ctx, account, startIndex, limit)

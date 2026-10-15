@@ -65,7 +65,7 @@ func TestRepToRaw(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := repToRaw(c.rep)
+			got := RepToRaw(c.rep)
 			// For exact-match cases
 			if c.rep == 25 {
 				if got != 0 {
@@ -124,7 +124,7 @@ func TestRepToRawStr(t *testing.T) {
 
 	// "34" should match repToRaw(34)
 	got = repToRawStr("34")
-	want := repToRaw(34)
+	want := RepToRaw(34)
 	if got != want {
 		t.Errorf("repToRawStr(\"34\") = %v, want %v", got, want)
 	}

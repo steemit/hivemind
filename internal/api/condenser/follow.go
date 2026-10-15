@@ -2,12 +2,12 @@ package condenser
 
 import (
 	"encoding/json"
-	"fmt"
-	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
+	"github.com/steemit/hivemind/internal/apierrors"
 	"github.com/steemit/hivemind/internal/db"
 	"github.com/steemit/hivemind/internal/models"
 	"github.com/steemit/hivemind/pkg/logging"
@@ -16,6 +16,7 @@ import (
 // FollowAPI provides follow-related API methods
 type FollowAPI struct {
 	repo   *db.Repository
+	cursor *Cursor
 	logger *zap.Logger
 }
 
@@ -27,179 +28,153 @@ func NewFollowAPI(repo *db.Repository) *FollowAPI {
 	}
 }
 
-// GetFollowers handles condenser_api.get_followers
-func (f *FollowAPI) GetFollowers(c *gin.Context, params json.RawMessage) (interface{}, error) {
-	var p []interface{}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, err
+// SetDatabase sets the database connection used by the follow cursor
+// queries (created_at DESC pagination, mirroring legacy condenser cursor).
+func (f *FollowAPI) SetDatabase(db *gorm.DB) {
+	f.cursor = NewCursor(db)
+}
+
+// validFollowType defaults an omitted follow type to "blog" and rejects any
+// other value, mirroring legacy valid_follow_type (helpers.py).
+func validFollowType(followType string) (string, error) {
+	if followType == "" {
+		return "blog", nil
+	}
+	if followType != "blog" && followType != "ignore" {
+		return "", apierrors.Publicf("invalid follow_type `%s`", followType)
+	}
+	return followType, nil
+}
+
+// legacyFollowerWithReputation builds a follow entry in the legacy condenser
+// shape (methods.py _legacy_follower_with_reputation): the `reputation` value
+// is the stored UI score from hive_accounts (NOT rep_to_raw — legacy passes
+// the column through), and `what` is always a fixed-length ["", ""] pair
+// filled from the state bitfield (bit 0 = blog, bit 1 = ignore).
+func legacyFollowerWithReputation(follower string, reputation float64, following string, state int16) map[string]interface{} {
+	what := []string{"", ""}
+	if state&models.FollowStateBlog != 0 {
+		what[0] = "blog"
+	}
+	if state&models.FollowStateIgnore != 0 {
+		what[1] = "ignore"
+	}
+	return map[string]interface{}{
+		"follower":   follower,
+		"reputation": reputation,
+		"following":  following,
+		"what":       what,
+	}
+}
+
+// parseFollowSeekParams parses the common (account, start, follow_type,
+// limit) positional list of the follow cursor methods.
+func parseFollowSeekParams(params json.RawMessage) (account, start, followType string, limit int, err error) {
+	arr, err := parseListParams(params, 4, 1)
+	if err != nil {
+		return "", "", "", 0, err
 	}
 
-	if len(p) < 1 {
-		return nil, apierrors.PublicError("missing required parameter: account")
+	account = paramString(arr, 0)
+	if account, err = apierrors.ValidAccount(account, false); err != nil {
+		return "", "", "", 0, err
 	}
 
-	account, _ := p[0].(string)
-	start := ""
-	if len(p) > 1 {
-		start, _ = p[1].(string)
+	start = paramString(arr, 1)
+	if start, err = apierrors.ValidAccount(start, true); err != nil {
+		return "", "", "", 0, err
 	}
-	followType := "blog"
-	if len(p) > 2 {
-		followType, _ = p[2].(string)
+
+	followType = paramString(arr, 2)
+	if followType, err = validFollowType(followType); err != nil {
+		return "", "", "", 0, err
 	}
-	limit := 1000
-	if len(p) > 3 {
-		if l, ok := p[3].(float64); ok {
+
+	limit = 1000
+	if len(arr) > 3 {
+		if l, ok := arr[3].(float64); ok {
 			limit = int(l)
 		}
 	}
-
 	if limit > 1000 {
 		limit = 1000
 	}
 	if limit < 1 {
 		limit = 100
 	}
+	return account, start, followType, limit, nil
+}
 
-	// Get account ID
-	accountRepo := db.NewAccountRepository(f.repo)
-	acc, err := accountRepo.GetByName(c.Request.Context(), account)
+// parseFollowPageParams parses the common (account, page, page_size,
+// follow_type) positional list of the by-page follow methods.
+func parseFollowPageParams(params json.RawMessage) (account string, page, pageSize int, followType string, err error) {
+	arr, err := parseListParams(params, 4, 2)
+	if err != nil {
+		return "", 0, 0, "", err
+	}
+
+	account = paramString(arr, 0)
+	if account, err = apierrors.ValidAccount(account, false); err != nil {
+		return "", 0, 0, "", err
+	}
+
+	page = paramInt(arr, 1)
+	pageSize = 100
+	if len(arr) > 2 {
+		pageSize = paramInt(arr, 2)
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+	if pageSize < 1 {
+		pageSize = 100
+	}
+	if page < 0 {
+		page = 0
+	}
+
+	followType = paramString(arr, 3)
+	if followType, err = validFollowType(followType); err != nil {
+		return "", 0, 0, "", err
+	}
+	return account, page, pageSize, followType, nil
+}
+
+// GetFollowers handles condenser_api.get_followers
+func (f *FollowAPI) GetFollowers(c *gin.Context, params json.RawMessage) (interface{}, error) {
+	account, start, followType, limit, err := parseFollowSeekParams(params)
 	if err != nil {
 		return nil, err
 	}
-	if acc == nil {
-		return nil, fmt.Errorf("account not found: %s", account)
-	}
 
-	// Get start follower ID if provided
-	var startFollowerID *int64
-	if start != "" {
-		startAcc, err := accountRepo.GetByName(c.Request.Context(), start)
-		if err == nil && startAcc != nil {
-			startFollowerID = &startAcc.ID
-		}
-	}
-
-	// Query followers
-	followRepo := db.NewFollowRepository(f.repo)
-	follows, err := followRepo.GetFollowers(c.Request.Context(), acc.ID, startFollowerID, followType, limit)
+	rows, err := f.cursor.GetFollowers(c.Request.Context(), account, start, followType, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build result
-	result := make([]interface{}, 0, len(follows))
-	for _, follow := range follows {
-		// Get follower account name
-		followerAcc, err := accountRepo.GetByID(c.Request.Context(), follow.FollowerID)
-		if err != nil || followerAcc == nil {
-			continue
-		}
-
-		// Determine what array based on state
-		what := []string{}
-		if follow.State&models.FollowStateBlog != 0 {
-			what = append(what, "blog")
-		}
-		if follow.State&models.FollowStateIgnore != 0 {
-			what = append(what, "ignore")
-		}
-
-		result = append(result, map[string]interface{}{
-			"follower":  followerAcc.Name,
-			"following": account,
-			"what":      what,
-		})
+	result := make([]interface{}, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, legacyFollowerWithReputation(row.Name, row.Reputation, account, row.State))
 	}
-
 	return result, nil
 }
 
 // GetFollowing handles condenser_api.get_following
 func (f *FollowAPI) GetFollowing(c *gin.Context, params json.RawMessage) (interface{}, error) {
-	var p []interface{}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, err
-	}
-
-	if len(p) < 1 {
-		return nil, apierrors.PublicError("missing required parameter: account")
-	}
-
-	account, _ := p[0].(string)
-	start := ""
-	if len(p) > 1 {
-		start, _ = p[1].(string)
-	}
-	followType := "blog"
-	if len(p) > 2 {
-		followType, _ = p[2].(string)
-	}
-	limit := 1000
-	if len(p) > 3 {
-		if l, ok := p[3].(float64); ok {
-			limit = int(l)
-		}
-	}
-
-	if limit > 1000 {
-		limit = 1000
-	}
-	if limit < 1 {
-		limit = 100
-	}
-
-	// Get account ID
-	accountRepo := db.NewAccountRepository(f.repo)
-	acc, err := accountRepo.GetByName(c.Request.Context(), account)
-	if err != nil {
-		return nil, err
-	}
-	if acc == nil {
-		return nil, fmt.Errorf("account not found: %s", account)
-	}
-
-	// Get start following ID if provided
-	var startFollowingID *int64
-	if start != "" {
-		startAcc, err := accountRepo.GetByName(c.Request.Context(), start)
-		if err == nil && startAcc != nil {
-			startFollowingID = &startAcc.ID
-		}
-	}
-
-	// Query following
-	followRepo := db.NewFollowRepository(f.repo)
-	follows, err := followRepo.GetFollowing(c.Request.Context(), acc.ID, startFollowingID, followType, limit)
+	account, start, followType, limit, err := parseFollowSeekParams(params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build result
-	result := make([]interface{}, 0, len(follows))
-	for _, follow := range follows {
-		// Get following account name
-		followingAcc, err := accountRepo.GetByID(c.Request.Context(), follow.FollowingID)
-		if err != nil || followingAcc == nil {
-			continue
-		}
-
-		// Determine what array based on state
-		what := []string{}
-		if follow.State&models.FollowStateBlog != 0 {
-			what = append(what, "blog")
-		}
-		if follow.State&models.FollowStateIgnore != 0 {
-			what = append(what, "ignore")
-		}
-
-		result = append(result, map[string]interface{}{
-			"follower":  account,
-			"following": followingAcc.Name,
-			"what":      what,
-		})
+	rows, err := f.cursor.GetFollowing(c.Request.Context(), account, start, followType, limit)
+	if err != nil {
+		return nil, err
 	}
 
+	result := make([]interface{}, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, legacyFollowerWithReputation(account, row.Reputation, row.Name, row.State))
+	}
 	return result, nil
 }
 
@@ -222,7 +197,7 @@ func (f *FollowAPI) GetFollowCount(c *gin.Context, params json.RawMessage) (inte
 		return nil, err
 	}
 	if acc == nil {
-		return nil, fmt.Errorf("account not found: %s", account)
+		return nil, apierrors.Publicf("account not found: `%s`", account)
 	}
 
 	return map[string]interface{}{
@@ -268,170 +243,38 @@ func (f *FollowAPI) GetRebloggedBy(c *gin.Context, params json.RawMessage) (inte
 
 // GetFollowersByPage handles condenser_api.get_followers_by_page
 func (f *FollowAPI) GetFollowersByPage(c *gin.Context, params json.RawMessage) (interface{}, error) {
-	var p []interface{}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, err
-	}
-
-	if len(p) < 2 {
-		return nil, fmt.Errorf("missing required parameters: account, page")
-	}
-
-	account, _ := p[0].(string)
-	page := 0
-	if pg, ok := p[1].(float64); ok {
-		page = int(pg)
-	}
-	pageSize := 100
-	if len(p) > 2 {
-		if ps, ok := p[2].(float64); ok {
-			pageSize = int(ps)
-		}
-	}
-	followType := "blog"
-	if len(p) > 3 {
-		followType, _ = p[3].(string)
-	}
-
-	if pageSize > 1000 {
-		pageSize = 1000
-	}
-	if pageSize < 1 {
-		pageSize = 100
-	}
-	if page < 0 {
-		page = 0
-	}
-
-	// Get account ID
-	accountRepo := db.NewAccountRepository(f.repo)
-	acc, err := accountRepo.GetByName(c.Request.Context(), account)
-	if err != nil {
-		return nil, err
-	}
-	if acc == nil {
-		return nil, fmt.Errorf("account not found: %s", account)
-	}
-
-	// Calculate offset
-	offset := page * pageSize
-
-	// Query followers with pagination
-	followRepo := db.NewFollowRepository(f.repo)
-	follows, err := followRepo.GetFollowersPaginated(c.Request.Context(), acc.ID, followType, offset, pageSize)
+	account, page, pageSize, followType, err := parseFollowPageParams(params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build result
-	result := make([]interface{}, 0, len(follows))
-	for _, follow := range follows {
-		// Get follower account name
-		followerAcc, err := accountRepo.GetByID(c.Request.Context(), follow.FollowerID)
-		if err != nil || followerAcc == nil {
-			continue
-		}
-
-		// Determine what array based on state
-		what := []string{}
-		if follow.State&models.FollowStateBlog != 0 {
-			what = append(what, "blog")
-		}
-		if follow.State&models.FollowStateIgnore != 0 {
-			what = append(what, "ignore")
-		}
-
-		result = append(result, map[string]interface{}{
-			"follower":  followerAcc.Name,
-			"following": account,
-			"what":      what,
-		})
+	rows, err := f.cursor.GetFollowersByPage(c.Request.Context(), account, page, pageSize, followType)
+	if err != nil {
+		return nil, err
 	}
 
+	result := make([]interface{}, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, legacyFollowerWithReputation(row.Name, row.Reputation, account, row.State))
+	}
 	return result, nil
 }
 
 // GetFollowingByPage handles condenser_api.get_following_by_page
 func (f *FollowAPI) GetFollowingByPage(c *gin.Context, params json.RawMessage) (interface{}, error) {
-	var p []interface{}
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, err
-	}
-
-	if len(p) < 2 {
-		return nil, fmt.Errorf("missing required parameters: account, page")
-	}
-
-	account, _ := p[0].(string)
-	page := 0
-	if pg, ok := p[1].(float64); ok {
-		page = int(pg)
-	}
-	pageSize := 100
-	if len(p) > 2 {
-		if ps, ok := p[2].(float64); ok {
-			pageSize = int(ps)
-		}
-	}
-	followType := "blog"
-	if len(p) > 3 {
-		followType, _ = p[3].(string)
-	}
-
-	if pageSize > 1000 {
-		pageSize = 1000
-	}
-	if pageSize < 1 {
-		pageSize = 100
-	}
-	if page < 0 {
-		page = 0
-	}
-
-	// Get account ID
-	accountRepo := db.NewAccountRepository(f.repo)
-	acc, err := accountRepo.GetByName(c.Request.Context(), account)
-	if err != nil {
-		return nil, err
-	}
-	if acc == nil {
-		return nil, fmt.Errorf("account not found: %s", account)
-	}
-
-	// Calculate offset
-	offset := page * pageSize
-
-	// Query following with pagination
-	followRepo := db.NewFollowRepository(f.repo)
-	follows, err := followRepo.GetFollowingPaginated(c.Request.Context(), acc.ID, followType, offset, pageSize)
+	account, page, pageSize, followType, err := parseFollowPageParams(params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build result
-	result := make([]interface{}, 0, len(follows))
-	for _, follow := range follows {
-		// Get following account name
-		followingAcc, err := accountRepo.GetByID(c.Request.Context(), follow.FollowingID)
-		if err != nil || followingAcc == nil {
-			continue
-		}
-
-		// Determine what array based on state
-		what := []string{}
-		if follow.State&models.FollowStateBlog != 0 {
-			what = append(what, "blog")
-		}
-		if follow.State&models.FollowStateIgnore != 0 {
-			what = append(what, "ignore")
-		}
-
-		result = append(result, map[string]interface{}{
-			"follower":  account,
-			"following": followingAcc.Name,
-			"what":      what,
-		})
+	rows, err := f.cursor.GetFollowingByPage(c.Request.Context(), account, page, pageSize, followType)
+	if err != nil {
+		return nil, err
 	}
 
+	result := make([]interface{}, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, legacyFollowerWithReputation(account, row.Reputation, row.Name, row.State))
+	}
 	return result, nil
 }
