@@ -193,3 +193,52 @@ func TestLoadSteemRPCDefaults(t *testing.T) {
 		t.Errorf("Steem.RPCTimeout = %v, want 2m (from HIVE_STEEMD_RPC_TIMEOUT)", cfg.Steem.RPCTimeout)
 	}
 }
+
+func TestValidateMaxBodyBytes(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Database: DatabaseConfig{
+				URL: "postgresql://test@localhost/test", MaxOpenConns: 25,
+				MaxIdleConns: 10, StatementTimeout: 30 * time.Second,
+			},
+			Steem: SteemConfig{URL: "u", MaxBatch: 50, MaxWorkers: 4},
+		}
+	}
+	c := base()
+	// 0 (unset) selects the default cap and must validate.
+	if err := c.Validate(); err != nil {
+		t.Errorf("zero MaxBodyBytes (default) should be valid: %v", err)
+	}
+	c.Server.MaxBodyBytes = 1
+	if err := c.Validate(); err != nil {
+		t.Errorf("explicit cap should be valid: %v", err)
+	}
+	c.Server.MaxBodyBytes = -1
+	if err := c.Validate(); err == nil {
+		t.Error("expected error for negative http_max_body_bytes")
+	}
+	c.Server.MaxBodyBytes = 1<<30 + 1
+	if err := c.Validate(); err == nil {
+		t.Error("expected error for http_max_body_bytes above 1GiB")
+	}
+}
+
+func TestLoadMaxBodyBytes(t *testing.T) {
+	t.Setenv("HIVE_DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+	if cfg.Server.MaxBodyBytes != 10<<20 {
+		t.Errorf("default Server.MaxBodyBytes = %d, want %d", cfg.Server.MaxBodyBytes, 10<<20)
+	}
+
+	t.Setenv("HIVE_HTTP_MAX_BODY_BYTES", "12345")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Failed to load config with override: %v", err)
+	}
+	if cfg.Server.MaxBodyBytes != 12345 {
+		t.Errorf("Server.MaxBodyBytes = %d, want 12345 (from HIVE_HTTP_MAX_BODY_BYTES)", cfg.Server.MaxBodyBytes)
+	}
+}

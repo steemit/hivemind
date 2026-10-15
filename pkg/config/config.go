@@ -98,6 +98,12 @@ type ServerConfig struct {
 
 	// IdleTimeout caps the time a keep-alive connection sits idle. Default 120s.
 	IdleTimeout time.Duration
+
+	// MaxBodyBytes caps the JSON-RPC request body (http.MaxBytesReader);
+	// larger bodies are refused with HTTP 413 before any parsing. Default
+	// 10MB; 0 selects the default. The legacy aiohttp default is 1MB
+	// (client_max_size).
+	MaxBodyBytes int64
 }
 
 // IndexerConfig holds indexer configuration
@@ -194,6 +200,7 @@ func Load() (*Config, error) {
 			ReadTimeout:  getDuration("http_read_timeout", 30*time.Second),
 			WriteTimeout: getDuration("http_write_timeout", 30*time.Second),
 			IdleTimeout:  getDuration("http_idle_timeout", 120*time.Second),
+			MaxBodyBytes: getInt64("http_max_body_bytes", 10<<20),
 		},
 		Indexer: IndexerConfig{
 			TrailBlocks:            getInt("trail_blocks", 2),
@@ -249,6 +256,7 @@ func setDefaults() {
 	viper.SetDefault("http_read_timeout", 30*time.Second)
 	viper.SetDefault("http_write_timeout", 30*time.Second)
 	viper.SetDefault("http_idle_timeout", 120*time.Second)
+	viper.SetDefault("http_max_body_bytes", 10<<20)
 	viper.SetDefault("log_level", "INFO")
 	viper.SetDefault("log_format", "json")
 	viper.SetDefault("log_scalyr_format", true)
@@ -281,6 +289,19 @@ func getInt(key string, defaultValue int) int {
 	}
 	if val := os.Getenv("HIVE_" + toEnvKey(key)); val != "" {
 		if i, err := strconv.Atoi(val); err == nil {
+			return i
+		}
+	}
+	return defaultValue
+}
+
+// getInt64 reads an int64 config value from viper or HIVE_ env var.
+func getInt64(key string, defaultValue int64) int64 {
+	if viper.IsSet(key) {
+		return viper.GetInt64(key)
+	}
+	if val := os.Getenv("HIVE_" + toEnvKey(key)); val != "" {
+		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
 			return i
 		}
 	}
@@ -390,6 +411,13 @@ func (c *Config) Validate() error {
 		if d.v < 0 {
 			return fmt.Errorf("%s must not be negative", d.name)
 		}
+	}
+	// Request body cap: 0 selects the default (10MB, applied by the
+	// JSON-RPC handler), negative or absurdly large values (> 1GiB) are
+	// rejected — an unbounded pre-auth body is exactly what §5.5 exists
+	// to prevent.
+	if c.Server.MaxBodyBytes < 0 || c.Server.MaxBodyBytes > 1<<30 {
+		return fmt.Errorf("http_max_body_bytes must be between 0 (default) and %d bytes", 1<<30)
 	}
 	return nil
 }

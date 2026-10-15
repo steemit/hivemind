@@ -27,9 +27,11 @@ type Router struct {
 
 // NewRouter creates a new API router. The steemd client is optional (nil
 // disables steemd-backed methods like get_transaction);
-// recommendCommunities is the HIVE_RECOMMEND_COMMUNITIES comma list.
-func NewRouter(database *db.DB, redisCache *cache.Cache, steemd *steem.Client, recommendCommunities string) *Router {
-	handler := NewJSONRPCHandler()
+// recommendCommunities is the HIVE_RECOMMEND_COMMUNITIES comma list;
+// maxBodyBytes caps the JSON-RPC request body (HIVE_HTTP_MAX_BODY_BYTES,
+// HTTP 413 beyond it; non-positive selects the framework default).
+func NewRouter(database *db.DB, redisCache *cache.Cache, steemd *steem.Client, recommendCommunities string, maxBodyBytes int64) *Router {
+	handler := NewJSONRPCHandler(maxBodyBytes)
 	router := &Router{
 		handler: handler,
 		db:      database,
@@ -49,8 +51,9 @@ func (r *Router) SetupRoutes(engine *gin.Engine) {
 	engine.GET("/health", r.healthHandler)
 	engine.GET("/.well-known/healthcheck.json", r.healthHandler)
 
-	// JSON-RPC endpoint
+	// JSON-RPC endpoint (+ CORS preflight, see CORSPreflightHandler)
 	engine.POST("/", r.handler.Handle)
+	engine.OPTIONS("/", CORSPreflightHandler)
 }
 
 // registerMethods registers all API methods

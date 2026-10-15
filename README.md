@@ -102,6 +102,7 @@ Configuration is managed via environment variables or config file:
 | `HIVE_HTTP_READ_TIMEOUT` | HTTP read timeout | 30s |
 | `HIVE_HTTP_WRITE_TIMEOUT` | HTTP write timeout | 30s |
 | `HIVE_HTTP_IDLE_TIMEOUT` | HTTP idle timeout | 120s |
+| `HIVE_HTTP_MAX_BODY_BYTES` | JSON-RPC request body cap; larger bodies get HTTP 413 before parsing (0 = default, max 1073741824) | 10485760 (10MB) |
 | `HIVE_LOG_LEVEL` | Logging level | INFO |
 | `HIVE_TRACES_ENDPOINT` | OTLP traces endpoint | localhost:4318 |
 | `HIVE_PROMETHEUS_ENABLED` | Enable Prometheus metrics | true |

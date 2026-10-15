@@ -39,6 +39,50 @@ POST http://localhost:8080/
 }
 ```
 
+The `result` member is always present on success — a method with no
+payload returns `"result": null`, matching the legacy server.
+
+## Transport (Batch, Notifications, CORS, Body Limit)
+
+Behavior follows the legacy stack (jsonrpcserver 4.0.1 behind aiohttp):
+
+- **Batch**: a JSON array body is dispatched item by item; the response is
+  an array with one entry per non-notification request, in request order
+  (max 100 items; beyond it the whole batch gets a `-32600` error). An
+  empty array `[]` is rejected with a single `-32600` error object.
+- **Notifications**: requests without an `id` member are executed but
+  never answered (a single notification gets an empty HTTP 200 body; an
+  all-notification batch gets `[]`).
+- **CORS**: every JSON-RPC response carries `Access-Control-Allow-Origin:
+  *`; `OPTIONS /` answers browser preflights (204).
+- **Body limit**: bodies larger than `HIVE_HTTP_MAX_BODY_BYTES`
+  (default 10MB) are refused with HTTP 413 before parsing.
+
+## Error Handling
+
+Errors are returned in JSON-RPC format (HTTP 200). Codes and messages
+match the legacy jsonrpcserver 4.0.1 strings:
+
+| Code | Message | Meaning |
+|------|---------|---------|
+| -32700 | Invalid JSON | Body is not valid JSON |
+| -32600 | Invalid JSON-RPC | Not a valid request object (wrong/missing `jsonrpc`, bad `id`/`params` type, empty batch) |
+| -32601 | Method not found | Unknown method name |
+| -32602 | Invalid parameters | Input validation failed (invalid account/permlink/limit, ...); `data` carries the detail |
+| -32000 | Server error | Any other handler failure; internal detail is withheld (logged/traced server-side) |
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32602,
+    "message": "Invalid parameters",
+    "data": "invalid account name length: `x`"
+  }
+}
+```
+
 ## Condenser API
 
 ### Follow Operations
@@ -700,22 +744,6 @@ Status/health check endpoint.
   "db_head_block": 19930833,
   "db_head_time": "2018-02-16 21:37:36",
   "db_head_age": 10
-}
-```
-
-## Error Handling
-
-Errors are returned in JSON-RPC format:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "error": {
-    "code": -32602,
-    "message": "Invalid params",
-    "data": "account is required"
-  }
 }
 ```
 
