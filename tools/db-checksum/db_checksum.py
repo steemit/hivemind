@@ -291,6 +291,12 @@ def bisect_range(left_psql: str, right_psql: str, table: str,
 def cmd_compare(args) -> int:
     left = load_artifact(args.left)
     right = load_artifact(args.right)
+    if left.get("segment_rows") != right.get("segment_rows"):
+        raise ToolError(
+            "artifacts were produced with different --segment-rows values "
+            f"({left.get('segment_rows')} vs {right.get('segment_rows')}); "
+            "regenerate with matching segmentation before comparing"
+        )
     left_tables = left["tables"]
     right_tables = right["tables"]
     differences = []

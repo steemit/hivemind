@@ -125,7 +125,9 @@ func (a *CallAPI) Call(c *gin.Context, params json.RawMessage) (interface{}, err
 		return forwardList(c, a.misc.GetAccountVotes, args, 1, -1)
 	}
 
-	return nil, apierrors.Publicf("unknown method: %s.%s", api, method)
+	// legacy raises ApiError here (call.py:151), which jsonrpcserver maps
+	// to -32000 "Server error" -- same class as the get_state refusals.
+	return nil, apierrors.NotSupportedf("unknown method: %s.%s", api, method)
 }
 
 // forwardList applies the legacy _strict_list arity check, then hands the

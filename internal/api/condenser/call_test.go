@@ -52,7 +52,6 @@ func TestCallAdapterValidation(t *testing.T) {
 		{"query filter_tags", `["condenser_api","get_discussions_by_trending",[{"limit":5,"filter_tags":["x"]}]]`, "filter_tags not supported"},
 		{"query select_tags", `["condenser_api","get_discussions_by_trending",[{"limit":5,"select_tags":["x"]}]]`, "select_tags not supported"},
 		{"query unknown key", `["condenser_api","get_discussions_by_trending",[{"limit":5,"nope":1}]]`, "unknown query key {'nope'}"},
-		{"unknown method", `["condenser_api","get_xyz",[]]`, "unknown method: condenser_api.get_xyz"},
 	}
 
 	for _, tc := range cases {
@@ -70,6 +69,21 @@ func TestCallAdapterValidation(t *testing.T) {
 			}
 		})
 	}
+
+	// Unknown methods raise the not-supported class (legacy ApiError ->
+	// -32000), not a parameter error.
+	t.Run("unknown method", func(t *testing.T) {
+		_, err := callRaw(t, adapter, `["condenser_api","get_xyz",[]]`)
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if _, isPub := err.(apierrors.PublicError); isPub {
+			t.Fatalf("error type = %T, want NotSupportedError", err)
+		}
+		if err.Error() != "unknown method: condenser_api.get_xyz" {
+			t.Errorf("error = %q", err.Error())
+		}
+	})
 }
 
 // TestStrictQueryNormalization checks the blank-key stripping and

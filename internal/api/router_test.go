@@ -368,7 +368,7 @@ func TestCallAdapterDispatch(t *testing.T) {
 		obj = call(t, `["condenser_api","get_account_votes",["alice"]]`)
 		assertRPCServerError(t, obj)
 		obj = call(t, `["condenser_api","no_such_method",[]]`)
-		assertRPCErrorData(t, obj, "unknown method: condenser_api.no_such_method")
+		assertRPCServerError(t, obj)
 	})
 }
 
