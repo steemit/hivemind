@@ -1,5 +1,11 @@
-# Server-specific Dockerfile
-FROM golang:1.23-alpine AS builder
+# Server image (planned PR#432: pinned base images + HEALTHCHECK,
+# 05-deploy.md section 1.6).
+#
+# Base images are pinned to exact tags (no :latest) so builds are
+# reproducible; bump deliberately.
+
+# Build stage - golang:1.23-alpine3.20 (go.mod requires go 1.23)
+FROM golang:1.23-alpine3.20 AS builder
 
 RUN apk add --no-cache git make
 
@@ -12,8 +18,11 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o hivemind-server ./cmd/server
 
-FROM alpine:latest
+# Runtime stage - alpine 3.20 (pinned; no :latest)
+FROM alpine:3.20
 
+# ca-certificates for HTTPS (steemd), tzdata for timestamps, wget for the
+# HEALTHCHECK probe.
 RUN apk --no-cache add ca-certificates tzdata wget
 
 RUN addgroup -g 1000 appuser && \
@@ -27,7 +36,21 @@ RUN chown -R appuser:appuser /app
 
 USER appuser
 
+# JSON-RPC API port. The observability port (HIVE_PROMETHEUS_PORT, default
+# 9090) serves /metrics + /debug/pprof and must stay internal-only.
 EXPOSE 8080
 
-CMD ["./hivemind-server"]
+# Real health endpoint (PR#430): 200 once the database is reachable and the
+# indexed head is fresh (HIVE_HEALTH_MAX_HEAD_AGE, 1h). On a brand-new
+# database the head is genesis-stale, so the container reports unhealthy
+# until the indexer catches up - intended (a stale reader serves garbage).
+# Env is honored via CMD-SHELL so a non-default HIVE_HTTP_SERVER_PORT works.
+#
+# GET-and-discard, NOT `wget --spider`: busybox spider mode sends HEAD and
+# the gin router registers /health as GET-only, so spider probes get 404
+# even while the endpoint is healthy (verified live; a pre-#432 compose
+# healthcheck had this latent bug). wget exits non-zero on HTTP 5xx.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD wget -q --tries=1 -O /dev/null "http://localhost:${HIVE_HTTP_SERVER_PORT:-8080}/health" || exit 1
 
+CMD ["./hivemind-server"]

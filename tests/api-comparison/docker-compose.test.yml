@@ -62,7 +62,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -79,7 +79,7 @@ services:
     environment:
       HIVE_DATABASE_URL: postgresql://hivemind:hivemind@postgres:5432/hivemind
       HIVE_REDIS_URL: redis://redis:6379
-      HIVE_STEEM_URL: https://api.steemit.com
+      HIVE_STEEMD_URL: https://api.steemit.com
       HIVE_HTTP_SERVER_PORT: 8080
       HIVE_HTTP_SERVER_HOST: 0.0.0.0
       HIVE_LOG_LEVEL: INFO
@@ -89,7 +89,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3

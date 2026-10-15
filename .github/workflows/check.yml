@@ -11,8 +11,8 @@
 #                 report artifacts; blocks only after Q4 W9 - see TODO),
 #                 also anti-skip guarded
 #
-# The docker image job (master pushes) stays in build.yml and is owned by
-# planned PR#432. build.yml is intentionally untouched by this workflow.
+# The docker image / smoke / EB-deploy pipeline lives in build.yml (owned
+# by planned PR#432); this workflow stays code-quality-only.
 #
 # NOTE on `-p 1`: integration tests issue `DROP SCHEMA public CASCADE` and the
 # internal/db + internal/indexer packages both use the database pointed to by
@@ -48,10 +48,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        # v5.6.0
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
 
@@ -74,7 +76,8 @@ jobs:
       - name: golangci-lint
         # v7 of the action serves golangci-lint v2; version pinned to the
         # release the .golangci.yml schema was validated against.
-        uses: golangci/golangci-lint-action@v7
+        # v7.0.1
+        uses: golangci/golangci-lint-action@9fae48acfc02a90574d7c304a1758ef9895495fa
         with:
           version: v2.14.0
 
@@ -107,10 +110,12 @@ jobs:
       HIVE_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        # v5.6.0
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
 
@@ -155,7 +160,8 @@ jobs:
       # uploaded only when the step fails to keep artifacts lean.
       - name: Upload integration test log (on failure)
         if: failure()
-        uses: actions/upload-artifact@v4
+        # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: integration-test-log
           path: integration-test.log
@@ -184,10 +190,12 @@ jobs:
       HIVE_TEST_DATABASE_URL: postgresql://test:test@localhost:5432/postgres
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        # v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        # v5.6.0
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
 
@@ -211,7 +219,8 @@ jobs:
 
       - name: Upload coverage test log (on failure)
         if: failure()
-        uses: actions/upload-artifact@v4
+        # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: coverage-test-log
           path: coverage-test.log
@@ -246,7 +255,8 @@ jobs:
           fi
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
+        # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: coverage-report
           path: |

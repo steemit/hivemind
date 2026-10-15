@@ -78,13 +78,15 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 		}
 	}
 
-	// Setup trace exporter using OTLP
-	traceExporter, err := otlptrace.New(ctx,
-		otlptracehttp.NewClient(
-			otlptracehttp.WithEndpoint(endpoint),
-			otlptracehttp.WithInsecure(), // Use TLS in production
-		),
-	)
+	// Setup trace exporter using OTLP. TLS is configurable (HIVE_TRACES_TLS,
+	// planned PR#432, 05-deploy.md section 1.6): the default (false) keeps
+	// insecure OTLP/HTTP for the local compose stack (in-network jaeger
+	// collector); production TLS endpoints set it to true.
+	otlpOpts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(endpoint)}
+	if !cfg.TracesTLS {
+		otlpOpts = append(otlpOpts, otlptracehttp.WithInsecure())
+	}
+	traceExporter, err := otlptrace.New(ctx, otlptracehttp.NewClient(otlpOpts...))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP trace exporter: %w", err)
 	}
@@ -98,7 +100,9 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 	otel.SetTracerProvider(tp)
 	shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
 
-	logging.GetLogger().Info("OTLP trace exporter initialized", zap.String("endpoint", endpoint))
+	logging.GetLogger().Info("OTLP trace exporter initialized",
+		zap.String("endpoint", endpoint),
+		zap.Bool("tls", cfg.TracesTLS))
 
 	// Initialize metric provider with Prometheus exporter, bridged onto the
 	// shared Registry (registry.go) so otel SDK metrics and the promauto

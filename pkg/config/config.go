@@ -159,10 +159,15 @@ type LoggingConfig struct {
 type TelemetryConfig struct {
 	Enabled           bool
 	TracesEndpoint    string // OTLP endpoint (e.g., "localhost:4318")
+	TracesTLS         bool   // Use TLS to the OTLP endpoint (false = insecure/HTTP)
 	JaegerURL         string // Deprecated: use TracesEndpoint instead
 	PrometheusEnabled bool
 	PrometheusPort    int
-	ServiceName       string
+
+	// ServiceName labels traces/metrics (HIVE_TELEMETRY_SERVICE_NAME,
+	// e.g. "hivemind-go" for the gray-release rollout - 05-deploy.md
+	// section 4; the key was "service_name" pre-#432, a dead env name).
+	ServiceName string
 
 	// HealthMaxHeadAge is the /health head-lag threshold (planned PR#430,
 	// 05-deploy.md section 1.2). Readers answer 500 when the indexed head
@@ -254,10 +259,11 @@ func Load() (*Config, error) {
 		Telemetry: TelemetryConfig{
 			Enabled:           getBool("telemetry_enabled", true),
 			TracesEndpoint:    getString("traces_endpoint", "localhost:4318"),
+			TracesTLS:         getBool("traces_tls", false),
 			JaegerURL:         getString("jaeger_url", "http://localhost:14268/api/traces"),
 			PrometheusEnabled: getBool("prometheus_enabled", true),
 			PrometheusPort:    getInt("prometheus_port", 9090),
-			ServiceName:       getString("service_name", "hivemind"),
+			ServiceName:       getString("telemetry_service_name", "hivemind"),
 			HealthMaxHeadAge:  getDuration("health_max_head_age", time.Hour),
 			PprofEnabled:      getBool("pprof_enabled", true),
 		},
@@ -302,9 +308,14 @@ func setDefaults() {
 	viper.SetDefault("max_workers", 4)
 	viper.SetDefault("telemetry_enabled", true)
 	viper.SetDefault("traces_endpoint", "localhost:4318")
+	// TracesTLS defaults to false (insecure OTLP/HTTP): the local compose
+	// stack ships an in-network jaeger collector without TLS. Production
+	// endpoints behind TLS set HIVE_TRACES_TLS=true (planned PR#432,
+	// 05-deploy.md section 1.6 - replaces the WithInsecure hardcode).
+	viper.SetDefault("traces_tls", false)
 	viper.SetDefault("prometheus_enabled", true)
 	viper.SetDefault("prometheus_port", 9090)
-	viper.SetDefault("service_name", "hivemind")
+	viper.SetDefault("telemetry_service_name", "hivemind")
 	viper.SetDefault("health_max_head_age", time.Hour)
 	viper.SetDefault("pprof_enabled", true)
 }
