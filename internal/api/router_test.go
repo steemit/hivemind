@@ -217,8 +217,11 @@ func TestNewAliasesDispatch(t *testing.T) {
 		{"tags_api.get_discussions_by_author_before_date", `["ab","","",10]`, "invalid account name length: `ab`"},
 		{"tags_api.get_post_discussions_by_payout", `{"start_author":"ab","limit":5}`, "invalid account name length: `ab`"},
 		{"tags_api.get_comment_discussions_by_payout", `{"start_author":"ab","limit":5}`, "invalid account name length: `ab`"},
-		{"tags_api.get_account_votes", `["alice"]`, "get_account_votes is no longer supported"},
 	}
+
+	// tags_api.get_account_votes is asserted separately below: its target
+	// handler is the not-supported dummy, whose classification is -32000
+	// ("Server error"), not the -32602 validation class this loop expects.
 
 	for _, tc := range cases {
 		t.Run(tc.method, func(t *testing.T) {
@@ -238,6 +241,67 @@ func TestNewAliasesDispatch(t *testing.T) {
 				t.Errorf("error data = %q, want %q", data, tc.wantData)
 			}
 		})
+	}
+}
+
+// TestNotSupportedClassification pins the -32000 mapping of the
+// not-supported class (planned PR#421, #408 audit): the dummy
+// get_account_votes (direct, tags_api alias and via the `call` adapter) and
+// the not-implemented get_state refusal must answer exactly like the legacy
+// ApiError route through jsonrpcserver 4.0.1's ExceptionResponse — code
+// -32000, message "Server error", and NO error.data (Go's registered
+// divergence: legacy debug dispatch adds "ApiError: <msg>" as data, which
+// the comparison tooling whitelists because it judges error.message only).
+// A validation PublicError must keep its -32602 mapping, proving the two
+// classes stay distinct.
+func TestNotSupportedClassification(t *testing.T) {
+	router := newRegistryRouter(t)
+	engine := gin.New()
+	engine.POST("/", router.handler.Handle)
+
+	cases := []struct {
+		method string
+		params string
+	}{
+		{"condenser_api.get_account_votes", `["alice"]`},
+		{"tags_api.get_account_votes", `["alice"]`},
+		{"condenser_api.get_state", `["trending"]`},
+		{"call", `["condenser_api","get_account_votes",["alice"]]`},
+		{"call", `["condenser_api","get_state",["trending"]]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method, func(t *testing.T) {
+			w := doPost(t, engine, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":%q,"params":%s}`, tc.method, tc.params))
+			obj := decodeObject(t, w)
+			errObj, ok := obj["error"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected an error response, got %v", obj)
+			}
+			if code := errObj["code"].(float64); code != -32000 {
+				t.Fatalf("error code = %v, want -32000 (legacy ApiError -> ExceptionResponse)", code)
+			}
+			if msg := errObj["message"].(string); msg != "Server error" {
+				t.Errorf("error message = %q, want \"Server error\" (legacy ExceptionResponse message; the refusal text lives in legacy debug data)", msg)
+			}
+			if data, has := errObj["data"]; has {
+				t.Errorf("error data = %v, want absent (Go omits data on -32000; registered whitelist)", data)
+			}
+		})
+	}
+
+	// Control: a validation PublicError through the same dispatch path must
+	// still map to -32602 — the not-supported class must not swallow it.
+	w := doPost(t, engine, `{"jsonrpc":"2.0","id":1,"method":"condenser_api.get_follow_count","params":["ab"]}`)
+	obj := decodeObject(t, w)
+	errObj, _ := obj["error"].(map[string]interface{})
+	if errObj == nil {
+		t.Fatalf("expected an error response, got %v", obj)
+	}
+	if code := errObj["code"].(float64); code != -32602 {
+		t.Errorf("validation error code = %v, want -32602", code)
+	}
+	if data := errObj["data"].(string); data != "invalid account name length: `ab`" {
+		t.Errorf("validation error data = %q, want the PublicError text", data)
 	}
 }
 
@@ -295,14 +359,34 @@ func TestCallAdapterDispatch(t *testing.T) {
 
 	t.Run("routed refusals", func(t *testing.T) {
 		// get_state is the registered D1 deviation; the adapter must
-		// forward to it rather than answer unknown-method.
+		// forward to it rather than answer unknown-method. Both refusals
+		// are the not-supported class (-32000 "Server error", no data);
+		// the full classification matrix is pinned by
+		// TestNotSupportedClassification above.
 		obj := call(t, `["condenser_api","get_state",["trending"]]`)
-		assertRPCErrorDataContains(t, obj, "get_state is not implemented")
+		assertRPCServerError(t, obj)
 		obj = call(t, `["condenser_api","get_account_votes",["alice"]]`)
-		assertRPCErrorData(t, obj, "get_account_votes is no longer supported")
+		assertRPCServerError(t, obj)
 		obj = call(t, `["condenser_api","no_such_method",[]]`)
 		assertRPCErrorData(t, obj, "unknown method: condenser_api.no_such_method")
 	})
+}
+
+func assertRPCServerError(t *testing.T, obj map[string]interface{}) {
+	t.Helper()
+	errObj, ok := obj["error"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected an error response, got %v", obj)
+	}
+	if code := errObj["code"].(float64); code != -32000 {
+		t.Fatalf("error code = %v, want -32000", code)
+	}
+	if msg := errObj["message"].(string); msg != "Server error" {
+		t.Fatalf("error message = %q, want \"Server error\"", msg)
+	}
+	if data, has := errObj["data"]; has {
+		t.Fatalf("error data = %v, want absent", data)
+	}
 }
 
 func assertRPCErrorData(t *testing.T, obj map[string]interface{}, want string) {
@@ -316,20 +400,5 @@ func assertRPCErrorData(t *testing.T, obj map[string]interface{}, want string) {
 	}
 	if data := errObj["data"].(string); data != want {
 		t.Fatalf("error data = %q, want %q", data, want)
-	}
-}
-
-func assertRPCErrorDataContains(t *testing.T, obj map[string]interface{}, want string) {
-	t.Helper()
-	errObj, ok := obj["error"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected an error response, got %v", obj)
-	}
-	if code := errObj["code"].(float64); code != -32602 {
-		t.Fatalf("error code = %v, want -32602", code)
-	}
-	data := errObj["data"].(string)
-	if !strings.Contains(data, want) {
-		t.Fatalf("error data = %q, want it to contain %q", data, want)
 	}
 }

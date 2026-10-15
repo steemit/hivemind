@@ -1,0 +1,96 @@
+# Go-only API methods: Go-vs-Go self-check track (decision D4).
+#
+# Legacy never registers hive_api.* nor bridge.list_top_communities, so
+# these 9 methods CANNOT be compared cross-service (legacy answers -32601
+# method-not-found). Per 04-comparison.md §二 they are verified on the D4
+# track instead: real-PG integration tests on the Go side plus a manual
+# cross-read against hivemind_legacy/hive/server/hive_api/{public,objects}.py
+# (W5 deliverable). This file keeps one reachability case per method so the
+# comparison tooling can run them in Go-vs-Go mode -- point BOTH endpoints
+# at the Go server:
+#
+#   python3 api_comparator.py --config test_cases_go_only.yaml \
+#       --python-url http://go:8080 --go-url http://go:8080
+#
+# (also usable as the --smoke self-regression basis: snapshot responses to
+# catch shape regressions, planned W8 evaluation).
+#
+# Parameter shapes use the Go handler keys (object form).
+
+config:
+  ignore_fields: []
+  tolerance:
+    float_epsilon: 0.001
+    timestamp_seconds: 2
+
+test_cases:
+  - id: hive-api-get-account
+    name: "hive_api.get_account steemit (Go-only)"
+    api: "hive_api.get_account"
+    priority: "P1"
+    # Go handler reads the `name` key
+    params:
+      name: "steemit"
+
+  - id: hive-api-get-accounts
+    name: "hive_api.get_accounts [steemit, alice] (Go-only)"
+    api: "hive_api.get_accounts"
+    priority: "P1"
+    params:
+      names: ["steemit", "alice"]
+
+  - id: hive-api-list-followers
+    name: "hive_api.list_followers steemit (limit 10) (Go-only)"
+    api: "hive_api.list_followers"
+    priority: "P1"
+    params:
+      account: "steemit"
+      start: ""
+      limit: 10
+
+  - id: hive-api-list-following
+    name: "hive_api.list_following steemit (limit 10) (Go-only)"
+    api: "hive_api.list_following"
+    priority: "P1"
+    params:
+      account: "steemit"
+      start: ""
+      limit: 10
+
+  - id: hive-api-list-all-muted
+    name: "hive_api.list_all_muted steemit (Go-only)"
+    api: "hive_api.list_all_muted"
+    priority: "P1"
+    params:
+      account: "steemit"
+
+  - id: hive-api-list-account-blog
+    name: "hive_api.list_account_blog steemit (limit 10) (Go-only)"
+    api: "hive_api.list_account_blog"
+    priority: "P1"
+    params:
+      account: "steemit"
+      limit: 10
+
+  - id: hive-api-list-account-posts
+    name: "hive_api.list_account_posts steemit (limit 10) (Go-only)"
+    api: "hive_api.list_account_posts"
+    priority: "P1"
+    params:
+      account: "steemit"
+      limit: 10
+
+  - id: hive-api-list-account-feed
+    name: "hive_api.list_account_feed steemit (limit 10) (Go-only)"
+    api: "hive_api.list_account_feed"
+    priority: "P1"
+    params:
+      account: "steemit"
+      limit: 10
+
+  - id: bridge-list-top-communities
+    name: "bridge.list_top_communities (Go-only alias of list_pop_communities)"
+    api: "bridge.list_top_communities"
+    priority: "P1"
+    params:
+      limit: 10

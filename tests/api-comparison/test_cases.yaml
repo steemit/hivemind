@@ -1,20 +1,39 @@
-# Hivemind API consistency test cases.
+# Hivemind API consistency test cases -- 2026-Q4 authoritative matrix.
+#
+# Coverage (planned PR#421, 04-comparison.md §一 1.9/1.10): every one of the
+# 68 method names the legacy server registers (serve.py build_methods) has at
+# least one case here -- condenser_api x26, follow_api/tags_api aliases x21
+# (one reachability case per alias), bare `call` x1, bridge x19, hive x1.
+# The 9 Go-only methods (hive_api x8 + bridge.list_top_communities) live in
+# test_cases_go_only.yaml (decision D4: Go-vs-Go self-check track, not
+# cross-service comparable).
 #
 # Parameter shapes follow the LEGACY Python server's wire protocol (the
 # authoritative reference), in forms the Go server also accepts:
-#   * condenser_api.* -- positional arrays. Discussion-style queries use the
-#     steemd/jussi nested-query form: a one-element array holding the query
-#     object (legacy `nested_query_compat`, Go params.go shape 2).
-#   * bridge.* / hive_api.* -- single object (kwargs) with keys matching the
-#     legacy method signatures exactly.
-#   * Go-only methods (hive_api.*, bridge.list_top_communities) use the Go
-#     handler's object keys; they are P2 and expected to fail against legacy
-#     (method not found) -- cross-service comparison for them is impossible
-#     (decision D4); the full matrix restructure lands with #421.
+#   * condenser_api.* / follow_api.* / tags_api.* / `call` -- positional
+#     arrays. Discussion-style queries use the steemd/jussi nested-query
+#     form: a one-element array holding the query object (legacy
+#     `nested_query_compat`, Go params.go shape 2).
+#   * bridge.* -- single object (kwargs) with keys matching the legacy
+#     method signatures exactly.
 #
-# Priorities follow the 2026-Q4 API comparison matrix (P0 = core read
-# paths exercised by every frontend, P1 = secondary paths, P2 =
-# peripheral / Go-only endpoints).
+# Priorities follow the 2026-Q4 comparison matrix (04-comparison.md §二):
+#   P0 = core read paths exercised by every frontend (must reach 100%);
+#   P1 = secondary paths (remaining condenser queries, remaining bridge
+#        methods, alias reachability cases);
+#   P2 = expected-difference / dummy-text / env-gated cases.
+#
+# expected_diff: true marks a REGISTERED expected difference (04 §一): the
+# comparator counts these cases separately and they never count as failures,
+# but a passing expected-diff case is surfaced so the registry can be pruned.
+#
+# Sample parameters (1.10): values are legacy-protocol-legal typical samples
+# (steemit/firstpost, community hive-139531). Both compared servers read the
+# SAME database, so responses are deterministic; cursor/pagination cases use
+# seek semantics (results start at/after the cursor), which stay
+# well-defined even when the sample does not exist in the target DB. When a
+# W4/W6 run against the test-env database needs non-empty page-N results,
+# adjust the samples to accounts/posts that actually exist there.
 #
 # Comparison tuning (ignore_fields / tolerance / unordered / lenient_list)
 # is intentionally left empty for now: both servers read the same database,
@@ -33,7 +52,7 @@ config:
     timestamp_seconds: 2      # tolerance for timestamp-aware comparison
 
 test_cases:
-  # ==================== Hive core ====================
+  # ==================== Hive core (1/1) ====================
   - id: db-head-state
     name: "hive.db_head_state (head block/age; age compared with time tolerance)"
     api: "hive.db_head_state"
@@ -54,11 +73,40 @@ test_cases:
     # legacy signature: (account, start, type, limit)
     params: ["steemit", "", "blog", 10]
 
+  - id: condenser-get-followers-start-cursor
+    name: "condenser_api.get_followers steemit second page (start='alice' seek cursor)"
+    api: "condenser_api.get_followers"
+    priority: "P0"
+    # 1.10 pagination follow-up: second request carrying the start cursor of
+    # the first page. Seek semantics make any valid account name
+    # deterministic (results begin at/after `start`).
+    params: ["steemit", "alice", "blog", 10]
+
   - id: condenser-get-following
     name: "condenser_api.get_following steemit (start='', type='blog', limit 10)"
     api: "condenser_api.get_following"
     priority: "P0"
     params: ["steemit", "", "blog", 10]
+
+  - id: condenser-get-following-start-cursor
+    name: "condenser_api.get_following steemit second page (start='alice' seek cursor)"
+    api: "condenser_api.get_following"
+    priority: "P0"
+    params: ["steemit", "alice", "blog", 10]
+
+  - id: condenser-get-followers-by-page
+    name: "condenser_api.get_followers_by_page steemit (page 0, size 10)"
+    api: "condenser_api.get_followers_by_page"
+    priority: "P1"
+    # legacy signature: (account, page, page_size[, follow_type]) — page_size
+    # is required (valid_limit(None) fails); follow_type defaults to 'blog'.
+    params: ["steemit", 0, 10]
+
+  - id: condenser-get-following-by-page
+    name: "condenser_api.get_following_by_page steemit (page 0, size 10)"
+    api: "condenser_api.get_following_by_page"
+    priority: "P1"
+    params: ["steemit", 0, 10]
 
   - id: condenser-get-reblogged-by
     name: "condenser_api.get_reblogged_by steemit/firstpost"
@@ -88,6 +136,17 @@ test_cases:
       - tag: ""
         limit: 5
         truncate_body: 1024
+
+  - id: condenser-discussions-trending-start-cursor
+    name: "condenser_api.get_discussions_by_trending second page (start_author/start_permlink seek)"
+    api: "condenser_api.get_discussions_by_trending"
+    priority: "P0"
+    # 1.10 pagination follow-up: cursor pair from the first page's last post.
+    params:
+      - start_author: "steemit"
+        start_permlink: "firstpost"
+        tag: ""
+        limit: 5
 
   - id: condenser-discussions-hot
     name: "condenser_api.get_discussions_by_hot (all tags, limit 5)"
@@ -143,6 +202,13 @@ test_cases:
     # legacy signature: (account, start_entry_id, limit)
     params: ["steemit", 0, 5]
 
+  - id: condenser-get-blog-page2
+    name: "condenser_api.get_blog steemit second page (start_entry_id 5, limit 5)"
+    api: "condenser_api.get_blog"
+    priority: "P0"
+    # 1.10 pagination follow-up: second request with the numeric cursor.
+    params: ["steemit", 5, 5]
+
   - id: condenser-get-blog-entries
     name: "condenser_api.get_blog_entries steemit (start_entry_id 0, limit 5)"
     api: "condenser_api.get_blog_entries"
@@ -184,23 +250,226 @@ test_cases:
     # must be non-blank (the previous startAuthor:'' form was rejected)
     params: ["steemit", "", 5]
 
+  - id: condenser-discussions-by-author-before-date
+    name: "condenser_api.get_discussions_by_author_before_date @steemit (before_date ignored)"
+    api: "condenser_api.get_discussions_by_author_before_date"
+    priority: "P1"
+    # legacy signature: (author, start_permlink, before_date, limit);
+    # before_date is ignored by legacy (and steemd) alike.
+    params: ["steemit", "", "", 10]
+
+  - id: condenser-post-discussions-by-payout
+    name: "condenser_api.get_post_discussions_by_payout (limit 5)"
+    api: "condenser_api.get_post_discussions_by_payout"
+    priority: "P1"
+    # legacy signature: (start_author, start_permlink, limit, tag,
+    # truncate_body); nested-query form via nested_query_compat.
+    params:
+      - limit: 5
+
+  - id: condenser-comment-discussions-by-payout
+    name: "condenser_api.get_comment_discussions_by_payout (limit 5)"
+    api: "condenser_api.get_comment_discussions_by_payout"
+    priority: "P1"
+    params:
+      - limit: 5
+
   - id: condenser-get-transaction
     name: "condenser_api.get_transaction all-zero trx id (env-gated: needs steemd)"
     api: "condenser_api.get_transaction"
     priority: "P2"
+    # Both servers must be configured with a steemd endpoint (04 §五);
+    # without one the Go side errors while legacy still answers — mark the
+    # case env-gated when running without steemd.
     params: ["0000000000000000000000000000000000000000"]
 
+  - id: condenser-get-state
+    name: "condenser_api.get_state /trending (EXPECTED DIFFERENCE: legacy serves the retired-frontend state monolith; Go answers -32000 not-implemented)"
+    api: "condenser_api.get_state"
+    priority: "P2"
+    expected_diff: true
+    # Registered expected difference (04 §二 condenser row): the legacy
+    # get_state router only served the retired condenser frontend; the Go
+    # server deliberately does not approximate it (explicit not-implemented
+    # error, D1 deviation). Counted separately by the comparator, never as
+    # a failure.
+    params: ["trending"]
+
   - id: condenser-get-account-votes
-    name: "condenser_api.get_account_votes steemit (dummy on both sides; EXPECTED RED: error texts differ)"
+    name: "condenser_api.get_account_votes steemit (dummy on both sides; error message compared)"
     api: "condenser_api.get_account_votes"
     priority: "P2"
-    # Both sides are dummies that error, so the case compares error TEXT.
-    # Currently expected red: legacy appends a URL suffix ("get_account_votes
-    # is no longer supported, for details see https://steemit.com/...")
-    # while Go returns only "get_account_votes is no longer supported".
-    # Registered as expected-red until the texts are aligned (tracked with
-    # the other Go-only / text-alignment stragglers in #421).
+    # Both sides are dummies that error, so the case compares the JSON-RPC
+    # error MESSAGE. Legacy raises ApiError(...) which jsonrpcserver 4.0.1
+    # answers as -32000 "Server error" (ExceptionResponse) — the
+    # informative "get_account_votes is no longer supported, for details
+    # see https://steemit.com/..." text lives in legacy's debug error.DATA,
+    # not the message. The Go side used to classify the refusal as a
+    # validation PublicError (-32602 "Invalid parameters"); that
+    # message-layer mismatch was the REAL red reason (the previous note
+    # here blamed the URL suffix, which is a data-layer difference the
+    # comparator never compares — annotation corrected in planned PR#421).
+    # Fixed Go-side via apierrors.NotSupportedError -> -32000 "Server
+    # error". Residual registered divergence: legacy error.data carries
+    # "ApiError: <msg>" while Go omits data on -32000 (whitelisted: the
+    # comparator judges error.message only).
     params: ["steemit"]
+
+  # ==================== follow_api aliases (9/9, one reachability case each) ====
+  # Aliases bind the same legacy handlers (serve.py); one case per alias
+  # proves the name is reachable with legacy-protocol params (04 §二:
+  # alias sampling, not 21 deep re-runs).
+  - id: follow-api-get-followers
+    name: "follow_api.get_followers steemit (alias reachability)"
+    api: "follow_api.get_followers"
+    priority: "P1"
+    params: ["steemit", "", "blog", 10]
+
+  - id: follow-api-get-following
+    name: "follow_api.get_following steemit (alias reachability)"
+    api: "follow_api.get_following"
+    priority: "P1"
+    params: ["steemit", "", "blog", 10]
+
+  - id: follow-api-get-followers-by-page
+    name: "follow_api.get_followers_by_page steemit (alias reachability)"
+    api: "follow_api.get_followers_by_page"
+    priority: "P1"
+    params: ["steemit", 0, 10]
+
+  - id: follow-api-get-following-by-page
+    name: "follow_api.get_following_by_page steemit (alias reachability)"
+    api: "follow_api.get_following_by_page"
+    priority: "P1"
+    params: ["steemit", 0, 10]
+
+  - id: follow-api-get-follow-count
+    name: "follow_api.get_follow_count steemit (alias reachability)"
+    api: "follow_api.get_follow_count"
+    priority: "P1"
+    params: ["steemit"]
+
+  - id: follow-api-get-account-reputations
+    name: "follow_api.get_account_reputations (alias reachability)"
+    api: "follow_api.get_account_reputations"
+    priority: "P1"
+    params: ["", 10]
+
+  - id: follow-api-get-blog
+    name: "follow_api.get_blog steemit (alias reachability)"
+    api: "follow_api.get_blog"
+    priority: "P1"
+    params: ["steemit", 0, 5]
+
+  - id: follow-api-get-blog-entries
+    name: "follow_api.get_blog_entries steemit (alias reachability)"
+    api: "follow_api.get_blog_entries"
+    priority: "P1"
+    params: ["steemit", 0, 5]
+
+  - id: follow-api-get-reblogged-by
+    name: "follow_api.get_reblogged_by steemit/firstpost (alias reachability)"
+    api: "follow_api.get_reblogged_by"
+    priority: "P1"
+    params: ["steemit", "firstpost"]
+
+  # ==================== tags_api aliases (12/12, one reachability case each) ====
+  - id: tags-api-get-account-votes
+    name: "tags_api.get_account_votes steemit (alias reachability; dummy error text)"
+    api: "tags_api.get_account_votes"
+    priority: "P2"
+    # Same dummy handler as condenser_api.get_account_votes; the alias case
+    # proves the name is registered on both servers.
+    params: ["steemit"]
+
+  - id: tags-api-get-discussion
+    name: "tags_api.get_discussion steemit/firstpost (alias of get_content; reachability)"
+    api: "tags_api.get_discussion"
+    priority: "P1"
+    params: ["steemit", "firstpost"]
+
+  - id: tags-api-get-content-replies
+    name: "tags_api.get_content_replies steemit/firstpost (alias reachability)"
+    api: "tags_api.get_content_replies"
+    priority: "P1"
+    params: ["steemit", "firstpost"]
+
+  - id: tags-api-discussions-trending
+    name: "tags_api.get_discussions_by_trending (alias reachability)"
+    api: "tags_api.get_discussions_by_trending"
+    priority: "P1"
+    params:
+      - tag: ""
+        limit: 5
+
+  - id: tags-api-discussions-hot
+    name: "tags_api.get_discussions_by_hot (alias reachability)"
+    api: "tags_api.get_discussions_by_hot"
+    priority: "P1"
+    params:
+      - tag: ""
+        limit: 5
+
+  - id: tags-api-discussions-promoted
+    name: "tags_api.get_discussions_by_promoted (alias reachability)"
+    api: "tags_api.get_discussions_by_promoted"
+    priority: "P1"
+    params:
+      - tag: ""
+        limit: 5
+
+  - id: tags-api-discussions-created
+    name: "tags_api.get_discussions_by_created (alias reachability)"
+    api: "tags_api.get_discussions_by_created"
+    priority: "P1"
+    params:
+      - tag: ""
+        limit: 5
+
+  - id: tags-api-discussions-blog
+    name: "tags_api.get_discussions_by_blog @steemit (alias reachability)"
+    api: "tags_api.get_discussions_by_blog"
+    priority: "P1"
+    params:
+      - tag: "steemit"
+        limit: 5
+
+  - id: tags-api-discussions-comments
+    name: "tags_api.get_discussions_by_comments @steemit (alias reachability)"
+    api: "tags_api.get_discussions_by_comments"
+    priority: "P1"
+    params:
+      - start_author: "steemit"
+        limit: 5
+
+  - id: tags-api-discussions-author-before-date
+    name: "tags_api.get_discussions_by_author_before_date @steemit (alias reachability)"
+    api: "tags_api.get_discussions_by_author_before_date"
+    priority: "P1"
+    params: ["steemit", "", "", 10]
+
+  - id: tags-api-post-discussions-by-payout
+    name: "tags_api.get_post_discussions_by_payout (alias reachability)"
+    api: "tags_api.get_post_discussions_by_payout"
+    priority: "P1"
+    params:
+      - limit: 5
+
+  - id: tags-api-comment-discussions-by-payout
+    name: "tags_api.get_comment_discussions_by_payout (alias reachability)"
+    api: "tags_api.get_comment_discussions_by_payout"
+    priority: "P1"
+    params:
+      - limit: 5
+
+  # ==================== Bare `call` (1/1) ====================
+  - id: call-get-content
+    name: "call condenser_api.get_content steemit/firstpost (legacy call style)"
+    api: "call"
+    priority: "P1"
+    # legacy call signature: (api, method, params) — the inner params keep
+    # the positional wire form of the routed method.
+    params: ["condenser_api", "get_content", ["steemit", "firstpost"]]
 
   # ==================== Bridge API - Post (object params) ====================
   - id: bridge-get-post
@@ -212,14 +481,15 @@ test_cases:
       permlink: "firstpost"
 
   - id: bridge-normalize-post
-    name: "bridge.normalize_post steemit/firstpost (EXPECTED RED: Go reads the post object at top level while legacy binds the `post` kwarg; baseline issue #23)"
+    name: "bridge.normalize_post steemit/firstpost (EXPECTED DIFF: Go reads the post object at top level while legacy binds the `post` kwarg; baseline issue #23)"
     api: "bridge.normalize_post"
     priority: "P1"
+    expected_diff: true
     # legacy signature: normalize_post(context, post) -- the payload must be
     # a full steemd-format post object (the previous {author, permlink} form
     # failed legacy kwarg binding). Go currently expects the post object at
     # the top level (known divergence, baseline issue #23) so this case is
-    # expected red until the Go side is fixed.
+    # a registered expected difference until the Go side is fixed.
     params:
       post:
         id: 33
@@ -258,6 +528,15 @@ test_cases:
         allow_votes: true
         allow_curation_rewards: true
         beneficiaries: []
+
+  - id: bridge-get-post-header
+    name: "bridge.get_post_header steemit/firstpost"
+    api: "bridge.get_post_header"
+    priority: "P1"
+    # legacy signature: get_post_header(context, author, permlink)
+    params:
+      author: "steemit"
+      permlink: "firstpost"
 
   - id: bridge-get-discussion
     name: "bridge.get_discussion steemit/firstpost"
@@ -320,6 +599,15 @@ test_cases:
       name: "hive-139531"
       observer: ""
 
+  - id: bridge-get-community-context
+    name: "bridge.get_community_context hive-139531 / steemit"
+    api: "bridge.get_community_context"
+    priority: "P1"
+    # legacy signature: get_community_context(context, name, account)
+    params:
+      name: "hive-139531"
+      account: "steemit"
+
   - id: bridge-list-communities
     name: "bridge.list_communities (from start, limit 10)"
     api: "bridge.list_communities"
@@ -328,13 +616,14 @@ test_cases:
       last: ""
       limit: 10
 
-  - id: bridge-list-top-communities
-    name: "bridge.list_top_communities (Go-only; legacy: method not found)"
-    api: "bridge.list_top_communities"
-    priority: "P2"
-    # Go-only endpoint (legacy never registers bridge.list_top_communities);
-    # expected red against legacy, see decision D4
+  - id: bridge-list-communities-cursor
+    name: "bridge.list_communities second page (last='hive-139531' seek cursor)"
+    api: "bridge.list_communities"
+    priority: "P0"
+    # 1.10 pagination follow-up: second request carrying the `last` cursor
+    # of the first page.
     params:
+      last: "hive-139531"
       limit: 10
 
   - id: bridge-list-pop-communities
@@ -345,6 +634,32 @@ test_cases:
     # legacy kwarg binding
     params:
       limit: 10
+
+  - id: bridge-list-community-roles
+    name: "bridge.list_community_roles hive-139531 (limit 10)"
+    api: "bridge.list_community_roles"
+    priority: "P1"
+    # legacy signature: list_community_roles(context, community, last, limit)
+    params:
+      community: "hive-139531"
+      last: ""
+      limit: 10
+
+  - id: bridge-list-subscribers
+    name: "bridge.list_subscribers hive-139531"
+    api: "bridge.list_subscribers"
+    priority: "P1"
+    # legacy signature: list_subscribers(context, community)
+    params:
+      community: "hive-139531"
+
+  - id: bridge-list-all-subscriptions
+    name: "bridge.list_all_subscriptions steemit"
+    api: "bridge.list_all_subscriptions"
+    priority: "P1"
+    # legacy signature: list_all_subscriptions(context, account)
+    params:
+      account: "steemit"
 
   # ==================== Bridge API - Notification ====================
   - id: bridge-unread-notifications
@@ -365,70 +680,26 @@ test_cases:
       min_score: 25
       limit: 10
 
-  # ==================== Hive API (Go-only; see D4) ====================
-  # legacy never registers hive_api.*; these cases always see "method not
-  # found" on the python side. Kept (P2) for Go-side regression bookkeeping
-  # until #421 moves them to a Go-vs-Go self-check track.
-  - id: hive-api-get-account
-    name: "hive_api.get_account steemit (Go-only)"
-    api: "hive_api.get_account"
-    priority: "P2"
-    # Go handler reads the `name` key (the previous `account` key was ignored)
-    params:
-      name: "steemit"
-
-  - id: hive-api-get-accounts
-    name: "hive_api.get_accounts [steemit, alice] (Go-only)"
-    api: "hive_api.get_accounts"
-    priority: "P2"
-    params:
-      names: ["steemit", "alice"]
-
-  - id: hive-api-list-followers
-    name: "hive_api.list_followers steemit (limit 10) (Go-only)"
-    api: "hive_api.list_followers"
-    priority: "P2"
+  - id: bridge-account-notifications-last-id
+    name: "bridge.account_notifications steemit second page (last_id cursor)"
+    api: "bridge.account_notifications"
+    priority: "P0"
+    # 1.10 pagination follow-up: second request after the first page's last
+    # notification id (sample value; same-database runs stay deterministic).
     params:
       account: "steemit"
-      start: ""
+      min_score: 25
+      last_id: 1
       limit: 10
 
-  - id: hive-api-list-following
-    name: "hive_api.list_following steemit (limit 10) (Go-only)"
-    api: "hive_api.list_following"
-    priority: "P2"
+  - id: bridge-post-notifications
+    name: "bridge.post_notifications steemit/firstpost (limit 10)"
+    api: "bridge.post_notifications"
+    priority: "P1"
+    # legacy signature: post_notifications(context, author, permlink,
+    # min_score, last_id, limit)
     params:
-      account: "steemit"
-      start: ""
-      limit: 10
-
-  - id: hive-api-list-all-muted
-    name: "hive_api.list_all_muted steemit (Go-only)"
-    api: "hive_api.list_all_muted"
-    priority: "P2"
-    params:
-      account: "steemit"
-
-  - id: hive-api-list-account-blog
-    name: "hive_api.list_account_blog steemit (limit 10) (Go-only)"
-    api: "hive_api.list_account_blog"
-    priority: "P2"
-    params:
-      account: "steemit"
-      limit: 10
-
-  - id: hive-api-list-account-posts
-    name: "hive_api.list_account_posts steemit (limit 10) (Go-only)"
-    api: "hive_api.list_account_posts"
-    priority: "P2"
-    params:
-      account: "steemit"
-      limit: 10
-
-  - id: hive-api-list-account-feed
-    name: "hive_api.list_account_feed steemit (limit 10) (Go-only)"
-    api: "hive_api.list_account_feed"
-    priority: "P2"
-    params:
-      account: "steemit"
+      author: "steemit"
+      permlink: "firstpost"
+      min_score: 25
       limit: 10

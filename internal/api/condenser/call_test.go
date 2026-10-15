@@ -222,11 +222,13 @@ func TestCallAdapterDispatch(t *testing.T) {
 		t.Errorf("call get_replies_by_last_update = %v, want [reply-y]", repliesByLU)
 	}
 
-	// get_account_votes dummy and get_state refusal route through too.
+	// get_account_votes dummy and get_state refusal route through too; both
+	// are the not-supported class (apierrors.NotSupportedError → JSON-RPC
+	// -32000 "Server error", mirroring the legacy ApiError classification).
 	if _, err := callRaw(t, adapter, `["condenser_api","get_account_votes",["alice"]]`); err == nil {
 		t.Error("call get_account_votes must return the informational error")
-	} else if pe, ok := err.(apierrors.PublicError); !ok || string(pe) != "get_account_votes is no longer supported" {
-		t.Errorf("call get_account_votes error = %v, want the legacy dummy message", err)
+	} else if pe, ok := err.(apierrors.NotSupportedError); !ok || string(pe) != "get_account_votes is no longer supported" {
+		t.Errorf("call get_account_votes error = %v (%T), want the legacy dummy message as NotSupportedError", err, err)
 	}
 	if _, err := callRaw(t, adapter, `["condenser_api","get_state",["trending"]]`); err == nil {
 		t.Error("call get_state must return the registered not-implemented refusal")

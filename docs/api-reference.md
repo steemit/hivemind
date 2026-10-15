@@ -69,7 +69,7 @@ match the legacy jsonrpcserver 4.0.1 strings:
 | -32600 | Invalid JSON-RPC | Not a valid request object (wrong/missing `jsonrpc`, bad `id`/`params` type, empty batch) |
 | -32601 | Method not found | Unknown method name |
 | -32602 | Invalid parameters | Input validation failed (invalid account/permlink/limit, ...); `data` carries the detail |
-| -32000 | Server error | Any other handler failure; internal detail is withheld (logged/traced server-side) |
+| -32000 | Server error | Any other handler failure; internal detail is withheld (logged/traced server-side). Also the classification of method-level refusals (`get_account_votes` dummy, `get_state` not-implemented) — matching the legacy `ApiError` → `ExceptionResponse` route; legacy additionally carries `"ApiError: <msg>"` as debug `data`, which the Go server omits (registered divergence) |
 
 ```json
 {
@@ -431,13 +431,14 @@ Get state for a path (compatibility method).
 **Parameters:**
 - `path` (string, required): State path
 
-**Returns:** Not implemented — returns an explicit error. The full get_state
-router only served the retired condenser frontend; use the bridge/condenser
-discussion methods instead.
+**Returns:** Not implemented — returns an explicit error (-32000 "Server
+error"). The full get_state router only served the retired condenser
+frontend; use the bridge/condenser discussion methods instead.
 
 #### condenser_api.get_account_votes
 
-**Note:** This method is no longer supported and returns an error message.
+**Note:** This method is no longer supported and returns an error (-32000
+"Server error", same classification as the legacy dummy).
 
 ## Bridge API
 

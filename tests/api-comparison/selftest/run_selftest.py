@@ -30,6 +30,15 @@ or network access beyond loopback:
   PR#420-review-r3: a body carrying BOTH "result" and "error" (identical
       error, divergent results on the two sides) is judged RED -- the
       identical error text must not mask divergent results.
+  planned PR#421 (1.9/1.10): full-matrix reachability -- every case in
+      test_cases.yaml (68 legacy methods) and test_cases_go_only.yaml (9
+      Go-only, D4 track) runs green against catch-all stubs, with the
+      python-flavored stub enforcing the legacy wire param shape
+      (positional arrays for the condenser family/`call`, kwargs objects
+      for bridge) while the go-flavored stub accepts any shape. A wrong
+      param form errors on exactly the python side and goes red, so this
+      run proves each case is protocol-reachable end to end; the distinct
+      method set actually hit is asserted to equal the full matrix.
 
 Run from tests/api-comparison/:  python3 selftest/run_selftest.py
 """
@@ -122,6 +131,148 @@ def check(condition: bool, message: str, failures: list):
     print(f"  [{status}] {message}")
     if not condition:
         failures.append(message)
+
+
+# ---------------------------------------------------------------------------
+# planned PR#421: full-matrix reachability (04 §一 1.9/1.10)
+# ---------------------------------------------------------------------------
+
+_ARRAY_PARAM_PREFIXES = ("condenser_api.", "follow_api.", "tags_api.")
+_ARRAY_PARAM_METHODS = {"call", "hive.db_head_state"}
+
+
+def _legacy_param_shape(method: str) -> str:
+    """Wire shape the legacy dispatcher accepts for `method`: positional
+    arrays for the condenser family (incl. the follow/tags aliases and the
+    bare `call` adapter) and the parameterless hive.db_head_state; a
+    kwargs object for bridge.* / hive_api.*."""
+    if method in _ARRAY_PARAM_METHODS or method.startswith(_ARRAY_PARAM_PREFIXES):
+        return "array"
+    return "object"
+
+
+def load_matrix_methods() -> dict:
+    """Return {config filename: sorted set of method names declared}."""
+    import yaml
+
+    declared = {}
+    for filename in ("test_cases.yaml", "test_cases_go_only.yaml"):
+        with open(os.path.join(TOOL_DIR, filename)) as handle:
+            cases = (yaml.safe_load(handle) or {}).get("test_cases") or []
+        declared[filename] = sorted({case["api"] for case in cases})
+    return declared
+
+
+def build_matrix_stub_script(methods: list, strict: bool) -> dict:
+    """Catch-all stub script for the reachability run.
+
+    Every method answers the same result payload on both stubs (so the
+    comparison itself is green). With strict=True (the python-flavored
+    stub) each entry also enforces the legacy param shape; the lenient
+    go-flavored stub accepts any shape (params.go three-form parsing). A
+    case whose YAML params have the wrong form therefore errors on
+    exactly the python side and turns red."""
+    script = {}
+    for method in methods:
+        entry = {"result": {"selftest": method, "ok": True}}
+        if strict:
+            entry["validate"] = _legacy_param_shape(method)
+        script[method] = entry
+    return script
+
+
+def run_matrix_reachability(failures: list):
+    """Boot strict/lenient catch-all stubs and run both case configs
+    through the real comparator; every case must pass and the distinct
+    method set hit must equal the declared matrix."""
+    import tempfile
+
+    import yaml
+
+    declared = load_matrix_methods()
+    all_methods = sorted(set(declared["test_cases.yaml"])
+                         | set(declared["test_cases_go_only.yaml"]))
+
+    strict_script = os.path.join(tempfile.mkdtemp(prefix="hivemind-selftest-matrix-"),
+                                 "strict.json")
+    lenient_script = strict_script.replace("strict.json", "lenient.json")
+    with open(strict_script, "w") as handle:
+        json.dump(build_matrix_stub_script(all_methods, strict=True), handle)
+    with open(lenient_script, "w") as handle:
+        json.dump(build_matrix_stub_script(all_methods, strict=False), handle)
+
+    strict_port, lenient_port = free_port(), free_port()
+    stubs = [
+        subprocess.Popen(
+            [sys.executable, STUB, "--port", str(strict_port),
+             "--script", strict_script],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+        subprocess.Popen(
+            [sys.executable, STUB, "--port", str(lenient_port),
+             "--script", lenient_script],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL),
+    ]
+    out_dir = tempfile.mkdtemp(prefix="hivemind-selftest-matrix-")
+    try:
+        wait_for_server(strict_port, stubs[0])
+        wait_for_server(lenient_port, stubs[1])
+        strict_url = f"http://127.0.0.1:{strict_port}"
+        lenient_url = f"http://127.0.0.1:{lenient_port}"
+
+        for filename, want_methods in declared.items():
+            print(f"Run: matrix reachability -- {filename}")
+            config_path = os.path.join(TOOL_DIR, filename)
+            cmd = [sys.executable, COMPARATOR,
+                   "--config", config_path,
+                   "--python-url", strict_url,
+                   "--go-url", lenient_url,
+                   "--output", out_dir, "--no-html"]
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  cwd=TOOL_DIR)
+            reports = sorted(name for name in os.listdir(out_dir)
+                             if name.startswith("report-"))
+            with open(os.path.join(out_dir, reports[-1])) as handle:
+                report = json.load(handle)
+
+            failed = [entry for entry in report["results"] if not entry["passed"]]
+            check(proc.returncode == 0 and not failed,
+                  f"{filename}: every case reachable and green against "
+                  f"catch-all stubs "
+                  f"(red cases: {[e['id'] for e in failed][:5]})",
+                  failures)
+
+            hit = sorted({entry["api"] for entry in report["results"]})
+            check(hit == want_methods,
+                  f"{filename}: distinct methods hit == declared matrix "
+                  f"({len(hit)}/{len(want_methods)})",
+                  failures)
+
+            # The strict stub must actually be enforcing shapes: spot-check
+            # one condenser-family case's params arrived as an array (its
+            # result payload came back, so the python side accepted the
+            # wire form). The Go-only config has no condenser-family
+            # methods, so the check only applies to the main matrix.
+            with open(config_path) as handle:
+                cases = (yaml.safe_load(handle) or {}).get("test_cases") or []
+            samples = [c for c in cases
+                       if c["api"].startswith(("condenser_api.", "call"))]
+            if samples:
+                sample = samples[0]
+                entry = next(e for e in report["results"]
+                             if e["id"] == sample["id"])
+                check(entry["passed"] and entry["python_error"] is None,
+                      f"{sample['id']}: legacy-strict stub accepted the "
+                      f"positional wire form",
+                      failures)
+    finally:
+        for stub in stubs:
+            stub.terminate()
+        for stub in stubs:
+            try:
+                stub.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                stub.kill()
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 def main() -> int:
@@ -292,6 +443,9 @@ def main() -> int:
               != detail["go_response"]["author"]["internal_id"],
               "global-ignore case: masked field really did differ "
               "(green comes from the config, not the data)", failures)
+
+        # planned PR#421: full-matrix reachability (see module docstring).
+        run_matrix_reachability(failures)
 
         print()
         if failures:

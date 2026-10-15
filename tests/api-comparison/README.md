@@ -8,21 +8,41 @@ Go rewrite and produces console/JSON/HTML reports.
 ```
 tests/api-comparison/
 ├── api_comparator.py        # comparator core + runner + reports
-├── run_tests.sh             # convenience runner (health checks, passthrough)
-├── test_cases.yaml          # comparison case suite (legacy wire protocol)
-├── test_api_comparator.py   # unit tests for the comparison core (pytest)
+├── run_tests.sh             # convenience runner (health checks, passthrough;
+│                            #   self-anchored to its own directory)
+├── test_cases.yaml          # the 68-method cross-service matrix (legacy
+│                            #   wire protocol; planned PR#421)
+├── test_cases_go_only.yaml  # 9 Go-only methods -- D4 Go-vs-Go self-check
+│                            #   track (point both URLs at the Go server)
+├── test_api_comparator.py   # unit tests for the comparison core (pytest),
+│                            #   including matrix coverage validation
 ├── selftest/                # selftest/smoke infrastructure (stub servers)
 │   ├── stub_server.py       #   stdlib JSON-RPC stub with scripted responses
 │   ├── stub_responses_python.json / stub_responses_go.json
 │   ├── selftest_cases.yaml  #   reduced case set with expected outcomes
 │   └── run_selftest.py      #   boots stubs, runs the tool, asserts outcomes
+│                            #   incl. full-matrix reachability
 ├── requirements.txt         # Python dependencies
 ├── Dockerfile               # Docker image
-├── docker-compose.test.yml  # Docker Compose config
-├── TEST_PLAN.md             # test plan
+├── docker-compose.test.yml  # Docker Compose config (legacy path via
+│                            #   $LEGACY_CONTEXT; results/ volume-mounted)
+├── TEST_PLAN.md             # test plan (English, priorities aligned to the
+│                            #   2026-Q4 §二 matrix)
 ├── API_ENDPOINTS.md         # endpoint inventory
 └── results/                 # report + per-case detail output directory
+                            #   (git-ignored; kept via results/.gitkeep)
 ```
+
+## Case coverage (2026-Q4 authoritative matrix)
+
+`test_cases.yaml` covers every one of the 68 method names the legacy
+server registers (serve.py `build_methods`): condenser_api x26,
+follow_api/tags_api aliases x21 (one reachability case per alias),
+bare `call` x1, bridge x19, hive x1 — each with at least one
+protocol-reachable case, plus cursor/pagination second requests for the
+paging families. `pytest test_api_comparator.py` fails when a matrix
+method loses its case, and the selftest asserts end-to-end reachability
+of the full set against strict/lenient stubs.
 
 ## Quick start
 
@@ -63,10 +83,18 @@ module. Its entry point is the `hive` console script (`hive.cli`, modes:
 python3 api_comparator.py --priority P0,P1 --output results
 ```
 
-Exit code is `0` when every executed case passed, `1` when at least one
-case failed, and `2` when no case executed at all (e.g. a `--priority`
-filter that matched nothing -- zero evidence must never read as "all
-green" in CI).
+Exit code is `0` when no UNEXPECTED case failed (registered
+`expected_diff` cases are counted separately and never fail the run), `1`
+when at least one unexpected case failed, and `2` when no case executed
+at all (e.g. a `--priority` filter that matched nothing -- zero evidence
+must never read as "all green" in CI).
+
+The Go-only track (decision D4) runs the same tool in Go-vs-Go mode:
+
+```bash
+python3 api_comparator.py --config test_cases_go_only.yaml \
+    --python-url http://localhost:8082 --go-url http://localhost:8082
+```
 
 ## Tool selftest (no services or database needed)
 
@@ -83,7 +111,11 @@ controls: transport-level failures (both sides 500 / unreachable / 302
 redirect) stay red, a 200 response without a JSON-RPC envelope (the
 health-body shape) is rejected on both sides, the object-form rejection
 is locked to the python side, and an empty run exits 2 with an explicit
-warning.
+warning. Since planned PR#421 it also runs a full-matrix reachability
+pass: every case in `test_cases.yaml` (68 methods) and
+`test_cases_go_only.yaml` (9 methods) must run green against catch-all
+stubs, with the strict stub enforcing the legacy param shape — a wrong
+wire form in the YAML errors on exactly the python side and turns red.
 
 ## Command line options
 
@@ -124,6 +156,9 @@ test_cases:
     api: condenser_api.get_content
     priority: P0                # P0/P1/P2; used by --priority
     params: ["steemit", "firstpost"]
+    # expected_diff: true       # REGISTERED expected difference: counted in
+                                #   a separate bucket, never a failure (e.g.
+                                #   get_state, normalize_post baseline #23)
     # ignore_fields: [...]      # per-case: REPLACES the global list
     # tolerance: {...}          # per-case: merged key-wise over global
     # unordered: true           # top-level list: sort by business key first
@@ -169,8 +204,17 @@ global list; per-case `tolerance` merges key-wise over the global one.
   match (case-insensitive; `"$"` matches only `"$"`). An amount string
   never bridges to a bare number: the number side carries no unit to
   verify, so that pair is reported as a type mismatch.
+* JSON-valued strings: when both sides parse as JSON and at least one
+  parses to an object/array, the parsed values are compared recursively.
+  Registered normalization (planned PR#421): payload strings such as
+  community `settings` render key order differently (Go alphabetical,
+  legacy insertion-ordered); scalar JSON strings stay plain strings.
 * When both endpoints return JSON-RPC **application** errors, the error
   texts are compared (used by dummy methods such as `get_account_votes`).
+  Registered whitelist (planned PR#421): `error.code` and `error.data`
+  are never compared — legacy's debug dispatch carries
+  `"ClassName: <msg>"` data on -32000 responses while Go omits data on
+  -32000 entirely; the message layer is the contract.
   Transport-level failures (connection refused, timeout, HTTP 5xx,
   malformed response) are never judged green, even when both sides fail
   identically -- identical transport errors carry no consistency evidence.
@@ -182,23 +226,36 @@ only where the legacy behavior itself is unordered, and record the reason in
 a YAML comment:
 
 * `unordered: true` (+ optional `unordered_key`): sort both sides by the
-  business key, then compare positionally.
+  business key, group equal keys, and compare groups element-wise; groups
+  with more than one element use maximum bipartite matching so two
+  elements sharing a business key cannot be zipped into the wrong partner.
 * `lenient_list: true`: same length plus order-insensitive one-to-one
-  element matching.
+  element matching via maximum bipartite matching (Kuhn's algorithm) —
+  greedy first-match pairing could strand an element whose only partner
+  was already taken and false-red lists that DO have a perfect matching
+  (planned PR#421 obligation ⑥).
 
 ### Reports
 
-* Console: summary (overall and per-priority) plus failures with diffs.
+* Console: summary (overall and per-priority, unexpected-failure count,
+  expected-diff bucket) plus failures with diffs and the separate
+  "Expected differences (registered)" section.
 * `results/report-<timestamp>.json` / `.html`: embedded responses are
   **truncated** (long string fields cut at 200 chars) to keep reports
   readable.
 * `results/case-<id>.json`: one full, untruncated result per case (both
   responses + diff), referenced from the reports.
 
+`results/` contents are git-ignored (the directory itself is kept via
+`results/.gitkeep`); commit run artifacts only by explicit copy.
+
 ## Docker
 
 ```bash
-docker-compose -f docker-compose.test.yml up -d
+# LEGACY_CONTEXT parameterizes the legacy checkout path (defaults to
+# /home/ety001/workspace/hivemind_legacy on this machine).
+LEGACY_CONTEXT=/path/to/hivemind_legacy \
+  docker-compose -f docker-compose.test.yml up -d
 docker-compose -f docker-compose.test.yml logs -f test-runner
 docker-compose -f docker-compose.test.yml down
 ```

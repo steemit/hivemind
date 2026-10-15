@@ -254,15 +254,21 @@ func (m *MiscAPI) GetTransaction(ctx *gin.Context, params json.RawMessage) (inte
 // The full get_state router (path parsing + feed_price/props assembly) is a
 // large legacy-compat surface aimed at the retired condenser frontend; it is
 // intentionally not approximated here (per repo policy: explicit error
-// instead of a wrong-shaped stub).
+// instead of a wrong-shaped stub). The refusal is a NotSupportedError, so it
+// maps to -32000 "Server error" like the legacy ApiError class (the case is
+// registered as an expected difference in the comparison matrix).
 func (m *MiscAPI) GetState(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	return nil, apierrors.PublicError("get_state is not implemented; use bridge/condenser methods instead")
+	return nil, apierrors.NotSupportedError("get_state is not implemented; use bridge/condenser methods instead")
 }
 
 // GetAccountVotes handles condenser_api.get_account_votes (dummy method)
 func (m *MiscAPI) GetAccountVotes(ctx *gin.Context, params json.RawMessage) (interface{}, error) {
-	// This method is no longer supported
-	return nil, apierrors.PublicError("get_account_votes is no longer supported")
+	// Legacy raises ApiError("get_account_votes is no longer supported, for
+	// details see https://steemit.com/...") which jsonrpcserver answers as
+	// -32000 "Server error" (ExceptionResponse). NotSupportedError carries
+	// the same classification; the URL suffix lives in legacy's debug
+	// error.data, which Go omits (registered whitelist, planned PR#421).
+	return nil, apierrors.NotSupportedError("get_account_votes is no longer supported")
 }
 
 // limitFromQuery extracts the limit from a query params map with legacy

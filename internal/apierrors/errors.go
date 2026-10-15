@@ -13,9 +13,9 @@ import (
 )
 
 // PublicError is an error whose message is safe for client consumption.
-// Handlers return these for user-input problems and documented refusals
-// (e.g. "not implemented"); the JSON-RPC layer forwards the message in
-// error.data.
+// Handlers return these for user-input problems; the JSON-RPC layer maps
+// them to -32602 "Invalid parameters" (the legacy AssertionError/TypeError
+// validation class) and forwards the message in error.data.
 type PublicError string
 
 // Error implements the error interface.
@@ -24,6 +24,25 @@ func (e PublicError) Error() string { return string(e) }
 // Publicf formats a new PublicError.
 func Publicf(format string, args ...interface{}) PublicError {
 	return PublicError(fmt.Sprintf(format, args...))
+}
+
+// NotSupportedError is a method-level refusal: dummy endpoints
+// (condenser_api.get_account_votes) and methods the Go server deliberately
+// does not implement (condenser_api.get_state). Its legacy counterpart
+// raises hive.server.common.helpers.ApiError, which jsonrpcserver 4.0.1
+// maps through ExceptionResponse to -32000 "Server error" — NOT the -32602
+// validation class. The 2026-Q4 #408 audit caught the previous
+// classification (a plain PublicError, i.e. -32602) contradicting the
+// legacy wire behavior; this distinct type keeps the two classes from
+// collapsing into one (registered obligation, planned PR#421).
+type NotSupportedError string
+
+// Error implements the error interface.
+func (e NotSupportedError) Error() string { return string(e) }
+
+// NotSupportedf formats a new NotSupportedError.
+func NotSupportedf(format string, args ...interface{}) NotSupportedError {
+	return NotSupportedError(fmt.Sprintf(format, args...))
 }
 
 // accountNameRe matches valid steem account names (legacy valid_account).

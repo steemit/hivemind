@@ -366,6 +366,26 @@ func (h *JSONRPCHandler) dispatchRequest(c *gin.Context, span trace.Span, req *J
 
 	duration := time.Since(start).Seconds()
 	if err != nil {
+		// Method-level refusals (apierrors.NotSupportedError: dummy
+		// endpoints, not-implemented methods) answer exactly like the
+		// legacy ApiError class: jsonrpcserver 4.0.1 routes them through
+		// ExceptionResponse → -32000 "Server error". The legacy response
+		// additionally carries debug data ("ApiError: <message>"); Go
+		// deliberately omits error.data on -32000 responses — a
+		// registered divergence whitelisted in the comparison tooling
+		// (the comparator judges error.message only; planned PR#421).
+		var notSupported apierrors.NotSupportedError
+		if errors.As(err, &notSupported) {
+			telemetry.RecordError(namespace, method, "not_supported")
+			telemetry.RecordRequest(namespace, method, "error", duration)
+			telemetry.RecordSpanError(methodSpan, err)
+			h.logger.Info("JSON-RPC method refused (not supported)",
+				zap.String("method", req.Method),
+				zap.Int("code", ErrServerError),
+				zap.Error(err))
+			return errorResponse(req.ID, ErrServerError, msgServerError, nil)
+		}
+
 		// Legacy dispatcher (jsonrpcserver 4.0.1 handle_exceptions):
 		// AssertionError/TypeError (input validation) map to -32602
 		// Invalid parameters; every other exception maps to -32000
