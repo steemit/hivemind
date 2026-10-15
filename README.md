@@ -109,6 +109,8 @@ Configuration is managed via environment variables or config file:
 | `HIVE_HTTP_SHUTDOWN_GRACE` | Graceful-shutdown window on SIGTERM; must be >= `HIVE_DB_STATEMENT_TIMEOUT` so in-flight statements complete (0 = default) | 45s |
 | `HIVE_LOG_LEVEL` | Logging level | INFO |
 | `HIVE_TRACES_ENDPOINT` | OTLP traces endpoint | localhost:4318 |
+| `HIVE_TRACES_TLS` | Use TLS to the OTLP traces endpoint; false keeps insecure OTLP/HTTP (local compose / in-VPC collector), true for TLS endpoints | false |
+| `HIVE_TELEMETRY_SERVICE_NAME` | Service name for traces/metrics (e.g. `hivemind-go` during the gray rollout) | hivemind |
 | `HIVE_PROMETHEUS_ENABLED` | Enable the observability HTTP listener (`/metrics`, pprof, and the indexer's `/health`) | true |
 | `HIVE_PROMETHEUS_PORT` | Observability HTTP port (server default 9090; the indexer is typically set to 9091) | 9090 |
 | `HIVE_PPROF_ENABLED` | Mount `/debug/pprof/*` on the observability port (keep the port internal-only) | true |
@@ -192,7 +194,8 @@ canceled. The indexer waits for the in-flight block batch (WS1 2.9).
 The easiest way to run Hivemind is using Docker Compose:
 
 ```bash
-# Start all services (PostgreSQL, Redis, Server, Indexer)
+# Start the stack (PostgreSQL, Server, Indexer, Jaeger; Redis is defined
+# but optional - enable it by uncommenting HIVE_REDIS_URL in compose)
 docker-compose up -d
 
 # View logs
@@ -204,10 +207,17 @@ docker-compose down
 
 This will start:
 - **PostgreSQL** on port 5432
-- **Redis** on port 6379
+- **Redis** on port 6379 (optional cache; not a dependency)
 - **API Server** on port 8080
 - **Indexer** (background service)
-- **Jaeger** (tracing UI) on port 16686
+- **Jaeger** (tracing UI) on 127.0.0.1:16686; services ship OTLP traces
+  to the in-network collector at `http://jaeger:4318`
+
+Port policy: the observability listeners (`/metrics` + `/debug/pprof`:
+server 9090, indexer 9091) and the Jaeger UI publish to **127.0.0.1 only** -
+keep pprof off public interfaces. Only port 8080 (JSON-RPC) publishes on
+all interfaces. Container images carry a `HEALTHCHECK` on the real
+`/health` endpoint (server: API port; indexer: observability port).
 
 ### Building Docker Images
 

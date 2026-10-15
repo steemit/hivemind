@@ -1,37 +1,199 @@
-name: build-and-push-docker-image
+# Docker image pipeline + image smoke test + EB deploy placeholder
+# (planned PR#432, 05-deploy.md section 1.8).
+#
+# Jobs:
+#   images    - build the server and indexer images; push to the registry
+#               tagged with the commit sha (Docker Hub secrets
+#               DOCKERHUB_USERNAME / DOCKERHUB_TOKEN - variable-name
+#               placeholders, configure them as repo secrets). Triggered by
+#               pushes to next/master; pull requests build WITHOUT pushing
+#               (no secrets needed) so every PR validates the Dockerfiles.
+#               The pre-#432 job built steemit/hivemind:latest on master
+#               only; next builds never produced an image at all.
+#   smoke     - 06-quality.md section 3.4: the Q3 verification report
+#               section 4 "build + seed + curl" flow, scripted. Builds the
+#               server image, starts it against a fresh postgres:15
+#               service, applies tests/smoke/seed.sql and asserts
+#               /health + condenser_api.get_content +
+#               get_discussions_by_trending + the -32601 error path.
+#   deploy-eb - PLACEHOLDER. Master pushes only (post-merge). Wires up the
+#               actual `eb deploy` during the W8 test-environment rollout;
+#               until then it logs what it would do and exits green.
+#
+# All third-party actions are pinned to full commit SHAs (supply-chain
+# hardening, PR#421 registered item 3). Update by resolving the new tag's
+# SHA and adjusting the trailing version comment.
+#
+# linux/amd64 only: EB instances and the dev/compose hosts are amd64; the
+# pre-#432 QEMU multi-arch setup cost ~3 extra minutes per run for
+# architectures nobody deploys.
+
+name: images-smoke-deploy
 
 on:
   push:
     branches:
-      - 'master'
+      - next
+      - master
+  pull_request:
+    branches:
+      - next
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Registry coordinates. The login secrets are referenced by variable name;
+# when absent (or on pull requests) the images job builds without pushing.
+env:
+  REGISTRY_IMAGE: steemit/hivemind
+
 jobs:
-  docker:
+  images:
+    name: images (server+indexer, tag=sha)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v2
-      -
-        name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
-      -
-        name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-      -
-        name: Login to DockerHub
-        uses: docker/login-action@v1
+      - name: Checkout
+        # v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Resolve push mode
+        id: pushmode
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          # Push only when credentials exist AND this is not a PR build
+          # (PRs come from untrusted contexts; they build but never push).
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ] && [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve image tags
+        id: tags
+        run: |
+          sha="${GITHUB_SHA}"
+          server="$REGISTRY_IMAGE:server-$sha"
+          indexer="$REGISTRY_IMAGE:indexer-$sha"
+          if [ "$GITHUB_REF" = "refs/heads/master" ]; then
+            # post-merge: also move the rolling tags
+            server="$server,$REGISTRY_IMAGE:server-latest"
+            indexer="$indexer,$REGISTRY_IMAGE:indexer-latest"
+          fi
+          {
+            echo "server=$server"
+            echo "indexer=$indexer"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        # v3.12.0
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Login to Docker Hub
+        if: steps.pushmode.outputs.push == 'true'
+        # v3.7.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      -
-        name: Build and push
-        uses: docker/build-push-action@v2
+
+      - name: Build (and push) server image
+        # v6.19.2
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
-          push: true
-          tags: steemit/hivemind:latest
-      -
-        name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+          file: ./Dockerfile.server
+          platforms: linux/amd64
+          push: ${{ steps.pushmode.outputs.push == 'true' }}
+          load: ${{ steps.pushmode.outputs.push != 'true' }}
+          tags: ${{ steps.tags.outputs.server }}
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,scope=server,mode=max
+
+      - name: Build (and push) indexer image
+        # v6.19.2
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: ./Dockerfile.indexer
+          platforms: linux/amd64
+          push: ${{ steps.pushmode.outputs.push == 'true' }}
+          load: ${{ steps.pushmode.outputs.push != 'true' }}
+          tags: ${{ steps.tags.outputs.indexer }}
+          cache-from: type=gha,scope=indexer
+          cache-to: type=gha,scope=indexer,mode=max
+
+  smoke:
+    name: smoke (image + pg + seed + curl)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SMOKE_DB_URL: postgresql://test:test@localhost:5432/hivemind_smoke
+      SMOKE_ADMIN_URL: postgresql://test:test@localhost:5432/postgres
+    steps:
+      - name: Checkout
+        # v4.4.0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # Built here rather than downloaded from the images job: the smoke
+      # suite must also pass on PRs, where images are never pushed.
+      - name: Build server image
+        run: docker build -t hivemind-server:smoke -f Dockerfile.server .
+
+      # tests/smoke/run_smoke.sh: recreate hivemind_smoke, boot the image
+      # (migrations apply on startup), apply seed.sql (accounts, discussion
+      # tree, cache rows with votes CSV, fresh head block), then assert
+      # /health, get_content, get_discussions_by_trending and the -32601
+      # error path. The /health wait doubles as a HEALTHCHECK probe: the
+      # image's own wget healthcheck starts passing at the same point.
+      - name: Run smoke suite
+        run: ./tests/smoke/run_smoke.sh
+
+      - name: Dump server logs (on failure)
+        if: failure()
+        run: docker logs hivemind-smoke-server || true
+
+  deploy-eb:
+    name: deploy-eb (placeholder until W8)
+    # Master merges only, after green images + smoke.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [images, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # PLACEHOLDER command (05-deploy.md section 1.8): the real deploy is
+      # wired up during the W8 test-environment rollout (O8). It will need
+      # the AWS credentials / EB environment as repo secrets - reference
+      # names below - plus the sha->Dockerrun.aws.json rewrite:
+      #
+      #   - name: Configure AWS credentials
+      #     uses: aws-actions/configure-aws-credentials@<sha>  # pin!
+      #     with:
+      #       aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #       aws-region: ${{ secrets.AWS_REGION }}
+      #   - name: Deploy to Elastic Beanstalk
+      #     run: |
+      #       sed -i "s/CHANGE_ME_COMMIT_SHA/${GITHUB_SHA}/" Dockerrun.aws.json
+      #       eb deploy hivemind-go-api --stage
+      - name: Placeholder
+        run: |
+          echo "deploy-eb placeholder: real EB deploy lands with the W8 test-env rollout."
+          echo "Would deploy $REGISTRY_IMAGE:server-${GITHUB_SHA} via Dockerrun.aws.json (see step comments)."

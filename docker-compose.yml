@@ -1,3 +1,18 @@
+# Full-stack local development compose (planned PR#432, 05-deploy.md
+# section 1.6).
+#
+# Every HIVE_* name below matches pkg/config/config.go exactly (Load() key
+# -> env var). The pre-#432 file carried five groups of dead env names that
+# config never read (HIVE_STEEM_URL, HIVE_STEEM_MAX_*, HIVE_INDEXER_TRAIL_*
+# and the HIVE_TELEMETRY_* cluster), so jaeger never saw a trace and the
+# indexer's 9091 listener never came up.
+#
+# Port exposure policy (PR#430 audit item 1): the observability listeners
+# (9090/9091) serve /metrics AND /debug/pprof/* and must stay off public
+# interfaces. They are published to 127.0.0.1 only - reachable for local
+# scraping/profiling, not from outside the host. Only 8080 (JSON-RPC) is
+# published on all interfaces.
+
 services:
   # PostgreSQL database
   postgres:
@@ -18,7 +33,12 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Redis cache
+  # Redis cache (OPTIONAL by config semantics: the cache layer enables only
+  # when HIVE_REDIS_URL is non-empty - pkg/config RedisConfig. It is a
+  # performance cache, not a dependency: server/indexer run fine without it.
+  # The service stays defined so it can be started on demand
+  # (`docker compose up -d redis`); applications opt in by uncommenting
+  # HIVE_REDIS_URL below. Neither binary hard-depends on it anymore.)
   redis:
     image: redis:7-alpine
     container_name: hivemind-redis
@@ -42,41 +62,43 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      # No redis dependency: redis is optional (see above).
     environment:
       # Database
       HIVE_DATABASE_URL: postgresql://hivemind:hivemind_password@postgres:5432/hivemind?sslmode=disable
-      
-      # Steem
-      HIVE_STEEM_URL: https://api.steemit.com
-      HIVE_STEEM_MAX_BATCH: 50
-      HIVE_STEEM_MAX_WORKERS: 4
-      
-      # Redis
-      HIVE_REDIS_ENABLED: "true"
-      HIVE_REDIS_URL: redis://redis:6379
-      
+
+      # Steem (config keys: steemd_url / max_batch / max_workers)
+      HIVE_STEEMD_URL: https://api.steemit.com
+      HIVE_MAX_BATCH: 50
+      HIVE_MAX_WORKERS: 4
+
+      # Redis (optional): uncomment to enable the cache layer.
+      # HIVE_REDIS_URL: redis://redis:6379
+
       # Server
       HIVE_HTTP_SERVER_PORT: 8080
       HIVE_HTTP_SERVER_HOST: 0.0.0.0
-      
+
       # Logging
       HIVE_LOG_LEVEL: INFO
       HIVE_LOG_FORMAT: json
       HIVE_LOG_SCALYR_FORMAT: "false"
-      
-      # Telemetry
+
+      # Telemetry (config keys: telemetry_enabled / traces_endpoint /
+      # traces_tls / prometheus_enabled / prometheus_port)
       HIVE_TELEMETRY_ENABLED: "true"
-      HIVE_TELEMETRY_JAEGER_ENABLED: "true"
-      HIVE_TELEMETRY_JAEGER_ENDPOINT: http://jaeger:14268/api/traces
-      HIVE_TELEMETRY_PROMETHEUS_ENABLED: "true"
-      HIVE_TELEMETRY_PROMETHEUS_PORT: 9090
+      HIVE_TELEMETRY_SERVICE_NAME: hivemind-go-server
+      # OTLP/HTTP to the in-network jaeger collector (service below).
+      HIVE_TRACES_ENDPOINT: http://jaeger:4318
+      # In-network collector has no TLS; a TLS endpoint sets this to "true".
+      HIVE_TRACES_TLS: "false"
+      HIVE_PROMETHEUS_ENABLED: "true"
+      HIVE_PROMETHEUS_PORT: 9090
     ports:
-      - "8080:8080"
-      - "9090:9090"  # Prometheus metrics
+      - "8080:8080"           # JSON-RPC API (public)
+      - "127.0.0.1:9090:9090" # /metrics + /debug/pprof (loopback only)
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --tries=1 -O /dev/null http://localhost:8080/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -92,47 +114,56 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      # No redis dependency: redis is optional (see above).
     environment:
       # Database
       HIVE_DATABASE_URL: postgresql://hivemind:hivemind_password@postgres:5432/hivemind?sslmode=disable
-      
-      # Steem
-      HIVE_STEEM_URL: https://api.steemit.com
-      HIVE_STEEM_MAX_BATCH: 50
-      HIVE_STEEM_MAX_WORKERS: 4
-      
-      # Redis
-      HIVE_REDIS_ENABLED: "true"
-      HIVE_REDIS_URL: redis://redis:6379
-      
-      # Indexer
-      HIVE_INDEXER_TRAIL_BLOCKS: 2
-      HIVE_INDEXER_SYNC_INTERVAL: 3
-      
+
+      # Steem (config keys: steemd_url / max_batch / max_workers)
+      HIVE_STEEMD_URL: https://api.steemit.com
+      HIVE_MAX_BATCH: 50
+      HIVE_MAX_WORKERS: 4
+
+      # Redis (optional): uncomment to enable the cache layer.
+      # HIVE_REDIS_URL: redis://redis:6379
+
+      # Indexer (config keys: trail_blocks / sync_interval)
+      HIVE_TRAIL_BLOCKS: 2
+      HIVE_SYNC_INTERVAL: 3
+
       # Logging
       HIVE_LOG_LEVEL: INFO
       HIVE_LOG_FORMAT: json
       HIVE_LOG_SCALYR_FORMAT: "false"
-      
-      # Telemetry
+
+      # Telemetry: the indexer serves /metrics + /debug/pprof + /health +
+      # /head_age on its own observability port (9091 here, 9090 is the
+      # server's). It is exempt from the /health head-lag criterion
+      # (is_syncer), so it stays healthy during catch-up.
       HIVE_TELEMETRY_ENABLED: "true"
-      HIVE_TELEMETRY_JAEGER_ENABLED: "true"
-      HIVE_TELEMETRY_JAEGER_ENDPOINT: http://jaeger:14268/api/traces
-      HIVE_TELEMETRY_PROMETHEUS_ENABLED: "true"
-      HIVE_TELEMETRY_PROMETHEUS_PORT: 9091
+      HIVE_TELEMETRY_SERVICE_NAME: hivemind-go-indexer
+      HIVE_TRACES_ENDPOINT: http://jaeger:4318
+      HIVE_TRACES_TLS: "false"
+      HIVE_PROMETHEUS_ENABLED: "true"
+      HIVE_PROMETHEUS_PORT: 9091
     ports:
-      - "9091:9091"  # Prometheus metrics
+      - "127.0.0.1:9091:9091" # /metrics + pprof + /health (loopback only)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O /dev/null http://localhost:9091/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
 
-  # Jaeger (optional, for tracing)
+  # Jaeger (optional, for tracing): all-in-one collector with OTLP enabled.
+  # Services ship traces to http://jaeger:4318 (OTLP/HTTP) over the compose
+  # network; no host port needed for ingestion. The UI is loopback-only.
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: hivemind-jaeger
     ports:
-      - "16686:16686"  # UI
-      - "14268:14268"  # HTTP collector
+      - "127.0.0.1:16686:16686" # UI (loopback only)
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     restart: unless-stopped
@@ -144,4 +175,3 @@ volumes:
 networks:
   default:
     name: hivemind-network
-

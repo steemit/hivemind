@@ -82,9 +82,16 @@ func NewMetricsServer(cfg MetricsServerConfig, extraRoutes map[string]http.Handl
 	}
 
 	srv := &http.Server{
-		Handler:           mux,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		Handler:     mux,
+		ReadTimeout: 10 * time.Second,
+		// 75s (not the 30s of an API server): /debug/pprof/profile streams
+		// a CPU profile for the requested window (default 30s, commonly
+		// requested up to 60s) and only finishes writing when the window
+		// closes. A 30s WriteTimeout cut every longer profile off mid-body
+		// (PR#430 audit item 5); 75s covers a 60s window plus scrape
+		// overhead. This listener is internal-only, so the generous bound
+		// is not externally reachable.
+		WriteTimeout:      75 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 	}

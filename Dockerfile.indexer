@@ -1,5 +1,11 @@
-# Indexer-specific Dockerfile
-FROM golang:1.23-alpine AS builder
+# Indexer image (planned PR#432: pinned base images + HEALTHCHECK,
+# 05-deploy.md section 1.6).
+#
+# Base images are pinned to exact tags (no :latest) so builds are
+# reproducible; bump deliberately.
+
+# Build stage - golang:1.23-alpine3.20 (go.mod requires go 1.23)
+FROM golang:1.23-alpine3.20 AS builder
 
 RUN apk add --no-cache git make
 
@@ -12,9 +18,12 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o hivemind-indexer ./cmd/indexer
 
-FROM alpine:latest
+# Runtime stage - alpine 3.20 (pinned; no :latest)
+FROM alpine:3.20
 
-RUN apk --no-cache add ca-certificates tzdata
+# ca-certificates for HTTPS (steemd), tzdata for timestamps, wget for the
+# HEALTHCHECK probe.
+RUN apk --no-cache add ca-certificates tzdata wget
 
 RUN addgroup -g 1000 appuser && \
     adduser -D -u 1000 -G appuser appuser
@@ -27,5 +36,14 @@ RUN chown -R appuser:appuser /app
 
 USER appuser
 
-CMD ["./hivemind-indexer"]
+# The indexer has no API port: it serves /health, /head_age, /metrics and
+# /debug/pprof on its observability listener (HIVE_PROMETHEUS_PORT, default
+# 9091 in compose) - keep that port internal-only. The HEALTHCHECK probes
+# the observability port, which requires HIVE_PROMETHEUS_ENABLED=true
+# (the default). GET-and-discard rather than wget --spider for parity
+# with Dockerfile.server (see its comment; the net/http mux here would
+# answer HEAD, but one probe form across images is easier to reason about).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD wget -q --tries=1 -O /dev/null "http://localhost:${HIVE_PROMETHEUS_PORT:-9091}/health" || exit 1
 
+CMD ["./hivemind-indexer"]
