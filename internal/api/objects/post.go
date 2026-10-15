@@ -174,12 +174,12 @@ func (l *PostLoader) buildPostObject(ctx context.Context, post *models.Post, cac
 		"title":             cache.Title,
 		"body":              body,
 		"json_metadata":     jsonMetadata,
-		"created":           post.CreatedAt.Format(time.RFC3339),
-		"last_update":       cache.UpdatedAt.Format(time.RFC3339),
+		"created":           jsonDate(post.CreatedAt),
+		"last_update":       jsonDate(cache.UpdatedAt),
 		"depth":             post.Depth,
 		"children":          cache.Children,
 		"net_rshares":       cache.RShares,
-		"url":               fmt.Sprintf("/%s/@%s/%s", post.Category, account.Name, post.Permlink),
+		"url":               postURL(rawFields, post, account),
 		"active_votes":      hydrateActiveVotes(cache.Votes),
 		"replies":           []interface{}{},
 		"reblogged_by":      l.getRebloggedBy(ctx, post.ID),
@@ -218,6 +218,17 @@ func jsonDate(ts time.Time) string {
 		return legacyNullDate
 	}
 	return ts.Format("2006-01-02T15:04:05")
+}
+
+// postURL mirrors legacy objects.py:183: the URL comes from the steemd
+// raw_json (comment URLs point at the root post with a #/@author/permlink
+// fragment); the constructed form is only a fallback for rows whose
+// raw_json lacks the key.
+func postURL(rawFields map[string]interface{}, post *models.Post, account *models.Account) string {
+	if v, ok := rawFields["url"].(string); ok && v != "" {
+		return v
+	}
+	return fmt.Sprintf("/%s/@%s/%s", post.Category, account.Name, post.Permlink)
 }
 
 // when mirrors the `payout_at if paid else None` expressions in legacy

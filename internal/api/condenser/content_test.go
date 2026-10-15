@@ -220,9 +220,9 @@ func TestGetContentPostObject(t *testing.T) {
 	}))
 	defer muteSrv.Close()
 	steem.SetSharedMutes(steem.NewMutes(muteSrv.URL))
+	t.Cleanup(func() { steem.SetSharedMutes(steem.NewMutes("")) })
 	filtered := getContentObj(t, content, "alice", "unpaid-root")
 	assertVoters(t, filtered, []string{"voter2"})
-	steem.SetSharedMutes(steem.NewMutes(""))
 
 	// --- 7. get_content_replies: children in creation order, deleted
 	// children and deleted parents filtered out. ---
