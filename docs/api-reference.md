@@ -528,7 +528,28 @@ Return top trending topics.
 
 ### bridge.normalize_post
 
-Normalize a post object (internal use).
+Normalize a steemd post object into the bridge post shape (legacy
+support.py::normalize_post). The caller-supplied steemd post object is the
+data source for all dynamic fields (title/body/payout/votes, converted via
+the post_to_internal pipeline); the DB only supplies immutable core metadata
+(`hive_posts`: category/community_id/is_muted/is_valid — no is_deleted
+filter), the author's reputation (`hive_accounts`) and community decoration
+(`hive_communities`/`hive_roles` with the support.py role map, where 4 maps
+to "admin").
+
+**Parameters:**
+- `post` (object, required): a full steemd-format post object, bound either
+  by name (`{"post": {...}}`) or positionally (`[{...}]`)
+
+**Returns:** Bridge post object (post_id, author, permlink, category, title,
+body, json_metadata, created, updated, depth, children, net_rshares,
+is_paidout, payout_at, payout, pending/author/curator_payout_value,
+promoted, replies, active_votes, author_reputation, stats, beneficiaries,
+max_accepted_payout, percent_steem_dollars, url; plus parent_author/
+parent_permlink for comments and community_title/author_role/author_title
+for community posts). This differs from bridge.get_post, which serves the
+indexer-maintained `hive_posts_cache` row; at payout/pending boundaries the
+input object wins here.
 
 ### bridge.get_post_header
 

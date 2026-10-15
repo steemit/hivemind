@@ -336,6 +336,13 @@ func numberString(v interface{}) (string, error) {
 	}
 }
 
+// NumberInt renders a JSON-decoded number (or numeric string) as an int.
+// Exported for the API layer, which parses numeric fields out of
+// caller-supplied steemd objects (e.g. bridge.normalize_post depth/children).
+func NumberInt(v interface{}) (int, error) {
+	return numberInt(v)
+}
+
 // numberInt renders a JSON-decoded number as int.
 func numberInt(v interface{}) (int, error) {
 	switch n := v.(type) {

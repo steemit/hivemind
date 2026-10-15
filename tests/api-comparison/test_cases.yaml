@@ -481,15 +481,17 @@ test_cases:
       permlink: "firstpost"
 
   - id: bridge-normalize-post
-    name: "bridge.normalize_post steemit/firstpost (EXPECTED DIFF: Go reads the post object at top level while legacy binds the `post` kwarg; baseline issue #23)"
+    name: "bridge.normalize_post steemit/firstpost"
     api: "bridge.normalize_post"
     priority: "P1"
-    expected_diff: true
     # legacy signature: normalize_post(context, post) -- the payload must be
-    # a full steemd-format post object (the previous {author, permlink} form
-    # failed legacy kwarg binding). Go currently expects the post object at
-    # the top level (known divergence, baseline issue #23) so this case is
-    # a registered expected difference until the Go side is fixed.
+    # a full steemd-format post object bound via the `post` kwarg (or the
+    # positional [post] form). Planned PR#415 rewrote the Go handler to the
+    # same binding and the full legacy support.py:41-103 pipeline (steemd
+    # input as the base via post_to_internal + hive_posts core enrichment +
+    # community decoration), so the former expected-diff registration
+    # (baseline issue #23: Go read the post object at top level and never
+    # touched the DB) is retired.
     params:
       post:
         id: 33
