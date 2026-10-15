@@ -208,7 +208,10 @@ func (h *JSONRPCHandler) readBody(c *gin.Context) ([]byte, bool) {
 		}
 		telemetry.RecordError("jsonrpc", "http", "parse_error")
 		h.logger.Warn("failed to read request body", zap.Error(err))
-		h.sendErrorResponse(c, parseErrorResponse(err))
+		// Do NOT surface err here: transport-level read failures carry
+		// server socket details ("read tcp a:b->c:d: ..."), which the
+		// #396 sanitizer must keep out of responses.
+		h.sendErrorResponse(c, parseErrorResponse(nil))
 		return nil, false
 	}
 	return body, true
@@ -515,6 +518,9 @@ func frameworkErrorResponse(code int, message string) *JSONRPCResponse {
 // server internals (#396 sanitizer), so exposing it is safe and keeps
 // parity with legacy's non-null data.
 func parseErrorResponse(err error) *JSONRPCResponse {
+	if err == nil {
+		return errorResponse(nil, ErrParseError, msgInvalidJSON, nil)
+	}
 	return errorResponse(nil, ErrParseError, msgInvalidJSON, err.Error())
 }
 
