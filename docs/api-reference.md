@@ -174,7 +174,11 @@ Get a single post/comment object.
 - `author` (string, required)
 - `permlink` (string, required)
 
-**Returns:** Post object with full details
+**Returns:** Post object with full details. Unknown or deleted posts
+return the legacy 3-key sentinel `{"id": 0, "author": "", "permlink": ""}`.
+Empty `cashout_time`/`last_payout` values are rendered as the legacy
+sentinel string `"1969-12-31T23:59:59"`, and an empty `category` is
+surfaced as `"undefined"` (condenser#3424 mitigation).
 
 **Post Object Structure:**
 ```json

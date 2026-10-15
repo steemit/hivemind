@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/steemit/hivemind/internal/models"
+	"github.com/steemit/hivemind/internal/steem"
 )
 
 // PostLoader loads complete post objects from database
@@ -83,6 +84,9 @@ func (l *PostLoader) LoadPosts(ctx context.Context, ids []int64, truncateBody in
 
 	// Build result in order
 	result := make([]map[string]interface{}, 0, len(ids))
+	// Snapshot the irredeemables list once per batch and strip muted voters
+	// from active_votes (legacy load_posts_keyed, objects.py:60-66).
+	muted := mutedAccountSet()
 	for _, id := range ids {
 		post := postMap[id]
 		if post == nil {
@@ -100,6 +104,9 @@ func (l *PostLoader) LoadPosts(ctx context.Context, ids []int64, truncateBody in
 		}
 
 		postObj := l.buildPostObject(ctx, post, cache, account, truncateBody)
+		if len(muted) > 0 {
+			postObj["active_votes"] = muteVotes(postObj["active_votes"].([]interface{}), muted)
+		}
 		result = append(result, postObj)
 	}
 
@@ -118,56 +125,157 @@ func (l *PostLoader) buildPostObject(ctx context.Context, post *models.Post, cac
 		jsonMetadata = "{}"
 	}
 
-	// Payout logic mirrors legacy condenser_api/objects.py:
-	// - If paid out: total_payout_value = payout, pending = 0
-	// - If not paid: total_payout_value = 0, pending = payout
-	var totalPayout, pendingPayout float64
+	// condenser#3424 mitigation: an empty category is surfaced as 'undefined'
+	// (legacy condenser_api/objects.py:139-141). The mitigated value also
+	// flows into parent_permlink for top-level posts, as in legacy.
+	category := cache.Category
+	if category == "" {
+		category = "undefined"
+	}
+
+	// Import fields from the legacy steemd object stored in raw_json
+	// (legacy objects.py:171-187). parseRawJSON tolerates a missing/short
+	// raw_json where legacy asserts; absent keys surface as nil.
+	rawFields := parseRawJSON(cache.RawJSON)
+
+	// Payout split mirrors legacy _condenser_post_object (objects.py:157-163,
+	// 189-192): before payout the whole amount is pending and the curator
+	// payout is zero; after payout the total is net of the curator payout
+	// recorded in raw_json at payout time.
+	var totalPayout, pendingPayout, curatorPayout float64
 	if cache.IsPaidout {
 		totalPayout = cache.Payout
-		pendingPayout = 0
+		if raw, ok := rawFields["curator_payout_value"]; ok {
+			curatorPayout = sbdAmount(raw)
+			totalPayout = cache.Payout - curatorPayout
+		}
 	} else {
-		totalPayout = 0
 		pendingPayout = cache.Payout
 	}
 
-	// cashout_time: nil if paid out, otherwise payout_at
-	var cashoutTime interface{}
-	if cache.IsPaidout {
-		cashoutTime = nil
-	} else {
-		cashoutTime = cache.PayoutAt.Format(time.RFC3339)
+	// Parent fields: comments read them from raw_json; top-level posts use
+	// ''/category (legacy objects.py:176-181).
+	parentAuthor := ""
+	parentPermlink := category
+	if post.Depth > 0 {
+		if v, ok := rawFields["parent_author"].(string); ok {
+			parentAuthor = v
+		}
+		if v, ok := rawFields["parent_permlink"].(string); ok {
+			parentPermlink = v
+		}
 	}
 
 	postObj := map[string]interface{}{
-		"id":                   post.ID,
-		"author":               account.Name,
-		"permlink":             post.Permlink,
-		"category":             post.Category,
-		"title":                cache.Title,
-		"body":                 body,
-		"json_metadata":        jsonMetadata,
-		"created":              post.CreatedAt.Format(time.RFC3339),
-		"last_update":          cache.UpdatedAt.Format(time.RFC3339),
-		"depth":                post.Depth,
-		"children":             cache.Children,
-		"net_rshares":          cache.RShares,
-		"url":                  fmt.Sprintf("/%s/@%s/%s", post.Category, account.Name, post.Permlink),
-		"active_votes":         hydrateActiveVotes(cache.Votes),
-		"replies":              []interface{}{},
-		"reblogged_by":         l.getRebloggedBy(ctx, post.ID),
-		"body_length":          len(cache.Body),
-		"author_reputation":    repToRaw(cache.AuthorRep),
-		"promoted":             formatAmount(cache.Promoted),
-		"payout":               cache.Payout,
-		"total_payout_value":   formatAmount(totalPayout),
-		"curator_payout_value": formatAmount(0),
-		"pending_payout_value": formatAmount(pendingPayout),
-		"last_payout":          payoutDate(cache.IsPaidout, cache.PayoutAt),
-		"cashout_time":         cashoutTime,
-		"total_votes":          cache.TotalVotes,
+		"id":                post.ID,
+		"author":            account.Name,
+		"permlink":          post.Permlink,
+		"category":          category,
+		"title":             cache.Title,
+		"body":              body,
+		"json_metadata":     jsonMetadata,
+		"created":           jsonDate(post.CreatedAt),
+		"last_update":       jsonDate(cache.UpdatedAt),
+		"depth":             post.Depth,
+		"children":          cache.Children,
+		"net_rshares":       cache.RShares,
+		"url":               postURL(rawFields, post, account),
+		"active_votes":      hydrateActiveVotes(cache.Votes),
+		"replies":           []interface{}{},
+		"reblogged_by":      l.getRebloggedBy(ctx, post.ID),
+		"body_length":       len(cache.Body),
+		"author_reputation": repToRaw(cache.AuthorRep),
+		"promoted":          formatAmount(cache.Promoted),
+		"payout":            cache.Payout,
+		// last_payout/cashout_time always carry a string: json_date renders
+		// the legacy sentinel for the empty side (objects.py:159-160).
+		"last_payout":           jsonDate(when(cache.IsPaidout, cache.PayoutAt)),
+		"cashout_time":          jsonDate(when(!cache.IsPaidout, cache.PayoutAt)),
+		"total_payout_value":    formatAmount(totalPayout),
+		"curator_payout_value":  formatAmount(curatorPayout),
+		"pending_payout_value":  formatAmount(pendingPayout),
+		"total_votes":           cache.TotalVotes,
+		"parent_author":         parentAuthor,
+		"parent_permlink":       parentPermlink,
+		"root_title":            rawFields["root_title"],
+		"beneficiaries":         rawFields["beneficiaries"],
+		"max_accepted_payout":   rawFields["max_accepted_payout"],
+		"percent_steem_dollars": rawFields["percent_steem_dollars"],
 	}
 
 	return postObj
+}
+
+// legacyNullDate is the sentinel legacy json_date renders for missing
+// timestamps (hive/server/common/helpers.py:52-55).
+const legacyNullDate = "1969-12-31T23:59:59"
+
+// jsonDate renders a timestamp the way legacy json_date does: 'T'-joined
+// and timezone-less, with missing (zero) timestamps becoming the sentinel
+// string instead of null. Mirrors hive/server/common/helpers.py:52.
+func jsonDate(ts time.Time) string {
+	if ts.IsZero() {
+		return legacyNullDate
+	}
+	return ts.Format("2006-01-02T15:04:05")
+}
+
+// postURL mirrors legacy objects.py:183: the URL comes from the steemd
+// raw_json (comment URLs point at the root post with a #/@author/permlink
+// fragment); the constructed form is only a fallback for rows whose
+// raw_json lacks the key.
+func postURL(rawFields map[string]interface{}, post *models.Post, account *models.Account) string {
+	if v, ok := rawFields["url"].(string); ok && v != "" {
+		return v
+	}
+	return fmt.Sprintf("/%s/@%s/%s", post.Category, account.Name, post.Permlink)
+}
+
+// when mirrors the `payout_at if paid else None` expressions in legacy
+// _condenser_post_object (objects.py:159-160): yields the timestamp, or the
+// zero time jsonDate turns into the sentinel.
+func when(cond bool, ts time.Time) time.Time {
+	if cond {
+		return ts
+	}
+	return time.Time{}
+}
+
+// mutedAccountSet snapshots the process-wide irredeemables list. Mirrors
+// legacy load_posts_keyed's single Mutes.all() per batch (objects.py:60);
+// returns nil when nothing is muted so vote filtering can be skipped.
+func mutedAccountSet() map[string]bool {
+	all := steem.SharedMutes().All()
+	if len(all) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(all))
+	for _, name := range all {
+		set[name] = true
+	}
+	return set
+}
+
+// muteVotes removes votes cast by muted accounts. Mirrors legacy
+// _mute_votes (condenser_api/objects.py:71-74): with an empty mute list
+// the original votes are returned untouched.
+func muteVotes(votes []interface{}, muted map[string]bool) []interface{} {
+	if len(muted) == 0 {
+		return votes
+	}
+	out := make([]interface{}, 0, len(votes))
+	for _, v := range votes {
+		vote, ok := v.(map[string]interface{})
+		if !ok {
+			out = append(out, v)
+			continue
+		}
+		if voter, _ := vote["voter"].(string); muted[voter] {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 // hydrateActiveVotes converts the minimal CSV representation in
@@ -223,15 +331,6 @@ func repToRawStr(repStr string) float64 {
 // Mirrors legacy _amount (condenser_api/objects.py:202).
 func formatAmount(amount float64) string {
 	return fmt.Sprintf("%.3f SBD", amount)
-}
-
-// payoutDate returns the payout_at timestamp if paid out, nil otherwise.
-// Mirrors legacy json_date(row['payout_at'] if paid else None).
-func payoutDate(isPaidout bool, payoutAt time.Time) interface{} {
-	if !isPaidout {
-		return nil
-	}
-	return payoutAt.Format(time.RFC3339)
 }
 
 // getRebloggedBy gets account names that reblogged a post

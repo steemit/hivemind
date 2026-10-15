@@ -2,6 +2,8 @@ package condenser
 
 import (
 	"encoding/json"
+	"fmt"
+
 	"github.com/steemit/hivemind/internal/apierrors"
 
 	"github.com/gin-gonic/gin"
@@ -48,12 +50,14 @@ func (c *ContentAPI) GetContent(ctx *gin.Context, params json.RawMessage) (inter
 	permlink, _ := p[1].(string)
 
 	postRepo := db.NewPostRepository(c.repo)
-	post, err := postRepo.GetByAuthorPermlink(ctx.Request.Context(), author, permlink)
+	post, err := postRepo.GetLiveByAuthorPermlink(ctx.Request.Context(), author, permlink)
 	if err != nil {
 		return nil, err
 	}
 	if post == nil {
-		return nil, nil
+		// Legacy sentinel for unknown (or deleted) posts, exactly three
+		// keys (condenser_api/methods.py:147).
+		return map[string]interface{}{"id": 0, "author": "", "permlink": ""}, nil
 	}
 
 	// Build full post object with cached data
@@ -69,8 +73,12 @@ func (c *ContentAPI) GetContent(ctx *gin.Context, params json.RawMessage) (inter
 	}
 
 	posts, err := c.postLoader.LoadPosts(ctx.Request.Context(), []int64{post.ID}, 0)
-	if err != nil || len(posts) == 0 {
-		return nil, nil
+	if err != nil {
+		return nil, err
+	}
+	if len(posts) == 0 {
+		// Legacy asserts the cache row exists (methods.py:150-151).
+		return nil, fmt.Errorf("post %d (%s/%s) was not found in cache", post.ID, author, permlink)
 	}
 
 	return posts[0], nil
@@ -90,27 +98,31 @@ func (c *ContentAPI) GetContentReplies(ctx *gin.Context, params json.RawMessage)
 	author, _ := p[0].(string)
 	permlink, _ := p[1].(string)
 
-	// Get parent post
+	// Get parent post (deleted parents resolve to nil, like legacy's
+	// is_deleted-filtered get_post_id returning no id).
 	postRepo := db.NewPostRepository(c.repo)
-	parent, err := postRepo.GetByAuthorPermlink(ctx.Request.Context(), author, permlink)
-	if err != nil || parent == nil {
-		return []interface{}{}, nil
+	parent, err := postRepo.GetLiveByAuthorPermlink(ctx.Request.Context(), author, permlink)
+	if err != nil {
+		return nil, err
+	}
+	if parent == nil {
+		return []map[string]interface{}{}, nil
 	}
 
 	// Query child posts
 	var childPosts []models.Post
 	if c.database == nil {
-		return []interface{}{}, nil
+		return []map[string]interface{}{}, nil
 	}
 	if err := c.database.WithContext(ctx.Request.Context()).
 		Where("parent_id = ? AND is_deleted = false", parent.ID).
 		Order("created_at ASC").
 		Find(&childPosts).Error; err != nil {
-		return []interface{}{}, nil
+		return nil, err
 	}
 
 	if len(childPosts) == 0 {
-		return []interface{}{}, nil
+		return []map[string]interface{}{}, nil
 	}
 
 	// Load full post objects
@@ -120,12 +132,12 @@ func (c *ContentAPI) GetContentReplies(ctx *gin.Context, params json.RawMessage)
 	}
 
 	if c.postLoader == nil {
-		return []interface{}{}, nil
+		return []map[string]interface{}{}, nil
 	}
 
 	posts, err := c.postLoader.LoadPosts(ctx.Request.Context(), childIDs, 0)
 	if err != nil {
-		return []interface{}{}, nil
+		return nil, err
 	}
 
 	return posts, nil
