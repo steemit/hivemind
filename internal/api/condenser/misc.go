@@ -40,8 +40,11 @@ func (m *MiscAPI) GetDiscussionsByComments(ctx *gin.Context, params json.RawMess
 	}
 
 	startAuthor, _ := p["start_author"].(string)
-	// legacy valid_account(start_author) with allow_empty=False: a blank
-	// start_author is "invalid account (not specified)".
+	// legacy asserts non-blank start_author first ("`start_author` cannot
+	// be blank", methods.py:296-297), then validates with valid_account.
+	if startAuthor == "" {
+		return nil, apierrors.PublicError("`start_author` cannot be blank")
+	}
 	if _, err := apierrors.ValidAccount(startAuthor, false); err != nil {
 		return nil, err
 	}
@@ -74,6 +77,11 @@ func (m *MiscAPI) GetRepliesByLastUpdate(ctx *gin.Context, params json.RawMessag
 	}
 
 	startAuthor, _ := p["start_author"].(string)
+	// legacy asserts non-blank start_author first ("`start_author` cannot
+	// be blank", methods.py:310-311), then validates with valid_account.
+	if startAuthor == "" {
+		return nil, apierrors.PublicError("`start_author` cannot be blank")
+	}
 	// legacy valid_account(start_author), allow_empty=False.
 	if _, err := apierrors.ValidAccount(startAuthor, false); err != nil {
 		return nil, err
@@ -108,7 +116,11 @@ func (m *MiscAPI) GetDiscussionsByAuthorBeforeDate(ctx *gin.Context, params json
 	}
 
 	author, _ := p["author"].(string)
-	// legacy valid_account(author), allow_empty=False.
+	// legacy asserts non-blank author first ("`author` cannot be blank",
+	// methods.py:330-331), then validates with valid_account.
+	if author == "" {
+		return nil, apierrors.PublicError("`author` cannot be blank")
+	}
 	if _, err := apierrors.ValidAccount(author, false); err != nil {
 		return nil, err
 	}

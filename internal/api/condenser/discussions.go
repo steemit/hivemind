@@ -96,7 +96,11 @@ func (d *DiscussionsAPI) GetDiscussionsByBlog(ctx *gin.Context, params json.RawM
 	}
 
 	// tag parameter is actually the account name for blog queries;
-	// legacy validates it with valid_account (allow_empty=False).
+	// legacy asserts non-blank first ("`tag` cannot be blank",
+	// methods.py:260-261), then validates with valid_account.
+	if tag == "" {
+		return nil, apierrors.PublicError("`tag` cannot be blank")
+	}
 	account := tag
 	if _, err := apierrors.ValidAccount(account, false); err != nil {
 		return nil, err
@@ -131,8 +135,11 @@ func (d *DiscussionsAPI) GetDiscussionsByFeed(ctx *gin.Context, params json.RawM
 	}
 
 	tag, _ := p["tag"].(string)
-	// legacy: valid_account(tag) (allow_empty=False) — a blank or invalid
-	// tag/account is "invalid account (not specified)" / the name errors.
+	// legacy asserts non-blank tag first ("`tag` cannot be blank",
+	// methods.py:274-275), then validates with valid_account.
+	if tag == "" {
+		return nil, apierrors.PublicError("`tag` cannot be blank")
+	}
 	account, err := apierrors.ValidAccount(tag, false)
 	if err != nil {
 		return nil, err

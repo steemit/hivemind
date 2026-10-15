@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -229,5 +230,48 @@ func TestCallAdapterDispatch(t *testing.T) {
 	}
 	if _, err := callRaw(t, adapter, `["condenser_api","get_state",["trending"]]`); err == nil {
 		t.Error("call get_state must return the registered not-implemented refusal")
+	}
+}
+
+// TestDiscussionBlankParamMessages pins the legacy blank-value asserts that
+// run before valid_account (methods.py:260/274/296/310/330): the five
+// discussion methods must report "`<key>` cannot be blank", never
+// "invalid account (not specified)".
+func TestDiscussionBlankParamMessages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// An empty db.DB is sufficient: the blank-param assertions fire before
+	// any database access, so the handlers never touch the nil connection.
+	emptyDB := &db.DB{}
+	repo := db.NewRepository(nil)
+	misc := NewMiscAPI(repo, emptyDB, nil)
+	disc := NewDiscussionsAPI(repo, emptyDB)
+	cases := []struct {
+		name   string
+		call   func(*gin.Context, json.RawMessage) (interface{}, error)
+		params string
+		want   string
+	}{
+		{"blog_blank_tag", disc.GetDiscussionsByBlog, `[{"tag":"","limit":1}]`, "`tag` cannot be blank"},
+		{"feed_blank_tag", disc.GetDiscussionsByFeed, `[{"tag":"","limit":1}]`, "`tag` cannot be blank"},
+		{"comments_blank_author", misc.GetDiscussionsByComments, `[{"start_author":"","limit":1}]`, "`start_author` cannot be blank"},
+		{"replies_blank_author", misc.GetRepliesByLastUpdate, `[{"start_author":""}]`, "`start_author` cannot be blank"},
+		{"author_before_blank", misc.GetDiscussionsByAuthorBeforeDate, `[{"author":""}]`, "`author` cannot be blank"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("POST", "/", nil)
+			_, err := tc.call(c, json.RawMessage(tc.params))
+			if err == nil {
+				t.Fatal("expected error for blank param")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %q, want substring %q", err.Error(), tc.want)
+			}
+			if strings.Contains(err.Error(), "invalid account") {
+				t.Fatalf("err = %q must not fall through to valid_account", err.Error())
+			}
+		})
 	}
 }
