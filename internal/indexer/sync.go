@@ -1018,7 +1018,7 @@ func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bo
 		// (landed server-side, error client-side) relies on the
 		// hive_blocks primary key plus the loops re-reading head before
 		// retrying (PR#411 review).
-restoreDeltas()
+		restoreDeltas()
 		tx.Rollback()
 		return fmt.Errorf("failed to commit batch transaction: %w", err)
 	}

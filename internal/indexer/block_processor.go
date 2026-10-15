@@ -129,7 +129,7 @@ func (bp *BlockProcessor) ProcessBlock(ctx context.Context, block map[string]int
 		// (database/sql refuses to send ROLLBACK after Commit, returning
 		// ErrTxDone which we discard); connection health is handled by
 		// Tx.Commit's own close path (PR#411 review).
-restoreDeltas()
+		restoreDeltas()
 		tx.Rollback()
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
