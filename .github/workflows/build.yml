@@ -16,9 +16,10 @@
 #               service, applies tests/smoke/seed.sql and asserts
 #               /health + condenser_api.get_content +
 #               get_discussions_by_trending + the -32601 error path.
-#   deploy-eb - PLACEHOLDER. Master pushes only (post-merge). Wires up the
-#               actual `eb deploy` during the W8 test-environment rollout;
-#               until then it logs what it would do and exits green.
+#   deploy-eb - REMOVED (user decision 2026-10-16): Elastic Beanstalk
+#               deploys are run manually by the operator. The reference
+#               procedure (sha rewrite + eb deploy command) lives in
+#               docs/deploy-runbook.md.
 #
 # All third-party actions are pinned to full commit SHAs (supply-chain
 # hardening, PR#421 registered item 3). Update by resolving the new tag's
@@ -169,31 +170,3 @@ jobs:
       - name: Dump server logs (on failure)
         if: failure()
         run: docker logs hivemind-smoke-server || true
-
-  deploy-eb:
-    name: deploy-eb (placeholder until W8)
-    # Master merges only, after green images + smoke.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: [images, smoke]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      # PLACEHOLDER command (05-deploy.md section 1.8): the real deploy is
-      # wired up during the W8 test-environment rollout (O8). It will need
-      # the AWS credentials / EB environment as repo secrets - reference
-      # names below - plus the sha->Dockerrun.aws.json rewrite:
-      #
-      #   - name: Configure AWS credentials
-      #     uses: aws-actions/configure-aws-credentials@<sha>  # pin!
-      #     with:
-      #       aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #       aws-region: ${{ secrets.AWS_REGION }}
-      #   - name: Deploy to Elastic Beanstalk
-      #     run: |
-      #       sed -i "s/CHANGE_ME_COMMIT_SHA/${GITHUB_SHA}/" Dockerrun.aws.json
-      #       eb deploy hivemind-go-api --stage
-      - name: Placeholder
-        run: |
-          echo "deploy-eb placeholder: real EB deploy lands with the W8 test-env rollout."
-          echo "Would deploy $REGISTRY_IMAGE:server-${GITHUB_SHA} via Dockerrun.aws.json (see step comments)."
