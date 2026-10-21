@@ -55,6 +55,29 @@ func TestGetAccountPosts_ParamValidationBeforeDB(t *testing.T) {
 			params: map[string]interface{}{"sort": "feed", "account": "ALICE"},
 			errMsg: "invalid account",
 		},
+		// Audit B1 follow-up: get_account_posts previously hand-clamped
+		// limit>100 to 100 and passed 0/negative through; illegal limits
+		// must now fail fast with the legacy valid_limit errors.
+		{
+			name:   "limit zero",
+			params: map[string]interface{}{"sort": "blog", "account": "alice", "limit": 0},
+			errMsg: "limit must be positive",
+		},
+		{
+			name:   "limit negative",
+			params: map[string]interface{}{"sort": "blog", "account": "alice", "limit": -3},
+			errMsg: "limit must be positive",
+		},
+		{
+			name:   "limit over max",
+			params: map[string]interface{}{"sort": "blog", "account": "alice", "limit": 101},
+			errMsg: "limit exceeds max (101 > 100)",
+		},
+		{
+			name:   "limit explicit null",
+			params: map[string]interface{}{"sort": "blog", "account": "alice", "limit": nil},
+			errMsg: "limit must be provided",
+		},
 	}
 
 	for _, tc := range cases {
@@ -65,6 +88,45 @@ func TestGetAccountPosts_ParamValidationBeforeDB(t *testing.T) {
 
 			params, _ := json.Marshal(tc.params)
 			result, err := r.GetAccountPosts(ctx, params)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got result=%v", tc.errMsg, result)
+			}
+			if !strings.Contains(err.Error(), tc.errMsg) {
+				t.Errorf("error should contain %q, got: %v", tc.errMsg, err)
+			}
+		})
+	}
+}
+
+// TestGetRankedPosts_InvalidLimit verifies bridge.get_ranked_posts rejects
+// illegal limits with the legacy valid_limit errors before any DB access
+// (audit B1 follow-up: the method previously hand-clamped limit>100 to 100
+// and passed 0/negative through, so the first PR revision wrongly described
+// it as already validated; this pins the unified policy). The zero-value
+// RankedAPI proves these paths fail fast without touching the cursor.
+func TestGetRankedPosts_InvalidLimit(t *testing.T) {
+	r := &RankedAPI{}
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name   string
+		limit  interface{}
+		errMsg string
+	}{
+		{"zero", 0.0, "limit must be positive"},
+		{"negative", -3.0, "limit must be positive"},
+		{"fractional below one", 0.5, "limit must be positive"},
+		{"over max", 101.0, "limit exceeds max (101 > 100)"},
+		{"explicit null", nil, "limit must be provided"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(w)
+			ctx.Request = httptest.NewRequest("POST", "/", nil)
+			params, _ := json.Marshal(map[string]interface{}{"sort": "trending", "limit": tc.limit})
+			result, err := r.GetRankedPosts(ctx, params)
 			if err == nil {
 				t.Fatalf("expected error containing %q, got result=%v", tc.errMsg, result)
 			}
@@ -188,6 +250,21 @@ func TestGetAccountPosts_Sorts(t *testing.T) {
 	}
 	if blocked, ok := result.([]map[string]interface{}); !ok || len(blocked) != 0 {
 		t.Errorf("blocked author should return empty, got %v", result)
+	}
+
+	// Boundary (audit B1): the ubound 100 is legal, 101 errors — legacy
+	// valid_limit(limit, 100) (methods.py:196). Before the unification this
+	// method silently truncated 101+ to 100.
+	wB := httptest.NewRecorder()
+	ctxB, _ := gin.CreateTestContext(wB)
+	ctxB.Request = httptest.NewRequest("POST", "/", nil)
+	paramsB, _ := json.Marshal(map[string]interface{}{"sort": "blog", "account": "alice", "limit": 100})
+	if _, err := api.GetAccountPosts(ctxB, paramsB); err != nil {
+		t.Fatalf("limit 100 (ubound) should be accepted: %v", err)
+	}
+	paramsB, _ = json.Marshal(map[string]interface{}{"sort": "blog", "account": "alice", "limit": 101})
+	if _, err := api.GetAccountPosts(ctxB, paramsB); err == nil || !strings.Contains(err.Error(), "limit exceeds max (101 > 100)") {
+		t.Errorf("limit 101: expected over-max error, got %v", err)
 	}
 }
 
@@ -490,6 +567,26 @@ func TestGetRankedPosts_CursorSemantics(t *testing.T) {
 		}
 	}
 	expect("blog skips unreblogged community post", got, []string{"re-comm", "tie-a"})
+
+	// Boundary (audit B1): the ubound 100 is accepted (fixture smaller than
+	// the limit), 101 errors — legacy valid_limit(limit, 100)
+	// (methods.py:126); this method previously clamped 101+ to 100.
+	if got := ranked("trending", "", "", "", 100); len(got) == 0 {
+		t.Error("limit 100 (ubound) should be accepted")
+	}
+	wB := httptest.NewRecorder()
+	ctxB, _ := gin.CreateTestContext(wB)
+	ctxB.Request = httptest.NewRequest("POST", "/", nil)
+	paramsB, _ := json.Marshal(map[string]interface{}{"sort": "trending", "limit": 101})
+	if _, err := api.GetRankedPosts(ctxB, paramsB); err == nil || !strings.Contains(err.Error(), "limit exceeds max (101 > 100)") {
+		t.Errorf("ranked limit 101: expected over-max error, got %v", err)
+	}
+	// Non-numeric stays lenient (registered leniency): treated as absent,
+	// so the default 20 applies.
+	paramsB, _ = json.Marshal(map[string]interface{}{"sort": "trending", "limit": "big"})
+	if _, err := api.GetRankedPosts(ctxB, paramsB); err != nil {
+		t.Errorf("ranked limit \"big\": expected default 20 to apply, got %v", err)
+	}
 }
 
 // seedRankedFixture builds the TestGetRankedPosts_CursorSemantics fixture.

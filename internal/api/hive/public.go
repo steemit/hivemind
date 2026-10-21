@@ -111,7 +111,10 @@ func (p *PublicAPI) ListFollowers(ctx *gin.Context, params json.RawMessage) (int
 		}
 	}
 	observer, _ := pMap["observer"].(string)
-	limit := validLimitParam(pMap, 50, 100)
+	limit, err := apierrors.ValidQueryLimit(pMap, 50, 100)
+	if err != nil {
+		return nil, err
+	}
 
 	names, err := p.cursor.GetFollowerNames(ctx.Request.Context(), account, start, limit)
 	if err != nil {
@@ -144,7 +147,10 @@ func (p *PublicAPI) ListFollowing(ctx *gin.Context, params json.RawMessage) (int
 		}
 	}
 	observer, _ := pMap["observer"].(string)
-	limit := validLimitParam(pMap, 50, 100)
+	limit, err := apierrors.ValidQueryLimit(pMap, 50, 100)
+	if err != nil {
+		return nil, err
+	}
 
 	names, err := p.cursor.GetFollowingNames(ctx.Request.Context(), account, start, limit)
 	if err != nil {
@@ -190,7 +196,10 @@ func (p *PublicAPI) ListAccountBlog(ctx *gin.Context, params json.RawMessage) (i
 		return nil, err
 	}
 	observer, _ := pMap["observer"].(string)
-	limit := validLimitParam(pMap, 10, 50)
+	limit, err := apierrors.ValidQueryLimit(pMap, 10, 50)
+	if err != nil {
+		return nil, err
+	}
 	lastPost, _ := pMap["last_post"].(string)
 
 	startAuthor, startPermlink := splitLastPost(lastPost)
@@ -219,7 +228,10 @@ func (p *PublicAPI) ListAccountPosts(ctx *gin.Context, params json.RawMessage) (
 		return nil, err
 	}
 	observer, _ := pMap["observer"].(string)
-	limit := validLimitParam(pMap, 10, 50)
+	limit, err := apierrors.ValidQueryLimit(pMap, 10, 50)
+	if err != nil {
+		return nil, err
+	}
 	lastPost, _ := pMap["last_post"].(string)
 
 	_, startPermlink := splitLastPost(lastPost)
@@ -248,7 +260,10 @@ func (p *PublicAPI) ListAccountFeed(ctx *gin.Context, params json.RawMessage) (i
 		return nil, err
 	}
 	observer, _ := pMap["observer"].(string)
-	limit := validLimitParam(pMap, 10, 50)
+	limit, err := apierrors.ValidQueryLimit(pMap, 10, 50)
+	if err != nil {
+		return nil, err
+	}
 	lastPost, _ := pMap["last_post"].(string)
 
 	startAuthor, startPermlink := splitLastPost(lastPost)
@@ -308,16 +323,4 @@ func splitLastPost(lastPost string) (string, string) {
 		return "", ""
 	}
 	return parts[0], parts[1]
-}
-
-// validLimitParam extracts and clamps a limit from a params map.
-func validLimitParam(pMap map[string]interface{}, def, ubound int) int {
-	limit := def
-	if l, ok := pMap["limit"].(float64); ok {
-		limit = int(l)
-	}
-	if limit, err := apierrors.ValidLimit(limit, ubound); err == nil {
-		return limit
-	}
-	return def
 }

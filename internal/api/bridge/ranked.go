@@ -71,12 +71,13 @@ func (r *RankedAPI) GetRankedPosts(ctx *gin.Context, params json.RawMessage) (in
 	if sp, ok := pMap["start_permlink"].(string); ok {
 		startPermlink = sp
 	}
-	limit := 20
-	if l, ok := pMap["limit"].(float64); ok {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
+	// Legacy valid_limit(limit, 100) with signature default 20
+	// (methods.py:113-114, :126). The old handwritten clamp silently truncated
+	// limit>100 to 100 and passed 0/negative through (an empty result) --
+	// audit B1 follow-up: unified on ValidQueryLimit so illegal limits error.
+	limit, err := apierrors.ValidQueryLimit(pMap, 20, 100)
+	if err != nil {
+		return nil, err
 	}
 	tag := ""
 	if t, ok := pMap["tag"].(string); ok {
@@ -292,12 +293,12 @@ func (r *RankedAPI) GetAccountPosts(ctx *gin.Context, params json.RawMessage) (i
 	if sp, ok := pMap["start_permlink"].(string); ok {
 		startPermlink = sp
 	}
-	limit := 20
-	if l, ok := pMap["limit"].(float64); ok {
-		limit = int(l)
-		if limit > 100 {
-			limit = 100
-		}
+	// Legacy valid_limit(limit, 100) with signature default 20
+	// (methods.py:184, :196). Replaces the old handwritten clamp (limit>100
+	// truncated to 100, 0/negative passed through) per audit B1.
+	limit, err := apierrors.ValidQueryLimit(pMap, 20, 100)
+	if err != nil {
+		return nil, err
 	}
 
 	// Author-blocked accounts (list_type=3) return nothing.

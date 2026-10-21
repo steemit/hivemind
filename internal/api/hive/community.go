@@ -182,7 +182,10 @@ func (c *CommunityAPI) ListCommunities(ctx *gin.Context, params json.RawMessage)
 		sortKey = "rank"
 	}
 	observer, _ := pMap["observer"].(string)
-	limit := validLimitParam(pMap, 100, 100)
+	limit, err := apierrors.ValidQueryLimit(pMap, 100, 100)
+	if err != nil {
+		return nil, err
+	}
 
 	if sortKey != "rank" && sortKey != "new" && sortKey != "subs" {
 		return nil, apierrors.PublicError("invalid sort")
@@ -272,9 +275,11 @@ func (c *CommunityAPI) ListTopCommunities(ctx *gin.Context, params json.RawMessa
 		// Tolerate empty params ([] or null) like legacy no-arg calls.
 		pMap = map[string]interface{}{}
 	}
-	limit := validLimitParam(pMap, 25, 99)
-	if limit >= 100 {
-		return nil, apierrors.PublicError("limit must be below 100")
+	// Legacy asserts `limit < 100` (hive_api/community.py:79); the ubound 99
+	// validation rejects limit >= 100 with -32602 before reaching here.
+	limit, err := apierrors.ValidQueryLimit(pMap, 25, 99)
+	if err != nil {
+		return nil, err
 	}
 
 	custom := []interface{}{}
@@ -330,7 +335,10 @@ func (c *CommunityAPI) ListPopCommunities(ctx *gin.Context, params json.RawMessa
 	if err := json.Unmarshal(params, &pMap); err != nil {
 		return nil, apierrors.PublicError("invalid parameters format")
 	}
-	limit := validLimitParam(pMap, 25, 25)
+	limit, err := apierrors.ValidQueryLimit(pMap, 25, 25)
+	if err != nil {
+		return nil, err
+	}
 
 	var rows []struct {
 		Name  string `gorm:"column:name"`
@@ -373,7 +381,10 @@ func (c *CommunityAPI) ListCommunityRoles(ctx *gin.Context, params json.RawMessa
 		return nil, apierrors.PublicError("missing required parameter: community")
 	}
 	last, _ := pMap["last"].(string)
-	limit := validLimitParam(pMap, 50, 100)
+	limit, err := apierrors.ValidQueryLimit(pMap, 50, 100)
+	if err != nil {
+		return nil, err
+	}
 
 	dbCtx := ctx.Request.Context()
 	cid, err := c.getCommunityID(dbCtx, community)
