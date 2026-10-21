@@ -221,7 +221,8 @@ factor; see migration `0001_init_schema`).
 - **20M checksum comparison:** `tools/db-checksum/tables.yaml` compares
   this table (key `post_id`) excluding `sc_trend`/`sc_hot` (both
   databases are normalized first with `recalc_sc_trend.sql`) and
-  `_synced_at` (a NOW() watermark, load-time volatile).
+  `_synced_at` (the legacy-only v24 backfill watermark; written once, at
+  different moments on the two databases -- see above).
 
 ### hive_feed_cache
 

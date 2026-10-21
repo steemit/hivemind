@@ -29,7 +29,7 @@
 # pre-#432 QEMU multi-arch setup cost ~3 extra minutes per run for
 # architectures nobody deploys.
 
-name: images-smoke-deploy
+name: images-smoke
 
 on:
   push:

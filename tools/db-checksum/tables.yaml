@@ -53,8 +53,10 @@ tables:
     exclude_columns: [sc_trend, sc_hot]
   hive_posts_cache_temp:
     key: [post_id]
-    # _synced_at is NOW() at sync time on both sides (hot-data mirror
-    # watermark) -- load-time volatile, excluded like the score columns.
+    # _synced_at is a backfill watermark: legacy's one-time v24 cold-start
+    # backfill wrote NOW(); regular dual-writes leave it NULL and the Go
+    # side never writes it -- values differ across databases, excluded
+    # like the score columns.
     exclude_columns: [sc_trend, sc_hot, _synced_at]
 
   # ---- expected-empty below block 37.5M: consistent-empty = pass ----
