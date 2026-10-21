@@ -229,6 +229,94 @@ func TestCommunityAndPublicMethods(t *testing.T) {
 	if rby := feedPosts[0]["reblogged_by"]; rby == nil {
 		t.Errorf("list_account_feed: expected reblogged_by on feed post")
 	}
+
+	// --- invalid limit policy (audit B1: error, not silent fallback) ---
+
+	// invoke calls a handler and returns (result, error) without failing the
+	// test, so error-path subtests can inspect the error.
+	invoke := func(handler func(*gin.Context, json.RawMessage) (interface{}, error), params map[string]interface{}) (interface{}, error) {
+		w := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(w)
+		ctx.Request = httptest.NewRequest("POST", "/", nil)
+		raw, _ := json.Marshal(params)
+		return handler(ctx, raw)
+	}
+
+	t.Run("hive_api list family rejects invalid limit (def 50/max 100)", func(t *testing.T) {
+		// list_followers: zero/negative, over-max, and explicit null all
+		// return legacy valid_limit PublicErrors (-32602) instead of the
+		// pre-B1 silent fallback to the default 50.
+		cases := []struct {
+			limit interface{}
+			want  string
+		}{
+			{0.0, "limit must be positive"},
+			{-3.0, "limit must be positive"},
+			{101.0, "limit exceeds max (101 > 100)"},
+			{nil, "limit must be provided"},
+		}
+		for _, tc := range cases {
+			if _, err := invoke(public.ListFollowers, map[string]interface{}{"account": "bob", "limit": tc.limit}); err == nil || err.Error() != tc.want {
+				t.Errorf("list_followers limit %v: err = %v, want %q", tc.limit, err, tc.want)
+			}
+		}
+	})
+
+	t.Run("hive_api blog family rejects invalid limit (def 10/max 50)", func(t *testing.T) {
+		if _, err := invoke(public.ListAccountBlog, map[string]interface{}{"account": "alice", "limit": 0}); err == nil || err.Error() != "limit must be positive" {
+			t.Errorf("list_account_blog limit 0: err = %v, want limit must be positive", err)
+		}
+		if _, err := invoke(public.ListAccountBlog, map[string]interface{}{"account": "alice", "limit": 51}); err == nil || err.Error() != "limit exceeds max (51 > 50)" {
+			t.Errorf("list_account_blog limit 51: err = %v, want limit exceeds max (51 > 50)", err)
+		}
+	})
+
+	t.Run("bridge community list methods reject invalid limit", func(t *testing.T) {
+		if _, err := invoke(community.ListCommunities, map[string]interface{}{"limit": 101}); err == nil || err.Error() != "limit exceeds max (101 > 100)" {
+			t.Errorf("list_communities limit 101: err = %v, want limit exceeds max (101 > 100)", err)
+		}
+		// list_top_communities ubound is 99: legacy asserts limit < 100.
+		if _, err := invoke(community.ListTopCommunities, map[string]interface{}{"limit": 100}); err == nil || err.Error() != "limit exceeds max (100 > 99)" {
+			t.Errorf("list_top_communities limit 100: err = %v, want limit exceeds max (100 > 99)", err)
+		}
+		if _, err := invoke(community.ListPopCommunities, map[string]interface{}{"limit": 26}); err == nil || err.Error() != "limit exceeds max (26 > 25)" {
+			t.Errorf("list_pop_communities limit 26: err = %v, want limit exceeds max (26 > 25)", err)
+		}
+		if _, err := invoke(community.ListCommunityRoles, map[string]interface{}{"community": "hive-123456", "limit": 0}); err == nil || err.Error() != "limit must be positive" {
+			t.Errorf("list_community_roles limit 0: err = %v, want limit must be positive", err)
+		}
+	})
+
+	t.Run("non-numeric limit stays lenient (registered leniency)", func(t *testing.T) {
+		// ValidQueryLimit treats a present non-number like an absent limit
+		// (legacy int() coercion paths are not replicated); this is the same
+		// behavior the old validLimitParam fallback produced.
+		res, err := invoke(public.ListFollowers, map[string]interface{}{"account": "bob", "limit": "ten"})
+		if err != nil {
+			t.Fatalf("list_followers limit \"ten\": unexpected error %v", err)
+		}
+		if l := len(res.([]map[string]interface{})); l != 1 {
+			t.Errorf("list_followers limit \"ten\": got %d accounts, want 1 (default applied)", l)
+		}
+	})
+
+	t.Run("boundary limits still accepted", func(t *testing.T) {
+		// Legal inputs (including exact ubound) behave exactly as before.
+		res, err := invoke(public.ListFollowers, map[string]interface{}{"account": "bob", "limit": 100})
+		if err != nil {
+			t.Fatalf("list_followers limit 100: %v", err)
+		}
+		if l := len(res.([]map[string]interface{})); l != 1 {
+			t.Errorf("list_followers limit 100: got %d, want 1", l)
+		}
+		blog, err := invoke(public.ListAccountBlog, map[string]interface{}{"account": "alice", "limit": 50})
+		if err != nil {
+			t.Fatalf("list_account_blog limit 50: %v", err)
+		}
+		if l := len(blog.(map[string]interface{})["posts"].([]map[string]interface{})); l != 2 {
+			t.Errorf("list_account_blog limit 50: got %d posts, want 2", l)
+		}
+	})
 }
 
 // seedHiveFixture builds accounts, a community with roles/subscriptions,
