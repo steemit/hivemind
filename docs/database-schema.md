@@ -186,7 +186,7 @@ covering only the hot sorts that read it.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| _synced_at | TIMESTAMP | Last dual-write watermark (NOW() at sync time; nullable) |
+| _synced_at | TIMESTAMP | Backfill watermark: legacy's one-time v24 cold-start backfill wrote NOW() here; regular dual-writes leave it NULL and the Go indexer never writes it (hence excluded from checksum comparisons) |
 
 **Indexes** (hot sorts only; the main table carries the full set):
 - `hive_posts_cache_temp_ix6a`: (sc_trend, post_id) WHERE is_paidout = '0' - Trending

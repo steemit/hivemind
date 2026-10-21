@@ -1,4 +1,4 @@
-# Docker image pipeline + image smoke test + EB deploy placeholder
+# Docker image pipeline + image smoke test
 # (planned PR#432, 05-deploy.md section 1.8).
 #
 # Jobs:
