@@ -55,7 +55,8 @@ compose/README, derive names from `toEnvKey`, not memory.
 - `telemetry.Init(cfg) (shutdown func(), err)`: OTLP/HTTP trace exporter +
   BatchSpanProcessor + resource (service name/version) + W3C
   TraceContext/Baggage propagators. Shutdown flushes with a per-exporter 3 s
-  / total 5 s budget. Disabled telemetry yields no-ops.
+  / total 5 s budget. Disabled trace export (HIVE_TELEMETRY_ENABLED=false)
+  yields a no-op tracer; metrics follow HIVE_PROMETHEUS_ENABLED independently.
 - Span helpers: `StartSpanWithName(ctx, name)`, `RecordSpanError(span, err)`,
   `SetSpanSuccess(span)`, `RecordSpanParams(span, params)` (params as span
   events — keep large arrays out of hot paths).

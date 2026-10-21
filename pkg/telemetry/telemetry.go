@@ -37,16 +37,19 @@ var (
 // is the one that labels the metrics.
 var meterProviderOnce sync.Once
 
-// Init initializes OpenTelemetry with OTLP and Prometheus exporters
+// Init initializes OpenTelemetry with OTLP and Prometheus exporters.
+//
+// cfg.Enabled (HIVE_TELEMETRY_ENABLED) is the kill-switch for OTLP trace
+// export ONLY: when false, no trace exporter, tracer provider or propagator
+// is installed (Tracer() serves a no-op tracer) and nothing is shipped to
+// the OTLP collector. The Prometheus meter provider is orthogonal and
+// answers solely to cfg.PrometheusEnabled (HIVE_PROMETHEUS_ENABLED): traces
+// can be off while metrics stay on, and vice versa.
 func Init(cfg *config.TelemetryConfig) (func(), error) {
-	if !cfg.Enabled {
-		logging.GetLogger().Info("Telemetry disabled")
-		return func() {}, nil
-	}
-
 	ctx := context.Background()
 
-	// Create resource
+	// Create resource. It labels both the trace exporter and the meter
+	// provider, so it is built regardless of which exporters are enabled.
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(cfg.ServiceName),
@@ -59,54 +62,66 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 
 	var shutdownFuncs []func(context.Context) error
 
-	// Parse endpoint URL to extract host:port
-	// WithEndpoint expects host:port format, not full URL
-	endpoint := cfg.TracesEndpoint
-	if strings.HasPrefix(cfg.TracesEndpoint, "http://") || strings.HasPrefix(cfg.TracesEndpoint, "https://") {
-		parsedURL, err := url.Parse(cfg.TracesEndpoint)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse endpoint URL: %w", err)
-		}
-		endpoint = parsedURL.Host
-		if parsedURL.Port() == "" {
-			// Default port based on scheme
-			if parsedURL.Scheme == "https" {
-				endpoint += ":4318"
-			} else {
+	if !cfg.Enabled {
+		logging.GetLogger().Info("OTLP trace export disabled (HIVE_TELEMETRY_ENABLED=false); Prometheus metrics unaffected")
+	} else {
+		// Parse endpoint URL to extract host:port
+		// WithEndpoint expects host:port format, not full URL
+		endpoint := cfg.TracesEndpoint
+		if strings.HasPrefix(cfg.TracesEndpoint, "http://") || strings.HasPrefix(cfg.TracesEndpoint, "https://") {
+			parsedURL, err := url.Parse(cfg.TracesEndpoint)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse endpoint URL: %w", err)
+			}
+			endpoint = parsedURL.Host
+			if parsedURL.Port() == "" {
+				// 4318 is the default OTLP/HTTP port for both http
+				// and https, so no scheme-dependent branch is needed.
 				endpoint += ":4318"
 			}
 		}
+
+		// Setup trace exporter using OTLP. TLS is configurable (HIVE_TRACES_TLS,
+		// planned PR#432, 05-deploy.md section 1.6): the default (false) keeps
+		// insecure OTLP/HTTP for the local compose stack (in-network jaeger
+		// collector); production TLS endpoints set it to true.
+		otlpOpts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(endpoint)}
+		if !cfg.TracesTLS {
+			otlpOpts = append(otlpOpts, otlptracehttp.WithInsecure())
+		}
+		traceExporter, err := otlptrace.New(ctx, otlptracehttp.NewClient(otlpOpts...))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OTLP trace exporter: %w", err)
+		}
+
+		// Setup trace provider
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithBatcher(traceExporter),
+			sdktrace.WithResource(res),
+		)
+
+		otel.SetTracerProvider(tp)
+		shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
+
+		logging.GetLogger().Info("OTLP trace exporter initialized",
+			zap.String("endpoint", endpoint),
+			zap.Bool("tls", cfg.TracesTLS))
+
+		// Set global propagator
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+			propagation.TraceContext{},
+			propagation.Baggage{},
+		))
+
+		// Create tracer
+		tracer = otel.Tracer(cfg.ServiceName)
 	}
-
-	// Setup trace exporter using OTLP. TLS is configurable (HIVE_TRACES_TLS,
-	// planned PR#432, 05-deploy.md section 1.6): the default (false) keeps
-	// insecure OTLP/HTTP for the local compose stack (in-network jaeger
-	// collector); production TLS endpoints set it to true.
-	otlpOpts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(endpoint)}
-	if !cfg.TracesTLS {
-		otlpOpts = append(otlpOpts, otlptracehttp.WithInsecure())
-	}
-	traceExporter, err := otlptrace.New(ctx, otlptracehttp.NewClient(otlpOpts...))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create OTLP trace exporter: %w", err)
-	}
-
-	// Setup trace provider
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExporter),
-		sdktrace.WithResource(res),
-	)
-
-	otel.SetTracerProvider(tp)
-	shutdownFuncs = append(shutdownFuncs, tp.Shutdown)
-
-	logging.GetLogger().Info("OTLP trace exporter initialized",
-		zap.String("endpoint", endpoint),
-		zap.Bool("tls", cfg.TracesTLS))
 
 	// Initialize metric provider with Prometheus exporter, bridged onto the
 	// shared Registry (registry.go) so otel SDK metrics and the promauto
 	// hivemind_* metrics are scraped from the same /metrics endpoint.
+	// Gated only by HIVE_PROMETHEUS_ENABLED -- deliberately NOT by the
+	// traces kill-switch above (the two switches are orthogonal).
 	if cfg.PrometheusEnabled {
 		if err := initMeterProvider(res); err != nil {
 			return nil, fmt.Errorf("failed to initialize Prometheus exporter: %w", err)
@@ -114,16 +129,7 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 		logging.GetLogger().Info("Prometheus exporter initialized", zap.Int("port", cfg.PrometheusPort))
 	}
 
-	// Set global propagator
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
-
-	// Create tracer
-	tracer = otel.Tracer(cfg.ServiceName)
-
-	// Return shutdown function
+	// Return shutdown function (a no-op when nothing was initialized)
 	shutdown := func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

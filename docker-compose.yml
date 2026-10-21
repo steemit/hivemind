@@ -5,7 +5,9 @@
 # -> env var). The pre-#432 file carried five groups of dead env names that
 # config never read (HIVE_STEEM_URL, HIVE_STEEM_MAX_*, HIVE_INDEXER_TRAIL_*
 # and the HIVE_TELEMETRY_* cluster), so jaeger never saw a trace and the
-# indexer's 9091 listener never came up.
+# indexer's 9091 listener never came up. Since PR#425 HIVE_TELEMETRY_ENABLED
+# is actually read (traces kill-switch); every other HIVE_TELEMETRY_* name
+# from that dead cluster stays dead.
 #
 # Port exposure policy (PR#430 audit item 1): the observability listeners
 # (9090/9091) serve /metrics AND /debug/pprof/* and must stay off public

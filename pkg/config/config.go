@@ -114,16 +114,17 @@ type ServerConfig struct {
 	ShutdownGracePeriod time.Duration
 }
 
-// IndexerConfig holds indexer configuration
+// IndexerConfig holds indexer configuration.
+//
+// MaxWorkers is deliberately absent: HIVE_MAX_WORKERS has a single semantic
+// outlet, Steem.MaxWorkers (steemgosdk concurrency, internal/steem/client.go)
+// -- the indexer has no independent fetch concurrency knob.
 type IndexerConfig struct {
 	TrailBlocks          int
 	MaxBatch             int
-	MaxWorkers           int
 	SyncInterval         int // Seconds between sync checks
-	SyncToS3             bool
 	ForceFollowRecount   bool
 	TestMaxBlock         int
-	TestDisableSync      bool
 	RecommendCommunities string
 
 	// JobsInterval is the cache-audit jobs period in seconds
@@ -160,7 +161,6 @@ type TelemetryConfig struct {
 	Enabled           bool
 	TracesEndpoint    string // OTLP endpoint (e.g., "localhost:4318")
 	TracesTLS         bool   // Use TLS to the OTLP endpoint (false = insecure/HTTP)
-	JaegerURL         string // Deprecated: use TracesEndpoint instead
 	PrometheusEnabled bool
 	PrometheusPort    int
 
@@ -217,7 +217,11 @@ func Load() (*Config, error) {
 			StatementTimeout:     getDuration("db_statement_timeout", 30*time.Second),
 		},
 		Steem: SteemConfig{
-			URL:              getString("steemd_url", "https://api.steemit.com"),
+			URL: getString("steemd_url", "https://api.steemit.com"),
+			// HIVE_MAX_BATCH intentionally feeds TWO consumers (2026-10-19
+			// consistency audit, item A7): GetContentBatch chunking here
+			// (internal/steem/client.go) and the indexer block-fetch batch
+			// below -- see the mirrored comment on Indexer.MaxBatch.
 			MaxBatch:         getInt("max_batch", 50),
 			MaxWorkers:       getInt("max_workers", 4),
 			MaxRetries:       getInt("steemd_max_retries", 3),
@@ -238,14 +242,15 @@ func Load() (*Config, error) {
 			ShutdownGracePeriod: getDuration("http_shutdown_grace", 45*time.Second),
 		},
 		Indexer: IndexerConfig{
-			TrailBlocks:            getInt("trail_blocks", 2),
+			TrailBlocks: getInt("trail_blocks", 2),
+			// HIVE_MAX_BATCH intentionally feeds TWO consumers (2026-10-19
+			// consistency audit, item A7): the indexer block-fetch batch here
+			// (internal/indexer sync fetch size) and GetContentBatch chunking
+			// above -- see the mirrored comment on Steem.MaxBatch.
 			MaxBatch:               getInt("max_batch", 50),
-			MaxWorkers:             getInt("max_workers", 4),
 			SyncInterval:           getInt("sync_interval", 3),
-			SyncToS3:               getBool("sync_to_s3", false),
 			ForceFollowRecount:     getBool("force_follow_recount", false),
 			TestMaxBlock:           getInt("test_max_block", 0),
-			TestDisableSync:        getBool("test_disable_sync", false),
 			RecommendCommunities:   getString("recommend_communities", "hive-108451,hive-172186,hive-187187"),
 			JobsInterval:           getInt("jobs_interval", 0),
 			CacheSyncCatchupBlocks: getInt("cache_sync_catchup_blocks", 100),
@@ -260,7 +265,6 @@ func Load() (*Config, error) {
 			Enabled:           getBool("telemetry_enabled", true),
 			TracesEndpoint:    getString("traces_endpoint", "localhost:4318"),
 			TracesTLS:         getBool("traces_tls", false),
-			JaegerURL:         getString("jaeger_url", "http://localhost:14268/api/traces"),
 			PrometheusEnabled: getBool("prometheus_enabled", true),
 			PrometheusPort:    getInt("prometheus_port", 9090),
 			ServiceName:       getString("telemetry_service_name", "hivemind"),
@@ -318,6 +322,16 @@ func setDefaults() {
 	viper.SetDefault("telemetry_service_name", "hivemind")
 	viper.SetDefault("health_max_head_age", time.Hour)
 	viper.SetDefault("pprof_enabled", true)
+	// Remaining keys read in Load() registered for parity (AGENTS.md:
+	// defaults are registered in BOTH Load() and setDefaults()). viper.IsSet
+	// returns true for keys with a SetDefault, keeping config-file and env
+	// reads consistent. Dead keys removed by the 2026-10-19 consistency
+	// audit (items A2-A4) are deliberately not registered.
+	viper.SetDefault("redis_url", "")
+	viper.SetDefault("sync_interval", 3)
+	viper.SetDefault("force_follow_recount", false)
+	viper.SetDefault("test_max_block", 0)
+	viper.SetDefault("recommend_communities", "hive-108451,hive-172186,hive-187187")
 }
 
 func getString(key, defaultValue string) string {
