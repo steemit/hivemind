@@ -243,9 +243,12 @@ func TestCommunityAndPublicMethods(t *testing.T) {
 	}
 
 	t.Run("hive_api list family rejects invalid limit (def 50/max 100)", func(t *testing.T) {
-		// list_followers: zero/negative, over-max, and explicit null all
-		// return legacy valid_limit PublicErrors (-32602) instead of the
-		// pre-B1 silent fallback to the default 50.
+		// list_followers AND list_following: zero/negative, over-max, and
+		// explicit null all return legacy valid_limit PublicErrors (-32602)
+		// instead of the pre-B1 silent fallback to the default 50. Both
+		// methods are asserted directly: first-round mutation testing showed
+		// family sampling (one member per family) cannot see a regression in
+		// the skipped sibling.
 		cases := []struct {
 			limit interface{}
 			want  string
@@ -255,19 +258,41 @@ func TestCommunityAndPublicMethods(t *testing.T) {
 			{101.0, "limit exceeds max (101 > 100)"},
 			{nil, "limit must be provided"},
 		}
-		for _, tc := range cases {
-			if _, err := invoke(public.ListFollowers, map[string]interface{}{"account": "bob", "limit": tc.limit}); err == nil || err.Error() != tc.want {
-				t.Errorf("list_followers limit %v: err = %v, want %q", tc.limit, err, tc.want)
+		methods := []struct {
+			name    string
+			handler func(*gin.Context, json.RawMessage) (interface{}, error)
+			account string
+		}{
+			{"list_followers", public.ListFollowers, "bob"},
+			{"list_following", public.ListFollowing, "alice"},
+		}
+		for _, m := range methods {
+			for _, tc := range cases {
+				if _, err := invoke(m.handler, map[string]interface{}{"account": m.account, "limit": tc.limit}); err == nil || err.Error() != tc.want {
+					t.Errorf("%s limit %v: err = %v, want %q", m.name, tc.limit, err, tc.want)
+				}
 			}
 		}
 	})
 
 	t.Run("hive_api blog family rejects invalid limit (def 10/max 50)", func(t *testing.T) {
-		if _, err := invoke(public.ListAccountBlog, map[string]interface{}{"account": "alice", "limit": 0}); err == nil || err.Error() != "limit must be positive" {
-			t.Errorf("list_account_blog limit 0: err = %v, want limit must be positive", err)
+		// All three blog-family methods are asserted directly (same
+		// mutation-testing rationale as the list family above).
+		methods := []struct {
+			name    string
+			handler func(*gin.Context, json.RawMessage) (interface{}, error)
+		}{
+			{"list_account_blog", public.ListAccountBlog},
+			{"list_account_posts", public.ListAccountPosts},
+			{"list_account_feed", public.ListAccountFeed},
 		}
-		if _, err := invoke(public.ListAccountBlog, map[string]interface{}{"account": "alice", "limit": 51}); err == nil || err.Error() != "limit exceeds max (51 > 50)" {
-			t.Errorf("list_account_blog limit 51: err = %v, want limit exceeds max (51 > 50)", err)
+		for _, m := range methods {
+			if _, err := invoke(m.handler, map[string]interface{}{"account": "alice", "limit": 0}); err == nil || err.Error() != "limit must be positive" {
+				t.Errorf("%s limit 0: err = %v, want limit must be positive", m.name, err)
+			}
+			if _, err := invoke(m.handler, map[string]interface{}{"account": "alice", "limit": 51}); err == nil || err.Error() != "limit exceeds max (51 > 50)" {
+				t.Errorf("%s limit 51: err = %v, want limit exceeds max (51 > 50)", m.name, err)
+			}
 		}
 	})
 
