@@ -176,6 +176,54 @@ Cached post data with computed fields for API queries.
 - `hive_posts_cache_ix20`: (community_id, author, payout, post_id) WHERE is_paidout = '0' - Community pending
 - `hive_posts_cache_ix30-34`: Community-specific indexes
 
+### hive_posts_cache_temp
+
+Rolling 90-day hot-data mirror of `hive_posts_cache`, maintained by the
+indexer's CachedPost dual-write. It is a structural mirror of the main
+table -- the same 32 columns with identical types and defaults (see
+`hive_posts_cache` above) -- plus one extra column and a reduced index set
+covering only the hot sorts that read it.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| _synced_at | TIMESTAMP | Backfill watermark: legacy's one-time v24 cold-start backfill wrote NOW() here; regular dual-writes leave it NULL and the Go indexer never writes it (hence excluded from checksum comparisons) |
+
+**Indexes** (hot sorts only; the main table carries the full set):
+- `hive_posts_cache_temp_ix6a`: (sc_trend, post_id) WHERE is_paidout = '0' - Trending
+- `hive_posts_cache_temp_ix7a`: (sc_hot, post_id) WHERE is_paidout = '0' - Hot
+- `hive_posts_cache_temp_ix9a`: (depth, payout, post_id) WHERE is_paidout = '0' - Payout
+- `hive_posts_cache_temp_ix30`: (community_id, sc_trend, post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0 - Community trending
+- `hive_posts_cache_temp_ix6b`: (depth, sc_trend DESC, post_id) WHERE is_paidout = '0' AND depth = 0 - Trending, root posts (v26)
+- `hive_posts_cache_temp_ix30b`: (community_id, depth, sc_trend DESC, post_id) WHERE community_id IS NOT NULL AND is_grayed = '0' AND depth = 0 - Community trending, root posts (v26)
+- `hive_posts_cache_temp_created`: (created_at) - Prune window scan
+
+Autovacuum settings mirror `hive_posts_cache` (fixed thresholds, no scale
+factor; see migration `0001_init_schema`).
+
+**Semantics:**
+
+- **Dual-table routing (CacheRouter):** ranked queries route the hot sorts
+  (trending, hot, payout, payout_comments, created, promoted) to this
+  table; every other sort reads `hive_posts_cache`
+  (`internal/api/condenser/cursor.go` `rankedCacheTable`, mirroring legacy
+  `CacheRouter.get_table`). The indexer dual-writes both tables on every
+  cache flush.
+- **90-day prune window:** the CacheSync background job (60s tick, legacy
+  `SYNC_WINDOW`/`HOT_DAYS`) deletes rows whose `created_at` falls outside
+  the 90-day hot window, in batched DELETEs (10000 rows per statement,
+  each under a statement-timeout exemption).
+- **Catch-up gating:** pruning pauses while the indexer trails the chain
+  head by more than `HIVE_CACHE_SYNC_CATCHUP_BLOCKS` (default 100; the
+  `catchupPaused` predicate, shared with the cache-jobs tick gate) and
+  resumes in live mode. Catch-up inserts rows with old `created_at`;
+  pruning them mid-catch-up would delete rows the dual-write just
+  produced.
+- **20M checksum comparison:** `tools/db-checksum/tables.yaml` compares
+  this table (key `post_id`) excluding `sc_trend`/`sc_hot` (both
+  databases are normalized first with `recalc_sc_trend.sql`) and
+  `_synced_at` (the legacy-only v24 backfill watermark; written once, at
+  different moments on the two databases -- see above).
+
 ### hive_feed_cache
 
 Materialized view of posts + reblogs for efficient feed queries.

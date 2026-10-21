@@ -76,8 +76,9 @@ func (PostCache) TableName() string {
 
 // PostCacheTemp mirrors PostCache in the hive_posts_cache_temp table, which
 // holds a rolling 90-day hot-data window pruned by the CacheSync background
-// job. It is identical to PostCache plus a _synced_at column tracking the
-// last dual-write.
+// job. It is identical to PostCache plus a _synced_at column: a backfill
+// watermark written only by legacy's one-time v24 cold-start sync; regular
+// dual-writes leave it NULL and the Go indexer never writes it.
 type PostCacheTemp struct {
 	PostID      int64         `gorm:"primaryKey;column:post_id"`
 	Author      string        `gorm:"type:varchar(16);not null;column:author"`

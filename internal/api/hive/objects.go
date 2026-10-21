@@ -140,11 +140,23 @@ func postsByID(ctx context.Context, db *gorm.DB, ids []int64, observer string, l
 		}, nil
 	}
 
-	// Observer handling mirrors legacy: the observer resolves through
-	// get_account_id (objects.py:42-43) -- an unknown account is an error
-	// -- and its reblog set comes from one batched IN query for the whole
-	// id list (legacy _reblogged_ids, objects.py:195-199). Votes need no
-	// query: the observer's rshares live in the already-loaded votes CSV.
+	// Observer handling: erroring on an unknown observer is a deliberate
+	// fail-loud policy choice (registered deviation O11 D2, kept as-is per
+	// the D7 decision to not expose hive_api during the gray rollout). At
+	// the posts stage the legacy chain performs no account validation: its
+	// _reblogged_ids helper queries hive_reblogs by observer name directly,
+	// so an unknown observer simply matches nothing there. The chain tail
+	// accounts_by_name call, however, resolves the observer through
+	// get_account_id, which asserts on unknown names (legacy common.py:40)
+	// -- so the net chain-level outcome still fails on both sides,
+	// differing in shape: a raw legacy AssertionError vs the clean public
+	// error Go raises early. Per stage the two sides are complementary
+	// mirrors (O11 D1/D2): legacy is silent at the posts stage and strict
+	// at the accounts stage, while Go is the reverse --
+	// appendFollowContexts returns nil for an unknown observer. The reblog
+	// set itself comes from one batched IN query for the whole id list
+	// (legacy _reblogged_ids). Votes need no query: the observer's rshares
+	// live in the already-loaded votes CSV.
 	var reblogged map[int64]bool
 	if observer != "" {
 		var obsAcc models.Account

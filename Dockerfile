@@ -47,6 +47,16 @@ RUN chown -R appuser:appuser /app
 # Switch to non-root user
 USER appuser
 
+# Build metadata surfaced by /health (internal/health/health.go reads
+# SOURCE_COMMIT / DOCKER_TAG). CI passes them via --build-arg; the empty
+# defaults keep local builds identical to images without the injection.
+# Declared this late so a changing SOURCE_COMMIT does not invalidate the
+# cached package/copy layers above.
+ARG SOURCE_COMMIT
+ARG DOCKER_TAG
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}
+ENV DOCKER_TAG=${DOCKER_TAG}
+
 # Expose default port (JSON-RPC; the CMD default runs the server)
 EXPOSE 8080
 

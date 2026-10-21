@@ -113,7 +113,7 @@ Configuration is managed via environment variables or config file:
 | `HIVE_TRACES_TLS` | Use TLS to the OTLP traces endpoint; false keeps insecure OTLP/HTTP (local compose / in-VPC collector), true for TLS endpoints | false |
 | `HIVE_TELEMETRY_SERVICE_NAME` | Service name for traces/metrics (e.g. `hivemind-go` during the gray rollout) | hivemind |
 | `HIVE_PROMETHEUS_ENABLED` | Enable the observability HTTP listener (`/metrics`, pprof, and the indexer's `/health`) | true |
-| `HIVE_PROMETHEUS_PORT` | Observability HTTP port (server default 9090; the indexer is typically set to 9091) | 9090 |
+| `HIVE_PROMETHEUS_PORT` | Observability HTTP port (server default 9090; the indexer is set to 9091 in compose) | 9090 |
 | `HIVE_PPROF_ENABLED` | Mount `/debug/pprof/*` on the observability port (keep the port internal-only) | true |
 | `HIVE_HEALTH_MAX_HEAD_AGE` | `/health` fails (500) for reader processes when the indexed head block is older than this (legacy `max_head_age`; 0 = disabled) | 1h |
 | `HIVE_CACHE_SYNC_CATCHUP_BLOCKS` | CacheSync gate: pause the hive_posts_cache_temp 90-day prune while the indexer trails the chain head by more than this many blocks (catch-up); resume in live mode | 100 |

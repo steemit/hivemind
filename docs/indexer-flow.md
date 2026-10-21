@@ -442,8 +442,11 @@ proportionally). These are instance-level recommendations, not code:
 Notes:
 
 - **UNLOGGED tables are NOT applicable**: every hive table must survive a
-  restart (`hive_posts_cache_temp` is a durability-preserving staging table
-  synced into `hive_posts_cache`, not a scratch table).
+  restart (`hive_posts_cache_temp` is a durability-preserving mirror of
+  `hive_posts_cache`: the indexer's CachedPost dual-writes both tables on
+  every flush, and CacheSync never copies main-to-temp -- it only DELETEs
+  temp rows outside the 90-day window; the sole one-time main-to-temp copy
+  was the v24 cold-start backfill).
 - The batch transaction holds row locks for its full duration (up to 1000
   blocks of writes). Keep the sync database dedicated during initial sync --
   API readers contending on locked rows is expected otherwise.
