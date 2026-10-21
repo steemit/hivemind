@@ -75,12 +75,9 @@ func Init(cfg *config.TelemetryConfig) (func(), error) {
 			}
 			endpoint = parsedURL.Host
 			if parsedURL.Port() == "" {
-				// Default port based on scheme
-				if parsedURL.Scheme == "https" {
-					endpoint += ":4318"
-				} else {
-					endpoint += ":4318"
-				}
+				// 4318 is the default OTLP/HTTP port for both http
+				// and https, so no scheme-dependent branch is needed.
+				endpoint += ":4318"
 			}
 		}
 

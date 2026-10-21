@@ -108,6 +108,7 @@ Configuration is managed via environment variables or config file:
 | `HIVE_HTTP_MAX_BODY_BYTES` | JSON-RPC request body cap; larger bodies get HTTP 413 before parsing (0 = default, max 1073741824) | 10485760 (10MB) |
 | `HIVE_HTTP_SHUTDOWN_GRACE` | Graceful-shutdown window on SIGTERM; must be >= `HIVE_DB_STATEMENT_TIMEOUT` so in-flight statements complete (0 = default) | 45s |
 | `HIVE_LOG_LEVEL` | Logging level | INFO |
+| `HIVE_TELEMETRY_ENABLED` | OTLP trace export kill-switch (traces only; Prometheus metrics follow `HIVE_PROMETHEUS_ENABLED`) | true |
 | `HIVE_TRACES_ENDPOINT` | OTLP traces endpoint | localhost:4318 |
 | `HIVE_TRACES_TLS` | Use TLS to the OTLP traces endpoint; false keeps insecure OTLP/HTTP (local compose / in-VPC collector), true for TLS endpoints | false |
 | `HIVE_TELEMETRY_SERVICE_NAME` | Service name for traces/metrics (e.g. `hivemind-go` during the gray rollout) | hivemind |

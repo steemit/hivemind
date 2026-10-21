@@ -49,7 +49,10 @@ func TestInitDisabledIsTracesKillSwitch(t *testing.T) {
 	// Metrics orthogonality: with traces off, the Prometheus meter provider
 	// must still be installed, so otel-API metrics keep landing on the
 	// shared Registry. This holds whether the once-guarded provider was
-	// installed by this Init call or an earlier test in the same process.
+	// installed by this Init call or an earlier test in the same process;
+	// for a strong assertion that this Init call installed the provider
+	// itself, run the Init tests in isolation:
+	// go test -run 'TestInit' ./pkg/telemetry/
 	counter, err := otel.Meter("hivemind-test").Int64Counter("hivemind_traces_kill_switch_probe_total")
 	if err != nil {
 		t.Fatalf("Int64Counter: %v", err)
