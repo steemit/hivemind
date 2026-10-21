@@ -111,6 +111,12 @@ jobs:
           push: ${{ steps.pushmode.outputs.push == 'true' }}
           load: ${{ steps.pushmode.outputs.push != 'true' }}
           tags: ${{ steps.tags.outputs.server }}
+          # /health build metadata (audit A8): SOURCE_COMMIT pins the exact
+          # revision, DOCKER_TAG mirrors the primary registry tag (tag=sha;
+          # the rolling -latest tags on master move on their own).
+          build-args: |
+            SOURCE_COMMIT=${{ github.sha }}
+            DOCKER_TAG=server-${{ github.sha }}
           cache-from: type=gha,scope=server
           cache-to: type=gha,scope=server,mode=max
 
@@ -124,6 +130,9 @@ jobs:
           push: ${{ steps.pushmode.outputs.push == 'true' }}
           load: ${{ steps.pushmode.outputs.push != 'true' }}
           tags: ${{ steps.tags.outputs.indexer }}
+          build-args: |
+            SOURCE_COMMIT=${{ github.sha }}
+            DOCKER_TAG=indexer-${{ github.sha }}
           cache-from: type=gha,scope=indexer
           cache-to: type=gha,scope=indexer,mode=max
 

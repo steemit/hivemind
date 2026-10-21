@@ -36,6 +36,16 @@ RUN chown -R appuser:appuser /app
 
 USER appuser
 
+# Build metadata surfaced by /health (internal/health/health.go reads
+# SOURCE_COMMIT / DOCKER_TAG). CI passes them via --build-arg; the empty
+# defaults keep local builds identical to images without the injection.
+# Declared this late so a changing SOURCE_COMMIT does not invalidate the
+# cached package/copy layers above.
+ARG SOURCE_COMMIT
+ARG DOCKER_TAG
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}
+ENV DOCKER_TAG=${DOCKER_TAG}
+
 # JSON-RPC API port. The observability port (HIVE_PROMETHEUS_PORT, default
 # 9090) serves /metrics + /debug/pprof and must stay internal-only.
 EXPOSE 8080

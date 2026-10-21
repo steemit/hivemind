@@ -237,7 +237,12 @@ func (f *FollowAPI) GetRebloggedBy(c *gin.Context, params json.RawMessage) (inte
 		return nil, err
 	}
 
-	// Get post ID
+	// Get post ID. Intentionally the non-filtering lookup (is_deleted NOT
+	// excluded), mirroring legacy condenser cursor._get_post_id
+	// (condenser_api/cursor.py:36): like the seek/paging cursors that share
+	// its cache_key mechanism, this lookup must still resolve deleted posts
+	// to their stable post_id. Data-fetch paths use the filtering
+	// GetLiveByAuthorPermlink instead.
 	postRepo := db.NewPostRepository(f.repo)
 	post, err := postRepo.GetByAuthorPermlink(c.Request.Context(), author, permlink)
 	if err != nil {
