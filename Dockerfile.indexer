@@ -4,8 +4,8 @@
 # Base images are pinned to exact tags (no :latest) so builds are
 # reproducible; bump deliberately.
 
-# Build stage - golang:1.23-alpine3.20 (go.mod requires go 1.23)
-FROM golang:1.23-alpine3.20 AS builder
+# Build stage - golang:1.27.3-alpine (go.mod requires go 1.23)
+FROM golang:1.27.3-alpine AS builder
 
 RUN apk add --no-cache git make
 
