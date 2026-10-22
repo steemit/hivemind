@@ -5,7 +5,7 @@
 # Planned PR#432: pinned base images + HEALTHCHECK (05-deploy.md 1.6).
 # Base images are pinned to exact tags (no :latest); bump deliberately.
 
-# Build stage - golang:1.23-alpine3.20 (go.mod requires go 1.23)
+# Build stage - golang:1.27.3-alpine (go.mod requires go 1.23)
 FROM golang:1.27.3-alpine AS builder
 
 # Install build dependencies
