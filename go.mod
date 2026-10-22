@@ -2,6 +2,8 @@ module github.com/steemit/hivemind
 
 go 1.23.0
 
+toolchain go1.27.3
+
 require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-redis/redis/v8 v8.11.0

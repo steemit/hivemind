@@ -6,7 +6,7 @@
 # Base images are pinned to exact tags (no :latest); bump deliberately.
 
 # Build stage - golang:1.23-alpine3.20 (go.mod requires go 1.23)
-FROM golang:1.23-alpine3.20 AS builder
+FROM golang:1.27.3-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make
