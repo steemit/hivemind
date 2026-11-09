@@ -174,9 +174,17 @@ func (pay *PaymentIndexer) ProcessTransfer(ctx context.Context, tx *gorm.DB, op 
 		return fmt.Errorf("failed to create payment: %w", err)
 	}
 
-	// Update post promoted amount
+	// Update the promoted balance with a single-column UPDATE, not a
+	// full-row Save: the cache-maintenance jobs write other hive_posts
+	// columns outside this transaction, and a Save would clobber their
+	// concurrent writes with this read-modify-write snapshot. Absolute
+	// value, like legacy op_transfer (payments.py "UPDATE hive_posts SET
+	// promoted = :val WHERE id = :id").
 	post.Promoted += amount
-	if err := tx.WithContext(ctx).Save(post).Error; err != nil {
+	if err := tx.WithContext(ctx).
+		Model(&models.Post{}).
+		Where("id = ?", post.ID).
+		Update("promoted", post.Promoted).Error; err != nil {
 		return fmt.Errorf("failed to update post promoted amount: %w", err)
 	}
 
