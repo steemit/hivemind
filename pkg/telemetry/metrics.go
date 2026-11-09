@@ -132,7 +132,7 @@ var (
 	IndexerBatchWriteDuration = metricFactory.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "hivemind_indexer_tx_batch_duration_seconds",
-			Help:    "Wall time of a committed tx batch (transaction open through COMMIT; excludes fetch)",
+			Help:    "Wall time of a committed tx batch (transaction open through COMMIT; excludes fetch and the trailing queue flushes)",
 			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
 		},
 		[]string{"phase"},
