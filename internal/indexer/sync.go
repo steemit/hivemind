@@ -1024,6 +1024,12 @@ func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bo
 	}
 	committed = true
 
+	// The write histogram's boundary is transaction open through COMMIT
+	// (see IndexerBatchWriteDuration help): sample it here, before the
+	// trailing queue flushes -- they run in their own transactions and
+	// make steemd RPC calls, which is not the transactional write path.
+	writeDur := time.Since(writeStart)
+
 	// Trailing queue flushes after each batch transaction. Placement
 	// precision (PR#411 review): legacy runs Accounts.flush(trx=True) and
 	// CachedPost.flush(trx=True) ONCE, after from_steemd's chunk loop has
@@ -1040,6 +1046,7 @@ func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bo
 	// terms: a crash can lose edits and pre-payout votes ("worst case it
 	// will be synced upon payout"), and RecoverMissingPosts heals missing
 	// cache INSERTs at startup.
+	flushStart := time.Now()
 	if n, err := s.blockProcessor.Accounts().FlushBatch(batchCtx, true); err != nil {
 		s.logger.Warn("account flush failed", zap.Error(err))
 	} else if n > 0 {
@@ -1053,12 +1060,15 @@ func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bo
 			zap.Int("inserts", counts["insert"]),
 			zap.Int("updates", counts["update"]+counts["payout"]+counts["upvote"]+counts["recount"]))
 	}
+	flushDur := time.Since(flushStart)
 
 	// Throughput observability (§4.2): the counter's rate() is blocks/s;
 	// fetch and write histograms attribute a slowdown to the RPC or the
-	// transactional path. Log at Info for substantial batches (initial-sync
-	// chunks) and Debug for the small live-mode batches.
-	writeDur := time.Since(writeStart)
+	// transactional path, while flushDur accounts the trailing queue
+	// flushes (own transactions + steemd RPCs) that the write histogram
+	// deliberately excludes. Log at Info for substantial batches
+	// (initial-sync chunks) and Debug for the small live-mode batches;
+	// blocks_per_sec is the write-side rate (histogram-consistent).
 	phase := "live"
 	if isInitialSync {
 		phase = "initial"
@@ -1078,6 +1088,7 @@ func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bo
 		zap.Int("blocks", len(blocks)),
 		zap.Duration("fetch", fetchDur),
 		zap.Duration("write", writeDur),
+		zap.Duration("flush", flushDur),
 		zap.Float64("blocks_per_sec", rate))
 	return nil
 }

@@ -418,8 +418,10 @@ Throughput observability (Prometheus): `hivemind_indexer_blocks_processed_total`
 (rate() = blocks/s, `phase` = initial|live),
 `hivemind_indexer_blocks_fetch_duration_seconds` (steemd fetch RPC wall time
 per batch) and `hivemind_indexer_tx_batch_duration_seconds` (transaction
-open through COMMIT). The per-batch log line `Synced block batch` carries
-the same numbers (blocks, fetch, write, blocks_per_sec).
+open through COMMIT; the trailing queue flushes are excluded -- they run
+in their own transactions and make steemd RPC calls). The per-batch log
+line `Synced block batch` carries the same numbers (blocks, fetch, write,
+flush, blocks_per_sec).
 `hivemind_indexer_poison_retries_total{phase}` counts every failed sync
 attempt the poison loops retry (see the poison runbook below for the
 amplification math it guards).
