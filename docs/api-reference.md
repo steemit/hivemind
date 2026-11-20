@@ -426,6 +426,11 @@ Get transaction by transaction ID.
 
 #### condenser_api.get_state
 
+> **Deprecated — scheduled for removal.** This is a legacy compatibility
+> endpoint slated for decommissioning; it will never be implemented in the Go
+> server and the routing entry will be deleted at retirement time. Do not
+> build new integrations against it.
+
 Get state for a path (compatibility method).
 
 **Parameters:**
@@ -618,6 +623,17 @@ List communities by new subscriber count.
 
 **Returns:** Array of community tuples
 
+#### bridge.list_top_communities
+
+List top communities (Go-only; no legacy counterpart): configured
+recommended communities first, then by rank.
+
+**Parameters:**
+- `limit` (integer, optional): Default 25, max 99; the method also accepts
+  no parameters
+
+**Returns:** Array of `(name, title)` tuples
+
 #### bridge.list_community_roles
 
 List community account-roles.
@@ -625,7 +641,7 @@ List community account-roles.
 **Parameters:**
 - `community` (string, required)
 - `last` (string, optional)
-- `limit` (integer, optional): Default 50
+- `limit` (integer, optional): Default 50, max 100
 
 **Returns:** Array of tuples: `[("account", "role", "title"), ...]`
 
@@ -698,6 +714,13 @@ Notes: an unknown account is an error; `lastread` renders as
 exclude notifications that reference deleted posts, matching legacy.
 
 ### Public APIs
+
+> **Reserved namespace.** The `hive_api.*` methods below are implemented and
+> available when calling the server directly, but the namespace is a legacy
+> reservation: the Python service never exposed it over HTTP, no active
+> consumer (condenser rewrite, wallet, steem-js, steemgosdk) calls it, and
+> the production jussi gateway has no routing entry for it (see the 2026-Q4
+> plan's O11 parity memo). Do not build new integrations against it.
 
 #### hive_api.get_account
 
