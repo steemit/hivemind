@@ -103,7 +103,6 @@ class DbState:
             'hive_posts_cache_ix9b', # (category, depth, payout, post_id, paidout=0)
             'hive_posts_cache_ix10', # (post_id, payout, gray=1, payout>0)
             'hive_posts_cache_ix30', # API: community trend
-            'hive_posts_cache_ix31', # API: community hot
             'hive_posts_cache_ix32', # API: community created
             'hive_posts_cache_ix33', # API: community payout
             'hive_posts_cache_ix34', # API: community muted
