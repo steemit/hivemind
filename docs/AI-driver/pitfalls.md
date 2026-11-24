@@ -68,6 +68,21 @@ write down where its behavior was verified against the real peer.
 pair-array rejection pinned as a scripted quirk case, and a fake↔real
 equivalence test in `client_contract_test.go`.)
 
+**Recurrence, upstream side (2026-11-23, first 0->20M sync)**: the SDK's
+typed `pow2_operation` model matched neither wire form steemd emits
+(`condenser_api.get_block` sends the `work` static_variant as
+`[0, {…}]`, `block_api.get_block` as `{"type","value"}`). Unknown fields
+are dropped silently, so `work.value.input.worker_account` was never
+decoded and every pow2-mined account (the pow2 era starts near block
+4.13M) went unregistered until a post by one failed `hive_posts_fk1` at
+block 4,143,571. Nothing caught it: the fake provider is built from
+hand-written maps of the *intended* shape, and the smoke run stopped at
+250k -- inside the pow1 era. Rule: a smoke window must cross every
+operation-shape boundary of the range being synced, and SDK-decoded blocks
+need a live regression test at each boundary (see
+`internal/indexer/pow2_live_test.go`, gated on `HIVE_TEST_STEEMD_URL`).
+Fixed in steemutil v0.0.35 / steemgosdk v0.0.34.
+
 ## 4. Stateful components constructed twice
 
 **What**: `CustomOpProcessor` constructed its own `NewFollowIndexer(repo,
