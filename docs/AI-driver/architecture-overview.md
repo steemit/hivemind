@@ -74,7 +74,8 @@ anything reusable belongs in `pkg/`.
    cache rows, rebuild the feed cache, force a follow recount.
 2. **Steady state (Strategy B)**: poll `get_dynamic_global_properties` every
    `SyncInterval` seconds; when the DB head trails LIB, pull the missing
-   blocks in `MaxBatch`-sized batches via `steem.GetBlocksRange`.
+   blocks via `steem.GetBlocksRange` (JSON-RPC batches; one `MaxBatch`
+   chunk per worker per call).
 3. **Per block**: `BlockProcessor.ProcessBlock` opens one transaction:
    insert the `hive_blocks` row, dispatch each operation, then (in order)
    custom-json ops, account registration, community registration, trxid map.

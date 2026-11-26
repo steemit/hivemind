@@ -97,18 +97,25 @@ Three layers:
    (`HIVE_STEEMD_RPC_TIMEOUT`), bounded transport-level retries with
    exponential backoff (`HIVE_STEEMD_MAX_RETRIES` — 0 falls back to the
    SDK default 3, so retries cannot be fully disabled; 100/200/400 ms,
-   doubled on 429), bounded worker pool for `GetBlocks`
-   (`HIVE_MAX_WORKERS` → SDK concurrency).
+   doubled on 429), bounded worker pool for its own range calls
+   (`HIVE_MAX_WORKERS` → SDK concurrency; block ranges no longer go
+   through it — see `GetBlocksRange` below).
 
 Contract facts an agent must know:
 
-- `GetBlocksRange(ctx, from, to)` fetches blocks `[from, to]` inclusive via
-  the SDK; the SDK fires one HTTP request per block (not a JSON-RPC batch)
-  on a bounded worker pool. Failures are retried with backoff by the SDK
-  transport; the wrapper adds **no outer retry** (stacking retries would
-  multiply attempts) and is **all-or-nothing**: any block still failing
-  after the bounded retries errors the whole range, so callers can never
-  skip a block.
+- `GetBlocksRange(ctx, from, to)` fetches blocks `[from, to]` inclusive as
+  JSON-RPC batches (`internal/steem/blocks_batch.go`), NOT through the
+  SDK: the range is split into `max_batch`-sized request-object arrays of
+  `condenser_api.get_block`, POSTed on a `max_workers`-bounded pool with
+  the same bounded retry and backoff as `GetContentBatch` (no SDK retry
+  sits underneath, so nothing stacks). It is **all-or-nothing**: any
+  chunk still failing after the bounded retries errors the whole range, so
+  callers can never skip a block. The retry granularity is the chunk, not
+  the block. **The pool only engages when a call spans more than one
+  chunk**: the sync fetches one chunk per worker per call
+  (`internal/indexer/sync.go` `fetchStepSize`). A call of exactly
+  `max_batch` blocks is a single serial POST, measured slower on dense
+  ranges than the per-block fan-out this path replaced.
 - Malformed responses are errors, never empty results: bad JSON fails
   decoding inside the SDK; `result: null` for `get_block` maps to
   `steem.ErrBlockNotFound`; null results for calls steemd never answers

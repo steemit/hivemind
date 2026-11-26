@@ -244,9 +244,10 @@ func Load() (*Config, error) {
 		Indexer: IndexerConfig{
 			TrailBlocks: getInt("trail_blocks", 2),
 			// HIVE_MAX_BATCH intentionally feeds TWO consumers (2026-10-19
-			// consistency audit, item A7): the indexer block-fetch batch here
-			// (internal/indexer sync fetch size) and GetContentBatch chunking
-			// above -- see the mirrored comment on Steem.MaxBatch.
+			// consistency audit, item A7): the indexer block-fetch chunk here
+			// (one chunk per worker per fetch call -- internal/indexer
+			// sync.go fetchStepSize) and GetContentBatch chunking above --
+			// see the mirrored comment on Steem.MaxBatch.
 			MaxBatch:               getInt("max_batch", 50),
 			SyncInterval:           getInt("sync_interval", 3),
 			ForceFollowRecount:     getBool("force_follow_recount", false),

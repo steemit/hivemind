@@ -882,6 +882,27 @@ func (s *Sync) txBatchBlocks() int64 {
 	return int64(s.config.Indexer.TxBatchBlocks)
 }
 
+// fetchStepSize is how many blocks one GetBlocksRange call fetches: one
+// max_batch chunk per worker, bounded by the tx batch size.
+//
+// GetBlocksRange splits whatever it is given into max_batch-sized JSON-RPC
+// batch POSTs and runs those on a max_workers pool, so a call must span
+// MORE than one chunk for that pool to engage. Stepping by max_batch alone
+// -- one chunk, one serial POST per call -- measured as a regression on
+// dense ranges against the single-block fan-out the batch path replaced
+// (fetch only, 4 workers: 113 blocks/s against 143). One chunk per worker
+// keeps max_workers requests in flight as the fan-out did, and the batch
+// path is then faster on every range measured (sparse ~5,700 blocks/s
+// against ~295; dense ~390 against ~143). A worker count of zero (steem
+// knobs unset, e.g. tests driving a fake provider) means one chunk per call.
+func (s *Sync) fetchStepSize() int64 {
+	step := int64(s.config.Indexer.MaxBatch) * int64(max(s.config.Steem.MaxWorkers, 1))
+	if step > s.txBatchBlocks() || step < 1 {
+		return s.txBatchBlocks()
+	}
+	return step
+}
+
 // syncBlocks syncs a range of blocks. isInitialSync must reflect the phase
 // the indexer is in: historical catch-up during startup passes true (suppresses
 // follow count deltas, follow notifications and account dirty-marking, exactly
@@ -940,12 +961,10 @@ func (s *Sync) syncTxBatch(ctx context.Context, from, to int64, isInitialSync bo
 	// (legacy sync.py from_steemd: `blocks = steemd.get_blocks_range(lbound,
 	// to)` then `Blocks.process_multi(blocks)`): the transaction never spans
 	// an RPC, and a cancelled fetch aborts the batch with nothing open to
-	// roll back. Fetches are chunked at the fetch batch size (capped by the
-	// tx batch size so the degenerate 1-block tx batch also fetches singly).
-	fetchSize := int64(s.config.Indexer.MaxBatch)
-	if fetchSize > s.txBatchBlocks() || fetchSize < 1 {
-		fetchSize = s.txBatchBlocks()
-	}
+	// roll back. Fetches are chunked at the fetch step size (capped by the
+	// tx batch size so the degenerate 1-block tx batch also fetches singly;
+	// see fetchStepSize).
+	fetchSize := s.fetchStepSize()
 	blocks := make([]map[string]interface{}, 0, to-from+1)
 	var fetchDur time.Duration
 	for start := from; start <= to; start += fetchSize {

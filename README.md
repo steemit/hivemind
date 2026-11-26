@@ -100,7 +100,7 @@ Configuration is managed via environment variables or config file:
 | `HIVE_STEEMD_URL` | Steemd node URL | Required |
 | `HIVE_STEEMD_MAX_RETRIES` | Transport-level RPC retries (0 = SDK default; retries cannot be fully disabled) | 3 |
 | `HIVE_STEEMD_RPC_TIMEOUT` | Per-attempt RPC timeout against steemd | 15s |
-| `HIVE_MAX_BATCH` | Items per chunk for JSON-RPC batch calls (`GetContentBatch`) and blocks per indexer fetch chunk. **Warning:** behind a jussi endpoint (for example `api.steemit.com`) a JSON-RPC batch may carry at most 50 requests (jussi's default `batch_size_limit`); a larger value gets every content batch rejected with error 1600 — the failed flush is only logged as a warning, the process keeps running and the post cache stops updating. Keep the default behind jussi; raise it only against a direct steemd endpoint. | 50 |
+| `HIVE_MAX_BATCH` | Items per JSON-RPC batch call: `GetContentBatch` chunks and the block-fetch chunks of `GetBlocksRange` (each fetch call spans one chunk per worker). **Warning:** behind a jussi endpoint (for example `api.steemit.com`) a JSON-RPC batch may carry at most 50 requests (jussi's default `batch_size_limit`); a larger value gets every batch rejected with error 1600 — block fetching then fails and the sync stops after its bounded retries, while content flushes fail silently (logged as a warning, the process keeps running, the post cache stops updating). Keep the default behind jussi; raise it only against a direct steemd endpoint. | 50 |
 | `HIVE_REDIS_URL` | Redis connection | Optional |
 | `HIVE_HTTP_SERVER_PORT` | API server port | 8080 |
 | `HIVE_HTTP_READ_TIMEOUT` | HTTP read timeout | 30s |
