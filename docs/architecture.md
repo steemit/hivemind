@@ -242,14 +242,16 @@ Key configuration options:
 - `STEEMD_URL`: Steemd node URL
 - `REDIS_URL`: Redis connection (optional, for caching)
 - `TRAIL_BLOCKS`: Blocks to trail behind head (fork protection)
-- `MAX_BATCH`: Batch size for block processing and JSON-RPC batching
-  (`GetContentBatch` chunks get_content request arrays at this size)
+- `MAX_BATCH`: Items per JSON-RPC batch call — `GetContentBatch` chunks
+  and the block-fetch chunks of `GetBlocksRange` (each fetch call spans
+  one chunk per worker)
   - **Warning:** the accepted range is 1–5000, but a jussi endpoint (for
     example `api.steemit.com`) rejects a JSON-RPC batch of more than 50
     requests with error 1600 (jussi's default `batch_size_limit`). A larger
-    value makes every content batch fail behind jussi: the failed flush is
-    only logged as a warning, the process keeps running and the post cache
-    stops updating. Keep the default of 50 behind jussi; raise it only
+    value makes every batch fail behind jussi: block fetching fails and the
+    sync stops after its bounded retries, while content flushes fail
+    silently — logged as a warning, the process keeps running, the post
+    cache stops updating. Keep the default of 50 behind jussi; raise it only
     against a direct steemd endpoint.
 - `MAX_WORKERS`: Number of worker threads (block-range and batch-chunk fetch
   concurrency)

@@ -60,9 +60,10 @@ Syncs from current head to last irreversible block.
 3. Group the range into tx batches of `HIVE_INDEXER_TX_BATCH_BLOCKS` blocks
    (default 1000, legacy `chunk_size`)
 4. Per tx batch:
-   - Fetch the whole batch from steemd first (fetch chunks of
-     `HIVE_MAX_BATCH`; cancellable between chunks -- a shutdown here aborts
-     with nothing in flight)
+   - Fetch the whole batch from steemd first (calls of
+     `HIVE_MAX_BATCH` x `HIVE_MAX_WORKERS` blocks, each a JSON-RPC batch
+     per `HIVE_MAX_BATCH` chunk; cancellable between calls -- a shutdown
+     here aborts with nothing in flight)
    - Open ONE transaction, process every block of the batch, flush the
      follow count deltas INSIDE the transaction (legacy
      `Follow.flush(trx=False)` in `process_multi`), COMMIT -- all on a
