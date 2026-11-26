@@ -10,7 +10,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -193,11 +195,34 @@ func (c *Client) GetBlock(ctx context.Context, num int64) (map[string]interface{
 
 // GetBlocksRange fetches blocks [from, to] inclusive.
 //
-// All-or-nothing: if any block in the range fails after the SDK's bounded
-// retries, the whole call returns an error and no blocks — the caller must
-// retry the range. Returning partial results would let the indexer skip
-// blocks (steem block numbers are contiguous), which is exactly the
-// "empty/garbage response advances head" hazard this wrapper prevents.
+// Transport: a JSON-RPC batch, like GetContentBatch (blocks_batch.go). The
+// range is chunked by max_batch (HIVE_MAX_BATCH, default 50); each chunk is
+// ONE POST whose body is a request-object array of
+// condenser_api.get_block calls, and the chunks run on a max_workers-bounded
+// pool (HIVE_MAX_WORKERS) and are reassembled in request order.
+//
+// Why not the SDK: steemgosdk's GetBlocks is a client-side fan-out — one
+// get_block HTTP request per block on a worker pool. A node answers
+// single get_block calls at a near-constant rate whatever the concurrency
+// (measured on a local 0.23.1 node: 420 blocks/s at 4 workers, 490 at 32),
+// so on sparse ranges fetching, not writing, capped the sync (~183 blocks/s
+// end-to-end). Legacy never had that cap: hive/steem/http_client.py sends
+// get_block as a request-object array.
+//
+// Same method, same params, same decoder as the single-block path: every
+// response item is decoded into protocolapi.Block and converted by
+// blockToMap exactly as GetBlock does, so the returned maps are what the
+// fan-out returned (pinned against recorded real blocks by
+// TestBlockBatchMatchesSingleGetBlock, and against a live node by
+// TestLiveBlockBatchMatchesSingleGetBlock).
+//
+// All-or-nothing: if any chunk fails after the bounded retries, the whole
+// call returns an error and no blocks — the caller must retry the range.
+// Returning partial results would let the indexer skip blocks (steem block
+// numbers are contiguous), which is exactly the "empty/garbage response
+// advances head" hazard this wrapper prevents. Retry granularity is the
+// chunk: a transient failure re-fetches the whole chunk (up to max_batch
+// blocks), not just the block that failed.
 func (c *Client) GetBlocksRange(ctx context.Context, from, to int64) ([]map[string]interface{}, error) {
 	ctx, span := telemetry.StartSpan(ctx, "steem.get_blocks_range")
 	defer span.End()
@@ -206,23 +231,32 @@ func (c *Client) GetBlocksRange(ctx context.Context, from, to int64) ([]map[stri
 		return nil, fmt.Errorf("invalid range: from (%d) must be >= 1 and <= to (%d)", from, to)
 	}
 
-	// steemgosdk's GetBlocks uses [from, to) (exclusive end)
-	// We need [from, to] (inclusive end), so we use to+1
-	wrapBlocks, err := c.api.GetBlocks(ctx, uint(from), uint(to+1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get blocks range %d-%d: %w", from, to, err)
-	}
+	total := to - from + 1
+	size := int64(c.maxBatch)
+	nChunks := int((total + size - 1) / size)
 
-	blocks := make([]map[string]interface{}, 0, len(wrapBlocks))
-	for _, wrapBlock := range wrapBlocks {
-		blockMap, err := c.blockToMap(wrapBlock.Block, int64(wrapBlock.BlockNum))
+	// Chunk i covers [from+i*size, from+(i+1)*size-1], clipped to `to`.
+	results := make([][]map[string]interface{}, nChunks)
+	err := runChunked(ctx, c.maxWorkers, nChunks, func(idx int) error {
+		chunkFrom := from + int64(idx)*size
+		chunkTo := min(chunkFrom+size-1, to)
+		blocks, err := c.fetchBlocksChunk(ctx, chunkFrom, chunkTo)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert block %d: %w", wrapBlock.BlockNum, err)
+			return fmt.Errorf("failed to get blocks range %d-%d (chunk %d/%d, blocks %d-%d): %w",
+				from, to, idx+1, nChunks, chunkFrom, chunkTo, err)
 		}
-		blocks = append(blocks, blockMap)
+		results[idx] = blocks
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	return blocks, nil
+	out := make([]map[string]interface{}, 0, total)
+	for _, res := range results {
+		out = append(out, res...)
+	}
+	return out, nil
 }
 
 // GetAccounts fetches account data from steemd.
@@ -336,15 +370,50 @@ func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[s
 		chunks = append(chunks, posts[start:end])
 	}
 
-	// Fan the chunks out to a bounded worker pool (legacy exec_multi uses a
-	// ThreadPoolExecutor with map(), which preserves order; the order here is
-	// restored by assembling per-chunk results by chunk index).
+	// Fan the chunks out to a bounded worker pool; results are stored by
+	// chunk index, so order is restored on reassembly regardless of chunk
+	// completion order (see runChunked).
 	results := make([][]map[string]interface{}, len(chunks))
-	errs := make([]error, len(chunks))
+	err := runChunked(ctx, c.maxWorkers, len(chunks), func(idx int) error {
+		contents, err := c.fetchContentChunk(ctx, chunks[idx])
+		if err != nil {
+			start := idx*c.maxBatch + 1
+			return fmt.Errorf("failed to get content batch (chunk %d/%d, posts %d-%d): %w",
+				idx+1, len(chunks), start, idx*c.maxBatch+len(chunks[idx]), err)
+		}
+		results[idx] = contents
+		return nil
+	})
+	if err != nil {
+		// All-or-nothing, and the lowest-index chunk failure is reported
+		// deterministically (runChunked).
+		return nil, err
+	}
 
-	workers := c.maxWorkers
-	if workers > len(chunks) {
-		workers = len(chunks)
+	out := make([]map[string]interface{}, 0, len(posts))
+	for _, res := range results {
+		out = append(out, res...)
+	}
+	return out, nil
+}
+
+// runChunked runs n independent chunk fetches on a max_workers-bounded pool
+// and returns the error of the lowest-index chunk that failed (nil when all
+// succeeded). fetch stores its own result, indexed by chunk; every chunk is
+// attempted even after an earlier one failed, so the verdict is complete.
+//
+// Dispatch is strictly in chunk order on an unbuffered channel (legacy
+// exec_multi uses a ThreadPoolExecutor with map(), which preserves order;
+// order is restored anyway by indexing results per chunk). On ctx
+// cancellation dispatch stops and, after the workers drained, the never-sent
+// tail is marked with the context error, so every chunk is accounted for.
+// (Do not buffer jobs: in-flight workers must not race the sender over tail
+// ownership — same reasoning as the SDK's runRange.)
+func runChunked(ctx context.Context, workers, n int, fetch func(idx int) error) error {
+	errs := make([]error, n)
+
+	if workers > n {
+		workers = n
 	}
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -358,23 +427,15 @@ func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[s
 					errs[idx] = err
 					continue
 				}
-				contents, err := c.fetchContentChunk(ctx, chunks[idx])
-				if err != nil {
+				if err := fetch(idx); err != nil {
 					errs[idx] = err
-					continue
 				}
-				results[idx] = contents
 			}
 		}()
 	}
-	// Dispatch strictly in order on an unbuffered channel; on ctx
-	// cancellation stop dispatching and (after the workers drained) mark the
-	// never-sent tail with the context error, so every chunk is accounted
-	// for. (Do not buffer jobs: in-flight workers must not race the sender
-	// over tail ownership — same reasoning as the SDK's runRange.)
 	sending := true
-	unsentFrom := len(chunks)
-	for idx := 0; idx < len(chunks) && sending; idx++ {
+	unsentFrom := n
+	for idx := 0; idx < n && sending; idx++ {
 		select {
 		case jobs <- idx:
 		case <-ctx.Done():
@@ -384,24 +445,16 @@ func (c *Client) GetContentBatch(ctx context.Context, posts [][]string) ([]map[s
 	}
 	close(jobs)
 	wg.Wait()
-	for i := unsentFrom; i < len(chunks); i++ {
+	for i := unsentFrom; i < n; i++ {
 		errs[i] = ctx.Err()
 	}
 
-	// All-or-nothing: report the lowest-index chunk failure deterministically.
-	for i, err := range errs {
+	for _, err := range errs {
 		if err != nil {
-			start := i*c.maxBatch + 1
-			return nil, fmt.Errorf("failed to get content batch (chunk %d/%d, posts %d-%d): %w",
-				i+1, len(chunks), start, i*c.maxBatch+len(chunks[i]), err)
+			return err
 		}
 	}
-
-	out := make([]map[string]interface{}, 0, len(posts))
-	for _, res := range results {
-		out = append(out, res...)
-	}
-	return out, nil
+	return nil
 }
 
 // batchRequest is one JSON-RPC request object inside a batch POST body.
@@ -495,14 +548,46 @@ func (c *Client) fetchContentChunk(ctx context.Context, chunk [][]string) ([]map
 		return nil, fmt.Errorf("failed to marshal get_content batch: %w", err)
 	}
 
+	resps, err := c.postBatchWithRetry(ctx, payload, batchChunk{
+		what:      "get_content",
+		noun:      "posts",
+		count:     len(chunk),
+		sizeField: "chunk_posts",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return validateBatchResponses(reqs, resps)
+}
+
+// batchChunk labels one chunk POST on the batch path.
+type batchChunk struct {
+	what      string // RPC name in error strings and log messages, e.g. "get_content"
+	noun      string // how the terminal error calls the items, e.g. "posts"
+	count     int    // items in this chunk: bounds the response body and is logged
+	sizeField string // log field name carrying count
+}
+
+// postBatchWithRetry performs ONE transport attempt sequence for a chunk:
+// POST the raw request-object array and decode the response-object array.
+// Transport failures — network errors, per-attempt timeouts, HTTP 429/5xx —
+// are retried with bounded exponential backoff (doubled on 429) — the ONLY
+// retry layer for the batch path, since it bypasses the SDK transport (whose
+// retry it mirrors; see the Client doc comment). Caller-side context
+// cancellation and protocol-level failures (bad JSON, trailing data,
+// non-array bodies) are not retried: a deterministic malformed response will
+// not heal, and a caller who gave up must not be kept waiting. Per-item
+// validation (id/length alignment, item errors, null results) is left to the
+// caller and is likewise not retried.
+func (c *Client) postBatchWithRetry(ctx context.Context, payload []byte, chunk batchChunk) ([]batchResponse, error) {
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resps, err := c.postBatch(ctx, payload)
+		resps, err := c.postBatch(ctx, payload, chunk.what, chunk.count)
 		if err == nil {
-			return validateBatchResponses(reqs, resps)
+			return resps, nil
 		}
 		if !isBatchRetryable(err) {
 			return nil, err
@@ -514,10 +599,10 @@ func (c *Client) fetchContentChunk(ctx context.Context, chunk [][]string) ([]map
 		backoff := batchBackoffFor(attempt, err)
 		// Ops visibility for retry storms (e.g. sustained 429 from steemd):
 		// without this, batches silently grind through backoffs.
-		c.logger.Warn("get_content batch attempt failed; retrying",
+		c.logger.Warn(chunk.what+" batch attempt failed; retrying",
 			zap.Int("attempt", attempt+1),
 			zap.Int("max_attempts", c.maxRetries+1),
-			zap.Int("chunk_posts", len(chunk)),
+			zap.Int(chunk.sizeField, chunk.count),
 			zap.Duration("backoff", backoff),
 			zap.Error(err),
 		)
@@ -529,17 +614,33 @@ func (c *Client) fetchContentChunk(ctx context.Context, chunk [][]string) ([]map
 		case <-timer.C:
 		}
 	}
-	return nil, fmt.Errorf("get_content batch of %d posts failed after %d attempts: %w", len(chunk), c.maxRetries+1, lastErr)
+	return nil, fmt.Errorf("%s batch of %d %s failed after %d attempts: %w",
+		chunk.what, chunk.count, chunk.noun, c.maxRetries+1, lastErr)
 }
 
+// batchRequestID numbers batch POSTs for their Idempotency-Key header.
+var batchRequestID atomic.Uint64
+
 // postBatch performs one transport attempt: POST the raw request-object
-// array and decode the response-object array.
-func (c *Client) postBatch(ctx context.Context, payload []byte) ([]batchResponse, error) {
+// array and decode the response-object array. what names the RPC for error
+// strings; items is the request count in the payload and bounds the
+// response body.
+func (c *Client) postBatch(ctx context.Context, payload []byte, what string, items int) ([]batchResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(payload))
 	if err != nil {
-		return nil, fmt.Errorf("failed to build get_content batch request: %w", err)
+		return nil, fmt.Errorf("failed to build %s batch request: %w", what, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Mark the POST replayable so net/http itself retries it when steemd
+	// closes an idle keep-alive connection just as the pool hands it out
+	// (errServerClosedIdle). The transport only auto-retries that failure
+	// for GET/HEAD or for a request that carries an idempotency key; without
+	// one every stale pooled connection surfaced as a retryable error
+	// through the application-level retry above (~3% of chunk POSTs in a
+	// 16-worker scan against a local node). Nothing reached the server when
+	// that error is raised, and both batch RPCs are read-only, so a replay
+	// is safe. The key only has to be unique per request.
+	req.Header.Set("Idempotency-Key", strconv.FormatUint(batchRequestID.Add(1), 10))
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {
@@ -569,13 +670,13 @@ func (c *Client) postBatch(ctx context.Context, payload []byte) ([]batchResponse
 		return nil, &batchHTTPError{Status: res.StatusCode, Body: string(body)}
 	}
 
-	// Response size cap: max_batch items × a generous per-item bound plus
-	// envelope slack (see batchResponseItemLimit for why 4 MiB is the
+	// Response size cap: the chunk's item count × a generous per-item bound
+	// plus envelope slack (see batchResponseItemLimit for why 4 MiB is the
 	// right per-item bound). The cap keeps a compromised node or MITM from
 	// ballooning process memory through the batch decoder. Reading cap+1
 	// bytes makes any body beyond the cap surface below as trailing data
 	// (or above, as a decode error on the truncated array).
-	cap := int64(c.maxBatch)*batchResponseItemLimit + batchResponseEnvelopeSlack
+	cap := int64(items)*batchResponseItemLimit + batchResponseEnvelopeSlack
 	dec := json.NewDecoder(io.LimitReader(res.Body, cap+1))
 	var resps []batchResponse
 	if err := dec.Decode(&resps); err != nil {
@@ -591,7 +692,7 @@ func (c *Client) postBatch(ctx context.Context, payload []byte) ([]batchResponse
 		if ctx.Err() == nil && isHTTPTimeout(err) {
 			return nil, fmt.Errorf("%w: %v", errBatchTimeout, err)
 		}
-		return nil, fmt.Errorf("malformed get_content batch response: %w", err)
+		return nil, fmt.Errorf("malformed %s batch response: %w", what, err)
 	}
 	// Legacy parses the whole body (json.loads), rejecting trailing data.
 	// json.Decoder stops after the first value, so demand EOF on a second
@@ -603,7 +704,7 @@ func (c *Client) postBatch(ctx context.Context, payload []byte) ([]batchResponse
 		if ctx.Err() == nil && isHTTPTimeout(err) {
 			return nil, fmt.Errorf("%w: %v", errBatchTimeout, err)
 		}
-		return nil, fmt.Errorf("malformed get_content batch response: trailing data after response array")
+		return nil, fmt.Errorf("malformed %s batch response: trailing data after response array", what)
 	}
 	return resps, nil
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sort"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,11 +17,12 @@ import (
 //   - the #401-registered MaxWorkers parallelism test: GetContentBatch's
 //     chunk pool must fetch chunks concurrently (in-flight workers overlap)
 //     while never exceeding max_workers (delay + timing assertions);
-//   - the 06-quality section 4 gap for GetBlocksRange: a TRANSIENT per-block
-//     failure inside a range (429 then success) is retried per block by the
-//     SDK transport with backoff and the whole range still completes — the
-//     existing matrix pinned single-block retry and permanent range failure,
-//     but not the transient-inside-range recovery.
+//   - the 06-quality section 4 gap for GetBlocksRange: a TRANSIENT failure
+//     inside a range (429 then success) is retried by the batch path's
+//     transport retry, with backoff, and the whole range still completes —
+//     the existing matrix pinned permanent range failure, but not the
+//     transient-inside-range recovery. (GetBlocksRange fetches JSON-RPC
+//     batches; the retry granularity is the chunk.)
 
 // TestContractContentBatchParallelismBoundedByMaxWorkers pins the chunk-pool
 // concurrency model (PR#401 registration for #440): requests are split into
@@ -111,37 +111,24 @@ func TestContractContentBatchParallelismBoundedByMaxWorkers(t *testing.T) {
 }
 
 // TestContractGetBlocksRangeTransientRetryRecovers pins the recovery twin of
-// TestContractRangePartialFailureNeverSkipsBlocks: when ONE block of the range
-// answers a transient 429 and succeeds on its retry, the SDK's per-block
-// transport retry rides it out inside the range fetch — the call returns ALL
-// blocks in order after exactly one extra request and a 429 backoff, instead
-// of failing the whole all-or-nothing range.
+// TestContractRangePartialFailureNeverSkipsBlocks: when the chunk answers a
+// transient 429 and succeeds on its retry, the batch path's transport retry
+// rides it out inside the range fetch — the call returns ALL blocks in order
+// after exactly one extra POST and a 429 backoff, instead of failing the
+// whole all-or-nothing range. The retry granularity is the chunk: the
+// retried POST carries the same blocks again.
 func TestContractGetBlocksRangeTransientRetryRecovers(t *testing.T) {
-	// Attempts are keyed per block (range fetches run concurrently, so the
-	// arrival order is not deterministic; respond runs under the harness
-	// record lock, so the map needs no extra locking).
-	attempts := map[int64]int{}
-	s := newScriptedSteemd(t, func(call recordedRPCCall, seq int) rpcScriptResponse {
-		if call.Method != "condenser_api.get_block" {
-			return rpcScriptResponse{status: http.StatusInternalServerError, body: "harness: unexpected method " + call.Method}
-		}
-		num, ok := call.ParamInt(0)
-		if !ok {
-			return rpcScriptResponse{status: http.StatusInternalServerError, body: "harness: missing block param"}
-		}
-		attempts[num]++
-		if num == 2 && attempts[num] == 1 {
-			return rpcScriptResponse{status: http.StatusTooManyRequests, body: `{"error":"rate limited"}`}
-		}
-		return rpcScriptResponse{body: rpcOK(blockOneResult)}
-	})
+	s := newScriptedSteemd(t, seqScript(
+		rpcScriptResponse{status: http.StatusTooManyRequests, body: `{"error":"rate limited"}`},
+		rpcScriptResponse{body: blockBatchResponseBody(1, 3)},
+	))
 	c := newTestClient(t, s.URL(), 3)
 
 	start := time.Now()
 	blocks, err := c.GetBlocksRange(context.Background(), 1, 3)
 	elapsed := time.Since(start)
 	if err != nil {
-		t.Fatalf("GetBlocksRange failed on a transient per-block 429: %v", err)
+		t.Fatalf("GetBlocksRange failed on a transient chunk 429: %v", err)
 	}
 	if len(blocks) != 3 {
 		t.Fatalf("got %d blocks, want 3 (transient failure must not shrink the range)", len(blocks))
@@ -151,28 +138,20 @@ func TestContractGetBlocksRangeTransientRetryRecovers(t *testing.T) {
 			t.Fatalf("block %d out of order: block_num = %v, want %d", i, got, i+1)
 		}
 	}
-	// Blocks 1 and 3 once; block 2 twice (429 + success).
-	if got := s.callCount(); got != 4 {
-		t.Fatalf("got %d requests, want 4 (blocks 1,3 once; block 2 retried once)", got)
+	// The chunk (blocks 1-3) is POSTed twice: 429 + success.
+	if got := s.callCount(); got != 2 {
+		t.Fatalf("got %d batch POSTs, want 2 (chunk of blocks 1-3, 429 then success)", got)
 	}
-	// The 429 backoff (api/v2 doubles for rate limiting: 100ms base doubled
-	// = 200ms) must have elapsed before the retry; a lower bound below that
-	// stays robust to timer granularity.
+	// The 429 backoff (doubled for rate limiting: 100ms base doubled = 200ms)
+	// must have elapsed before the retry; a lower bound below that stays
+	// robust to timer granularity.
 	if elapsed < 150*time.Millisecond {
 		t.Fatalf("retry came back too fast (%v); 429 backoff not applied inside the range fetch", elapsed)
 	}
 
-	// After-the-fact param verification (test goroutine).
-	nums := make([]int, 0, s.callCount())
+	// After-the-fact wire verification (test goroutine): both POSTs carry
+	// exactly blocks 1, 2, 3.
 	for i := 0; i < s.callCount(); i++ {
-		num, ok := s.call(i).ParamInt(0)
-		if !ok {
-			t.Fatalf("request %d has no parsable block param", i)
-		}
-		nums = append(nums, int(num))
-	}
-	sort.Ints(nums)
-	if fmt.Sprint(nums) != "[1 2 2 3]" {
-		t.Fatalf("requested block numbers = %v, want [1 2 2 3]", nums)
+		assertBlockBatch(t, s.call(i), 1, 3)
 	}
 }

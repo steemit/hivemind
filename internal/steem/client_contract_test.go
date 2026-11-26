@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -488,57 +487,40 @@ func TestContractRateLimitedBacksOffAndRetries(t *testing.T) {
 }
 
 // TestContractRangePartialFailureNeverSkipsBlocks pins the all-or-nothing
-// semantics of GetBlocksRange: when one block in the range keeps failing
-// after bounded retries, the whole call errors — the caller must never
-// receive a partial/empty success it could advance past.
+// semantics of GetBlocksRange: when the chunk keeps failing after bounded
+// retries, the whole call errors — the caller must never receive a
+// partial/empty success it could advance past.
+//
+// Retry granularity is the chunk: GetBlocksRange fetches a range as
+// JSON-RPC batches of up to max_batch get_block calls (blocks_batch.go), so
+// a transport failure re-POSTs the WHOLE chunk and nothing is salvaged from
+// a failed attempt.
 func TestContractRangePartialFailureNeverSkipsBlocks(t *testing.T) {
-	// Script by request params (range fetches run concurrently): block 2
-	// answers 500 on every attempt, blocks 1 and 3 answer real blocks. The
-	// respond closure must not fail the test itself (it runs on a handler
-	// goroutine); on an unusable param it answers 500 so the request can
-	// never masquerade as a good block. Params are asserted afterwards,
-	// below.
+	// The respond closure must not fail the test itself (it runs on a
+	// handler goroutine); on any wire shape other than the expected batch
+	// it answers 400, so a request can never masquerade as a good block.
+	// Wire assertions run afterwards, in the test goroutine.
 	s := newScriptedSteemd(t, func(call recordedRPCCall, seq int) rpcScriptResponse {
-		if num, ok := call.ParamInt(0); ok && call.Method == "condenser_api.get_block" && num == 2 {
-			return rpcScriptResponse{status: http.StatusInternalServerError, body: `boom`}
+		if !call.IsBatch || len(call.Batch) != 3 {
+			return rpcScriptResponse{status: http.StatusBadRequest, body: `harness: expected a 3-item get_block batch`}
 		}
-		if call.Method == "condenser_api.get_block" {
-			if _, ok := call.ParamInt(0); !ok {
-				return rpcScriptResponse{status: http.StatusInternalServerError, body: `harness: missing/unparsable block param`}
-			}
-		}
-		return rpcScriptResponse{body: rpcOK(blockOneResult)}
+		return rpcScriptResponse{status: http.StatusInternalServerError, body: `boom`}
 	})
-	c := newTestClient(t, s.URL(), 1) // 1 retry: block 2 fails after 2 attempts
+	c := newTestClient(t, s.URL(), 1) // 1 retry: the chunk fails after 2 attempts
 
 	blocks, err := c.GetBlocksRange(context.Background(), 1, 3)
 	if err == nil {
-		t.Fatal("GetBlocksRange succeeded with a persistently failing block; want error")
+		t.Fatal("GetBlocksRange succeeded with a persistently failing chunk; want error")
 	}
 	if blocks != nil {
 		t.Fatalf("GetBlocksRange returned %d blocks alongside the error; want nil (never partial)", len(blocks))
 	}
-	// 3 distinct blocks; block 2 attempted twice (initial + 1 retry).
-	if got := s.callCount(); got != 4 {
-		t.Fatalf("got %d requests, want 4 (blocks 1,3 once; block 2 twice)", got)
+	// The chunk (all of blocks 1-3) is POSTed twice: initial + 1 retry.
+	if got := s.callCount(); got != 2 {
+		t.Fatalf("got %d batch POSTs, want 2 (chunk of blocks 1-3, initial + 1 retry)", got)
 	}
-	// After-the-fact param verification (test goroutine): the four requests
-	// must be exactly blocks 1, 2 (twice), 3 of condenser_api.get_block.
-	nums := make([]int, 0, s.callCount())
 	for i := 0; i < s.callCount(); i++ {
-		call := s.call(i)
-		if call.Method != "condenser_api.get_block" {
-			t.Fatalf("request %d method = %q, want condenser_api.get_block", i, call.Method)
-		}
-		num, ok := call.ParamInt(0)
-		if !ok {
-			t.Fatalf("request %d has no parsable block param (params: %s)", i, call.Params)
-		}
-		nums = append(nums, int(num))
-	}
-	sort.Ints(nums)
-	if !reflect.DeepEqual(nums, []int{1, 2, 2, 3}) {
-		t.Fatalf("requested block numbers = %v, want [1 2 2 3]", nums)
+		assertBlockBatch(t, s.call(i), 1, 3)
 	}
 }
 
