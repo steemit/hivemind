@@ -83,6 +83,25 @@ need a live regression test at each boundary (see
 `internal/indexer/pow2_live_test.go`, gated on `HIVE_TEST_STEEMD_URL`).
 Fixed in steemutil v0.0.35 / steemgosdk v0.0.34.
 
+**Recurrence, caller side (2026-11-26, block-fetch batching PR#436)**:
+component equivalence is not integration equivalence. The batch
+`GetBlocksRange` was verified with large ranges (2,000 blocks = 40 chunks
+per call, so the max_workers pool always engaged) — an offline golden
+test over recorded real blocks, a 480-block live byte-for-byte
+equivalence test and a 26.7M-block decoder scan, all green. But the sync
+loop calls `GetBlocksRange` in `max_batch` steps (50 blocks = ONE chunk
+per call): one serial batch POST, pool idle, and on dense ranges the
+batch path measured *slower* than the single-block fan-out it replaced
+(fetch-only, 4 workers: 113 vs 143 blocks/s). Every test drove the
+component the way the tests wanted, not the way the caller does. Rule:
+when a change's correctness or performance depends on how the caller
+invokes the target (step size, batch splitting, concurrency), the
+equivalence/perf test must drive it through the production call shape —
+ideally the caller itself, or at least with the caller's exact
+parameters. Caught in review as a follow-up commit (fetch one chunk per
+worker, `fetchStepSize()` in `internal/indexer/sync.go`), not by the
+original test suite.
+
 ## 4. Stateful components constructed twice
 
 **What**: `CustomOpProcessor` constructed its own `NewFollowIndexer(repo,
